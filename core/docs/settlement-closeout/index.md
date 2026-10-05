@@ -17,8 +17,16 @@ Preparation: `make dist`, `make -C core/buyer reinit` and `cd core && uv sync --
 
 The checked target uses deterministic synthetic Ed25519 buyer/publisher personas, temporary v3 run logs, and injected publisher trust; no external credential or deployment selector is required. No server, browser, database or container was left running.
 
+## F8 — core carrier coverage
+
+`core/tests/unit/test_settlement.py` calls the public carrier exports directly. It checks duplicate/empty/whitespace mechanism rejection and absent-stage refusal, defensive snapshots for mapping and pair-list composition inputs, blocked mapping mutation, and `SettlementEvidence.validate_identity` refusal of changed negotiation, mechanism or established reference (including loss of the reference). The same identity validates before each changed-reuse attempt. No mechanism table declaration or concrete domain wiring is restated.
+
+After another `make dist`, buyer reinit and core sync/reinstall, all **11 new carrier cases** and **15 existing carrier/domain-contract/import-boundary checks** passed (**26 total**). Core's unused `asyncio_mode` warning remains owned by [#258](https://github.com/arkhai-io/simple-compute-market/issues/258); it was not suppressed.
+
 ## Replay
 
 Run `bash core/docs/settlement-closeout/replay.sh` from the repository root. It rebuilds wheels, reinstalls consumers and opens the library/run-log recovery surface plus the existing VM `market settle --from <run>` CLI replay. The CLI replay seeds its own exact accepted Agreement/mandate and uses controlled approval/signed seller HTTP. It does not claim live receipt, ledger or physical-delivery qualification.
+
+The complete committed script was re-driven successfully: **26 carrier/boundary**, **51 buyer**, and **2 CLI checks**, plus mypy, comment hygiene and strict change validation. These repeat the focused measurements above, not additional unique coverage. Final buyer/domain-buyer grep returned no `SettlementEvidence` or `settlement_evidence` matches. Generated lock changes were restored; all processes finished and no external resources remain.
 
 Reinit lock churn remains owned by [#257](https://github.com/arkhai-io/simple-compute-market/issues/257). Restore only generated lock changes after execution, keeping the fresh installs; do not resync to restored locks before reading evidence.
