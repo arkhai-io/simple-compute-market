@@ -1776,6 +1776,25 @@ re-verifies them by grep before each move.
         - Gate as above, plus `kit/site`, `kit/fulfillment`, both storefronts, and the
           API-credit service (which composes the site ledger without a guard).
 
+  - [x] 5B.8.B.7 Added after the slice B checkpoint's end-to-end run (2026-10-05,
+        maintainer decision; `design.md`, "Slice B implementation findings", last row).
+        - `commit` returns the reservation as the site recorded it at every client layer:
+          - `kit/site-client`'s `SiteCapacityClient.commit`;
+          - core's `CapacityClient` protocol (`core_storefront/capacity.py`) and its
+            `AggregateCapacityClient` (`aggregation.py`), tagged with the owning site;
+          - `kit/capacity-publication`'s `CapacityRuntime.commit`, tagged with the bound
+            site.
+        - Tests:
+          - the site client's and the aggregate client's unit tests, and the capacity
+            runtime's;
+          - the service's `test_capacity_api.py`: the commit answer, and a registered lease's
+            unchanged window;
+          - the VM storefront's new `tests/integration/test_committed_window.py`, through the
+            real runtime and aggregate client against the fake site, which now keeps a
+            registered lease's window (`registered`).
+        - Versions: arkhai-core-storefront 0.8.0, kit-site-client 0.8.0,
+          kit-capacity-publication 0.5.0 (exact pins moved), apicredits-storefront 0.6.1 (its
+          pin moved); floors raised in kit-capacity-publication and the VM storefront.
       Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
       implementation settled or found).
       - B.1:
@@ -1840,17 +1859,18 @@ re-verifies them by grep before each move.
         - compute contracts 50, client 49, family kit 167, Ansible 84;
         - VM adapter 39 and bare-metal adapter 23; bare-metal domain package 132;
         - bare-metal storefront 229;
-        - provisioning service 836 unit and 279 integration;
-        - VM storefront by frozen sync: 1102 unit and 346 integration (the two known
-          `test_alkahest` failures need Node and Anvil);
+        - provisioning service 836 unit and 280 integration (with B.7);
+        - VM storefront by frozen sync: 1102 unit and 348 integration (with B.7; the two
+          known `test_alkahest` failures need Node and Anvil);
         - e2e: unit 236 (the one known failure is 10.1's), and the VM scenarios collect.
         - The root `make test` aggregate passes its 44 suites, failing only where this
           environment cannot run a suite (`kit/policy`, the VM storefront, and the VM buyer
           cannot reinit from the PyTorch index; the API-credit middleware needs Cargo).
         - `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
           strict validation pass.
-        - Not yet run through the end-to-end pipeline: the next verification covers A.6
-          and B together.
+        - End-to-end, first run (with A.6): the bare-metal lane passed 16; the VM lane
+          failed 4, all from no lease being registered, fixed by B.7. B.7 has not yet run
+          through the pipeline.
 
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
 

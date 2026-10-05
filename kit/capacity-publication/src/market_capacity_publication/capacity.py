@@ -320,16 +320,25 @@ class CapacityRuntime:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
-    ) -> None:
-        """Commit directly at the recorded site, including after restart."""
+    ) -> dict[str, Any] | None:
+        """Commit directly at the recorded site, including after restart.
+
+        Returns the reservation as the site recorded it, whose window a lease
+        registered afterwards repeats.
+        """
         binding = self.require_binding(binding)
-        await self.site_client(binding.site_id).commit(
+        committed = await self.site_client(binding.site_id).commit(
             resource_id=resource_id,
             capacity_reservation_id=capacity_reservation_id,
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=idempotency_ref,
         )
+        if committed is None:
+            return None
+        out = dict(committed)
+        out["site"] = binding.site_id
+        return out
 
     async def release(
         self,

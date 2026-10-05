@@ -35,8 +35,9 @@ Committing a reservation MUST be refused when the reservation is `releasing`,
 `release_failed`, or `unmanaged`, and MUST NOT change its state. Before a lease is
 registered, a repeated commit of a `leased` reservation MAY record the window it names.
 Once a lease is registered, a commit MUST return the reservation unchanged and MUST NOT move
-its lease start or end. A caller that registers a lease after committing MUST register the
-window the commit returned.
+its lease start or end. A commit MUST answer with the reservation as the authority recorded
+it, through every client layer between the caller and the authority, and a caller that
+registers a lease after committing MUST register the window that answer carries.
 
 #### Scenario: A storefront refreshes the window after provisioning
 

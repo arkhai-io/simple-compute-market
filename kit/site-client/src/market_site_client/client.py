@@ -632,7 +632,12 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
         request_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        """Commit a reservation; the reservation as the site recorded it.
+
+        The site may record a window other than the one named: once a lease
+        is registered on the reservation, a commit leaves its window alone.
+        """
         if not capacity_reservation_id:
             raise ValueError(
                 "remote capacity commit requires the capacity_reservation_id the "
@@ -652,13 +657,14 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
             }.items()
             if value is not None
         }
-        await self._request(
+        result = await self._request(
             "POST",
             "/api/v1/capacity/reservations/"
             f"{capacity_reservation_id}/commit",
             body,
             request_id=request_id,
         )
+        return result.get("reservation")
 
     async def release(
         self,

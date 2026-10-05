@@ -112,11 +112,14 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     assert reserved is not None
     reservation_id = reserved["capacity_reservation_id"]
     assert "resource_id" not in reserved
-    await capacity_client.commit(
+    committed = await capacity_client.commit(
         capacity_reservation_id=reservation_id,
         idempotency_ref="0xesc",
         request_id="commit",
     )
+    # The commit answers with the reservation as the site recorded it.
+    assert committed["capacity_reservation_id"] == reservation_id
+    assert committed["state"] == "leased"
     assert (await capacity_client.get_reservation(reservation_id))["state"] == "leased"
     assert [
         row["capacity_reservation_id"]

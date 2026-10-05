@@ -15,6 +15,7 @@ from compute_provisioning.hosts.db import Host
 from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
+from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.main import app
 from market_site_client import (
     SiteCapacityAdminClient,
@@ -100,8 +101,8 @@ class CapacityApi:
         resource_id: str,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-    ) -> None:
-        await self.site.commit(
+    ) -> dict | None:
+        return await self.site.commit(
             capacity_reservation_id=capacity_reservation_id,
             resource_id=resource_id,
             lease_start_utc=lease_start_utc,
@@ -232,16 +233,15 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
-    # The client's commit returns nothing; the committed reservation is read
-    # back through the same client, as a storefront would.
-    await capacity.commit(
+    # The commit answers with the reservation as the site recorded it.
+    committed = await capacity.commit(
         reserved["capacity_reservation_id"],
         resource_id="compute-kvm1-001",
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01T01:00:00Z",
     )
-    committed = await capacity.site.get_reservation(reserved["capacity_reservation_id"])
     assert committed["state"] == "leased"
+    assert committed["lease_end_utc"] == "2099-01-01T01:00:00Z"
 
     truncated = await capacity.truncate(reserved["capacity_reservation_id"], "2026-06-01 00:00")
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
@@ -345,6 +345,44 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     restored = {row["resource_id"]: row for row in await capacity.snapshot()}
     assert restored["compute-host-1"]["available_units"] == 8
     assert restored["bare-metal-node-1"]["available_units"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_commit_of_a_registered_lease_answers_with_its_recorded_window(
+    capacity: CapacityApi,
+):
+    """Once a lease is registered, a commit leaves its window alone, and the
+    answer says so: the caller registers what the site recorded, not what it
+    asked for."""
+    await capacity.register(
+        "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1", attributes={}
+    )
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"listing_id": "lst-window"},
+    )
+    reservation_id = reserved["capacity_reservation_id"]
+    await capacity.commit(
+        reservation_id,
+        resource_id="compute-kvm1-001",
+        lease_start_utc="2099-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01 01:00",
+    )
+    _container_module.resolved_capacity_ledger_service.attach_lease(
+        capacity_reservation_id=reservation_id, executor_target="tenant-window"
+    )
+
+    again = await capacity.commit(
+        reservation_id,
+        resource_id="compute-kvm1-001",
+        lease_start_utc="2099-02-01T00:00:00+00:00",
+        lease_end_utc="2099-02-01 01:00",
+    )
+
+    assert (again["lease_start_utc"], again["lease_end_utc"]) == (
+        "2099-01-01T00:00:00+00:00",
+        "2099-01-01 01:00",
+    )
 
 
 @pytest.mark.asyncio

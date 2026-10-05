@@ -401,33 +401,35 @@ class AggregateCapacityClient:
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
         site_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Commit at the owning site (cache-first, then the rest).
 
         A site that doesn't know the reservation raises/refuses and the
         next is tried; if every site refuses, the last error propagates
-        — a commit that lands nowhere must not look like success.
+        — a commit that lands nowhere must not look like success. Returns
+        the reservation as the owning site recorded it, tagged with that
+        site.
         """
         if site_id is not None:
-            await self._sites[site_id].commit(
+            committed = await self._sites[site_id].commit(
                 resource_id=resource_id,
                 capacity_reservation_id=capacity_reservation_id,
                 lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
                 idempotency_ref=idempotency_ref,
             )
-            return
+            return None if committed is None else _tagged(site_id, committed)
         last_error: Exception | None = None
         for name in self._route_order(capacity_reservation_id):
             try:
-                await self._sites[name].commit(
+                committed = await self._sites[name].commit(
                     resource_id=resource_id,
                     capacity_reservation_id=capacity_reservation_id,
                     lease_start_utc=lease_start_utc,
                     lease_end_utc=lease_end_utc,
                     idempotency_ref=idempotency_ref,
                 )
-                return
+                return None if committed is None else _tagged(name, committed)
             except Exception as exc:
                 logger.warning(
                     "[AGGREGATOR] commit at site %r failed: %s", name, exc,
@@ -435,6 +437,7 @@ class AggregateCapacityClient:
                 last_error = exc
         if last_error is not None:
             raise last_error
+        return None
 
     async def release(
         self,
