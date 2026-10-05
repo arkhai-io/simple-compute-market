@@ -6,17 +6,26 @@ to repair by hand.
 
 ## 1. Shared skill source
 
-- [ ] 1.1 Create `.agents/skills/` as the single skill source, with relative links
-      from `.claude/skills/` and `.codex/skills/`.
-- [ ] 1.2 Resolve the dangling Stripe skill links: commit their source under
-      `.agents/skills/`, or remove them.
-- [ ] 1.3 Decide whether the generated OpenSpec skills move behind links, by
-      testing whether regeneration overwrites a link.
-- [ ] 1.4 Add `make check-agent-skills`: every skill is present for every harness,
-      every link resolves, and no harness directory holds a copy of a skill that
-      has a shared source. Wire it into the existing check aggregate.
-- [ ] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
-      included, to `.gitignore`.
+- [x] 1.1 Create `.agents/skills/` as the single skill source, with relative links
+      from `.claude/skills/` and `.codex/skills/`. `debug-attended-lane`, until now
+      Claude Code's alone, is linked for Codex too. Both harnesses were confirmed
+      to load all seven skills through the links.
+- [x] 1.2 Resolve the dangling Stripe skill links: removed. The eight links
+      (`stripe-*`, `upgrade-stripe`, `connect-*`) were committed incidentally,
+      pointing at a skill installation that never entered the repository, so they
+      resolved for no one.
+- [x] 1.3 Decide whether the generated OpenSpec skills move behind links: they do.
+      In a scratch clone, `openspec update` (1.6.0) wrote through the links,
+      leaving them in place and the content byte-identical, and wrote nothing else.
+- [x] 1.4 Add `make check-agent-skills` (`scripts/check_agent_skills.py`, tests in
+      `scripts/tests/test_check_agent_skills.py`): every shared skill has a
+      `SKILL.md` and a link in every harness, no harness holds a copy, and every
+      link resolves to the shared skill of its own name. Amended: there is no
+      general check aggregate to wire it into — `check-packaging` aggregates
+      packaging checks only — so `change-closeout` runs it among closeout's
+      mechanical checks (9.1).
+- [x] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
+      included, to `.gitignore`; confirmed for an active and an archived path.
 
 ## 2. Index format
 
@@ -28,7 +37,7 @@ to repair by hand.
       recorded state the change does not support.
 - [ ] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
       and the `Depends on` rule.
-- [ ] 2.3 Amend part 6 (campaign index currency) of
+- [x] 2.3 Amend part 6 (campaign index currency) of
       `openspec/README.md#plan-closeout-requirements` with the dependency-landing
       step: remove the completing change from every dependent's `Depends on`,
       return each dependent not yet implementing to `ready for design`, and record
@@ -136,7 +145,8 @@ to repair by hand.
 
 - [ ] 9.1 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
-      and reporting the parts that need judgement; it moves the index row to
+      and reporting the parts that need judgement, including
+      `make check-agent-skills`; it moves the index row to
       `in closeout` when closeout starts.
 - [ ] 9.2 Write the `change-ship` skill: archival with the intervention ledger kept
       and `reviews/` deleted, and drafting the commit message and pull request
