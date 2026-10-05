@@ -220,7 +220,9 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 | Open gap | Owned by |
 |---|---|
 | Live Arkhai payment and domain delivery qualification | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
-| Isolate escrow carriers and the conditional-escrow port fully within Alkahest | Unowned follow-up; deferred scope in [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Domains dispatch settlement through scattered mechanism-ID comparisons and an escrow-or-not branch in core | [`route-settlement-by-mechanism`](../../openspec/changes/route-settlement-by-mechanism/) |
+| Isolate escrow carriers and the conditional-escrow port fully within Alkahest | [`move-escrow-into-alkahest`](../../openspec/changes/move-escrow-into-alkahest/) |
+| Escrow fields in listing, registry and storefront-client wire formats | [`drop-escrow-from-shared-wire`](../../openspec/changes/drop-escrow-from-shared-wire/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
 
