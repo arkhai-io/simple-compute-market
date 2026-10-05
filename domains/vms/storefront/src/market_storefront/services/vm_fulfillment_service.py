@@ -16,7 +16,6 @@ from market_capacity_publication import CapacityBinding
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 
 logger = logging.getLogger(__name__)
-_background_tasks: set[asyncio.Task[None]] = set()
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
@@ -220,7 +219,6 @@ async def _commit_fresh_reservation(
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
-ScheduleShutdownFn = Callable[..., Awaitable[Any]]
 RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
@@ -347,7 +345,6 @@ async def fulfill_vm_obligation(
     capacity: CapacityClientLike,
     stage_event: StageEventFn,
     provision_vm: ProvisionVmFn,
-    schedule_shutdown: ScheduleShutdownFn,
     register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
@@ -444,7 +441,7 @@ async def fulfill_vm_obligation(
         # response (kit/site's opaque-reservation boundary -- see
         # openspec/specs/site-capacity/spec.md); reserved.get("vm_host")
         # is therefore always None. Kept as a variable, not deleted,
-        # because provision_vm/register_lease/schedule_shutdown already
+        # because provision_vm and register_lease already
         # treat it as an accepted-but-unused compatibility parameter
         # (documented on _do_provision and _register_vm_lease_with_settings)
         # -- removing it from every call site is a larger signature change
@@ -707,27 +704,6 @@ async def fulfill_vm_obligation(
             escrow_uid,
             committed_window[1],
         )
-
-    async def _schedule_shutdown_best_effort() -> None:
-        try:
-            await schedule_shutdown(
-                lease_end_utc,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-            )
-        except Exception as shutdown_err:
-            logger.warning(
-                "[LEASE] Failed to schedule VM expiry with provisioning service "
-                "(resource=%s escrow=%s vm=%s): %s",
-                reserved_resource_id,
-                escrow_uid,
-                vm_target,
-                shutdown_err,
-            )
-
-    shutdown_task = asyncio.create_task(_schedule_shutdown_best_effort())
-    _background_tasks.add(shutdown_task)
-    shutdown_task.add_done_callback(_background_tasks.discard)
 
     try:
         fulfillment_uid = await submit_compute_fulfillment(

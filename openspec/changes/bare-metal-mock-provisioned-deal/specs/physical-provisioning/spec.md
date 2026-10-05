@@ -159,6 +159,42 @@ contract.
   `compute_provisioning_service` or the other adapter, and no `compute_provisioning`
   module imports `vm_provisioning_operator`
 
+### Requirement: Domains contribute their inventory views
+
+A domain view in the site's resource-pool projection, whether attached to a projected
+resource or to a pool, MUST be produced by a projection the domain's adapter contributes.
+The provisioning service MUST NOT name a domain's view, its source attributes, or its
+provider configuration. Each projection MUST declare the view identifiers it produces and
+the declaration attributes it consumes, a consumed attribute MUST NOT appear in the neutral
+projected attributes, and composition MUST refuse a view identifier or consumed attribute
+declared by two projections.
+
+#### Scenario: A third domain contributes a view
+
+- **WHEN** a domain contributes a projection producing a resource view under its own
+  identifier
+- **THEN** projected resources carry that view without any change to the provisioning
+  service
+
+#### Scenario: Two projections claim one view
+
+- **WHEN** two contributed projections declare the same view identifier
+- **THEN** composition refuses to start
+
+### Requirement: Domain routes are bound through accessors
+
+A provisioning adapter that contributes routes MUST supply them as router factories
+taking zero-argument accessors for its collaborators, and MUST NOT import the deployed
+service's composition module to find them. A route whose collaborator is not yet
+composed MUST answer 503.
+
+#### Scenario: A route is mounted before composition
+
+- **WHEN** the service mounts an adapter's routes before its lifespan has composed the
+  adapter's collaborators
+- **THEN** the routes resolve them through the accessors at request time, and a request
+  arriving before composition answers 503
+
 ### Requirement: Every provisioning route admits the administrator
 
 Every route on the provisioning service's route table MUST admit the `admin` role, in

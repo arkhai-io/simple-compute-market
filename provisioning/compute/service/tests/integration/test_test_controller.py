@@ -63,7 +63,6 @@ from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
-from vm_provisioning_adapter.services.system_service import SystemService
 
 HOST = "kvm1"
 
@@ -168,11 +167,6 @@ async def client_and_queue(
         retry_policy=retry_policy_from(mock_settings),
     )
     job_submitter = VmJobSubmitter(job_engine, default_host_id=mock_settings.default_host_id)
-    system_service = SystemService(
-        ansible_service=programmable_mock,
-        settings=mock_settings,
-        host_service=host_authority,
-    )
     job_queue = AsyncJobQueue(max_concurrent=2)
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
@@ -216,17 +210,15 @@ async def client_and_queue(
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(programmable_mock)
     app.container.job_engine.override(job_engine)
-    app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
     app.container.host_authority.override(host_authority)
 
     _container_module.resolved_job_engine = job_engine
     _container_module.resolved_session_factory = session_factory
     _container_module.resolved_ansible_service = programmable_mock
-    _container_module.resolved_system_service = system_service
     _container_module.resolved_host_authority = host_authority
 
-    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
+    from compute_provisioning_service.main import _vm_mock_router
     _test_prefix = "/test"
     _already_mounted = any(
         getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
@@ -235,7 +227,7 @@ async def client_and_queue(
         from compute_provisioning_service.controllers import test_jobs_controller
 
         app.include_router(test_jobs_controller.router)
-        app.include_router(_make_test_router())
+        app.include_router(_vm_mock_router())
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
@@ -265,7 +257,6 @@ async def client_and_queue(
     app.container.provisioning_replay_store.reset_override()
     app.container.ansible_service.reset_override()
     app.container.job_engine.reset_override()
-    app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_authority.reset_override()
     _container_module.resolved_vm_operations_service = None

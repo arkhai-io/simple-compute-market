@@ -216,10 +216,9 @@ class TestStageB0_Readiness:
         assert health.status == "ok", f"Storefront unhealthy: {health}"
         deal_state._storefront_healthy = True
 
-        resp = provisioning_client.get_ansible_readiness()
-        mode = resp.get("ansible_mode", "real")
-        assert mode == "mock", (
-            f"Provisioning must be in mock mode for the e2e buy, got {mode!r}. "
+        execution = provisioning_client.get_system_status().execution
+        assert execution.mocked, (
+            f"Provisioning must be in mock mode for the e2e buy, got {execution!r}. "
             "Set ACTIVE_PROFILES=...,mock on the provisioning container."
         )
         deal_state._provisioning_mock_mode = True

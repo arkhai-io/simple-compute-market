@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
-from arkhai_bare_metal import BareMetalResourceProjection
 from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleRunner
 
@@ -47,9 +46,6 @@ class BareMetalProvisioningRuntime:
             additional_non_retryable_errors=self.settings.additional_non_retryable_errors,
         )
 
-    def readiness(self) -> dict[str, bool]:
-        return {"operations_service": self.operations_service is not None}
-
     @property
     def mock_executor(self):
         """This adapter's mock runner, or ``None`` outside the mock profile."""
@@ -62,13 +58,7 @@ class BareMetalProvisioningRuntime:
             fulfillment_provider=self.fulfillment_provider,
             pool_config_handler=self.pool_config_handler,
             job_executor=self.job_executor(),
-            readiness_check=self.readiness,
         )
-
-
-def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and serialize the public bare-metal resource projection."""
-    return BareMetalResourceProjection.model_validate(raw_view).model_dump(mode="json")
 
 
 def build_bare_metal_runtime(

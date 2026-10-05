@@ -1,9 +1,11 @@
 """Resource-pool projection inventory, built from capacity declarations alone.
 
 The fixtures below are frozen declaration sets covering a fungible pool and a
-specific-resource bare-metal pool. The projection of each must equal its frozen
-expectation exactly: that equality is the contractual regression evidence for
-the projection's shape.
+specific-resource bare-metal pool, projected with the inventory views
+production composes. The projection of each must equal its frozen expectation
+exactly: that equality is the contractual regression evidence for the
+projection's shape. Each domain's own view rules are tested beside its
+projection; this module proves the neutral rules and the merge.
 """
 
 from types import SimpleNamespace
@@ -11,6 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
+from compute_provisioning import InventoryViews, compose_inventory_views
 from compute_provisioning_service.db.models import AnsiblePoolConfig
 from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
@@ -21,6 +25,20 @@ from arkhai_bare_metal.fixtures.publication_view import (
 )
 from market_resource_pools import ResourcePool
 from market_site.projections import resource_pool_projection
+from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
+
+#: The views production composes, one projection per adapter bundle.
+VIEWS = compose_inventory_views(
+    [
+        ("vm", AnsiblePoolDefaultsViews(provider="ansible")),
+        ("bare-metal", BareMetalPublicationViews()),
+    ]
+)
+NO_VIEWS = InventoryViews()
+
+
+def _project(declarations, views=VIEWS):
+    return load_capacity_resource_inventory(declarations, views)
 
 
 def _declaration(**overrides):
@@ -163,52 +181,49 @@ SPECIFIC_RESOURCE_PROJECTION = [
 
 
 def test_a_fungible_pool_projects_exactly_its_frozen_expectation():
-    assert load_capacity_resource_inventory(FUNGIBLE_DECLARATIONS) == FUNGIBLE_PROJECTION
+    assert _project(FUNGIBLE_DECLARATIONS) == FUNGIBLE_PROJECTION
 
 
 def test_a_specific_resource_pool_projects_exactly_its_frozen_expectation():
-    assert (
-        load_capacity_resource_inventory(SPECIFIC_RESOURCE_DECLARATIONS)
-        == SPECIFIC_RESOURCE_PROJECTION
-    )
+    assert _project(SPECIFIC_RESOURCE_DECLARATIONS) == SPECIFIC_RESOURCE_PROJECTION
 
 
 # ---------------------------------------------------------------------------
-# Individual rules
+# Neutral rules
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("host_id", [None, "compute-kvm1-001", "not-yet-registered"])
 def test_whether_a_host_is_named_does_not_change_the_entry(host_id):
-    (projected,) = load_capacity_resource_inventory([_declaration(host_id=host_id)])
-    (reference,) = load_capacity_resource_inventory([_declaration(host_id=None)])
+    (projected,) = _project([_declaration(host_id=host_id)])
+    (reference,) = _project([_declaration(host_id=None)])
 
     assert projected == reference
 
 
 def test_no_entry_carries_host_connection_identity():
     """Registration refuses a host_id attribute, but a stored row may predate
-    that. Nothing the projection writes names a host or an address."""
+    that. Nothing the neutral projection writes names a host or an address."""
     declarations = [
         _declaration(attributes={"gpu_model": "H200"}),
         _bare_metal_declaration(),
     ]
 
-    for projected in load_capacity_resource_inventory(declarations):
+    for projected in _project(declarations):
         assert "host_id" not in projected
         assert "host_id" not in projected["attributes"]
         assert "public_host" not in projected["attributes"]
 
 
 def test_enablement_comes_from_the_declaration_alone():
-    (enabled,) = load_capacity_resource_inventory([_declaration(enabled=True)])
-    (disabled,) = load_capacity_resource_inventory([_declaration(enabled=False)])
+    (enabled,) = _project([_declaration(enabled=True)])
+    (disabled,) = _project([_declaration(enabled=False)])
 
     assert enabled["enabled"] is True
     assert disabled["enabled"] is False
 
 
 def test_an_undeclared_attribute_is_absent_rather_than_null():
-    (projected,) = load_capacity_resource_inventory([_declaration(attributes={})])
+    (projected,) = _project([_declaration(attributes={})])
 
     assert projected["attributes"] == {}
 
@@ -219,25 +234,22 @@ def test_unreported_availability_is_not_projected_as_zero():
     declaration = _declaration()
     del declaration["available"]
 
-    (projected,) = load_capacity_resource_inventory([declaration])
+    (projected,) = _project([declaration])
 
     assert "available" not in projected
 
 
 def test_a_declaration_with_no_recorded_pool_belongs_to_the_default_pool():
-    (projected,) = load_capacity_resource_inventory([_declaration(pool_id=None)])
+    (projected,) = _project([_declaration(pool_id=None)])
 
     assert projected["pool_id"] == "default"
 
 
-def test_the_bare_metal_view_becomes_unavailable_when_any_dimension_is_held():
-    declaration = _bare_metal_declaration(available={"gpu_count": 7, "ram_gb": 512})
+def test_without_contributed_views_every_attribute_projects_and_no_view_does():
+    (projected,) = _project([_bare_metal_declaration()], NO_VIEWS)
 
-    (projected,) = load_capacity_resource_inventory([declaration])
-
-    view = projected["publication_views"]["bare_metal.v2"]
-    assert view["capacity"] == projected["capacity"]
-    assert view["available"] is False
+    assert "bare_metal_publication" in projected["attributes"]
+    assert "publication_views" not in projected
 
 
 def test_every_bare_metal_view_meets_its_consumers_contract():
@@ -253,7 +265,7 @@ def test_every_bare_metal_view_meets_its_consumers_contract():
         ),
     ]
 
-    pools = resource_pool_projection(load_capacity_resource_inventory(declarations))
+    pools = resource_pool_projection(_project(declarations))
 
     validated = 0
     for pool in pools:
@@ -270,51 +282,78 @@ def test_every_bare_metal_view_meets_its_consumers_contract():
     assert validated == 3
 
 
-def test_the_bare_metal_view_is_unavailable_for_a_disabled_declaration():
-    (projected,) = load_capacity_resource_inventory(
-        [_bare_metal_declaration(enabled=False)]
+# ---------------------------------------------------------------------------
+# A third domain
+# ---------------------------------------------------------------------------
+
+class _ThirdDomainViews:
+    """A further compute domain's projection, which the service has never seen."""
+
+    resource_view_ids = frozenset({"third.v1"})
+    pool_view_ids = frozenset({"third.pool.v1"})
+    consumed_attributes = frozenset({"third_config"})
+
+    def resource_views(self, declaration, *, pool_id):
+        config = (declaration.get("attributes") or {}).get("third_config")
+        if not config:
+            return {}
+        return {"third.v1": {"pool_id": pool_id, "flavour": config["flavour"]}}
+
+    def pool_views(self, db, *, pool_id, provider):
+        return {"third.pool.v1": {"provider": provider}} if provider == "third" else {}
+
+
+THIRD_DOMAIN_VIEWS = compose_inventory_views(
+    [
+        ("vm", AnsiblePoolDefaultsViews(provider="ansible")),
+        ("bare-metal", BareMetalPublicationViews()),
+        ("third", _ThirdDomainViews()),
+    ]
+)
+
+
+def test_a_third_domains_resource_view_is_attached_and_its_attribute_consumed():
+    declaration = _declaration(
+        attributes={"gpu_model": "H200", "third_config": {"flavour": "plain"}}
     )
 
-    assert projected["publication_views"]["bare_metal.v2"]["available"] is False
+    (projected,) = _project([declaration], THIRD_DOMAIN_VIEWS)
 
-
-def test_a_publication_that_is_not_enabled_projects_no_view():
-    declaration = _bare_metal_declaration()
-    declaration["attributes"]["bare_metal_publication"]["enabled"] = False
-
-    (projected,) = load_capacity_resource_inventory([declaration])
-
-    assert "publication_views" not in projected
-    assert "bare_metal_publication" not in projected["attributes"]
-
-
-def test_a_publication_exposing_a_private_capability_fails_closed():
-    declaration = _bare_metal_declaration()
-    declaration["attributes"]["bare_metal_publication"]["capabilities"] = {
-        "service_url": "https://private.invalid",
+    assert projected["publication_views"] == {
+        "third.v1": {"pool_id": "gpu-pool", "flavour": "plain"}
     }
+    assert projected["attributes"] == {"gpu_model": "H200"}
 
-    with pytest.raises(ValueError):
-        load_capacity_resource_inventory([declaration])
+
+def test_a_third_domains_pool_view_is_attached():
+    session = _pool_session(pools=[_pool(id="third-pool", provider="third")])
+
+    result = load_capacity_pool_metadata(lambda: session, THIRD_DOMAIN_VIEWS)
+
+    assert result["third-pool"]["pool_views"] == {"third.pool.v1": {"provider": "third"}}
 
 
 # ---------------------------------------------------------------------------
 # load_capacity_pool_metadata
 # ---------------------------------------------------------------------------
 
-def _pool_session(*, pools, ansible_configs):
+def _pool_session(*, pools, ansible_configs=()):
+    configs = {config.pool_id: config for config in ansible_configs}
+
     def query(model):
-        result = MagicMock()
-        if model is ResourcePool:
-            result.all.return_value = pools
-        elif model is AnsiblePoolConfig:
-            result.all.return_value = ansible_configs
-        else:  # pragma: no cover - defensive
+        if model is not ResourcePool:  # pragma: no cover - defensive
             raise AssertionError(f"unexpected query target {model!r}")
+        result = MagicMock()
+        result.all.return_value = pools
         return result
+
+    def get(model, pool_id):
+        assert model is AnsiblePoolConfig
+        return configs.get(pool_id)
 
     session = MagicMock()
     session.query.side_effect = query
+    session.get.side_effect = get
     session.__enter__.return_value = session
     session.__exit__.return_value = False
     return session
@@ -333,9 +372,9 @@ def _pool(**overrides):
 
 
 def test_load_capacity_pool_metadata_projects_allowlisted_pool_fields():
-    session = _pool_session(pools=[_pool()], ansible_configs=[])
+    session = _pool_session(pools=[_pool()])
 
-    result = load_capacity_pool_metadata(lambda: session)
+    result = load_capacity_pool_metadata(lambda: session, VIEWS)
 
     assert result == {
         "gpu-pool": {
@@ -347,7 +386,7 @@ def test_load_capacity_pool_metadata_projects_allowlisted_pool_fields():
     }
 
 
-def test_load_capacity_pool_metadata_nests_vm_size_defaults_under_versioned_view():
+def test_load_capacity_pool_metadata_attaches_the_contributed_pool_view():
     session = _pool_session(
         pools=[_pool()],
         ansible_configs=[
@@ -360,7 +399,7 @@ def test_load_capacity_pool_metadata_nests_vm_size_defaults_under_versioned_view
         ],
     )
 
-    result = load_capacity_pool_metadata(lambda: session)
+    result = load_capacity_pool_metadata(lambda: session, VIEWS)
 
     assert result["gpu-pool"]["pool_views"] == {
         "vm.ansible_pool_defaults.v1": {
@@ -371,58 +410,12 @@ def test_load_capacity_pool_metadata_nests_vm_size_defaults_under_versioned_view
     }
 
 
-def test_load_capacity_pool_metadata_omits_pool_views_when_all_defaults_unset():
-    session = _pool_session(
-        pools=[_pool()],
-        ansible_configs=[
-            SimpleNamespace(
-                pool_id="gpu-pool",
-                default_vm_ram=None,
-                default_vm_vcpus=None,
-                default_vm_disk_size=None,
-            ),
-        ],
-    )
-
-    result = load_capacity_pool_metadata(lambda: session)
-
-    assert "pool_views" not in result["gpu-pool"]
-
-
-def test_load_capacity_pool_metadata_omits_pool_views_with_no_ansible_config_row():
-    session = _pool_session(pools=[_pool()], ansible_configs=[])
-
-    result = load_capacity_pool_metadata(lambda: session)
-
-    assert "pool_views" not in result["gpu-pool"]
-
-
-def test_load_capacity_pool_metadata_includes_partial_defaults():
-    session = _pool_session(
-        pools=[_pool()],
-        ansible_configs=[
-            SimpleNamespace(
-                pool_id="gpu-pool",
-                default_vm_ram=65536,
-                default_vm_vcpus=None,
-                default_vm_disk_size=None,
-            ),
-        ],
-    )
-
-    result = load_capacity_pool_metadata(lambda: session)
-
-    assert result["gpu-pool"]["pool_views"] == {
-        "vm.ansible_pool_defaults.v1": {"default_vm_ram": 65536},
-    }
-
-
 def test_load_capacity_pool_metadata_never_projects_provider_config():
     pool = _pool()
     assert not hasattr(pool, "provider_config")
-    session = _pool_session(pools=[pool], ansible_configs=[])
+    session = _pool_session(pools=[pool])
 
-    result = load_capacity_pool_metadata(lambda: session)
+    result = load_capacity_pool_metadata(lambda: session, VIEWS)
 
     assert "provider_config" not in result["gpu-pool"]
     assert "extra_vars" not in result["gpu-pool"]
@@ -430,9 +423,9 @@ def test_load_capacity_pool_metadata_never_projects_provider_config():
 
 
 def test_load_capacity_pool_metadata_disabled_pool_reported_as_disabled():
-    session = _pool_session(pools=[_pool(enabled=False)], ansible_configs=[])
+    session = _pool_session(pools=[_pool(enabled=False)])
 
-    result = load_capacity_pool_metadata(lambda: session)
+    result = load_capacity_pool_metadata(lambda: session, VIEWS)
 
     assert result["gpu-pool"]["enabled"] is False
 
@@ -448,31 +441,9 @@ def test_load_capacity_pool_metadata_handles_several_pools_independently():
         ],
     )
 
-    result = load_capacity_pool_metadata(lambda: session)
+    result = load_capacity_pool_metadata(lambda: session, VIEWS)
 
     assert set(result) == {"gpu-pool", "cpu-pool"}
     assert "pool_views" in result["gpu-pool"]
     assert "pool_views" not in result["cpu-pool"]
     assert result["cpu-pool"]["mechanism"] == "k8s"
-
-
-def test_load_capacity_pool_metadata_ignores_stale_ansible_config_for_non_ansible_pool():
-    """A pool whose declared mechanism is no longer 'ansible' must never
-    surface the vm.ansible_pool_defaults.v1 view, even if a stale
-    ansible_pool_configs row happens to still exist for its pool_id --
-    the view name's own semantics ("vm.ansible...") must never be
-    published alongside a contradicting mechanism."""
-    session = _pool_session(
-        pools=[_pool(provider="k8s")],
-        ansible_configs=[
-            SimpleNamespace(
-                pool_id="gpu-pool", default_vm_ram=65536,
-                default_vm_vcpus=16, default_vm_disk_size="500G",
-            ),
-        ],
-    )
-
-    result = load_capacity_pool_metadata(lambda: session)
-
-    assert result["gpu-pool"]["mechanism"] == "k8s"
-    assert "pool_views" not in result["gpu-pool"]

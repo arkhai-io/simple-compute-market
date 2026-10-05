@@ -29,13 +29,13 @@ from .connection import (
 from .executor import TRANSPORT_FAILURES, AnsibleJobExecutor
 from .inventory import DEFAULT_KEY_PATH, parse_inventory_ini
 from .mock import DefaultOutput, MockAnsibleRunner, MockPlaybook
-from .probes import (
-    AnsibleReadinessResponse,
+from .probes import probe_connectivity
+from .readiness import (
+    ANSIBLE_COMPONENT,
+    AnsibleReadinessDetail,
     FileInfo,
-    InventoryInfo,
     SshKeyInfo,
-    ansible_readiness,
-    probe_connectivity,
+    ansible_readiness_component,
 )
 
 #: The Ansible configuration every playbook the service runs is run under,
@@ -45,14 +45,14 @@ DEFAULT_ANSIBLE_CONFIG = Path(__file__).with_name("ansible.cfg")
 __all__ = [
     "DEFAULT_ANSIBLE_CONFIG",
     "AnsibleJobCodec",
-    "AnsibleReadinessResponse",
+    "ANSIBLE_COMPONENT",
+    "AnsibleReadinessDetail",
     "DefaultOutput",
     "FileInfo",
-    "InventoryInfo",
     "MockAnsibleRunner",
     "MockPlaybook",
     "SshKeyInfo",
-    "ansible_readiness",
+    "ansible_readiness_component",
     "probe_connectivity",
     "AnsibleJobExecutor",
     "AnsibleJobInterpretation",

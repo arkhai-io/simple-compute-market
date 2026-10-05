@@ -168,7 +168,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.12.0"
+version = "0.13.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -181,27 +181,28 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.13.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.3.1"
+version = "0.4.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-contracts" },
+    { name = "arkhai-core" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-resource-pools" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.3.1-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -209,12 +210,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "aiohttp" },
@@ -246,7 +247,7 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_service-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_service-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -413,7 +414,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -443,7 +444,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning", specifier = ">=0.12.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.13.0" },
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-service", specifier = ">=0.7.0" },

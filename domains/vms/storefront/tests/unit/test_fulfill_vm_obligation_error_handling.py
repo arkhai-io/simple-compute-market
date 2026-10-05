@@ -32,7 +32,6 @@ async def test_malformed_order_returns_graceful_error_and_runs_failure_policy():
         capacity=capacity,
         stage_event=stage_event,
         provision_vm=AsyncMock(),
-        schedule_shutdown=AsyncMock(),
         register_lease=AsyncMock(),
         apply_failure_policy=apply_failure_policy,
     )
@@ -103,7 +102,6 @@ async def test_interrupted_fulfillment_never_persists_the_string_none_as_settlem
         capacity=capacity,
         stage_event=lambda *a, **k: None,
         provision_vm=failing_provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=AsyncMock(),
         apply_failure_policy=apply_failure_policy,
     )

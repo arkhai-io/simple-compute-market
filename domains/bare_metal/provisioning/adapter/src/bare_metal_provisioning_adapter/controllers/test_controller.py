@@ -13,6 +13,7 @@ shared ``/test/jobs/*`` routes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
@@ -21,11 +22,8 @@ from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
-from compute_provisioning_service import container as _container_module
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-
-router = APIRouter(prefix="/test/bare-metal", tags=["test", "bare-metal"])
 
 
 class BareMetalMockRuleRequest(BaseModel):
@@ -51,14 +49,6 @@ class BareMetalEvaluateJobResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-def _bare_metal_mock_rules() -> MockRuleSet | None:
-    mock = _container_module.resolved_bare_metal_mock_executor
-    return mock.rules if mock is not None else None
-
-
-_rule_routes = MockRuleRouteService(_bare_metal_mock_rules)
-
-
 def _routed(call):
     try:
         return call()
@@ -66,64 +56,74 @@ def _routed(call):
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.post("/mock-rules", summary="Add a bare-metal mock rule")
-def add_mock_rule(body: BareMetalMockRuleRequest) -> dict:
-    return _routed(lambda: _rule_routes.add(body.model_dump()))
+def make_mock_router(
+    *,
+    mock_executor: Callable[[], Any],
+    host_authority: Callable[[], Any],
+) -> APIRouter:
+    """Bare metal's mock control routes.
 
+    ``mock_executor`` resolves this adapter's mock runner, ``None`` outside the
+    mock profile; ``host_authority`` resolves the host registry a dry run
+    checks the host against. Both are read per request.
+    """
+    router = APIRouter(prefix="/test/bare-metal", tags=["test", "bare-metal"])
 
-@router.get("/mock-rules", summary="List bare-metal mock rules")
-def list_mock_rules() -> list[dict]:
-    return _routed(_rule_routes.list)
+    def mock_rules() -> MockRuleSet | None:
+        mock = mock_executor()
+        return mock.rules if mock is not None else None
 
+    def rule_set() -> MockRuleSet:
+        rules = mock_rules()
+        if rules is None:
+            raise ProvisioningRouteError(
+                503, "the bare-metal mock executor is not active (ACTIVE_PROFILES != mock)"
+            )
+        return rules
 
-@router.delete("/mock-rules/{rule_id}", summary="Remove a bare-metal mock rule")
-def delete_mock_rule(rule_id: str) -> dict:
-    return _routed(lambda: _rule_routes.delete(rule_id))
+    rule_routes = MockRuleRouteService(mock_rules)
 
+    @router.post("/mock-rules", summary="Add a bare-metal mock rule")
+    def add_mock_rule(body: BareMetalMockRuleRequest) -> dict:
+        return _routed(lambda: rule_routes.add(body.model_dump()))
 
-@router.post(
-    "/mock-rules/{rule_id}/resume", summary="Release a held bare-metal job"
-)
-def resume_mock_rule(rule_id: str) -> dict:
-    return _routed(lambda: _rule_routes.resume(rule_id))
+    @router.get("/mock-rules", summary="List bare-metal mock rules")
+    def list_mock_rules() -> list[dict]:
+        return _routed(rule_routes.list)
 
+    @router.delete("/mock-rules/{rule_id}", summary="Remove a bare-metal mock rule")
+    def delete_mock_rule(rule_id: str) -> dict:
+        return _routed(lambda: rule_routes.delete(rule_id))
 
-@router.post(
-    "/evaluate-job",
-    response_model=BareMetalEvaluateJobResponse,
-    summary="Dry-run: would this bare-metal job run, and which rule would it meet?",
-)
-def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobResponse:
-    rules = _routed(lambda: _rule_routes_rule_set())
-    host_service = _container_module.resolved_host_authority
-    if host_service is None:
-        raise HTTPException(status_code=503, detail="HostService not available")
-    # Shaped as a submitted job's stored parameters, which rules match.
-    params = {
-        "action": body.action,
-        "host_id": body.host,
-        "physical_host_id": body.physical_host_id,
-        "escrow_uid": body.escrow_uid,
-    }
-    report = rules.evaluate(
-        params, host_id=body.host, host_lookup=host_service.get_host
+    @router.post(
+        "/mock-rules/{rule_id}/resume", summary="Release a held bare-metal job"
     )
-    if body.action not in BARE_METAL_ACCESS_ACTIONS:
-        report["errors"].append(
-            f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
-        )
-        report["params_valid"] = False
-    return BareMetalEvaluateJobResponse(**report)
+    def resume_mock_rule(rule_id: str) -> dict:
+        return _routed(lambda: rule_routes.resume(rule_id))
 
+    @router.post(
+        "/evaluate-job",
+        response_model=BareMetalEvaluateJobResponse,
+        summary="Dry-run: would this bare-metal job run, and which rule would it meet?",
+    )
+    def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobResponse:
+        rules = _routed(rule_set)
+        hosts = host_authority()
+        if hosts is None:
+            raise HTTPException(status_code=503, detail="HostService not available")
+        # Shaped as a submitted job's stored parameters, which rules match.
+        params = {
+            "action": body.action,
+            "host_id": body.host,
+            "physical_host_id": body.physical_host_id,
+            "escrow_uid": body.escrow_uid,
+        }
+        report = rules.evaluate(params, host_id=body.host, host_lookup=hosts.get_host)
+        if body.action not in BARE_METAL_ACCESS_ACTIONS:
+            report["errors"].append(
+                f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
+            )
+            report["params_valid"] = False
+        return BareMetalEvaluateJobResponse(**report)
 
-def _rule_routes_rule_set() -> MockRuleSet:
-    rules = _bare_metal_mock_rules()
-    if rules is None:
-        raise ProvisioningRouteError(
-            503, "the bare-metal mock executor is not active (ACTIVE_PROFILES != mock)"
-        )
-    return rules
-
-
-def make_router() -> APIRouter:
     return router

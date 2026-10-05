@@ -381,7 +381,7 @@ from compute_provisioning_service.services.job_retry import retry_policy_from
 from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
-from vm_provisioning_adapter.services.system_service import SystemService
+from compute_provisioning_service.services.system_status import SystemStatusService
 
 
 # ---------------------------------------------------------------------------
@@ -506,15 +506,11 @@ def job_executor_table_for():
     return _job_executor_table
 
 
-def _job_executor_table(runner, settings, bare_metal_runner=None):
-    """Every VM job action runs through ``runner`` and every bare-metal one
-    through ``bare_metal_runner`` (``runner`` when absent), each in an Ansible
-    executor with its mode's playbook, as composition registers them in the
-    service."""
-    from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
-    from compute_provisioning import JobExecutorTable
+def _ansible_executors(runner, settings, bare_metal_runner=None):
+    """VM's and bare metal's Ansible executors, each with its mode's playbook,
+    as their runtimes build them: VM's over ``runner``, bare metal's over
+    ``bare_metal_runner`` (``runner`` when absent)."""
     from compute_provisioning_ansible import AnsibleJobExecutor
-    from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
     from vm_provisioning_adapter.codec import VmAnsibleCodec
     from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 
@@ -532,6 +528,17 @@ def _job_executor_table(runner, settings, bare_metal_runner=None):
         timeout_seconds=settings.ansible_timeout_seconds,
         additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
+    return vm, bare_metal
+
+
+def _job_executor_table(runner, settings, bare_metal_runner=None):
+    """A frozen table registering every VM and bare-metal job action, as
+    composition registers them in the service."""
+    from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
+    from compute_provisioning import JobExecutorTable
+    from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
+
+    vm, bare_metal = _ansible_executors(runner, settings, bare_metal_runner)
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
         table.register("vm", action, vm)
@@ -655,24 +662,27 @@ async def client_and_queue(
 
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
+    resource_pool_service_handlers = {
+        "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
+        "bare_metal.ansible": BareMetalPoolConfigHandler(),
+    }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
         # Both adapter bundles' handlers, as a composition carrying both
         # registers them: the bare-metal provider takes no pool-local
         # configuration, which is what lets a pool name a provider without
         # fabricating execution settings.
-        handlers={
-            "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-            "bare_metal.ansible": BareMetalPoolConfigHandler(),
-        },
+        handlers=resource_pool_service_handlers,
     )
 
     # The one job authority and host authority the composition root builds.
+    # The executor table starts empty, as there: composing the adapter bundles
+    # below fills and freezes it.
+    from compute_provisioning import JobExecutorTable
+    job_executor_table = JobExecutorTable()
     job_engine = JobEngine(
         session_factory,
-        executors=_job_executor_table(
-            fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
-        ),
+        executors=job_executor_table,
         host_lookup=host_authority.lookup,
         retry_policy=retry_policy_from(mock_settings),
     )
@@ -711,7 +721,6 @@ async def client_and_queue(
 
     from market_fulfillment import (
         FulfillmentOrchestrator,
-        ProviderRegistry,
         SqlAlchemyFulfillmentUnitOfWork,
     )
     from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
@@ -742,16 +751,37 @@ async def client_and_queue(
     from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
         BareMetalFulfillmentProvider,
     )
-    fulfillment_service = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry(
-            {
-                "ansible": ansible_fulfillment_provider,
-                "bare_metal.ansible": BareMetalFulfillmentProvider(
+    from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
+    from compute_provisioning import compose_adapter_bundles
+    from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
+
+    # Both adapter bundles composed as the container composes them: their
+    # executors fill the job table, and their providers, pool handlers, and
+    # inventory views are what the routes and the status read.
+    vm_executor, bare_metal_executor = _ansible_executors(
+        fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
+    )
+    composed_adapters = compose_adapter_bundles(
+        [
+            build_vm_adapter_bundle(
+                fulfillment_provider=ansible_fulfillment_provider,
+                pool_config_handler=resource_pool_service_handlers["ansible"],
+                job_executor=vm_executor,
+            ),
+            build_bare_metal_adapter_bundle(
+                fulfillment_provider=BareMetalFulfillmentProvider(
                     operations_service=bare_metal_operations_service,
                     job_service=job_engine,
                 ),
-            }
-        ),
+                pool_config_handler=resource_pool_service_handlers["bare_metal.ansible"],
+                job_executor=bare_metal_executor,
+            ),
+        ],
+        host_requirement=host_requirement,
+        job_executors=job_executor_table,
+    )
+    fulfillment_service = FulfillmentOrchestrator(
+        provider_registry=composed_adapters.provider_registry,
         unit_of_work=fulfillment_unit_of_work,
     )
 
@@ -803,20 +833,35 @@ async def client_and_queue(
         ),
     )
 
-    system_service = SystemService(
-        ansible_service=fake_ansible,
+    from compute_provisioning_service.services.fulfillment_convergence import (
+        FulfillmentConvergenceWatchdog,
+    )
+    fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=composed_adapters.provider_registry,
         settings=mock_settings,
-        host_service=host_authority,
+        port_allocator=RelayPortAllocator(session_factory),
+    )
+    # Status composed as production composes it: the composed executor table,
+    # the lease lifecycle, and the readiness components the container builds.
+    system_status_service = SystemStatusService(
+        settings=mock_settings,
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
-        lease_lifecycle_service=lease_lifecycle_service,
+        lease_lifecycle=lease_lifecycle_service,
+        job_executors=job_executor_table,
+        components=_container_module._make_status_components(
+            job_executor_table, host_authority
+        ),
+        identity_resolver=lambda: identity_context,
     )
 
     # Override container providers
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
     app.container.job_engine.override(job_engine)
-    app.container.system_service.override(system_service)
+    app.container.system_status_service.override(system_status_service)
     app.container.session_factory.override(session_factory)
     app.container.host_authority.override(host_authority)
     app.container.connectivity_probes.override(connectivity_probes)
@@ -837,7 +882,11 @@ async def client_and_queue(
     _container_module.resolved_job_engine = job_engine
     _container_module.resolved_session_factory = session_factory
     _container_module.resolved_ansible_service = fake_ansible
-    _container_module.resolved_system_service = system_service
+    _container_module.resolved_system_status_service = system_status_service
+    _container_module.resolved_inventory_views = composed_adapters.inventory_views
+    _container_module.resolved_fulfillment_convergence_watchdog = (
+        fulfillment_convergence_watchdog
+    )
     _container_module.resolved_host_authority = host_authority
     _container_module.resolved_connectivity_probes = connectivity_probes
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
@@ -883,11 +932,10 @@ async def client_and_queue(
     # Mount each adapter's test routes unless ``main.py`` already did: it
     # mounts them only when the mock profile is active at import, and the suite
     # must behave the same however pytest is invoked.
-    from bare_metal_provisioning_adapter.routers import bare_metal_mock_router
-    from vm_provisioning_adapter.routers import vm_mock_router
+    from compute_provisioning_service.main import _bare_metal_mock_router, _vm_mock_router
 
     _mounted_paths = {getattr(route, "path", "") for route in app.routes}
-    for _test_router in (vm_mock_router(), bare_metal_mock_router()):
+    for _test_router in (_vm_mock_router(), _bare_metal_mock_router()):
         if not {route.path for route in _test_router.routes} <= _mounted_paths:
             app.include_router(_test_router)
 
@@ -911,7 +959,7 @@ async def client_and_queue(
     app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()
     app.container.job_engine.reset_override()
-    app.container.system_service.reset_override()
+    app.container.system_status_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_authority.reset_override()
     app.container.connectivity_probes.reset_override()

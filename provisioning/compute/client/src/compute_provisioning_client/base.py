@@ -251,8 +251,10 @@ class SigningBase:
             )
 
     @staticmethod
-    def unsigned_body(response: httpx.Response) -> Any:
-        if not response.is_success:
+    def unsigned_body(
+        response: httpx.Response, *, accepted_statuses: Collection[int] = ()
+    ) -> Any:
+        if not response.is_success and response.status_code not in accepted_statuses:
             raise ComputeProvisioningError(response.text[:500], status_code=response.status_code)
         return response.json()
 

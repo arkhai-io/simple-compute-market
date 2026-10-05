@@ -27,6 +27,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
     FulfillmentValidationResponse,
+    HealthResponse,
     HostCreate,
     HostListResponse,
     HostResponse,
@@ -45,6 +46,7 @@ from compute_provisioning_contracts import (
     LeaseTermination,
     LeaseView,
     ProvisioningRouteContract,
+    SystemStatusResponse,
     VersionResponse,
 )
 from market_core import VersionedEnvelope
@@ -224,8 +226,24 @@ def _connectivity(host_id: str) -> _Call:
 # The service's system and identity routes.
 
 
-def _system_get(path: str, *, accepted_statuses: Collection[int] = ()) -> _Call:
-    return _Call("GET", path, parse=_object, accepted_statuses=accepted_statuses)
+# A degraded health or status answers 503 with the same body, which a caller
+# reads rather than receives as an error: it says what is degraded.
+_DEGRADED = (503,)
+
+
+def _system_health() -> _Call:
+    return _Call(
+        "GET", "/api/v1/system/health", parse=_model(HealthResponse), accepted_statuses=_DEGRADED
+    )
+
+
+def _system_status() -> _Call:
+    return _Call(
+        "GET",
+        "/api/v1/system/status",
+        parse=_model(SystemStatusResponse),
+        accepted_statuses=_DEGRADED,
+    )
 
 
 def _system_post(path: str) -> _Call:
@@ -550,24 +568,21 @@ class ComputeProvisioningClient(SigningBase):
 
     # The service's system and identity routes.
 
-    async def get_health(self) -> dict[str, Any]:
+    async def get_health(self) -> HealthResponse:
         """``GET /health``: unauthenticated local liveness."""
-        return self.unsigned_body(await self._client.get("/health"))
-
-    async def get_system_health(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_get("/api/v1/system/health"), request_id)
-
-    async def get_system_status(self, *, request_id: str | None = None) -> dict[str, Any]:
-        """The full diagnostic status; a degraded service answers 503 with the same body."""
-        return await self._run(
-            _system_get("/api/v1/system/status", accepted_statuses=(503,)), request_id
+        return HealthResponse.model_validate(
+            self.unsigned_body(await self._client.get("/health"), accepted_statuses=_DEGRADED)
         )
+
+    async def get_system_health(self, *, request_id: str | None = None) -> HealthResponse:
+        return await self._run(_system_health(), request_id)
+
+    async def get_system_status(self, *, request_id: str | None = None) -> SystemStatusResponse:
+        """Operational status, including what executes jobs and each readiness component."""
+        return await self._run(_system_status(), request_id)
 
     async def get_version(self, *, request_id: str | None = None) -> VersionResponse:
         return await self._run(_version(), request_id)
-
-    async def get_ansible_readiness(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return await self._run(_system_get("/api/v1/system/ansible/readiness"), request_id)
 
     async def check_leases(self, *, request_id: str | None = None) -> dict[str, Any]:
         """Run one lease lifecycle cycle now."""
@@ -824,22 +839,21 @@ class SyncComputeProvisioningClient(SigningBase):
 
     # The service's system and identity routes.
 
-    def get_health(self) -> dict[str, Any]:
+    def get_health(self) -> HealthResponse:
         """``GET /health``: unauthenticated local liveness."""
-        return self.unsigned_body(self._client.get("/health"))
+        return HealthResponse.model_validate(
+            self.unsigned_body(self._client.get("/health"), accepted_statuses=_DEGRADED)
+        )
 
-    def get_system_health(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_get("/api/v1/system/health"), request_id)
+    def get_system_health(self, *, request_id: str | None = None) -> HealthResponse:
+        return self._run(_system_health(), request_id)
 
-    def get_system_status(self, *, request_id: str | None = None) -> dict[str, Any]:
+    def get_system_status(self, *, request_id: str | None = None) -> SystemStatusResponse:
         """See ``ComputeProvisioningClient.get_system_status``."""
-        return self._run(_system_get("/api/v1/system/status", accepted_statuses=(503,)), request_id)
+        return self._run(_system_status(), request_id)
 
     def get_version(self, *, request_id: str | None = None) -> VersionResponse:
         return self._run(_version(), request_id)
-
-    def get_ansible_readiness(self, *, request_id: str | None = None) -> dict[str, Any]:
-        return self._run(_system_get("/api/v1/system/ansible/readiness"), request_id)
 
     def check_leases(self, *, request_id: str | None = None) -> dict[str, Any]:
         """Run one lease lifecycle cycle now."""

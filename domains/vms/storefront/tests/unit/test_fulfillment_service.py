@@ -177,7 +177,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
         "_do_provision",
         AsyncMock(return_value={"ssh": "ssh tenant@example"}),
     )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
     alkahest = MagicMock()
     alkahest.string_obligation.do_obligation = AsyncMock(
@@ -259,7 +258,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         "_do_provision",
         AsyncMock(return_value={"ssh": "ssh tenant@example"}),
     )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
     with (
         settings_overrides(
@@ -494,7 +492,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
     monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
@@ -625,7 +622,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
     monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",

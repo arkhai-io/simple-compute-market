@@ -10,13 +10,13 @@ service.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from .adapters import JobExecutorTable
+from .inventory_views import InventoryViewProjection, InventoryViews, compose_inventory_views
 from .jobs.executor import JobExecutor
-from .app import ComputeProvisioningRouterMount
 from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
 
 
@@ -37,22 +37,26 @@ class ExecutorAdapterContribution:
 
 @dataclass(frozen=True)
 class ExecutorAdapterBundle:
-    """Everything one compute domain contributes to service composition."""
+    """Everything one compute domain contributes to service composition.
+
+    A domain's routes are not part of it: the service mounts them when it
+    builds the app, before any bundle exists, through the router factories the
+    adapter exports. Execution readiness is not either: the composition root
+    reports it from the executors it composed.
+    """
 
     name: str
     executors: tuple[ExecutorAdapterContribution, ...]
     fulfillment_providers: Mapping[str, FulfillmentProvider] = field(default_factory=dict)
     pool_config_handlers: Mapping[str, Any] = field(default_factory=dict)
-    router_mounts: tuple[ComputeProvisioningRouterMount, ...] = ()
-    readiness_checks: Mapping[str, Callable[[], Any]] = field(default_factory=dict)
+    inventory_views: tuple[InventoryViewProjection, ...] = ()
 
 
 @dataclass(frozen=True)
 class ComposedComputeAdapters:
     provider_registry: ProviderRegistry
     pool_config_handlers: Mapping[str, Any]
-    router_mounts: tuple[ComputeProvisioningRouterMount, ...]
-    readiness_checks: Mapping[str, Callable[[], Any]]
+    inventory_views: InventoryViews
     job_executors: JobExecutorTable
 
 
@@ -193,11 +197,9 @@ def compose_adapter_bundles(
     executor_owners: dict[str, str] = {}
     provider_owners: dict[str, str] = {}
     handler_owners: dict[str, str] = {}
-    readiness_owners: dict[str, str] = {}
     providers: dict[str, FulfillmentProvider] = {}
     pool_config_handlers: dict[str, Any] = {}
-    routers: list[ComputeProvisioningRouterMount] = []
-    readiness_checks: dict[str, Callable[[], Any]] = {}
+    inventory_views: list[tuple[str, InventoryViewProjection]] = []
 
     bundle_names: set[str] = set()
     for bundle in bundles:
@@ -259,30 +261,17 @@ def compose_adapter_bundles(
             handler_owners[name] = bundle_name
             pool_config_handlers[name] = handler
 
-        for check_name, check in bundle.readiness_checks.items():
-            if not callable(check):
-                raise ValueError(
-                    f"adapter bundle {bundle_name!r} readiness check {check_name!r} "
-                    "is not callable"
-                )
-            previous = readiness_owners.get(check_name)
-            if previous is not None:
-                raise ValueError(
-                    f"duplicate readiness check {check_name!r}: "
-                    f"bundles {previous!r} and {bundle_name!r}"
-                )
-            readiness_owners[check_name] = bundle_name
-            readiness_checks[check_name] = check
-
-        routers.extend(bundle.router_mounts)
+        inventory_views.extend(
+            (bundle_name, projection) for projection in bundle.inventory_views
+        )
 
     _validate_host_requirement(providers, host_requirement)
+    composed_views = compose_inventory_views(inventory_views)
     job_executors.freeze()
 
     return ComposedComputeAdapters(
         provider_registry=ProviderRegistry(providers),
         pool_config_handlers=pool_config_handlers,
-        router_mounts=tuple(routers),
-        readiness_checks=readiness_checks,
+        inventory_views=composed_views,
         job_executors=job_executors,
     )

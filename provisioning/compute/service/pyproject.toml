@@ -1,19 +1,19 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.9.0"
+version = "0.10.0"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.4.0",
+    "arkhai-compute-provisioning-contracts>=0.5.0",
     "arkhai-kit-resource-pools-contracts>=0.1.0",
     "arkhai-core>=0.4.0",
     "arkhai-kit-config",
     "arkhai-kit-site>=0.8.0",
     "arkhai-kit-resource-pools>=0.3.0",
     "arkhai-kit-fulfillment>=0.5.0",
-    "arkhai-compute-provisioning>=0.12.0",
-    "arkhai-compute-provisioning-ansible>=0.3.1",
+    "arkhai-compute-provisioning>=0.13.0",
+    "arkhai-compute-provisioning-ansible>=0.4.0",
     # Relay wire models, which VM's package owns; the service serves the relay
     # routes until relay administration moves to VM's adapter.
     "arkhai-vms-provisioning-operator-client>=0.8.0",
@@ -38,8 +38,8 @@ dependencies = [
 
 [project.optional-dependencies]
 adapters = [
-    "arkhai-vms-provisioning-adapter>=0.8.0",
-    "arkhai-bare-metal-provisioning-adapter>=0.6.0",
+    "arkhai-vms-provisioning-adapter>=0.9.0",
+    "arkhai-bare-metal-provisioning-adapter>=0.7.0",
 ]
 
 [project.scripts]
@@ -61,13 +61,13 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    "arkhai-vms-provisioning-adapter>=0.8.0",
-    "arkhai-bare-metal-provisioning-adapter>=0.6.0",
+    "arkhai-vms-provisioning-adapter>=0.9.0",
+    "arkhai-bare-metal-provisioning-adapter>=0.7.0",
     # The bare-metal view's contract fixture, which the producer test validates
     # its projected views against.
     "arkhai-bare-metal>=0.7.0",
     # The canonical typed clients the integration suite drives every route with.
-    "arkhai-compute-provisioning-client>=0.3.0",
+    "arkhai-compute-provisioning-client>=0.4.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-site-client>=0.7.0",
     "pytest>=9.0.2",

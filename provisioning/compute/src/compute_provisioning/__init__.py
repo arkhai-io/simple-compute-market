@@ -20,6 +20,11 @@ from .composition import (
     compose_adapter_bundles,
 )
 from .events import IdempotentLifecycleEventSink, LifecycleEventSink
+from .inventory_views import (
+    InventoryViewProjection,
+    InventoryViews,
+    compose_inventory_views,
+)
 from .app import (
     DEFAULT_COMPUTE_PROVISIONING_DESCRIPTION,
     ComputeProvisioningAppConfig,
@@ -45,6 +50,9 @@ __all__ = [
     "ExecutorAdapterBundle",
     "ExecutorAdapterContribution",
     "compose_adapter_bundles",
+    "compose_inventory_views",
+    "InventoryViewProjection",
+    "InventoryViews",
     "JobExecutor",
     "JobExecutorResolver",
     "JobFailure",

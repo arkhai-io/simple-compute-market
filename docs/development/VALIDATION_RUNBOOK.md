@@ -1073,11 +1073,13 @@ case ",${ACTIVE_PROFILES}," in
 esac
 
 make forward ENV="$ENV"
-curl -sf http://localhost:8081/api/v1/system/ansible/readiness \
-  | tee /tmp/scm-ansible-readiness.json \
+# A degraded status answers 503 with the same body, so read it without -f.
+curl -s http://localhost:8081/api/v1/system/status \
+  | tee /tmp/scm-provisioning-status.json \
   | jq
-jq -e '.ansible_mode == "real" and .playbook.exists == true' \
-  /tmp/scm-ansible-readiness.json
+jq -e '.execution.mocked == false
+  and ([.components[] | select(.name == "ansible") | .ready] == [true])' \
+  /tmp/scm-provisioning-status.json
 ```
 
 ## 24. Provisioning Host Registration And Capacity

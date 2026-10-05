@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -76,7 +76,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -84,7 +84,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

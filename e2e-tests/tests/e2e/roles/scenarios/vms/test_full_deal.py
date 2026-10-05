@@ -7,7 +7,7 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00b  Registry reachable:      GET /api/v1/system/status → checks.registry=ok
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
-  00e  Provisioning mock mode:  GET /api/v1/system/ansible/readiness → ansible_mode=mock
+  00e  Provisioning mock mode:  GET /api/v1/system/status → execution.mocked
   00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
                                 upserts the compute row this test needs
   00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
@@ -278,25 +278,27 @@ class TestStage00c_ProvisioningHealth:
     def test_00c_provisioning_is_healthy(
         self, provisioning_client, deal_state: DealState
     ):
-        """GET /api/v1/system/ansible/readiness → playbook.exists=True.
+        """GET /api/v1/system/status → the Ansible component is ready.
 
-        Uses the ansible readiness endpoint rather than /health because it
-        confirms the mock profile is correctly configured — not just that
-        the HTTP server is running. In mock mode the playbook points to
-        /dev/null which always exists; a missing playbook means the mock
-        profile isn't active.
+        Uses status rather than /health because the component confirms the
+        executors are composed as the lane expects — not just that the HTTP
+        server is running. Mocked executors are ready without Ansible or
+        playbooks; a component that is not ready means real executors that
+        cannot run.
         """
         require_state(deal_state, "_storefront_healthy", "_registry_reachable")
-        resp = provisioning_client.get_ansible_readiness()
-        playbook_exists = resp.get("playbook", {}).get("exists", False)
-        assert playbook_exists, (
-            f"Provisioning playbook path does not exist: {resp.get('playbook')}\n"
+        status = provisioning_client.get_system_status()
+        ansible = status.component("ansible")
+        assert ansible is not None and ansible.ready, (
+            f"Provisioning's Ansible component is not ready: {ansible!r}\n"
             "Ensure ACTIVE_PROFILES=mock is set on the provisioning container.\n"
-            f"Full response: {resp}"
+            f"Full status: {status!r}"
         )
         deal_state._provisioning_healthy = True
-        log.info("[00c] Provisioning ansible readiness: playbook.exists=%s ansible=%s",
-                 playbook_exists, resp.get("ansible_version"))
+        log.info(
+            "[00c] Provisioning Ansible component ready: ansible=%s",
+            ansible.detail.payload.get("ansible_version"),
+        )
 
 
 class TestStage00c2_ProvisioningContractPins:
@@ -332,10 +334,8 @@ class TestStage00c2_ProvisioningContractPins:
         provisioning_status = provisioning_client.get_system_status()
         seller_status = storefront_admin_client.get_system_status()
 
-        service_pin = provisioning_status.get("provisioning_contract_version")
-        supported = provisioning_status.get(
-            "provisioning_contract_supported_majors"
-        )
+        service_pin = provisioning_status.provisioning_contract_version
+        supported = provisioning_status.provisioning_contract_supported_majors
         caller_pin = seller_status.provisioning_contract_version
 
         assert service_pin, (
@@ -398,21 +398,20 @@ class TestStage00e_ProvisioningMockMode:
     def test_00e_provisioning_is_in_mock_mode(
         self, provisioning_client, deal_state: DealState
     ):
-        """GET /api/v1/system/ansible/readiness → ansible_mode=mock.
+        """GET /api/v1/system/status → execution.mocked.
 
         Guards the full e2e deal flow from accidentally targeting a production
-        provisioning service. If ansible_mode is 'real', any settlement attempt
-        would run an actual Ansible playbook against a real KVM host.
+        provisioning service. If any composed executor is real, a settlement
+        attempt would run an actual Ansible playbook against a real KVM host.
 
         Fix: set provisioning.mockMode=true in the helm values and redeploy,
         or set ACTIVE_PROFILES=production,provisioning-secrets,mock on the
         provisioning container.
         """
         require_state(deal_state, "_provisioning_healthy")
-        resp = provisioning_client.get_ansible_readiness()
-        mode = resp.get("ansible_mode", "real")
-        assert mode == "mock", (
-            f"Provisioning service is running in '{mode}' mode, not 'mock'.\n"
+        execution = provisioning_client.get_system_status().execution
+        assert execution.mocked, (
+            f"Provisioning executes jobs for real: {execution!r}.\n"
             "The e2e deal flow requires mock mode to avoid running real Ansible "
             "playbooks against live infrastructure.\n"
             "Fix: set provisioning.mockMode=true in values.yaml and redeploy, or\n"
@@ -420,7 +419,7 @@ class TestStage00e_ProvisioningMockMode:
             "provisioning container."
         )
         deal_state._provisioning_mock_mode = True
-        log.info("[00e] Provisioning mock mode confirmed: ansible_mode=%s", mode)
+        log.info("[00e] Provisioning mock mode confirmed: %s", execution.executors)
 
 
 class TestStage00f_ResourceSeed:
@@ -585,7 +584,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
         health = provisioning_client.get_system_status()
-        checks = health.get("checks", {})
+        checks = health.checks
 
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (

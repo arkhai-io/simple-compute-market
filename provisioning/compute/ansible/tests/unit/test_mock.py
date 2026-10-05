@@ -249,7 +249,7 @@ class TestExecutorIntegration:
             ),
         )
 
-        assert table.executor_modes() == {"mocked": "mock", "real": "real"}
+        assert table.mocked_by_offering_mode() == {"mocked": True, "real": False}
 
     async def test_cancelling_a_held_run_ends_it_without_a_resume(self):
         runner = MockAnsibleRunner(default_output=_default)

@@ -16,6 +16,7 @@ from compute_provisioning_ansible import (
     SSH_CONNECTION_KIND,
     MockAnsibleRunner,
     SshConnectionCodec,
+    ansible_readiness_component,
     probe_connectivity,
 )
 from compute_provisioning_ansible.runner import AnsibleRunner
@@ -59,6 +60,7 @@ from compute_provisioning_service.services.capacity_reservation_watchdog import 
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.relay_port_allocator import RelayPortAllocator
 from compute_provisioning_service.services.job_retry import retry_policy_from
+from compute_provisioning_service.services.system_status import SystemStatusService
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -120,11 +122,24 @@ def _adapter_bundle(runtime):
     return runtime.adapter_bundle()
 
 
-def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
-    return runtime.system_service(
-        lease_lifecycle_service=lease_lifecycle_service,
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
-    )
+def _make_status_components(job_executors, host_authority):
+    """The readiness components status reports, each built by its implementation.
+
+    The Ansible implementation reports on every executor it built, whichever
+    domain contributed it, and on the keys the registered hosts reference.
+    """
+
+    def ansible():
+        return ansible_readiness_component(
+            executors_by_offering_mode=job_executors.executors_by_offering_mode(),
+            list_hosts=lambda: host_authority.list_hosts(enabled_only=True),
+        )
+
+    return (ansible,)
+
+
+def _inventory_views(composed_adapters):
+    return composed_adapters.inventory_views
 
 
 def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, bool]:
@@ -350,7 +365,6 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
         host_authority=host_authority,
         job_engine=job_engine,
-        job_executors=job_executor_table,
     )
 
     ansible_service = providers.Callable(
@@ -409,6 +423,11 @@ class Container(containers.DeclarativeContainer):
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
         job_executors=job_executor_table,
+    )
+
+    inventory_views = providers.Singleton(
+        _inventory_views,
+        composed_adapters=composed_adapters,
     )
 
     composed_pool_config_handlers = providers.Singleton(
@@ -549,16 +568,21 @@ class Container(containers.DeclarativeContainer):
         port_allocator=relay_port_allocator,
     )
 
-    system_service = providers.Singleton(
-        _system_service,
-        runtime=vm_runtime,
-        lease_lifecycle_service=lease_lifecycle_service,
-        # The admin convergence route exists to run exactly one cycle of this
-        # watchdog. Its parameter was there and nothing ever passed it, so the
-        # route answered `503 fulfillment_convergence_watchdog not
-        # initialised` for every caller -- the only thing missing was the
-        # wiring between two singletons in this container.
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+    status_components = providers.Singleton(
+        _make_status_components,
+        job_executors=job_executor_table,
+        host_authority=host_authority,
+    )
+
+    system_status_service = providers.Singleton(
+        SystemStatusService,
+        settings=config,
+        session_factory=session_factory,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+        lease_lifecycle=lease_lifecycle_service,
+        job_executors=job_executor_table,
+        components=status_components,
+        identity_resolver=providers.Object(lambda: resolve_identity_context(settings)),
     )
 
 
@@ -578,7 +602,8 @@ resolved_job_engine: "JobEngine | None" = None
 resolved_session_factory: "sessionmaker[Session] | None" = None
 resolved_ansible_service: Any | None = None
 resolved_job_queue: "AsyncJobQueue | None" = None
-resolved_system_service: Any | None = None
+resolved_system_status_service: "SystemStatusService | None" = None
+resolved_inventory_views: Any | None = None
 resolved_host_authority: "HostAuthority | None" = None
 resolved_connectivity_probes: Mapping[str, Any] | None = None
 resolved_vm_operations_service: Any | None = None

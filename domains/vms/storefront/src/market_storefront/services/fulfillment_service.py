@@ -264,25 +264,6 @@ def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str
     return result
 
 
-async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
-    """Schedule VM expiry via the provisioning service.
-
-    NOTE: The provisioning service has no ``schedule_expiry`` endpoint — this
-    hook was wired but the underlying API was never implemented.
-    Lease teardown is managed by the LeaseWatchdog; call
-    ``POST /api/v1/system/check-leases`` or wait for the next watchdog cycle.
-
-    Raises ``NotImplementedError`` if called so callers discover the gap
-    immediately rather than silently failing on a missing import.
-    """
-    raise NotImplementedError(
-        "_do_shutdown is not implemented: the provisioning service has no "
-        "schedule_expiry endpoint. Lease teardown is handled by the "
-        "LeaseWatchdog. Submit POST /api/v1/system/check-leases to trigger "
-        "an immediate teardown cycle."
-    )
-
-
 async def _build_provisioning_job_spec(
     *,
     order_dict: dict | None,
@@ -472,7 +453,6 @@ async def fulfill_compute_obligation(
         capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
         provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
-        schedule_shutdown=_do_shutdown,
         register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=partial(
             _apply_fulfillment_failure_policy_adapter,

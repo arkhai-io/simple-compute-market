@@ -209,24 +209,79 @@ def test_incomplete_executor_contribution_is_rejected_before_startup():
         )
 
 
-def test_duplicate_readiness_check_is_rejected():
-    with pytest.raises(ValueError, match="duplicate readiness check 'controller'"):
-        compose_adapter_bundles(
-            [
-                ExecutorAdapterBundle(
-                    name="vm",
-                    executors=(contribution("vm", "create"),),
-                    readiness_checks={"controller": lambda: True},
-                ),
-                ExecutorAdapterBundle(
-                    name="bare-metal",
-                    executors=(contribution("bare_metal", "grant_access"),),
-                    readiness_checks={"controller": lambda: True},
-                ),
-            ],
-            host_requirement=ANSIBLE_NEEDS_HOST,
-            job_executors=JobExecutorTable(),
-        )
+class FakeViews:
+    """An inventory projection claiming the given views and attributes."""
+
+    def __init__(self, *, resource=(), pool=(), consumed=()):
+        self.resource_view_ids = frozenset(resource)
+        self.pool_view_ids = frozenset(pool)
+        self.consumed_attributes = frozenset(consumed)
+
+    def resource_views(self, declaration, *, pool_id):
+        return {view_id: {"pool_id": pool_id} for view_id in self.resource_view_ids}
+
+    def pool_views(self, db, *, pool_id, provider):
+        return {}
+
+
+def _compose_views(first, second):
+    return compose_adapter_bundles(
+        [
+            ExecutorAdapterBundle(
+                name="vm",
+                executors=(contribution("vm", "create"),),
+                inventory_views=(first,),
+            ),
+            ExecutorAdapterBundle(
+                name="bare-metal",
+                executors=(contribution("bare_metal", "grant_access"),),
+                inventory_views=(second,),
+            ),
+        ],
+        host_requirement={},
+        job_executors=JobExecutorTable(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "claim"),
+    [
+        (FakeViews(resource=["x.v1"]), FakeViews(resource=["x.v1"]), "resource view 'x.v1'"),
+        (FakeViews(pool=["p.v1"]), FakeViews(pool=["p.v1"]), "pool view 'p.v1'"),
+        (FakeViews(consumed=["cfg"]), FakeViews(consumed=["cfg"]), "consumed attribute 'cfg'"),
+    ],
+)
+def test_an_inventory_view_claimed_twice_is_refused(first, second, claim):
+    with pytest.raises(ValueError, match=f"duplicate inventory {claim}"):
+        _compose_views(first, second)
+
+
+def test_one_identifier_at_both_attachment_points_is_not_a_conflict():
+    composed = _compose_views(FakeViews(resource=["x.v1"]), FakeViews(pool=["x.v1"]))
+
+    assert len(composed.inventory_views.projections) == 2
+
+
+def test_composed_views_merge_and_refuse_an_undeclared_view():
+    composed = _compose_views(
+        FakeViews(resource=["a.v1"], consumed=["a"]),
+        FakeViews(resource=["b.v1"], consumed=["b"]),
+    )
+    views = composed.inventory_views
+
+    assert views.consumed_attributes == {"a", "b"}
+    assert views.resource_views({}, pool_id="p") == {
+        "a.v1": {"pool_id": "p"},
+        "b.v1": {"pool_id": "p"},
+    }
+
+    class Overreaching(FakeViews):
+        def resource_views(self, declaration, *, pool_id):
+            return {"other.v1": {}}
+
+    overreaching = _compose_views(Overreaching(resource=["c.v1"]), FakeViews())
+    with pytest.raises(ValueError, match="undeclared view"):
+        overreaching.inventory_views.resource_views({}, pool_id="p")
 
 
 class UndeclaredProvider(FakeProvider):

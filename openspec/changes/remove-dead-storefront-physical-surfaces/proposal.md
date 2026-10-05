@@ -39,7 +39,8 @@ trigger is a repository-owner decision, so these removals land independently.
   fulfillment service.
 - Remove the dead VM expiry hook (`schedule_shutdown`, wired to `_do_shutdown`,
   which always raises because no expiry-scheduling endpoint exists); the lease
-  watchdog performs expiry. Routed here from `bare-metal-mock-provisioned-deal`. `vm_host` inside the provisioning adapter is the real
+  watchdog performs expiry. Routed here from `bare-metal-mock-provisioned-deal`, and
+  delivered there (its task 5B.8.C.6; this change's task 3.8). `vm_host` inside the provisioning adapter is the real
   execution target and is untouched.
 - Remove the orphaned resource admin routes, their request/response models,
   authentication contracts, and both client variants' `get_resource`/`patch_resource`.

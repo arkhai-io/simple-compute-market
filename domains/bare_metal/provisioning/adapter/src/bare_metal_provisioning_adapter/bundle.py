@@ -11,7 +11,7 @@ from compute_provisioning import (
     JobExecutor,
 )
 
-from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts
+from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
     BareMetalFulfillmentProvider,
 )
@@ -37,13 +37,7 @@ def build_bare_metal_adapter_bundle(
     fulfillment_provider: BareMetalFulfillmentProvider,
     pool_config_handler: BareMetalPoolConfigHandler,
     job_executor: JobExecutor,
-    readiness_check=None,
 ) -> ExecutorAdapterBundle:
-    checks = (
-        {"bare-metal": readiness_check}
-        if readiness_check is not None
-        else {}
-    )
     return ExecutorAdapterBundle(
         name="bare-metal",
         executors=(
@@ -57,6 +51,5 @@ def build_bare_metal_adapter_bundle(
         ),
         fulfillment_providers={BARE_METAL_PROVIDER: fulfillment_provider},
         pool_config_handlers={BARE_METAL_PROVIDER: pool_config_handler},
-        router_mounts=bare_metal_router_mounts(),
-        readiness_checks=checks,
+        inventory_views=(BareMetalPublicationViews(),),
     )

@@ -1924,7 +1924,11 @@ re-verifies them by grep before each move.
           - The root aggregate passes its 44 suites, failing only where this environment
             cannot run a suite. `make check-packaging`, comment hygiene, documentation
             citations, and OpenSpec strict validation pass.
-          - Not yet run end to end.
+          - End-to-end (run 37304872316, with every slice B fix through B.9): the
+            bare-metal lane passed 16 and the VM lane 135, nothing failed or skipped, and
+            neither lane's service logs show a traceback, a 5xx, a 401, or a 403. Each
+            expired VM lease went `releasing` under its fulfillment and was released on
+            the next cycle.
       Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
       implementation settled or found).
       - B.1:
@@ -2035,41 +2039,207 @@ re-verifies them by grep before each move.
       - 5B.9 now ends by updating `relay-vm-access-without-a-dashboard`.
 
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
+      Amended 2026-10-05 before implementation, after the slice C design review
+      (`design.md`, "Controls and routes (5B.8)", "Slice C design review"): the dead bundle
+      fields, inventory-view contributions, typed health and the 503/409 rule, the unlisted
+      status callers, the expiry hook, and the neutral readiness component.
 
-  - [ ] 5B.8.C.1 Status. `compute_provisioning_contracts` gains `SystemStatusResponse`
-        (today's fields, `checks.execution`, `execution` with `mocked` and `executors`,
-        `components` with versioned details); `JobExecutorTable.executor_modes()` becomes
-        `mocked_by_offering_mode()`. New
-        `provisioning/compute/service/src/compute_provisioning_service/services/system_status.py`
-        (health, status, version; `resolve_identity_context` stays in the service's
-        `identity.py`) and `controllers/system_controller.py` binding health, status, version,
-        check-leases, and the convergence and lease-watchdog controls. The Ansible
-        distribution's `probes.py` becomes a readiness component
-        (`compute_provisioning_ansible/readiness.py`) reporting `ansible_version`, every Ansible
-        executor's playbook found in the table, and SSH key references, composed by the root;
-        `AnsibleReadinessResponse` and `InventoryInfo` go; the bundles' `readiness_checks`
-        become this contribution. The readiness route and its contract are removed; the client
-        drops `get_ansible_readiness`, and `get_system_status` returns `SystemStatusResponse`.
-        Tombstone VM's `services/system_service.py` and `controllers/system_controller.py`.
-  - [ ] 5B.8.C.2 Resource projections. The bundles carry a resource-projection contribution
-        (VM's `project_ansible_pool_defaults`, bare metal's `project_bare_metal_resource`);
-        `services/capacity_inventory.py` iterates it and imports neither runtime.
-  - [ ] 5B.8.C.3 Router factories. VM's `vms_controller.py`, `hosts_controller.py` (capacity),
-        and `test_controller.py`, and bare metal's `test_controller.py`, become router
-        factories taking zero-argument accessors; each adapter's `routers.py` exposes them;
-        `main.py` passes accessors resolving from the container. No adapter module imports
-        `compute_provisioning_service.container`.
-  - [ ] 5B.8.C.4 Boundary test. `provisioning/compute/service/tests/unit/test_import_boundaries.py`
-        allowlists (file, module) pairs: `container.py` and `main.py` the adapters' runtimes and
-        routers, `db/migrations.py` `legacy_backfill`, nothing else.
-  - [ ] 5B.8.C.5 Callers. e2e mock-mode checks read `execution.mocked`
+  - [x] 5B.8.C.1 Status (decision 7; review points 1, 3, 4, and 6).
+        - Contracts (`compute_provisioning_contracts/system.py`): `HealthResponse` keeps
+          `status` and `checks`; new `SystemStatusResponse` (`status`, `checks` with
+          `execution`, the two contract-version fields, `execution` as `ExecutionStatus`
+          with `mocked` and `executors` of `ExecutorStatus` `{offering_mode, mocked}`, and
+          `components` of `SystemStatusComponent` `{name, ready, detail}`, the detail a
+          `market_core` versioned envelope). `routes.py` loses the readiness contract.
+        - Client: `get_health` and `get_system_health` return `HealthResponse`,
+          `get_system_status` returns `SystemStatusResponse` (both accepting 503's body),
+          `get_ansible_readiness` goes; the worker controls keep returning dicts.
+        - Family kit (`compute_provisioning/adapters.py`): `executor_modes()` becomes
+          `mocked_by_offering_mode()`; new `executors_by_offering_mode()` and
+          `executor_is_mocked` (in `jobs/executor_mock.py`). `composition.py`: the
+          bundle and composed result lose `readiness_checks` and `router_mounts`.
+        - Ansible distribution: new `compute_provisioning_ansible/readiness.py`
+          (`FileInfo`, `SshKeyInfo`, `AnsiblePlaybookInfo`, `AnsibleReadinessDetail`,
+          `ANSIBLE_READINESS_KIND`, `ansible_readiness_component`, `ansible_version`,
+          `sha256_file`, `collect_ssh_keys_from_hosts`): the `ansible` component reports
+          Ansible's version, each Ansible executor's offering mode and playbook (path,
+          existence, sha256), and the registered hosts' SSH key references, and is ready
+          when every Ansible executor is mocked or has its playbook with Ansible on
+          `PATH`. `probes.py` keeps `probe_connectivity`; `AnsibleReadinessResponse`,
+          `InventoryInfo`, and `ansible_readiness` go.
+        - Service: new `services/system_status.py` (`SystemStatusService`: health,
+          status, version; storefront reachability and authentication through an injected
+          identity resolver, `resolve_identity_context` staying in `identity.py`;
+          components run off the event loop) and `controllers/system_controller.py`
+          binding health (bare and versioned), status, version, check-leases, and the
+          convergence and lease-watchdog controls, resolving collaborators through
+          accessors; an uninitialised collaborator answers 503 and advance while
+          convergence runs 409. `container.py` builds the status service from the executor
+          table, the lease lifecycle, the convergence watchdog, and the Ansible component
+          provider, and drops `system_service`; `app_runtime.py` and `main.py` follow.
+        - VM adapter: tombstone `services/system_service.py` and
+          `controllers/system_controller.py`; `runtime.py` loses `system_service()` and
+          `readiness()`; `bundle.py` loses `readiness_check` and `router_mounts`. Bare
+          metal's `runtime.py` and `bundle.py` likewise.
+        - Tests: the service's `integration/test_system_api.py` through the canonical
+          client against the mounted app (status execution section and Ansible component,
+          health typed, the advance 409); new `unit/test_system_controller.py` (the 503
+          matrix) and `unit/services/test_system_status.py`; the Ansible distribution's
+          `tests/unit/test_readiness.py` (from `test_probes.py`, which keeps the
+          connectivity tests); `provisioning/compute/tests/unit/test_job_executor_table.py`
+          and `test_composition.py`; the Ansible `test_mock.py` case for modes; the client
+          parity test; the contracts route-table test. The integration harness
+          (`tests/integration/conftest.py`) composes the status service as production
+          does.
+  - [x] 5B.8.C.2 Inventory views (review points 2 and 7).
+        - Family kit: new `compute_provisioning/inventory_views.py`
+          (`InventoryViewProjection`: `resource_view_ids`, `pool_view_ids`,
+          `consumed_attributes`, `resource_views(declaration, pool_id)`,
+          `pool_views(db, pool_id, provider)`); the bundle and the composed result carry
+          `inventory_views`, and composition refuses a view id or consumed attribute
+          declared twice.
+        - Bare metal: new `bare_metal_provisioning_adapter/inventory_views.py`
+          (`BareMetalPublicationViews`: the `bare_metal_publication` attribute, host
+          eligibility, whole-resource availability, `project_bare_metal_resource`), leaving
+          `runtime.py`.
+        - VM: new `vm_provisioning_adapter/inventory_views.py`
+          (`AnsiblePoolDefaultsViews`: the `ansible` provider gate, the
+          `AnsiblePoolConfig` read, `project_ansible_pool_defaults`), leaving `runtime.py`.
+        - Service: `services/capacity_inventory.py` takes the composed views and imports
+          neither adapter; `main.py`'s inventory and pool-directory accessors pass them.
+        - Tests: the service's `unit/services/test_capacity_inventory.py` keeps the
+          neutral projection and gains a fake third domain's projection; the views' tests
+          move to `domains/bare_metal/provisioning/adapter/tests/test_inventory_views.py`
+          and `domains/vms/provisioning/adapter/tests/test_inventory_views.py`;
+          `test_composition.py` covers the duplicate refusals;
+          `integration/test_capacity_api.py` keeps proving both views through the site
+          client.
+  - [x] 5B.8.C.3 Router factories (decision 4). VM's `controllers/vms_controller.py`,
+        `hosts_controller.py` (capacity), and `test_controller.py`, and bare metal's
+        `controllers/test_controller.py`, become router factories taking zero-argument
+        accessors, an uninitialised collaborator answering 503; each adapter's `routers.py`
+        exposes them (`vm_router_mounts`, `vm_mock_router`, `bare_metal_mock_router`;
+        bare metal's empty `bare_metal_router_mounts` goes); `main.py` and the integration
+        harness pass accessors resolving from the container. No adapter module imports
+        `compute_provisioning_service.container`, asserted by a source scan in each
+        adapter's tests (`test_service_boundary.py`).
+  - [x] 5B.8.C.4 Boundary test. `provisioning/compute/service/tests/unit/test_import_boundaries.py`
+        allowlists (file, module) pairs: `container.py` the adapters' runtimes, `main.py`
+        their routers, `db/migrations.py` `legacy_backfill`, and A0's
+        `controllers/relays_controller.py` exception until 5B.9; nothing else.
+  - [x] 5B.8.C.5 Callers (review point 4). e2e mock-mode checks read `execution.mocked`
+        and the provisioning check reads the Ansible component's readiness
         (`scenarios/vms/test_full_deal.py`, `test_full_deal_buyer_cli.py`,
-        `test_buy_oneshot_buyer_cli.py`, `test_non_erc20_settlement.py`); `tests/smoke/test_provisioning_smoke.py`
-        asserts the status execution section and the Ansible component;
-        `docs/development/VALIDATION_RUNBOOK.md`'s `jq` checks `.execution.mocked == false` and
-        the Ansible component's `ready`. Tests: `test_system_api.py`,
-        `provisioning/compute/ansible/tests/unit/test_probes.py` (becoming `test_readiness.py`),
-        `test_job_executor_table.py`. Gate as above, plus the e2e unit suite.
+        `test_buy_oneshot_buyer_cli.py`, `test_non_erc20_settlement.py`); the contract-pin
+        check of `test_full_deal.py` and the storefront checks of `test_full_deal.py` and
+        `test_full_deal_buyer_cli.py` read the typed status; `test_non_erc20_settlement.py`'s health check reads the typed
+        health; `tests/smoke/test_provisioning_smoke.py` asserts the status execution
+        section and the Ansible component; `docs/development/VALIDATION_RUNBOOK.md`'s `jq`
+        checks `.execution.mocked == false` and the Ansible component's `ready`.
+  - [x] 5B.8.C.6 The VM storefront's dead expiry hook (review point 5). Remove
+        `_do_shutdown` from `services/fulfillment_service.py`, and the `schedule_shutdown`
+        parameter, `ScheduleShutdownFn`, and `_schedule_shutdown_best_effort` (with the
+        module's background-task set if nothing else uses it) from
+        `services/vm_fulfillment_service.py`; update `tests/unit/test_fulfillment_provisioning.py`,
+        `test_fulfillment_service.py`, and `test_fulfill_vm_obligation_error_handling.py`.
+        Mark `remove-dead-storefront-physical-surfaces` task 3.8 delivered here.
+  - [x] 5B.8.C.7 Gate. Every provisioning-family suite, both adapters, the root `make test`,
+        the VM storefront by frozen sync, the e2e unit suite and scenario collection,
+        `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
+        strict validation. Versions bumped per slice, exact pins moved, changed projects
+        relocked.
+      Slice C done 2026-10-05 (`design.md`, "Slice C design review", for the rulings and
+      the plan corrections).
+      - C.1:
+        - `compute_provisioning_contracts.system`: a lean `HealthResponse`, and
+          `SystemStatusResponse` with `ExecutionStatus`, `ExecutorStatus`, and
+          `SystemStatusComponent`; the readiness route contract is gone. The client types
+          health and status and accepts a degraded 503 body; the worker controls still
+          return dicts.
+        - The executor table's `mocked_by_offering_mode()` and
+          `executors_by_offering_mode()`, and `executor_is_mocked` beside the mock
+          mechanism; the bundle and the composed result lost `readiness_checks` and
+          `router_mounts`.
+        - `compute_provisioning_ansible.readiness` builds the `ansible` component, with the
+          version probe injectable; `probes.py` keeps only the connectivity probe.
+        - The service's `services/system_status.py` and `controllers/system_controller.py`
+          (a router factory over accessors; 503 for an uncomposed collaborator, 409 for an
+          advance while convergence runs). A database error in health reports only its
+          type, since its message can carry the URL.
+        - VM's system service and controller are deleted, with the runtime's
+          `system_service()`, `readiness()`, and `job_executors`.
+      - C.2: `compute_provisioning.inventory_views` (`InventoryViewProjection`,
+        `InventoryViews`, `compose_inventory_views`); bare metal's
+        `BareMetalPublicationViews` and VM's `AnsiblePoolDefaultsViews` own their views,
+        source data, and eligibility; `capacity_inventory.py` names neither.
+      - C.3: VM's VM-operations, host-capacity, and mock routes and bare metal's mock
+        routes are router factories over accessors, sharing the family's
+        `require_composed`. `main.py` imports the adapters' entry points at module top,
+        since no adapter module reads the container any longer. Bare metal's adapter
+        imports no service module at all, so its dependencies on the service, VM's
+        adapter, `fastapi-utils`, and `typing-inspect` were removed: bare metal's half of
+        5B.10, done early because the comment justifying them had become false.
+      - C.4: the service's `test_import_boundaries.py` allowlists (file, module) pairs and
+        also scans both adapters' sources for imports of the service's composition
+        modules. The plan placed that scan in each adapter's tests; the VM adapter has no
+        test directory (its target runs tests the service suite hosts), so it lives beside
+        the service's own boundary check.
+      - C.5: the four mock-mode checks read `execution.mocked`, the provisioning-health
+        stages read the Ansible component, and the pin and storefront checks read the
+        typed status; the smoke test checks execution and the component; the runbook's
+        `jq` reads status.
+      - C.6: the hook is removed; `remove-dead-storefront-physical-surfaces` task 3.8 and
+        its proposal record it as delivered here.
+      - Tests:
+        - Family kit: inventory-view composition (duplicate claims at each attachment
+          point, an identifier shared across attachment points, merge, an undeclared
+          view) and the table's two readers.
+        - Ansible: `test_readiness.py` (every mode's playbook, a missing playbook, real
+          executors without Ansible, mocked executors, an unreadable registry, no key
+          material).
+        - Service unit: `test_system_controller.py` (the 503 matrix and the 409),
+          `services/test_system_status.py`, `services/test_vm_inventory_views.py`, the
+          neutral and third-domain cases of `services/test_capacity_inventory.py` (its
+          frozen projections kept, with production's views), the rewritten
+          `test_fulfillment_convergence_wiring.py` (the mounted routers reach the
+          composed workers), and the boundary test.
+        - Service integration: the harness now composes both bundles through
+          `compose_adapter_bundles` into an empty executor table, builds a real
+          convergence watchdog, and composes the status service with the production
+          components. `test_system_api.py` covers typed health, the status's execution
+          and its Ansible component reporting both modes' playbooks, the advance 409,
+          pause, advance, and resume, and a mocked-execution case.
+        - Bare-metal adapter: `tests/test_inventory_views.py`.
+      - Versions:
+        - compute-provisioning-contracts 0.5.0, compute-provisioning-client 0.4.0,
+          compute-provisioning 0.13.0, compute-provisioning-ansible 0.4.0 (now declaring
+          `arkhai-core`), compute-provisioning-service 0.10.0;
+        - vms-provisioning-adapter 0.9.0, bare-metal-provisioning-adapter 0.7.0;
+        - e2e-tests 0.1.3, vms-storefront 0.10.1;
+        - floors raised where a consumer needs the new behaviour; no exact pin names
+          these packages.
+        - Relocked with `scripts/uv_project.py lock`: the contracts, client, family kit,
+          Ansible distribution, VM operator client, both adapters, the service, the
+          bare-metal storefront, and e2e-tests; the VM storefront by hand from the
+          wheelhouse, as before (three entries moved).
+      - Validation:
+        - compute contracts 51, client 49, family kit 180, Ansible 88, bare-metal adapter
+          31;
+        - provisioning service 859 unit and 276 integration (24 readiness and status
+          cases replaced by 16);
+        - VM storefront by frozen sync: 1109 unit and 348 integration (the two known
+          `test_alkahest` failures);
+        - e2e unit 236 (the known 10.1 failure), and 178 e2e and smoke tests collect.
+        - Comment hygiene, documentation citations, and OpenSpec strict validation pass.
+        - VM adapter target 45 (the two service-hosted VM test files).
+        - The root `make -k test` aggregate passes its 44 suites, failing only where this
+          environment cannot run a suite (`kit/policy`, the VM storefront, and the VM
+          buyer cannot reinit from the PyTorch index; the API-credit middleware needs
+          Cargo). The locks its reinit rewrites without a project change were restored:
+          `kit/alkahest`, `kit/config`, `kit/settlement-runtime`, and this time also
+          `domains/apicredits/storefront` (platform markers only). `make check-locks` and
+          `make check-packaging` pass.
+        - Not yet run end to end.
 - [ ] 5B.9 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
       `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
       relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
@@ -2378,7 +2548,13 @@ service code.
       `find_active_lease_by_vm_target`, a commit before registration still able to
       re-record a truncated window). The VM storefront's dead `schedule_shutdown` hook,
       first recorded here, was routed on 2026-10-05 to
-      `remove-dead-storefront-physical-surfaces` task 3.8.
+      `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
+      maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in slice C: the system worker controls' response bodies are untyped dicts
+      (review point 3), and `openspec/specs/site-capacity/spec.md`'s evidence line for
+      the pool-metadata provider gate should cite
+      `provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py`,
+      where that test now lives, at promotion.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

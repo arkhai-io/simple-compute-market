@@ -8,7 +8,10 @@ into its framework's response.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 
 class ProvisioningRouteError(RuntimeError):
@@ -18,4 +21,18 @@ class ProvisioningRouteError(RuntimeError):
         self.detail = detail
 
 
-__all__ = ["ProvisioningRouteError"]
+def require_composed(accessor: Callable[[], T | None], what: str) -> T:
+    """The collaborator ``accessor`` resolves, or a 503 refusal while there is none.
+
+    A binding is mounted when the app is built and its collaborators are
+    composed later, at startup, so it reaches them through an accessor. A
+    request that finds nothing composed is refused as unavailable rather than
+    failing inside the route.
+    """
+    collaborator = accessor()
+    if collaborator is None:
+        raise ProvisioningRouteError(503, f"{what} is not initialised")
+    return collaborator
+
+
+__all__ = ["ProvisioningRouteError", "require_composed"]

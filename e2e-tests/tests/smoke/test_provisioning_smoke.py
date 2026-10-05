@@ -58,30 +58,29 @@ class TestProvisioningSmoke:
     def test_health_returns_ok(
         self, provisioning_settings: dict, seller_settings: dict
     ):
-        """GET /health -> 200 with status field present."""
+        """GET /health -> a typed liveness body, ok or degraded."""
         with _client(provisioning_settings, seller_settings) as client:
             data = client.get_health()
-        assert "status" in data, f"Missing status field: {data}"
-        assert data["status"] in ("ok", "degraded"), f"Unexpected status: {data['status']}"
+        assert data.status in ("ok", "degraded"), f"Unexpected status: {data.status}"
         log.info("Health: %s", data)
 
     @pytest.mark.provisioning_readonly
-    def test_ansible_readiness_returns_structured_response(
+    def test_status_reports_execution_and_the_ansible_component(
         self, provisioning_settings: dict, seller_settings: dict
     ):
-        """GET /api/v1/system/ansible/readiness returns structured diagnostics."""
+        """GET /api/v1/system/status reports what executes jobs and the
+        Ansible readiness component, typed, whether or not it is degraded."""
         with _client(provisioning_settings, seller_settings) as client:
-            data = client.get_ansible_readiness()
-        assert "inventory" in data, f"Missing inventory field: {data}"
-        assert "playbook" in data, f"Missing playbook field: {data}"
-        assert "ssh_keys" in data, f"Missing ssh_keys field: {data}"
-        inv = data["inventory"]
-        assert "source" in inv
-        assert "host_count" in inv
+            status = client.get_system_status()
+        assert status.execution.executors, f"No composed executors: {status.execution}"
+        assert "execution" in status.checks, f"Missing execution check: {status.checks}"
+        ansible = status.component("ansible")
+        assert ansible is not None, f"Missing ansible component: {status.components}"
         log.info(
-            "Readiness: ansible_version=%s, host_count=%s",
-            data.get("ansible_version"),
-            inv.get("host_count"),
+            "Status: execution.mocked=%s, ansible ready=%s, version=%s",
+            status.execution.mocked,
+            ansible.ready,
+            ansible.detail.payload.get("ansible_version"),
         )
 
     @pytest.mark.provisioning_readonly

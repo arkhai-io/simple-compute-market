@@ -28,6 +28,29 @@ from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
     load_capacity_resource_inventory,
 )
+from compute_provisioning_service.route_table import assemble_service_route_table
+from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController
+from compute_provisioning_service.controllers.pools_controller import PoolController
+from compute_provisioning_service.controllers.relays_controller import RelayController
+from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
+from compute_provisioning_service.controllers.system_controller import make_system_routers
+from compute_provisioning_service.controllers import (
+    host_import_controller,
+    hosts_controller,
+    jobs_controller,
+    leases_controller,
+    test_jobs_controller,
+)
+from market_site.router import make_capacity_router
+from vm_provisioning_adapter.routers import (
+    vm_mock_router,
+    vm_route_contracts,
+    vm_router_mounts,
+)
+from bare_metal_provisioning_adapter.routers import (
+    bare_metal_mock_router,
+    bare_metal_route_contracts,
+)
 
 
 logging.basicConfig(
@@ -35,32 +58,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# Adapter router imports come AFTER container.py so controller decorators can
-# resolve the shared composition module without creating an import cycle.
-from vm_provisioning_adapter.routers import (  # noqa: E402
-    vm_mock_router,
-    vm_route_contracts,
-    vm_router_mounts,
-)
-from bare_metal_provisioning_adapter.routers import (  # noqa: E402
-    bare_metal_mock_router,
-    bare_metal_route_contracts,
-    bare_metal_router_mounts,
-)
-from compute_provisioning_service.route_table import assemble_service_route_table  # noqa: E402
-from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController  # noqa: E402
-from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
-from compute_provisioning_service.controllers.relays_controller import RelayController  # noqa: E402
-from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController  # noqa: E402
-from compute_provisioning_service.controllers import (  # noqa: E402
-    host_import_controller,
-    hosts_controller,
-    jobs_controller,
-    leases_controller,
-    test_jobs_controller,
-)
-from market_site.router import make_capacity_router  # noqa: E402
 
 
 
@@ -123,20 +120,19 @@ PROVISIONING_OPENAPI_TAGS = [
     },
     {
         "name": "system",
-        "description": "Health, version, and Ansible readiness diagnostics.",
+        "description": "Health, status, version, and worker controls.",
     },
     {
         "name": "leases",
         "description": (
-            "VM lease lifecycle — register, query, terminate, release oversight, "
-            "and admin repair actions."
+            "Lease lifecycle for every offering mode — register, query, terminate, "
+            "release oversight, and admin repair actions."
         ),
     },
     {
         "name": "bare-metal",
         "description": (
-            "Bare-metal domain adapter — register and query SSH-access leases "
-            "against site reservations."
+            "Bare-metal mock controls, mounted only under the mock profile."
         ),
     },
     {
@@ -166,24 +162,54 @@ PROVISIONING_OPENAPI_TAGS = [
 #   /health                          <- bare liveness probe (no prefix)
 #   /api/v1/system/health            <- versioned alias
 #   /api/v1/system/version
-#   /api/v1/system/ansible/readiness
+#   /api/v1/system/status            <- operator status, execution, components
 #   /api/v1/jobs/*                   <- job read + cancel
 #   /api/v1/hosts/*                  <- host registry CRUD, capacity, connectivity
 #   /api/v1/hosts/{host}/vms/*       <- direct VM admin/operator lifecycle
-#   /api/v1/leases/*                 <- market-managed lease lifecycle
-#   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
+#   /api/v1/contract/leases/*        <- lease lifecycle, every offering mode
 #   /api/v1/pools/*                  <- resource pool registry (CRUD, import, validate)
 # ---------------------------------------------------------------------------
+
+def _inventory_views():
+    views = _container_module.resolved_inventory_views
+    if views is None:
+        raise RuntimeError("inventory views are not composed")
+    return views
+
 
 def _capacity_resource_inventory() -> list[dict[str, object]]:
     ledger = _container_module.resolved_capacity_ledger_service
     if ledger is None:
         raise RuntimeError("capacity ledger is not initialized")
-    return load_capacity_resource_inventory(ledger.list_resources())
+    return load_capacity_resource_inventory(ledger.list_resources(), _inventory_views())
 
 
 def _capacity_pool_directory() -> dict[str, dict[str, object]]:
-    return load_capacity_pool_metadata(container.session_factory())
+    return load_capacity_pool_metadata(container.session_factory(), _inventory_views())
+
+
+# The service's own system routes, and each adapter's routes, are mounted when
+# the app is built and reach collaborators the lifespan composes later, so each
+# takes accessors read per request.
+_health_router, _system_router = make_system_routers(
+    status_service=lambda: _container_module.resolved_system_status_service,
+    lease_lifecycle=lambda: _container_module.resolved_lease_lifecycle_service,
+    convergence_watchdog=lambda: _container_module.resolved_fulfillment_convergence_watchdog,
+)
+
+
+def _vm_mock_router():
+    return vm_mock_router(
+        vm_runner=lambda: _container_module.resolved_ansible_service,
+        host_authority=lambda: _container_module.resolved_host_authority,
+    )
+
+
+def _bare_metal_mock_router():
+    return bare_metal_mock_router(
+        mock_executor=lambda: _container_module.resolved_bare_metal_mock_executor,
+        host_authority=lambda: _container_module.resolved_host_authority,
+    )
 
 
 
@@ -235,8 +261,12 @@ app = build_compute_provisioning_app(
         ),
     ),
     routers=(
-        *vm_router_mounts(),
-        *bare_metal_router_mounts(),
+        ComputeProvisioningRouterMount(_health_router),
+        ComputeProvisioningRouterMount(_system_router, "/api/v1"),
+        *vm_router_mounts(
+            vm_operations=lambda: _container_module.resolved_vm_operations_service,
+            host_operations=lambda: _container_module.resolved_host_operations_service,
+        ),
         ComputeProvisioningRouterMount(jobs_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(host_import_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(hosts_controller.router, "/api/v1"),
@@ -283,8 +313,8 @@ import os as _os
 _active_profiles = [p.strip() for p in _os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
 if "mock" in _active_profiles:
     app.include_router(test_jobs_controller.router)                                  # /test/jobs/*
-    app.include_router(vm_mock_router())                                             # /test/*
-    app.include_router(bare_metal_mock_router())                                     # /test/bare-metal/*
+    app.include_router(_vm_mock_router())                                            # /test/*
+    app.include_router(_bare_metal_mock_router())                                    # /test/bare-metal/*
     logger.info("Test controllers mounted at /test/* (mock profile active)")
 
 # Expose the container on the app instance for integration test overrides.

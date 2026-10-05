@@ -1,8 +1,7 @@
-"""The connectivity probe and the readiness report."""
+"""The connectivity probe."""
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,24 +9,10 @@ from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, Protec
 from cryptography.fernet import Fernet
 from market_config import encrypt_secret
 
-from compute_provisioning_ansible import SshConnectionCodec, ansible_readiness
+from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning_contracts import ConnectivityResult
-from compute_provisioning_ansible.probes import (
-    PROBE_INVENTORY_GROUP,
-    collect_ssh_keys_from_hosts,
-    probe_connectivity,
-)
+from compute_provisioning_ansible.probes import PROBE_INVENTORY_GROUP, probe_connectivity
 from compute_provisioning_ansible.runner import AnsibleRunner
-
-
-def _host(host_id: str, *, key_path: str | None = None, embedded: bool = False):
-    return SimpleNamespace(
-        host_id=host_id,
-        connection=SimpleNamespace(
-            public={"key_path": key_path},
-            protected={"private_key": object()} if embedded else {},
-        ),
-    )
 
 
 class _ProbingRunner(AnsibleRunner):
@@ -70,61 +55,3 @@ async def test_a_probe_pings_the_registered_host_and_leaves_nothing_behind():
     assert runner.seen["key existed"]
     assert not runner.seen["key"].exists()
     assert not runner.seen["inventory"].exists()
-
-
-def test_key_references_are_grouped_by_path_and_embedded_keys_listed_alone(tmp_path):
-    key_file = tmp_path / "id_ed25519"
-    key_file.write_bytes(b"key")
-    hosts = [
-        _host("b", key_path=str(key_file)),
-        _host("a", key_path=str(key_file)),
-        _host("c", key_path=str(tmp_path / "missing")),
-        _host("d", embedded=True),
-    ]
-
-    keys = {info.raw_path: info for info in collect_ssh_keys_from_hosts(hosts)}
-
-    assert keys[str(key_file)].referenced_by == ["a", "b"]
-    assert keys[str(key_file)].sha256 == hashlib.sha256(b"key").hexdigest()
-    assert keys[str(tmp_path / "missing")].exists is False
-    assert keys["<encrypted>"].key_type == "embedded"
-    assert keys["<encrypted>"].referenced_by == ["d"]
-
-
-def test_readiness_reports_the_registry_the_playbook_and_the_modes(tmp_path):
-    playbook = tmp_path / "playbook.yaml"
-    playbook.write_text("- hosts: all\n")
-
-    report = ansible_readiness(
-        list_hosts=lambda: [_host("a", embedded=True)],
-        inventory_path="sqlite:///hosts.db",
-        playbook_path=playbook,
-        ansible_mode="mock",
-        executor_modes={"vm": "mock"},
-    )
-
-    assert report.ansible_mode == "mock"
-    assert report.executor_modes == {"vm": "mock"}
-    assert (report.inventory.exists, report.inventory.host_count) == (True, 1)
-    assert report.inventory.path == "sqlite:///hosts.db"
-    assert report.playbook.exists is True
-    assert report.playbook.sha256 == hashlib.sha256(playbook.read_bytes()).hexdigest()
-    assert [key.key_type for key in report.ssh_keys] == ["embedded"]
-
-
-def test_an_unreadable_or_absent_registry_is_reported_not_raised(tmp_path):
-    def failing():
-        raise RuntimeError("database unavailable")
-
-    for list_hosts in (failing, None):
-        report = ansible_readiness(
-            list_hosts=list_hosts,
-            inventory_path="sqlite:///hosts.db",
-            playbook_path=tmp_path / "absent.yaml",
-            ansible_mode="real",
-            executor_modes={},
-        )
-
-        assert (report.inventory.exists, report.inventory.host_count) == (False, None)
-        assert report.ssh_keys == []
-        assert (report.playbook.exists, report.playbook.sha256) == (False, None)

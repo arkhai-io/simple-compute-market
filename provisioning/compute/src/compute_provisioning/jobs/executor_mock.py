@@ -197,6 +197,16 @@ class MockRuleSet:
         }
 
 
+def executor_is_mocked(executor: Any) -> bool:
+    """Whether ``executor`` runs against the compute mock mechanism.
+
+    An executor is the mock when it exposes this mechanism's rules, whatever
+    implementation built it, so the family can report mocked execution without
+    knowing any implementation's classes.
+    """
+    return isinstance(getattr(executor, "rules", None), MockRuleSet)
+
+
 class MockRuleRouteService:
     """Add, list, delete, and resume one adapter's mock rules.
 
@@ -243,4 +253,5 @@ __all__ = [
     "MockRule",
     "MockRuleRouteService",
     "MockRuleSet",
+    "executor_is_mocked",
 ]

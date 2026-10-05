@@ -59,22 +59,33 @@ class JobExecutorTable:
                 f"and action {action!r}"
             ) from exc
 
-    def executor_modes(self) -> dict[str, str]:
-        """``mock`` or ``real`` per offering mode, from the executors it registered.
+    def mocked_by_offering_mode(self) -> dict[str, bool]:
+        """Whether each offering mode's executors are the mock.
 
-        A mode is ``mock`` only when every executor registered for it carries the
-        compute mock mechanism's rules.
+        A mode counts as mocked only when every executor registered for it
+        carries the compute mock mechanism's rules (``executor_is_mocked``).
         """
-        from .jobs.executor_mock import MockRuleSet
+        from .jobs.executor_mock import executor_is_mocked
 
-        modes: dict[str, str] = {}
+        mocked: dict[str, bool] = {}
         for (offering_mode, _action), executor in self._executors.items():
-            is_mock = isinstance(getattr(executor, "rules", None), MockRuleSet)
-            current = modes.get(offering_mode)
-            modes[offering_mode] = (
-                "mock" if is_mock and current in (None, "mock") else "real"
+            mocked[offering_mode] = mocked.get(offering_mode, True) and executor_is_mocked(
+                executor
             )
-        return modes
+        return mocked
+
+    def executors_by_offering_mode(self) -> dict[str, tuple[JobExecutor, ...]]:
+        """Each offering mode's distinct executors, in registration order.
+
+        An implementation reads this to report on the executors it built,
+        whichever domain contributed them.
+        """
+        grouped: dict[str, list[JobExecutor]] = {}
+        for (offering_mode, _action), executor in self._executors.items():
+            known = grouped.setdefault(offering_mode, [])
+            if not any(executor is seen for seen in known):
+                known.append(executor)
+        return {mode: tuple(executors) for mode, executors in grouped.items()}
 
     def executors(self) -> tuple[JobExecutor, ...]:
         """Each distinct executor once, in registration order."""

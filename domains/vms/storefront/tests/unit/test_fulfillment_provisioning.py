@@ -513,7 +513,6 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=validating_provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=register_lease,
     )
     await asyncio.sleep(0)
@@ -604,7 +603,6 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=register_lease,
     )
     await asyncio.sleep(0)
@@ -671,7 +669,6 @@ async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=register_lease,
     )
     await asyncio.sleep(0)

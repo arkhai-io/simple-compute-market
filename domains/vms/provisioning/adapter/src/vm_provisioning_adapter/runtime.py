@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
-from compute_provisioning import JobExecutorResolver
 from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import AnsibleJobExecutor
@@ -51,7 +50,6 @@ class VmProvisioningRuntime:
     job_submitter: VmJobSubmitter
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
-    job_executors: Any = None
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs every VM job action: this runtime's runner, codec, and playbook."""
@@ -72,56 +70,12 @@ class VmProvisioningRuntime:
             port_allocator=RelayPortAllocator(self.session_factory),
         )
 
-    def readiness(self) -> dict[str, bool]:
-        return {"ansible_service": self.ansible_service is not None}
-
     def adapter_bundle(self):
         return build_vm_adapter_bundle(
             fulfillment_provider=self.fulfillment_provider(),
             pool_config_handler=self.pool_config_handler,
             job_executor=self.job_executor(),
-            readiness_check=self.readiness,
         )
-
-    def system_service(
-        self,
-        *,
-        lease_lifecycle_service,
-        fulfillment_convergence_watchdog=None,
-    ):
-        from vm_provisioning_adapter.services.system_service import SystemService
-
-        return SystemService(
-            ansible_service=self.ansible_service,
-            settings=self.config,
-            host_service=self.host_authority,
-            session_factory=self.session_factory,
-            job_queue_provider=self.job_queue_provider,
-            lease_lifecycle_service=lease_lifecycle_service,
-            fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
-            job_executors=self.job_executors,
-        )
-
-
-def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]:
-    """Shape an Ansible pool's configured VM size defaults for the
-    site-authority resource-pool projection's `pool_views` field.
-
-    Mirrors `bare_metal_provisioning_adapter.runtime.project_bare_metal_resource`'s
-    placement (the domain adapter shapes its own view; the generic
-    composer only calls out to it) but not its pydantic-validation
-    mechanism -- three optional scalars with no cross-field validation
-    need (the handler already enforces value constraints at write time)
-    don't warrant a dedicated model. Only present (non-`None`) fields are
-    included, so a pool with no configured defaults produces an empty
-    dict -- the caller omits `pool_views` entirely in that case rather
-    than emitting an empty view.
-    """
-    return {
-        key: raw_view[key]
-        for key in ("default_vm_ram", "default_vm_vcpus", "default_vm_disk_size")
-        if raw_view.get(key) is not None
-    }
 
 
 def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str) -> None:
@@ -152,7 +106,6 @@ def build_vm_runtime(
     job_queue_provider: Callable[[], Any],
     host_authority: HostAuthority,
     job_engine: JobEngine,
-    job_executors: JobExecutorResolver,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -203,5 +156,4 @@ def build_vm_runtime(
             job_submitter=job_submitter,
             job_queue_provider=job_queue_provider,
         ),
-        job_executors=job_executors,
     )

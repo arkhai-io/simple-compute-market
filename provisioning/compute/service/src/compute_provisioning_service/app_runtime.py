@@ -67,7 +67,8 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_fulfillment_service = fulfillment_service
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
-    _container_module.resolved_system_service = container.system_service()
+    _container_module.resolved_system_status_service = container.system_status_service()
+    _container_module.resolved_inventory_views = container.inventory_views()
     _container_module.resolved_host_authority = container.host_authority()
     _container_module.resolved_connectivity_probes = container.connectivity_probes()
     _container_module.resolved_vm_operations_service = container.vm_operations_service()

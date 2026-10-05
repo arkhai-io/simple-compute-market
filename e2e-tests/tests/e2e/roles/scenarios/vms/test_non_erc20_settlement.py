@@ -297,10 +297,9 @@ def _assert_services_ready(storefront_admin_client, provisioning_client) -> None
     assert "anvil" in ((status.checks or {}).get("alkahest", ""))
 
     provisioning_health = provisioning_client.get_health()
-    assert provisioning_health.get("status") == "ok"
+    assert provisioning_health.status == "ok"
 
-    ansible = provisioning_client.get_ansible_readiness()
-    assert ansible.get("ansible_mode") == "mock"
+    assert provisioning_client.get_system_status().execution.mocked
 
 
 @pytest.mark.parametrize("case", _settlement_cases(), ids=lambda c: c.name)

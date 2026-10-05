@@ -80,8 +80,14 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions authorized by this change
       by 3.5.
 - [ ] 3.7 Run the storefront and `core/storefront-client` suites plus the
       client parity contract test.
-- [ ] 3.8 Remove the dead VM expiry hook (routed here on 2026-10-05 from
-      `bare-metal-mock-provisioned-deal`'s closeout findings).
+- [x] 3.8 Remove the dead VM expiry hook (routed here on 2026-10-05 from
+      `bare-metal-mock-provisioned-deal`'s closeout findings). Delivered by
+      `bare-metal-mock-provisioned-deal` task 5B.8.C.6 (2026-10-05), on the maintainer's
+      ruling at that change's slice C design review: `_do_shutdown`, the
+      `schedule_shutdown` parameter, `ScheduleShutdownFn`,
+      `_schedule_shutdown_best_effort`, and the module's background-task set are gone, and
+      the three test files below no longer pass the hook. 3.5 still owns
+      `reserved_vm_host`.
       - What is dead: `fulfillment_service.py` wires `schedule_shutdown=_do_shutdown`,
         and `_do_shutdown` always raises, because the provisioning service has no
         expiry-scheduling endpoint. `vm_fulfillment_service.py`'s

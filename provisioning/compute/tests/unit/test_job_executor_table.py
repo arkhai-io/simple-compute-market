@@ -80,4 +80,18 @@ def test_a_mode_is_mock_only_when_every_executor_carries_mock_rules() -> None:
     table.register("vm", "destroy", _Executor())
     table.register("bare_metal", "grant", _Executor(rules=MockRuleSet()))
 
-    assert table.executor_modes() == {"vm": "real", "bare_metal": "mock"}
+    assert table.mocked_by_offering_mode() == {"vm": False, "bare_metal": True}
+
+
+def test_executors_are_grouped_by_offering_mode_once_each() -> None:
+    shared, other = _Executor(), _Executor()
+    table = JobExecutorTable()
+    table.register("vm", "create", shared)
+    table.register("vm", "destroy", shared)
+    table.register("bare_metal", "grant", other)
+    table.register("bare_metal", "reclaim", shared)
+
+    assert table.executors_by_offering_mode() == {
+        "vm": (shared,),
+        "bare_metal": (other, shared),
+    }

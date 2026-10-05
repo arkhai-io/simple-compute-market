@@ -10,7 +10,7 @@ from compute_provisioning import (
     JobExecutor,
 )
 
-from vm_provisioning_adapter.routers import vm_router_mounts
+from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -54,9 +54,7 @@ def build_vm_adapter_bundle(
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
     job_executor: JobExecutor,
-    readiness_check=None,
 ) -> ExecutorAdapterBundle:
-    checks = {"ansible": readiness_check} if readiness_check is not None else {}
     return ExecutorAdapterBundle(
         name="vm",
         executors=(
@@ -67,6 +65,5 @@ def build_vm_adapter_bundle(
         ),
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},
         pool_config_handlers={ANSIBLE_PROVIDER: pool_config_handler},
-        router_mounts=vm_router_mounts(),
-        readiness_checks=checks,
+        inventory_views=(AnsiblePoolDefaultsViews(provider=ANSIBLE_PROVIDER),),
     )

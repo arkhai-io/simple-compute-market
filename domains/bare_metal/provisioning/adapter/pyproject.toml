@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-bare-metal-provisioning-adapter"
-version = "0.6.0"
+version = "0.7.0"
 license = "MIT"
 description = "Bare-metal adapter for the compute provisioning service"
 requires-python = ">=3.12"
@@ -8,20 +8,13 @@ dependencies = [
     "arkhai-compute-provisioning-contracts>=0.1.0",
     "arkhai-core>=0.4.0",
     "arkhai-bare-metal>=0.7.0",
-    "arkhai-compute-provisioning>=0.12.0",
+    "arkhai-compute-provisioning>=0.13.0",
     "arkhai-compute-provisioning-ansible>=0.1.0",
-    "arkhai-compute-provisioning-service>=0.7.0",
     "arkhai-kit-fulfillment>=0.3.0",
     "arkhai-kit-resource-pools>=0.3.0",
-    # Not imported here: the service's composition module, which this adapter's
-    # routes read their collaborators from, imports VM's adapter at load time.
-    "arkhai-vms-provisioning-adapter>=0.7.0",
     "pydantic>=2.7",
     # The routes this adapter binds.
     "fastapi>=0.115.0",
-    "fastapi-utils>=0.8.0",
-    # Imported by fastapi-utils' class-based views, which do not declare it.
-    "typing-inspect>=0.9.0",
 ]
 
 [build-system]
