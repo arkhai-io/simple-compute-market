@@ -70,8 +70,7 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
         try:
             result = service.issue(
                 fulfillment_id=body.fulfillment_id,
-                obligation_ref=body.obligation_ref,
-                mechanism=body.mechanism,
+                negotiation_id=body.negotiation_id,
                 owner_scheme=body.owner.scheme.value,
                 owner_id=body.owner.identifier,
                 service=body.service,

@@ -27,6 +27,7 @@ where = ["src"]
 
 [dependency-groups]
 dev = [
+    "arkhai-apicredits-domain>=0.2.0",
     "pytest>=8.3.4,<9.0.0",
     "httpx>=0.28.1",
 ]

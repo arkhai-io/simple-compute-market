@@ -23,8 +23,7 @@ _PRINCIPAL = Identity(
 
 def _request(quantity: int = 2) -> CreditIssuanceRequest:
     return CreditIssuanceRequest.create(
-        obligation_ref="e1",
-        mechanism="alkahest.v1",
+        negotiation_id="e1",
         owner=_PRINCIPAL,
         service="service-main",
         resource_id="q1",
@@ -39,8 +38,7 @@ def _response(request: CreditIssuanceRequest) -> dict:
         "schema": "arkhai.api-credits.issuance-result.v1",
         "fulfillment_id": request.fulfillment_id,
         "grant_id": request.fulfillment_id,
-        "obligation_ref": request.obligation_ref,
-        "mechanism": request.mechanism,
+        "negotiation_id": request.negotiation_id,
         "owner": request.owner.model_dump(mode="json"),
         "service": request.service,
         "resource_id": request.resource_id,

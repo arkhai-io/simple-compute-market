@@ -37,16 +37,16 @@ class CreditKeyTarget(_CreditsContract):
         return self
 
 
-def derive_credit_fulfillment_id(obligation_ref: str) -> str:
-    """Derive the mechanism-neutral grant key for one accepted obligation."""
+def derive_credit_fulfillment_id(negotiation_id: str) -> str:
+    """Derive the grant key uniformly from the accepted negotiation."""
 
-    if not isinstance(obligation_ref, str) or not _SAFE_REF.fullmatch(obligation_ref):
-        raise ValueError("obligation_ref must be a safe opaque reference")
+    if not isinstance(negotiation_id, str) or not _SAFE_REF.fullmatch(negotiation_id):
+        raise ValueError("negotiation_id must be a safe opaque reference")
     digest = hashlib.sha256(
         canonical_json(
             {
                 "domain": "api-credits",
-                "obligation_ref": obligation_ref,
+                "negotiation_id": negotiation_id,
                 "version": 1,
             }
         )
@@ -57,8 +57,7 @@ def derive_credit_fulfillment_id(obligation_ref: str) -> str:
 def credit_issuance_request_digest(
     *,
     fulfillment_id: str,
-    obligation_ref: str,
-    mechanism: str,
+    negotiation_id: str,
     owner: Identity,
     service: str,
     resource_id: str,
@@ -70,8 +69,7 @@ def credit_issuance_request_digest(
     payload = {
         "fulfillment_id": fulfillment_id,
         "key": key.model_dump(mode="json"),
-        "mechanism": mechanism,
-        "obligation_ref": obligation_ref,
+        "negotiation_id": negotiation_id,
         "owner": owner.model_dump(mode="json"),
         "quantity": quantity,
         "resource_id": resource_id,
@@ -82,13 +80,12 @@ def credit_issuance_request_digest(
 
 
 class CreditIssuanceRequest(_CreditsContract):
-    """Complete immutable command accepted by the credits authority."""
+    """Operator-authenticated immutable authorization accepted by the authority."""
 
     # The wire schema field shadows Pydantic's deprecated schema() method.
     schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA  # type: ignore[assignment]
+    negotiation_id: str = Field(min_length=1, max_length=255)
     fulfillment_id: str = Field(min_length=1, max_length=320)
-    obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -105,8 +102,7 @@ class CreditIssuanceRequest(_CreditsContract):
     def create(
         cls,
         *,
-        obligation_ref: str,
-        mechanism: Literal["alkahest.v1", "arkhai.payments.v1"],
+        negotiation_id: str,
         owner: Identity,
         service: str,
         resource_id: str,
@@ -115,13 +111,14 @@ class CreditIssuanceRequest(_CreditsContract):
         capacity_reservation_id: str | None = None,
         fulfillment_id: str | None = None,
     ) -> Self:
-        resolved_fulfillment_id = fulfillment_id or derive_credit_fulfillment_id(
-            obligation_ref
+        resolved_fulfillment_id = (
+            derive_credit_fulfillment_id(negotiation_id)
+            if fulfillment_id is None
+            else fulfillment_id
         )
         digest = credit_issuance_request_digest(
             fulfillment_id=resolved_fulfillment_id,
-            obligation_ref=obligation_ref,
-            mechanism=mechanism,
+            negotiation_id=negotiation_id,
             owner=owner,
             service=service,
             resource_id=resource_id,
@@ -129,9 +126,8 @@ class CreditIssuanceRequest(_CreditsContract):
             key=key,
         )
         return cls(
+            negotiation_id=negotiation_id,
             fulfillment_id=resolved_fulfillment_id,
-            obligation_ref=obligation_ref,
-            mechanism=mechanism,
             owner=owner,
             service=service,
             resource_id=resource_id,
@@ -143,14 +139,11 @@ class CreditIssuanceRequest(_CreditsContract):
 
     @model_validator(mode="after")
     def validate_identity_and_digest(self) -> Self:
-        if not _SAFE_REF.fullmatch(self.obligation_ref):
-            raise ValueError("obligation_ref must be a safe opaque reference")
-        if self.fulfillment_id != derive_credit_fulfillment_id(self.obligation_ref):
-            raise ValueError("fulfillment_id does not match obligation_ref")
+        if self.fulfillment_id != derive_credit_fulfillment_id(self.negotiation_id):
+            raise ValueError("fulfillment_id does not match negotiation_id")
         expected = credit_issuance_request_digest(
             fulfillment_id=self.fulfillment_id,
-            obligation_ref=self.obligation_ref,
-            mechanism=self.mechanism,
+            negotiation_id=self.negotiation_id,
             owner=self.owner,
             service=self.service,
             resource_id=self.resource_id,
@@ -166,11 +159,10 @@ class CreditIssuanceResult(_CreditsContract):
     """Committed grant projection; bearer material is excluded from serialization."""
 
     schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA  # type: ignore[assignment]
+    negotiation_id: str = Field(min_length=1, max_length=255)
     fulfillment_id: str = Field(min_length=1, max_length=320)
     grant_id: str = Field(min_length=1, max_length=320)
-    obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
-    owner: Identity | None
+    owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
     quantity: int = Field(ge=1)
@@ -191,6 +183,8 @@ class CreditIssuanceResult(_CreditsContract):
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:
+        if self.fulfillment_id != derive_credit_fulfillment_id(self.negotiation_id):
+            raise ValueError("fulfillment_id does not match negotiation_id")
         if self.grant_id != self.fulfillment_id:
             raise ValueError("grant_id must equal fulfillment_id")
         if self.key_mode == "existing" and self.secret is not None:
