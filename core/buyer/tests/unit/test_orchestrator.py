@@ -4,7 +4,10 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from market_core.schemas import SettlementSelection
+from market_core import SettlementEvidence, SettlementStageTable
+from market_core.schemas import (
+    Agreement, SettlementOption, SettlementSelection, derive_settlement_option_id,
+)
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from registry_client import FilterSpecResponse
 
@@ -153,7 +156,8 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
     assert ("domain_settle", {"listing_id": "L1"}) in events
 
 
-def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> None:
+@pytest.mark.parametrize("proposal", (None, {"stray": "escrow"}))
+def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal) -> None:
     selection = SettlementSelection(
         mechanism="example.payment.v1",
         option_id="a" * 64,
@@ -162,13 +166,21 @@ def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> Non
         status="agreed",
         negotiation_id="N1",
         settlement_selection=selection,
+        accepted_escrow_proposal=proposal,
         settlement_data={"mandate": {"opaque": "to-core"}},
+        agreement=_agreement(selection.mechanism),
     )
     negotiation = NegotiationResult(
         match={"seller": "http://seller"},
         outcome=outcome,
     )
-    expected = BuyResult(status="ready", negotiation_id="N1")
+    expected = BuyResult(
+        status="ready", negotiation_id="N1",
+        settlement_evidence=SettlementEvidence(
+            negotiation_id="N1", mechanism=selection.mechanism,
+            settlement_ref="txn-1", status="approved", evidence={"public": "proof"},
+        ),
+    )
     delegated: list[NegotiationResult] = []
     events: list[tuple[str, dict]] = []
 
@@ -177,20 +189,14 @@ def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> Non
         emit("agreement_settlement", {"negotiation_id": actual.outcome.negotiation_id})
         return expected
 
+    stage = object()
     hook = make_settle_hook(
-        config=_config(),
-        unit_count=1.0,
-        build_escrow_terms=lambda *_args: pytest.fail("escrow path was used"),
-        create_escrow=lambda *_args: pytest.fail("escrow path was used"),
-        settlement_recipient=lambda *_args: pytest.fail("escrow path was used"),
-        build_settlement_payload=lambda *_args: pytest.fail("escrow path was used"),
-        confirm_settlement=None,
-        settlement_submit_max_attempts=1,
-        settlement_submit_retryable=lambda _exc: False,
-        settlement_poll_interval=0.0,
-        settlement_total_timeout=0.0,
-        sleep=lambda _seconds: None,
-        agreement_settlement=agreement_settlement,
+        stages=SettlementStageTable({selection.mechanism: stage}),
+        invoke=lambda selected, actual, emit: (
+            agreement_settlement(actual, emit)
+            if selected is stage
+            else pytest.fail("wrong stage")
+        ),
     )
 
     result = hook(negotiation, lambda name, body: events.append((name, body)))
@@ -198,15 +204,59 @@ def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> Non
     assert result is expected
     assert delegated == [negotiation]
     assert delegated[0].outcome.settlement_data == {"mandate": {"opaque": "to-core"}}
-    assert events == [("agreement_settlement", {"negotiation_id": "N1"})]
+    assert events == [
+        ("agreement_settlement", {"negotiation_id": "N1"}),
+        ("settlement_evidence", {
+            "settlement_evidence": expected.settlement_evidence.to_dict(),
+        }),
+    ]
+    assert result.settlement_ref == "txn-1"
+    assert result.to_dict()["settlement_evidence"] == expected.settlement_evidence.to_dict()
 
     legacy = NegotiationResult(
         match={"seller": "http://seller"},
         outcome=NegotiationOutcome(status="agreed", negotiation_id="legacy"),
     )
-    legacy_result = hook(legacy, lambda _name, _body: None)
-    assert legacy_result.reason == "missing_accepted_escrow_proposal"
+    with pytest.raises(ValueError, match="no Agreement"):
+        hook(legacy, lambda _name, _body: None)
     assert delegated == [negotiation]
+
+
+def _agreement(mechanism: str) -> Agreement:
+    buyer = _config().principal
+    seller = Ed25519Signer(b"\x12" * 32).identity
+    return Agreement(
+        negotiation_id="N1",
+        listing_id="L1",
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        amount=10,
+        duration_seconds=3600,
+        start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z",
+        settlement=SettlementOption(
+            mechanism=mechanism,
+            option_id=derive_settlement_option_id(
+                mechanism=mechanism, asset="usd", rates=[], params={},
+            ),
+            asset="usd",
+        ),
+        asset="usd",
+    )
+
+
+def test_missing_accepted_entry_fails_before_domain_effects() -> None:
+    outcome = NegotiationOutcome(
+        status="agreed", negotiation_id="N1", agreement=_agreement("absent.v1"),
+        accepted_escrow_proposal={"opaque": "must not trigger fallback"},
+    )
+    hook = make_settle_hook(
+        stages=SettlementStageTable({"example.payment.v1": object()}),
+        invoke=lambda *_args: pytest.fail("effect before support lookup"),
+    )
+    with pytest.raises(ValueError, match="unsupported.*absent.v1"):
+        hook(NegotiationResult(match={}, outcome=outcome), lambda *_args: None)
 
 
 def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:

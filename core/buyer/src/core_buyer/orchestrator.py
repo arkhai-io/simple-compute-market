@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from market_core import SettlementEvidence
 from market_identity import Identity, Signer
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
@@ -109,6 +110,7 @@ class BuyResult:
     agreed_amount: Optional[int] = None
     escrow_uid: Optional[str] = None
     settlement_ref: Optional[str] = None
+    settlement_evidence: SettlementEvidence | None = None
     fulfillment_uid: Optional[str] = None
     connection_details: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
@@ -132,6 +134,8 @@ class BuyResult:
             v = getattr(self, k)
             if v is not None:
                 out[k] = v
+        if self.settlement_evidence is not None:
+            out["settlement_evidence"] = self.settlement_evidence.to_dict()
         if self.attempts:
             out["attempts"] = self.attempts
         return out

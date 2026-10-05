@@ -115,6 +115,49 @@ Land shared core carriers/dispatch first. VM, bare-metal, API-credit storefront/
 
 Use fresh disposable databases and installed internal wheels. First use is the existing accepted-run `market settle --from <run>` surface for VM/API credits, the bare-metal purchase/result surface, and the existing controlled seller settlement/typed-credit-client paths. Preserve Alkahest and contact behavior as well as wallet-free payment dispatch. Check deployed readiness before complete-deal scenarios. A controlled local example establishes wiring only, not live ledger/hardware qualification; unavailable external prerequisites are reported rather than replaced with a mock success.
 
+## Core implementation boundary
+
+`market_core` exports `SettlementStageTable[StageT]` (immutable Mapping; opaque
+values; mapping or duplicate-checked pair input) and frozen `SettlementEvidence`
+with exactly the five shared fields above. Evidence supports `to_dict`,
+`from_dict` and `validate_identity`; the copied payload mapping is read-only,
+with nested values left domain-owned. No status vocabulary is imposed.
+
+`ImmutableSettlementCapability` declares optional `buyer_stages` and
+`seller_stages`; at least one non-empty table is required, and supplied
+buyer/storefront roles require their matching table. No `verify` or
+`build_plan` capability methods remain. Legacy storefront artifact construction
+receives an explicit `build_plan=` callback.
+
+Buyer `make_settle_hook(stages=..., invoke=...)` invokes
+`invoke(selected_stage, NegotiationResult, on_event)` and returns `BuyResult`.
+The exact outcome, Agreement bytes and settlement data remain unchanged.
+`make_escrow_settle_hook` binds the existing escrow ports explicitly into an
+applicable entry, never a dispatch default. `validate_acceptance(outcome)` in
+`negotiate_with_seller` and `make_negotiate_hook` runs before accepted-round
+observation; each domain resolves its same entry and owns required artifacts.
+`BuyerSettlementPolicy` requires the supported table as `stages=`.
+
+`BuyResult` and recovered `DealContext` carry optional `settlement_evidence`.
+The dispatcher emits a `settlement_evidence` event and recovery correlates it
+with the accepted Agreement and established reference. Storefront transient
+input can carry evidence; `StorefrontFulfillmentContext` requires it and exposes
+`settlement_ref`, and `StorefrontFulfillmentLifecycle` returns that reference
+rather than `escrow_uid`. Public wire DTOs are unchanged. Domain boundaries
+project their legacy public coordinates explicitly.
+
+Sections 2–5 must adapt the concrete domains to these signatures before their
+consumer suites can run. Keep applicable escrow behavior as an explicit table
+entry; preserve its missing-plan/proposal guard in the selected validator.
+Core contains no mechanism-ID or proposal-presence dispatch; existing carrier
+projections/coercions and the explicit escrow helper's own input guard remain.
+
+Core diff/comment/import review and focused validation are recorded in
+[`core dispatch evidence`](../../../docs/attachments/core-dispatch/index.md).
+This is implementation self-check evidence, not independent or live domain
+qualification. Domain evidence schemas, seller revalidation and joined
+qualification remain with their assigned sections. Roadmap closeout is 8.7.
+
 ## Planning validation
 
 - `openspec validate route-settlement-by-mechanism --strict`: passed.
@@ -127,13 +170,13 @@ None. The credits authorization boundary is decided above. Optional convention i
 
 ## Design promotion record
 
-Promotion occurs after code review and before implementation closeout; these are destinations, not claims of current behavior.
+Core promotions below follow local diff review and focused checks. Remaining rows are destinations for their owners, not claims of current domain behavior.
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Core table/evidence carriers; role dispatch without a universal mechanism API or fixed actor order | `openspec/specs/market-composition/spec.md`; `architecture.md#typed-phase-boundaries`; `docs/development/ARCHITECTURE.md#composition-from-above-and-below` and `#package-and-dependency-layers` | Planned |
+| Core table/evidence carriers; role dispatch without a universal mechanism API or fixed actor order | `openspec/specs/market-composition/spec.md`; `architecture.md#typed-phase-boundaries`; `docs/development/ARCHITECTURE.md#composition-from-above-and-below` and `#package-and-dependency-layers` | Core promoted; domain adapters remain in sections 2–5 |
 | Registration is admission/configuration, never settlement execution; supported table intersection | `openspec/specs/settlement-configuration/spec.md`; `architecture.md#registration-and-ownership` | Planned |
-| Agreement-based buyer dispatch and accepted-run recovery | `openspec/specs/buyer-orchestration/spec.md`; `architecture.md#configured-mechanism-choice-and-buyer-actions` | Planned |
+| Agreement-based buyer dispatch and accepted-run recovery | `openspec/specs/buyer-orchestration/spec.md`; `architecture.md#configured-mechanism-choice-and-buyer-actions` | Core promoted; concrete buyer surfaces remain in sections 2–4 |
 | Domain-owned evidence/progress, common delivery and stage-owned continuation | `openspec/specs/vm-storefront-fulfillment/spec.md` and `architecture.md`; `openspec/specs/physical-provisioning/spec.md`; `architecture.md#signed-payment-receipt-boundary` | Planned |
 | Storefront settlement authority, neutral credits authorization, exact-once grants and separate issuance evidence/private results | `openspec/specs/api-credits/spec.md`; `architecture.md#authority-boundaries`, `#idempotency-boundaries`, `#payment-composition-and-recovery` | Planned |
 | Optional convention lives in a kit, home deferred; no mandatory adoption | `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` | Planned; adapter implementation deferred |

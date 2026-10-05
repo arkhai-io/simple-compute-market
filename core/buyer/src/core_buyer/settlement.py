@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption, SettlementSelection
 from market_settlement_runtime import (
     CompiledSettlementClause,
@@ -104,6 +105,7 @@ class BuyerSettlementPolicy:
 
     config: SettlementConfig
     registry: SettlementConfigurationRegistry = field(repr=False)
+    stages: SettlementStageTable[Any] = field(repr=False)
     public_context: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -116,7 +118,7 @@ class BuyerSettlementPolicy:
                 self.config,
                 role="buyer",
             )
-            if (
+            if registration.mechanism_id in self.stages and (
                 (section := self.config.mechanisms.get(registration.config_key))
                 is not None
                 and bool(getattr(section, "enabled", False))
@@ -142,8 +144,12 @@ class BuyerSettlementPolicy:
     ) -> tuple[tuple[MechanismRegistration, SettlementOption], ...]:
         """Return first-clause survivors in configured mechanism order."""
 
+        supported = tuple(
+            option for option in _decode_options(tuple(advertised))
+            if option.mechanism in self.stages
+        )
         result = select_settlement_candidates(
-            advertised,
+            supported,
             registry=self.registry,
             config=self.config,
             clauses=clauses,
@@ -164,7 +170,10 @@ class BuyerSettlementPolicy:
         """Select the first compatible option from the first surviving clause."""
 
         result = select_settlement_candidates(
-            _decode_options(listing.get("settlement_options")),
+            tuple(
+                option for option in _decode_options(listing.get("settlement_options"))
+                if option.mechanism in self.stages
+            ),
             registry=self.registry,
             config=self.config,
             clauses=clauses,

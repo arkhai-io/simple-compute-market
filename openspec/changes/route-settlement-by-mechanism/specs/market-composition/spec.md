@@ -66,8 +66,6 @@ Core buyer settlement MUST select the composing domain's role-table entry using 
 - **WHEN** accepted durable work names an unavailable role-table entry
 - **THEN** settlement fails actionably before a mutation and never falls through to another mechanism
 
-## ADDED Requirements
-
 ### Requirement: One settlement declaration per domain role
 
 Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Mechanism IDs MUST NOT select behavior elsewhere in domain orchestration; mechanism-owned input validation inside an entry remains permitted. Fresh admission MUST expose only supported entries.
@@ -109,3 +107,8 @@ Mechanism-specific post-delivery attestation, claim binding, compensation and so
 
 - **WHEN** a payment stage resumes delivery after restart
 - **THEN** it revalidates its stored receipt before passing evidence to common recovery and reuses accepted operation identities
+
+#### Scenario: A stage requires seller action first
+
+- **WHEN** a domain composes a supporting stage whose first effect belongs to the seller
+- **THEN** core dispatches its role entry without requiring a prior buyer deposit, confirmation or escrow proposal

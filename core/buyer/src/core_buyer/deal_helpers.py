@@ -14,7 +14,8 @@ from typing import Any
 
 import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
-from market_core.schemas import SettlementPlan
+from market_core import SettlementEvidence
+from market_core.schemas import Agreement, SettlementPlan
 
 from .run_log import RunLog, read_run, read_run_identity
 
@@ -34,6 +35,7 @@ class DealContext:
     agreed_amount: float
     escrow_uid: str | None = None
     settlement_ref: str | None = None
+    settlement_evidence: SettlementEvidence | None = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
     # per-hour price by duration_seconds/3600 to compute total payment.
@@ -65,10 +67,17 @@ def accepted_settlement_mechanism(deal: DealContext) -> str:
     """Return the mechanism pinned by accepted Terms, never current config."""
 
     selected: str | None = None
+    if deal.agreement is not None:
+        agreement = Agreement.model_validate(deal.agreement)
+        if agreement.settlement is None:
+            raise ValueError("accepted Agreement has no settlement option")
+        selected = agreement.settlement.mechanism
     if deal.settlement_selection is not None:
         value = deal.settlement_selection.get("mechanism")
         if not isinstance(value, str) or not value:
             raise ValueError("accepted settlement selection has no mechanism")
+        if selected is not None and value != selected:
+            raise ValueError("accepted selection conflicts with the Agreement")
         selected = value
 
     planned: set[str] = set()
@@ -231,6 +240,7 @@ def load_deal_context(
     agreed_amount: float | None = None
     escrow_uid: str | None = None
     settlement_ref: str | None = None
+    settlement_evidence: SettlementEvidence | None = None
     duration_seconds: int = 3600
     seller_wallet_address: str | None = None
     token_contract: str | None = None
@@ -413,6 +423,30 @@ def load_deal_context(
 
     for ev in events:
         ev_type = ev.get("event")
+        raw_evidence = ev.get("settlement_evidence")
+        if raw_evidence is not None:
+            try:
+                if not isinstance(raw_evidence, dict):
+                    raise ValueError("evidence must be an object")
+                candidate = SettlementEvidence.from_dict(raw_evidence)
+                if settlement_evidence is not None:
+                    candidate.validate_identity(
+                        negotiation_id=settlement_evidence.negotiation_id,
+                        mechanism=settlement_evidence.mechanism,
+                        settlement_ref=settlement_evidence.settlement_ref,
+                    )
+                settlement_evidence = candidate
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has invalid settlement evidence: {exc}"
+                ) from exc
+        if ev.get("settlement_ref") is not None:
+            ref = ev["settlement_ref"]
+            if not isinstance(ref, str) or not ref or ref != ref.strip():
+                raise typer.BadParameter("Run-log has a malformed settlement reference.")
+            if settlement_ref is not None and ref != settlement_ref:
+                raise typer.BadParameter("Run-log has conflicting settlement references.")
+            settlement_ref = ref
         _capture_publisher_binding(ev)
         if ev_type == "publisher_trust_refreshed":
             try:
@@ -473,10 +507,6 @@ def load_deal_context(
             uid = ev.get("escrow_uid")
             if isinstance(uid, str) and uid:
                 escrow_uid = uid
-        if ev_type == "settlement_started":
-            ref = ev.get("settlement_ref")
-            if isinstance(ref, str) and ref:
-                settlement_ref = ref
         if ev_type == "escrow_create_start":
             terms = ev.get("terms", {})
             if isinstance(terms, dict):
@@ -526,6 +556,26 @@ def load_deal_context(
             f"Last status was {last_status!r}. Recovery requires a "
             f"prior `agreed` outcome."
         )
+    if settlement_evidence is not None:
+        try:
+            if accepted_agreement is None:
+                raise ValueError("settlement evidence has no accepted Agreement")
+            agreement = Agreement.model_validate(accepted_agreement)
+            if agreement.settlement is None:
+                raise ValueError("accepted Agreement has no settlement option")
+            settlement_evidence.validate_identity(
+                negotiation_id=negotiation_id,  # type: ignore[arg-type]
+                mechanism=agreement.settlement.mechanism,
+                settlement_ref=settlement_ref,
+            )
+            if agreement.negotiation_id != negotiation_id:
+                raise ValueError("accepted Agreement changed negotiation identity")
+            settlement_ref = settlement_evidence.settlement_ref
+        except (TypeError, ValueError) as exc:
+            raise typer.BadParameter(
+                f"Run-log {run_id!r} has conflicting settlement evidence: {exc}"
+            ) from exc
+
     publisher_principals = _refresh_publisher_trust(
         run_id,
         signer=signer,
@@ -540,8 +590,6 @@ def load_deal_context(
     # Pre-plan logs carry only the flat opaque terms; the generic carrier
     # can preserve those payloads without decoding their mechanism schema.
     if settlement_plan is None and accepted_escrow_terms:
-        from market_core.schemas import SettlementPlan
-
         settlement_plan = SettlementPlan.model_validate(
             accepted_escrow_terms
         ).model_dump()
@@ -575,6 +623,7 @@ def load_deal_context(
         agreed_amount=agreed_amount,  # type: ignore[arg-type]
         escrow_uid=escrow_uid,
         settlement_ref=settlement_ref,
+        settlement_evidence=settlement_evidence,
         duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,
         token_contract=token_contract,

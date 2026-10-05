@@ -53,7 +53,26 @@ Run logs persist the canonical public principal, signature-contract version, acc
 
 ## Configured mechanism choice and buyer actions
 
-The buyer receives installed and enabled mechanisms through shared settlement registration. Ordered explicit clauses or configured priority select compatible options before acceptance. Prerequisites are late-bound: Arkhai payments uses trusted service policy and owner-scoped credentials, while Alkahest resolves its own EVM inputs.
+The buyer intersects installed, enabled registration compatibility with its
+explicit buyer-role stage table before applying ordered clauses or priority.
+Registration does not imply execution support. Accepted work resolves only
+`Agreement.settlement.mechanism`, including after a priority change; a missing
+entry is an actionable refusal before effects.
+
+`make_settle_hook(stages=..., invoke=...)` invokes the selected opaque stage
+with the unchanged `NegotiationResult`. The domain supplies the invoker and
+entry-specific acceptance validator. The validator receives the exact
+`NegotiationOutcome` after generic Agreement/party/option checks and before
+accepted-round observation or persistence. Alkahest-only artifact requirements
+belong there. An entry can bind `make_escrow_settle_hook` explicitly; neither
+proposal presence nor absence selects it.
+
+Prerequisites are late-bound: Arkhai payments uses trusted service policy and
+owner-scoped credentials, while Alkahest resolves its own EVM inputs.
+Mechanism-specific continuations stay with the selected entry, not a common
+buyer-first sequence. Optional `BuyResult.settlement_evidence` is persisted as
+a secret-free run projection and recovered against the accepted negotiation,
+mechanism and established reference. It does not authorize seller delivery.
 
 The buyer preserves exact Agreement bytes and opaque settlement data in accepted run state. Its `payer_account` travels in selection params, independently of the profile signer. It validates the seller-derived mandate against that Agreement and local policy, approves and polls the same transaction ID, then calls seller settlement with only the negotiation ID. Resume does not reconstruct the Agreement or use current priority to fail over.
 
