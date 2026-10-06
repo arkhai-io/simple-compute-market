@@ -26,7 +26,8 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 
 #### Scenario: Bare-metal result is returned
 - **WHEN** the recorded fulfillment succeeds
-- **THEN** the storefront normalizes one buyer-safe `BareMetalReceipt` and `BareMetalAccessResult` without returning a private key, provider payload, authority URL, or credential
+- **THEN** the storefront records one buyer-safe `BareMetalReceipt` and `BareMetalResult` (the tenant account, when access became ready, and the lease end) without an endpoint, a private key, provider payload, authority URL, or credential
+- **AND** where to connect is served only live, through the access route, while the lease is active
 
 #### Scenario: Bare-metal lease is torn down
 - **WHEN** the buyer requests teardown for the completed fulfillment

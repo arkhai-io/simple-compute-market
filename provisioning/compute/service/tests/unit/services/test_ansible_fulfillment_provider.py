@@ -582,7 +582,7 @@ class TestPreparedEnvelope:
         with pytest.raises(ProviderConfigInvalidError):
             await provider.dispatch_create(malformed)
 
-    async def test_executor_contract_uses_empty_deal_ref_and_deterministic_key(
+    async def test_executor_contract_carries_no_deal_reference_and_a_deterministic_key(
         self, provider, job_service
     ):
         prepared = provider.prepare_create(
@@ -595,7 +595,7 @@ class TestPreparedEnvelope:
         await provider.dispatch_create(prepared)
 
         contract = job_service.submit.await_args.kwargs["contract"]
-        assert contract.deal_ref == {}
+        assert "deal_ref" not in contract.model_dump()
         assert contract.idempotency_key == "alloc-1:create"
 
 

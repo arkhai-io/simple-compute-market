@@ -12,7 +12,7 @@ from typing import Any, TypeVar
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
     BareMetalAcceptedHostedBinding,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     BareMetalListing,
@@ -591,7 +591,7 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        result: BareMetalAccessResult | Mapping[str, Any],
+        result: BareMetalResult | Mapping[str, Any],
     ) -> None:
         await self._save_artifact(
             negotiation_id=negotiation_id,
@@ -604,7 +604,7 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-    ) -> BareMetalAccessResult | None:
+    ) -> BareMetalResult | None:
         return await self._load_artifact(
             negotiation_id=negotiation_id,
             artifact="result",

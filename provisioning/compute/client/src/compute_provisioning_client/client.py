@@ -158,7 +158,11 @@ def _lease_action(capacity_reservation_id: str, action: str, body: Any) -> _Call
 
 
 def _list_jobs(
-    status: str | None, offset: int, limit: int, escrow_uid: str | None, sort: str
+    status: str | None,
+    offset: int,
+    limit: int,
+    capacity_reservation_id: str | None,
+    sort: str,
 ) -> _Call:
     return _Call(
         "GET",
@@ -167,7 +171,7 @@ def _list_jobs(
             "offset": offset,
             "limit": limit,
             "status": status,
-            "escrow_uid": escrow_uid,
+            "capacity_reservation_id": capacity_reservation_id,
             "sort": sort,
         },
         parse=_model(JobListResponse),
@@ -496,11 +500,11 @@ class ComputeProvisioningClient(SigningBase):
         status: str | None = None,
         offset: int = 0,
         limit: int = 20,
-        escrow_uid: str | None = None,
+        capacity_reservation_id: str | None = None,
         sort: JobListSort = "created_at_desc",
         request_id: str | None = None,
     ) -> JobListResponse:
-        return await self._run(_list_jobs(status, offset, limit, escrow_uid, sort), request_id)
+        return await self._run(_list_jobs(status, offset, limit, capacity_reservation_id, sort), request_id)
 
     async def get_job(self, job_id: str, *, request_id: str | None = None) -> JobStatusResponse:
         return await self._run(_get_job(job_id), request_id)
@@ -774,11 +778,11 @@ class SyncComputeProvisioningClient(SigningBase):
         status: str | None = None,
         offset: int = 0,
         limit: int = 20,
-        escrow_uid: str | None = None,
+        capacity_reservation_id: str | None = None,
         sort: JobListSort = "created_at_desc",
         request_id: str | None = None,
     ) -> JobListResponse:
-        return self._run(_list_jobs(status, offset, limit, escrow_uid, sort), request_id)
+        return self._run(_list_jobs(status, offset, limit, capacity_reservation_id, sort), request_id)
 
     def get_job(self, job_id: str, *, request_id: str | None = None) -> JobStatusResponse:
         return self._run(_get_job(job_id), request_id)

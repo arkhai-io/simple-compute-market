@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleRunner
 
@@ -14,11 +16,8 @@ from bare_metal_provisioning_adapter.bundle import (
     build_bare_metal_adapter_bundle,
 )
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
-    BareMetalOperationsService,
-)
-from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
-    BareMetalFulfillmentProvider,
+from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
+    BareMetalFulfillmentPlan,
 )
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
@@ -27,8 +26,7 @@ from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler imp
 
 @dataclass
 class BareMetalProvisioningRuntime:
-    operations_service: BareMetalOperationsService
-    fulfillment_provider: BareMetalFulfillmentProvider
+    fulfillment_provider: JobFulfillmentProvider
     pool_config_handler: BareMetalPoolConfigHandler
     # Runs the bare-metal access playbook: the real Ansible runner, or under
     # the mock profile this adapter's own mock.
@@ -64,9 +62,8 @@ class BareMetalProvisioningRuntime:
 def build_bare_metal_runtime(
     *,
     job_engine,
-    job_queue_provider: Callable[[], Any],
+    job_submission: JobSubmissionService,
     config,
-    host_authority,
 ) -> BareMetalProvisioningRuntime:
     active = [
         profile.strip()
@@ -81,17 +78,13 @@ def build_bare_metal_runtime(
         ansible_service = MockAnsibleRunner(default_output=bare_metal_mock_output)
     else:
         ansible_service = AnsibleRunner(config)
-    operations_service = BareMetalOperationsService(
-        jobs=job_engine,
-        job_queue_provider=job_queue_provider,
-        host_service=host_authority,
-        reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
-    )
     return BareMetalProvisioningRuntime(
-        operations_service=operations_service,
-        fulfillment_provider=BareMetalFulfillmentProvider(
-            operations_service=operations_service,
-            job_service=job_engine,
+        fulfillment_provider=JobFulfillmentProvider(
+            plan=BareMetalFulfillmentPlan(
+                reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
+            ),
+            submission=job_submission,
+            jobs=job_engine,
         ),
         pool_config_handler=BareMetalPoolConfigHandler(),
         ansible_service=ansible_service,

@@ -48,9 +48,12 @@ class JobStatusResponse(BaseModel):
         default=None,
         description="Scheduled time for the next retry attempt (UTC)",
     )
-    escrow_uid: Optional[str] = Field(
+    capacity_reservation_id: Optional[str] = Field(
         default=None,
-        description="On-chain escrow UID linking this job to a deal (set at submission time)",
+        description=(
+            "The capacity reservation a fulfillment's job serves; none for an "
+            "operator's job"
+        ),
     )
 
 

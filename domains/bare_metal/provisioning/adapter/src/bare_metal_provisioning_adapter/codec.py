@@ -3,9 +3,15 @@
 ``BareMetalAnsibleCodec`` is the bare-metal domain's contribution to the compute
 family's Ansible executor. A grant installs the buyer's key for a tenant account
 on the whole host the lease sells; a reclaim removes access by the configured
-reclaim policy. Each job stores a ``BareMetalJobParams``, and its result is the
-access fact the ``bare-metal-access`` role prints, which carries no credential:
-the buyer already holds the private half of the key that was installed.
+reclaim policy. Each job stores a ``BareMetalJobParams``.
+
+A grant's result is the compute family's ``DeliveryEvidence``: the host and port
+the buyer connects to, the tenant account, and when access became ready, read
+from the fact the ``bare-metal-access`` role prints. A grant whose fact cannot
+say that stores the fact itself instead, under bare metal's own result kind, so
+the family's provider fails the create and an operator can read what the role
+printed. A reclaim's result is its fact. No result carries a credential: the
+buyer already holds the private half of the key that was installed.
 """
 
 from __future__ import annotations
@@ -18,7 +24,12 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning_contracts import ResultEnvelope
+from compute_provisioning_contracts import (
+    DELIVERY_EVIDENCE_RESULT_KIND,
+    AccessEndpoint,
+    DeliveryEvidence,
+    ResultEnvelope,
+)
 from compute_provisioning.jobs import JobRun
 from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan
 from compute_provisioning_ansible.runner import (
@@ -26,7 +37,7 @@ from compute_provisioning_ansible.runner import (
     InventoryTarget,
     extract_fact,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 #: The inventory group the bare-metal access playbook targets.
 BARE_METAL_INVENTORY_GROUP = "bare_metal_nodes"
@@ -78,6 +89,29 @@ class BareMetalJobParams(BaseModel):
     reclaim_policy: str | None = None
 
 
+def grant_evidence(fact: Mapping[str, Any]) -> DeliveryEvidence | None:
+    """What a grant's access fact says about reaching the host, or ``None``.
+
+    The role prints the port as a string and the time as an ISO 8601 UTC
+    instant; a fact missing the host, the port, the account, or the time says
+    nothing a buyer can use.
+    """
+    try:
+        return DeliveryEvidence(
+            endpoints=(
+                AccessEndpoint(
+                    protocol="ssh",
+                    host=str(fact.get("host") or ""),
+                    port=int(str(fact.get("port") or "0")),
+                    user=str(fact.get("ssh_user") or "") or None,
+                ),
+            ),
+            ready_at=fact.get("timestamp"),
+        )
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
 class BareMetalAnsibleCodec:
     """The bare-metal domain's ``AnsibleJobCodec``; see the module docstring."""
 
@@ -101,6 +135,15 @@ class BareMetalAnsibleCodec:
         fact = extract_fact(output.stdout, BARE_METAL_RESULT_FACTS[run.action])
         if fact is None:
             return AnsibleJobInterpretation(result=None)
+        evidence = grant_evidence(fact) if run.action == NODE_GRANT_ACCESS_ACTION else None
+        if evidence is not None:
+            return AnsibleJobInterpretation(
+                result=ResultEnvelope(
+                    offering_mode=run.offering_mode,
+                    result_kind=DELIVERY_EVIDENCE_RESULT_KIND,
+                    value=evidence.model_dump(mode="json"),
+                )
+            )
         return AnsibleJobInterpretation(
             result=ResultEnvelope(
                 offering_mode=run.offering_mode,
@@ -142,5 +185,6 @@ __all__ = [
     "BareMetalAnsibleCodec",
     "BareMetalJobParams",
     "DEFAULT_BARE_METAL_RECLAIM_POLICY",
+    "grant_evidence",
     "reclaim_policy_from",
 ]

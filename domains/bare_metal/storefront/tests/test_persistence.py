@@ -8,11 +8,11 @@ import pytest
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
-    BareMetalAccessResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
+    BareMetalResult,
     BareMetalTerms,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
@@ -57,12 +57,10 @@ def _artifacts():
             status="fulfilled",
             result_ref={"result_id": "result-1"},
         ),
-        "result": BareMetalAccessResult(
-            action="node_grant_access",
-            host_id="machine-1",
-            physical_host_id="host-1",
+        "result": BareMetalResult(
             ssh_user="tenant-1",
-            status="success",
+            ready_at=NOW,
+            lease_end_utc=LATER,
         ),
     }
 

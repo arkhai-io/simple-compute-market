@@ -225,7 +225,6 @@ async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> No
 
     contract = JobActionRequest(
         capacity_reservation_id="r-1",
-        deal_ref={"deal": "d"},
         offering_mode="fake",
         action_kind="make",
         idempotency_key="k-1",
@@ -247,7 +246,6 @@ async def test_a_repeated_contract_identity_with_different_parameters_is_refused
     queue = _Queue()
     contract = JobActionRequest(
         capacity_reservation_id="r-3",
-        deal_ref={},
         offering_mode="fake",
         action_kind="make",
         idempotency_key="r-3:make",
@@ -269,12 +267,38 @@ def test_a_job_identity_record_carries_no_job_content() -> None:
     with pytest.raises(ValueError):
         JobActionRequest(
             capacity_reservation_id="r-4",
-            deal_ref={},
-            offering_mode="fake",
+                offering_mode="fake",
             action_kind="make",
             idempotency_key="r-4:make",
             parameters={"p": 1},
         )
+
+
+@pytest.mark.asyncio
+async def test_jobs_are_listed_by_the_capacity_reservation_they_serve() -> None:
+    """A deal's jobs are found by its capacity reservation, whatever its
+    settlement mechanism; an operator's job serves none, and none is recorded."""
+    engine, _ = _engine(_Executor())
+    queue = _Queue()
+    for reservation, operation in (("r-5", "create"), ("r-5", "teardown"), ("r-6", "create")):
+        await _submit(
+            engine,
+            queue,
+            contract=JobActionRequest(
+                capacity_reservation_id=reservation,
+                offering_mode="fake",
+                action_kind=operation,
+                idempotency_key=f"{reservation}:{operation}",
+            ),
+        )
+    operator_job = await _submit(engine, queue, operation_id="operator-1")
+
+    listed = engine.list_jobs(capacity_reservation_id="r-5")
+
+    assert listed.total == 2
+    assert {job.capacity_reservation_id for job in listed.jobs} == {"r-5"}
+    assert engine.get_job(operator_job.job_id).capacity_reservation_id is None
+    assert engine.list_jobs().total == 4
 
 
 @pytest.mark.asyncio
@@ -297,7 +321,6 @@ async def test_a_contract_action_runs_as_the_executor_action_it_was_submitted_wi
     engine, factory = _engine(executor)
     contract = JobActionRequest(
         capacity_reservation_id="r-2",
-        deal_ref={},
         offering_mode="fake",
         action_kind="release",
         idempotency_key="r-2:release",

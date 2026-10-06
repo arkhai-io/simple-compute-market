@@ -93,7 +93,6 @@ class JobEngine:
         host_id: str,
         params: Mapping[str, Any],
         job_queue,
-        escrow_uid: str | None = None,
         max_retries: int | None = None,
         contract: JobActionRequest | None = None,
         operation_id: str | None = None,
@@ -123,12 +122,10 @@ class JobEngine:
                 status=JobStatus.queued.value,
                 params=raw_params,
                 host_id=host_id,
-                escrow_uid=escrow_uid,
                 retry_count=0,
                 max_retries=max_retries,
                 next_retry_at=None,
                 capacity_reservation_id=contract.capacity_reservation_id if contract else None,
-                deal_ref=contract.deal_ref if contract else None,
                 offering_mode=contract.offering_mode if contract else offering_mode,
                 action_kind=contract.action_kind if contract else action,
                 executor_action=action,
@@ -221,7 +218,7 @@ class JobEngine:
         limit: int = 20,
         status_filter: str | None = None,
         sort: str = "created_at_desc",
-        escrow_uid: str | None = None,
+        capacity_reservation_id: str | None = None,
     ) -> JobListResponse:
         order = {
             "created_at_asc": JobRecord.created_at.asc(),
@@ -231,8 +228,10 @@ class JobEngine:
             query = db.query(JobRecord)
             if status_filter:
                 query = query.filter(JobRecord.status == status_filter)
-            if escrow_uid:
-                query = query.filter(JobRecord.escrow_uid == escrow_uid)
+            if capacity_reservation_id:
+                query = query.filter(
+                    JobRecord.capacity_reservation_id == capacity_reservation_id
+                )
             total = query.count()
             jobs = (
                 query.order_by(order.get(sort, order["created_at_desc"]))
@@ -619,7 +618,7 @@ class JobEngine:
             retry_count=job.retry_count,
             max_retries=job.max_retries,
             next_retry_at=job.next_retry_at,
-            escrow_uid=job.escrow_uid,
+            capacity_reservation_id=job.capacity_reservation_id,
         )
 
 

@@ -15,11 +15,11 @@ from market_core import (
 
 from .schema import (
     BARE_METAL_DOMAIN_IDENTITY,
-    BareMetalAccessResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
+    BareMetalResult,
     BareMetalTerms,
 )
 
@@ -44,8 +44,8 @@ def _normalize_receipt(value: Any) -> BareMetalReceipt:
     return BareMetalReceipt.model_validate(value)
 
 
-def _normalize_result(value: Any) -> BareMetalAccessResult:
-    return BareMetalAccessResult.model_validate(value)
+def _normalize_result(value: Any) -> BareMetalResult:
+    return BareMetalResult.model_validate(value)
 
 
 def _publication_source(**kwargs: Any) -> Any:

@@ -10,11 +10,9 @@ from compute_provisioning import (
     ExecutorAdapterContribution,
     JobExecutor,
 )
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 
 from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
-from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
-    BareMetalFulfillmentProvider,
-)
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
@@ -28,13 +26,13 @@ BARE_METAL_PROVIDER = "bare_metal.ansible"
 #: to the site ledger, which is built before any provider instance exists;
 #: composition refuses to start if it disagrees with the registered instances.
 HOST_REQUIREMENT = MappingProxyType(
-    {BARE_METAL_PROVIDER: BareMetalFulfillmentProvider.needs_host}
+    {BARE_METAL_PROVIDER: JobFulfillmentProvider.needs_host}
 )
 
 
 def build_bare_metal_adapter_bundle(
     *,
-    fulfillment_provider: BareMetalFulfillmentProvider,
+    fulfillment_provider: JobFulfillmentProvider,
     pool_config_handler: BareMetalPoolConfigHandler,
     job_executor: JobExecutor,
 ) -> ExecutorAdapterBundle:

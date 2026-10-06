@@ -9,6 +9,11 @@ from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTI
 from compute_provisioning.jobs import JobFailure, JobSuccess
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_contracts import (
+    DELIVERY_EVIDENCE_RESULT_KIND,
+    AccessEndpoint,
+    DeliveryEvidence,
+)
 
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams
 from bare_metal_provisioning_adapter.services.mock_output import (
@@ -48,13 +53,11 @@ async def test_default_grant_reports_the_access_fact_for_the_registered_host() -
 
     assert isinstance(outcome, JobSuccess)
     assert outcome.credentials == ()
-    fact = outcome.result.value
-    assert outcome.result.result_kind == "bare_metal_access"
-    assert fact["action"] == NODE_GRANT_ACCESS_ACTION
-    assert fact["ssh_user"] == "tenant-a"
-    assert fact["host"] == "10.0.0.5"
-    assert fact["port"] == "2201"
-    assert fact["physical_host_id"] == "physical-1"
+    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
+    evidence = DeliveryEvidence.model_validate(outcome.result.value)
+    assert evidence.endpoints == (
+        AccessEndpoint(protocol="ssh", host="10.0.0.5", port=2201, user="tenant-a"),
+    )
 
 
 @pytest.mark.asyncio
@@ -64,7 +67,7 @@ async def test_default_grant_without_a_tenant_names_the_mock_user() -> None:
         _params(NODE_GRANT_ACCESS_ACTION, ssh_user=None),
     )
 
-    assert outcome.result.value["ssh_user"] == DEFAULT_MOCK_SSH_USER
+    assert outcome.result.value["endpoints"][0]["user"] == DEFAULT_MOCK_SSH_USER
 
 
 @pytest.mark.asyncio
@@ -110,5 +113,5 @@ async def test_a_rule_for_another_domains_runner_never_meets_a_bare_metal_job() 
 
     outcome = await _execute(bare_metal, _params(NODE_GRANT_ACCESS_ACTION))
 
-    assert outcome.result.value["action"] == NODE_GRANT_ACCESS_ACTION
+    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
     assert bare_metal.list_rules() == []

@@ -444,75 +444,29 @@ class BareMetalAccessGrant(BaseModel):
         )
 
 
-class BareMetalAccessResult(BaseModel):
-    """Result shape for bare-metal grant/reclaim executor slots."""
+class BareMetalResult(BaseModel):
+    """What a buyer is told of a delivered bare-metal lease.
+
+    How access works, as which tenant account, since when, and until when. The
+    storefront writes it from provisioning's delivery and its own
+    materialization, whose window it sold. Where to connect is not part of it:
+    the endpoint is served live while the lease is active and never stored, so
+    a result read after the lease ends names no address that once granted
+    access.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
-    action: str = Field(
-        description="Bare-metal executor lifecycle action that completed.",
-    )
-    host_id: str = Field(
-        description="Executor-local bare-metal machine identity.",
-    )
-    physical_host_id: str | None = Field(
-        default=None,
-        description="Stable cross-mode physical host identity when available.",
-    )
-    ssh_user: str | None = Field(
-        default=None,
-        description="Tenant SSH account touched by the access operation.",
-    )
-    escrow_uid: str | None = Field(
-        default=None,
-        description="On-chain escrow UID associated with the lease.",
-    )
-    settlement_obligation_ref: str | None = Field(
-        default=None,
-        description="Hosted settlement obligation identity associated with the lease.",
-    )
-    access_grant_ref: str | None = Field(
-        default=None,
-        description="Opaque access-authority operation reference.",
-    )
-    host: str | None = Field(
-        default=None,
-        description="Transient buyer-reachable SSH host.",
-    )
-    port: int | None = Field(
-        default=None,
-        ge=1,
-        le=65535,
-        description="Transient buyer-reachable SSH port.",
-    )
-    lease_expires_at: datetime | None = Field(
-        default=None,
-        description="Authoritative lease expiry for access-ready projection.",
-    )
-    timestamp: str | None = Field(
-        default=None,
-        description="Executor-reported completion timestamp.",
-    )
-    status: str = Field(
-        default="success",
-        description="Executor-reported terminal status.",
-    )
-    details: dict[str, Any] | None = Field(
-        default=None,
-        description="Implementation-specific result details.",
-    )
+    access_method: str = Field(default=SSH_ACCESS_METHOD, min_length=1)
+    ssh_user: str = Field(min_length=1, description="The tenant account access was granted to.")
+    ready_at: datetime = Field(description="When access became ready.")
+    lease_end_utc: datetime = Field(description="When the lease ends.")
 
     @model_validator(mode="after")
-    def _validate_action(self) -> "BareMetalAccessResult":
-        if self.action not in BARE_METAL_ACCESS_ACTIONS:
-            raise ValueError(
-                f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
-            )
-        if not self.host_id.strip():
-            raise ValueError("host_id must be non-empty")
-        if self.host is not None and not self.host.strip():
-            raise ValueError("host must be non-empty")
-        if (self.host is None) != (self.port is None):
-            raise ValueError("host and port must be provided together")
+    def _validate_result(self) -> "BareMetalResult":
+        if self.ready_at.tzinfo is None or self.lease_end_utc.tzinfo is None:
+            raise ValueError("result times must be timezone-aware")
         return self
 
 

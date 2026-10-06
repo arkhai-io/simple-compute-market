@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from market_identity import Ed25519Signer
 from market_settlement_runtime import SettlementObligationRecord
-from arkhai_bare_metal import bare_metal_digest
+from arkhai_bare_metal import BareMetalMaterialization, bare_metal_digest
 from market_core import VersionedEnvelope
 
 from arkhai_bare_metal_storefront.hosted_lifecycle import (
@@ -630,6 +630,16 @@ class _AccessReadyDb(FakeLifecycleDb):
             access_method="ssh", ssh_public_key=_KEY, duration_seconds=3600, access_ref=None
         )
 
+    async def load_bare_metal_materialization(self, *, negotiation_id):
+        return BareMetalMaterialization(
+            settlement_obligation_ref="obligation-a",
+            host_id="machine-1",
+            physical_host_id="host-1",
+            lease_start_utc="2099-01-01T00:00:00+00:00",
+            lease_end_utc="2099-01-01T01:00:00+00:00",
+            ssh_public_key=_KEY,
+        )
+
     async def advance_bare_metal_hosted_lifecycle(self, **fields):
         self.advances.append(fields)
         for name, value in fields.items():
@@ -662,17 +672,19 @@ class _ActiveFulfillment:
             payload={
                 "state": "active",
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "status": "success",
-                        "host_id": "machine-1",
-                        "physical_host_id": "host-1",
-                        "access_grant_ref": "grant-a",
-                        "lease_expires_at": "2099-01-01T01:00:00+00:00",
-                        "timestamp": "2099-01-01T00:00:05+00:00",
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.25",
+                                "port": 22,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2099-01-01T00:00:05+00:00",
                     },
                 },
             },
@@ -715,3 +727,6 @@ async def test_access_readiness_registers_the_lease_on_the_family_surface() -> N
     }
     assert state_at_registration == "fulfillment_pending"
     assert ready.physical_state == "access_ready"
+    # Readiness is the delivery's; the window is the one the storefront sold.
+    assert ready.public_result.access_ready_at.isoformat() == "2099-01-01T00:00:05+00:00"
+    assert ready.public_result.expires_at.isoformat() == "2099-01-01T01:00:00+00:00"

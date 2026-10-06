@@ -44,7 +44,6 @@ class VmJobSubmitter:
             ),
             params=dataclasses.asdict(params),
             job_queue=job_queue,
-            escrow_uid=params.escrow_uid,
             max_retries=params.max_retries,
             contract=contract,
             operation_id=operation_id,

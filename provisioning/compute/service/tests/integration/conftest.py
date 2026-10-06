@@ -719,12 +719,13 @@ async def client_and_queue(
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
-    from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
-    bare_metal_operations_service = BareMetalOperationsService(
-        jobs=job_engine,
+    from compute_provisioning.jobs.submission import JobSubmissionService
+    # Every job's submission, as the container builds it; the queue is read
+    # when a job is submitted, after it is created below.
+    job_submission = JobSubmissionService(
+        engine=job_engine,
+        hosts=host_authority,
         job_queue_provider=lambda: job_queue,
-        host_service=host_authority,
-        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
     )
 
     from market_fulfillment import (
@@ -763,9 +764,10 @@ async def client_and_queue(
         # the reservation, which the release guard reads as provenance.
         capacity_ledger=capacity_ledger_service,
     )
-    from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
-        BareMetalFulfillmentProvider,
+    from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
+        BareMetalFulfillmentPlan,
     )
+    from compute_provisioning.job_fulfillment import JobFulfillmentProvider
     from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
     from compute_provisioning import compose_adapter_bundles
     from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
@@ -784,9 +786,12 @@ async def client_and_queue(
                 job_executor=vm_executor,
             ),
             build_bare_metal_adapter_bundle(
-                fulfillment_provider=BareMetalFulfillmentProvider(
-                    operations_service=bare_metal_operations_service,
-                    job_service=job_engine,
+                fulfillment_provider=JobFulfillmentProvider(
+                    plan=BareMetalFulfillmentPlan(
+                        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
+                    ),
+                    submission=job_submission,
+                    jobs=job_engine,
                 ),
                 pool_config_handler=resource_pool_service_handlers["bare_metal.ansible"],
                 job_executor=bare_metal_executor,
@@ -883,7 +888,7 @@ async def client_and_queue(
     app.container.host_authority.override(host_authority)
     app.container.connectivity_probes.override(connectivity_probes)
     app.container.site_authority.override(site_authority)
-    app.container.bare_metal_operations_service.override(bare_metal_operations_service)
+    app.container.job_submission.override(job_submission)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
     app.container.resource_pool_service.override(resource_pool_service)
@@ -910,7 +915,6 @@ async def client_and_queue(
     )
     _container_module.resolved_host_authority = host_authority
     _container_module.resolved_connectivity_probes = connectivity_probes
-    _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_bare_metal_mock_executor = (
         bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
     )
@@ -977,7 +981,7 @@ async def client_and_queue(
     app.container.host_authority.reset_override()
     app.container.connectivity_probes.reset_override()
     app.container.site_authority.reset_override()
-    app.container.bare_metal_operations_service.reset_override()
+    app.container.job_submission.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
     app.container.fulfillment_service.reset_override()

@@ -29,12 +29,18 @@ def list_jobs(
         default=None, description="Filter by status: queued, running, succeeded, failed, cancelled"
     ),
     sort: str = Query(default="created_at_desc", description="created_at_asc or created_at_desc"),
-    escrow_uid: str | None = Query(default=None, description="Filter by the escrow UID a job records"),
+    capacity_reservation_id: str | None = Query(
+        default=None, description="Filter by the capacity reservation a job serves"
+    ),
     service: JobRouteService = Depends(_service),
 ) -> JobListResponse:
     return routed(
         lambda: service.list_jobs(
-            offset=offset, limit=limit, status=status, sort=sort, escrow_uid=escrow_uid
+            offset=offset,
+            limit=limit,
+            status=status,
+            sort=sort,
+            capacity_reservation_id=capacity_reservation_id,
         )
     )
 

@@ -34,10 +34,16 @@ class TestJobRouteService:
     def test_a_listing_passes_its_filters_to_the_engine(self):
         engine = MagicMock()
 
-        JobRouteService(engine).list_jobs(offset=5, limit=10, status="failed", escrow_uid="e-1")
+        JobRouteService(engine).list_jobs(
+            offset=5, limit=10, status="failed", capacity_reservation_id="r-1"
+        )
 
         engine.list_jobs.assert_called_once_with(
-            offset=5, limit=10, status_filter="failed", sort="created_at_desc", escrow_uid="e-1"
+            offset=5,
+            limit=10,
+            status_filter="failed",
+            sort="created_at_desc",
+            capacity_reservation_id="r-1",
         )
 
     @pytest.mark.parametrize("read", ["get_job", "get_credentials", "get_logs"])

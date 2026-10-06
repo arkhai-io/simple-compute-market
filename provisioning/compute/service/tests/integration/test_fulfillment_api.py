@@ -15,8 +15,9 @@ Coverage:
   - ``begin`` persists a versioned, typed prepared-create envelope before
     dispatch, containing every VM create field and the pool's provider
     configuration snapshot.
-  - The dispatched Ansible job carries an empty ``deal_ref`` and the
-    deterministic ``{capacity_reservation_id}:create`` idempotency key.
+  - The dispatched Ansible job is correlated by its capacity reservation and
+    carries the deterministic ``{capacity_reservation_id}:create`` idempotency
+    key.
   - ``begin`` is idempotent for an equivalent retry: no second job.
   - ``validate`` performs the identical preparation/validation path but
     persists nothing and dispatches nothing.
@@ -134,7 +135,7 @@ class FulfillmentApi:
     def dispatched_job(job_id: str) -> dict:
         """The correlation identity of a job the provider dispatched.
 
-        The identity (``deal_ref``, ``idempotency_key``, ``action_kind``) is the
+        The identity (reservation, ``idempotency_key``, ``action_kind``) is the
         job authority's own state, which no route serves; it is read from the
         database the app composed, so it is the state the app wrote.
         """
@@ -143,7 +144,6 @@ class FulfillmentApi:
             assert job is not None, f"no job {job_id!r}"
             return {
                 "capacity_reservation_id": job.capacity_reservation_id,
-                "deal_ref": dict(job.deal_ref or {}),
                 "offering_mode": job.offering_mode,
                 "action_kind": job.action_kind,
                 "idempotency_key": job.idempotency_key,
@@ -319,7 +319,7 @@ class TestBeginPersistsPreparedCreateInput:
             assert metadata["operation"] == "create"
             assert metadata["create_job_id"]
 
-    async def test_dispatched_job_has_empty_deal_ref_and_deterministic_key(
+    async def test_dispatched_job_is_correlated_by_its_reservation_and_a_deterministic_key(
         self, fulfillment: FulfillmentApi
     ):
         capacity_reservation_id = await _scheduled_reservation()
@@ -334,7 +334,6 @@ class TestBeginPersistsPreparedCreateInput:
             job_id = record.provider_metadata["create_job_id"]
 
         job = fulfillment.dispatched_job(job_id)
-        assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:create"
         assert job["capacity_reservation_id"] == capacity_reservation_id
         assert result["fulfillment_id"]
@@ -518,7 +517,6 @@ class TestTeardownPreparation:
         assert teardown_job_id != provider_metadata["create_job_id"]
 
         job = fulfillment.dispatched_job(teardown_job_id)
-        assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:teardown"
         assert job["action_kind"] == "teardown"
 

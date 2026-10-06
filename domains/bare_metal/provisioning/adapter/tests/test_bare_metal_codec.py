@@ -10,6 +10,7 @@ import pydantic
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
+from compute_provisioning_contracts import DELIVERY_EVIDENCE_RESULT_KIND
 
 from bare_metal_provisioning_adapter.codec import (
     BARE_METAL_INVENTORY_GROUP,
@@ -82,27 +83,66 @@ def test_parameters_in_another_shape_are_refused() -> None:
         )
 
 
-def test_a_run_reports_the_printed_access_fact_and_no_credential() -> None:
-    stdout = (
-        "ok: [bm-node-1] => {\n"
-        '    "node_grant_access_data": {"action": "node_grant_access", '
-        '"host": "10.0.0.5", "port": "2201", "ssh_user": "tenant-a"}\n}\n'
-    )
-    run = job_run(_grant())
+def _granted(fact: str) -> AnsibleResult:
+    stdout = "ok: [bm-node-1] => {\n" f'    "node_grant_access_data": {fact}\n}}\n'
+    return AnsibleResult(stdout=stdout, stderr="", process_id=1)
 
+
+def test_a_grant_reports_delivery_evidence_and_no_credential() -> None:
     outcome = BareMetalAnsibleCodec().interpret(
-        run, inventory_target(HOST), AnsibleResult(stdout=stdout, stderr="", process_id=1)
+        job_run(_grant()),
+        inventory_target(HOST),
+        _granted(
+            '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
+            '"ssh_user": "tenant-a", "timestamp": "2030-01-01T00:00:01Z", '
+            '"physical_host_id": "physical-1"}'
+        ),
     )
 
     assert outcome.credentials == ()
-    assert outcome.result.result_kind == "bare_metal_access"
+    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
     assert outcome.result.offering_mode == "bare_metal"
     assert outcome.result.value == {
-        "action": "node_grant_access",
-        "host": "10.0.0.5",
-        "port": "2201",
-        "ssh_user": "tenant-a",
+        "endpoints": [
+            {"protocol": "ssh", "host": "10.0.0.5", "port": 2201, "user": "tenant-a"}
+        ],
+        "ready_at": "2030-01-01T00:00:01Z",
     }
+
+
+def test_a_grant_whose_fact_cannot_say_where_to_connect_stores_the_fact() -> None:
+    """The family's provider then fails the create, and an operator can read
+    what the role printed."""
+    fact = '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201"}'
+
+    outcome = BareMetalAnsibleCodec().interpret(
+        job_run(_grant()), inventory_target(HOST), _granted(fact)
+    )
+
+    assert outcome.result.result_kind == "bare_metal_access"
+    assert outcome.result.value == {
+        "action": "node_grant_access", "host": "10.0.0.5", "port": "2201"
+    }
+
+
+def test_a_reclaim_reports_its_fact() -> None:
+    reclaim = _grant().model_copy(
+        update={"action": NODE_RECLAIM_ACCESS_ACTION, "reclaim_policy": "remove_lease_key"}
+    )
+    stdout = (
+        "ok: [bm-node-1] => {\n"
+        '    "node_reclaim_access_data": {"action": "node_reclaim_access", '
+        '"status": "success"}\n}\n'
+    )
+
+    outcome = BareMetalAnsibleCodec().interpret(
+        job_run(reclaim),
+        inventory_target(HOST),
+        AnsibleResult(stdout=stdout, stderr="", process_id=1),
+    )
+
+    assert outcome.result.result_kind == "bare_metal_access"
+    assert outcome.result.value == {"action": "node_reclaim_access", "status": "success"}
 
 
 def test_a_run_that_printed_no_fact_reports_no_result() -> None:

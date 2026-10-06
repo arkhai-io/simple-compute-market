@@ -2557,86 +2557,236 @@ re-verifies them by grep before each move.
         recorded harness race once more (closeout task 2.6). The four locks its reinit
         rewrites were restored. `make check-locks`, `make check-packaging`, comment
         hygiene, documentation citations, and OpenSpec strict validation (1.14.0) pass.
-        Not yet run end to end.
-- [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
+      - End-to-end: run 37437827289 on this tree passed both lanes (recorded at 5B.11).
+- [x] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
-      Status 2026-10-06: run 37431438099 passed both lanes on the 5B.10 checkpoint, but
-      5B.10.D changes when relay ports are returned, so the gate runs again on the
-      5B.10.D tree before it is checked.
+      Done 2026-10-06 on the 5B.10.D tree. The suites, packaging, and comment hygiene are
+      5B.10.D's. End-to-end run 37437827289 installed compute-provisioning-service 0.13.0,
+      compute-provisioning 0.15.0, kit-site 0.9.0, and vms-provisioning-adapter 0.11.0
+      (with kit-alkahest 0.3.0 and vms-storefront 0.11.0). The bare-metal lane passed 16 and
+      the VM lane 135; nothing failed or was skipped. Neither lane's service logs show a
+      traceback, a 5xx, a 401, or a 403: the 404s are the scenarios' existence probes, the
+      402s API-credit exhaustion, the 410s introduction retention. Expired leases were
+      released. The VM lane runs no relay, so 5B.10.D's port path is proven by the
+      integration suites, not by this run.
 - [ ] 5B.12 Job-backed fulfillment. Re-planned 2026-10-05 before implementation, after the
       design review (`design.md`, "Job-backed fulfillment (5B.12)"): the family owns the
-      whole job-backed provider and one delivery envelope; domains contribute preparation
-      and their codec's output. Three slices, each keeping both end-to-end lanes green, so
-      a domain's producer and its storefront consumer move together.
-  - [ ] 5B.12.A The family provider and delivery envelope; bare metal end to end.
+      whole job-backed provider and one delivery contract; domains contribute preparation
+      and their codec's output. Amended 2026-10-06 by the implementation audit (`design.md`,
+      "5B.12 implementation audit (2026-10-06)"): typed delivery evidence validated before a
+      create succeeds, teardown prepared from the create job's parameters, a family job
+      submission service, jobs correlated on the capacity reservation, and lease
+      registration removed behind a decision gate. Four slices, each keeping both end-to-end
+      lanes green, so a domain's producer and its storefront consumer move together.
+  - [x] 5B.12.A The family provider, job submission, and delivery contracts; bare metal
+        moved onto them.
         - Contracts (`provisioning/compute/contracts/src/compute_provisioning_contracts/`):
-          new `delivery.py`: the access delivery (provisioned resources, endpoints,
-          credentials by role, `ready_at`) under its own kind and schema version.
-        - Family kit (`provisioning/compute/src/compute_provisioning/`): new
-          `job_fulfillment.py`: the prepared job (offering mode, action, `host_id`,
-          `executor_target`, opaque parameters, escrow reference), the domain's plan
-          protocol (prepare create, prepare teardown), the fulfillment metadata
-          (`create_job_id`, `teardown_job_id`, `current_job_id`, `operation`, `host_id`,
-          `executor_target`), the status table on `JobStatus`, submission (one host check,
-          the operation id from the contract's idempotency key), and
-          `JobFulfillmentProvider`, implementing `kit/fulfillment`'s provider protocol
-          over the job authority: the prepared-operation envelope and its decoding,
-          dispatch, status, provisioned-resource resolution from `executor_target`,
-          `resolve_executor_job_id`, and the delivery assembled from the create job's
-          result and an allowlist of its credentials' fields.
-        - Bare metal: `services/bare_metal_fulfillment_provider.py` becomes the plan
-          (`services/bare_metal_fulfillment_plan.py`: publication and lease binding,
-          preparation), the provider file tombstoned; `services/bare_metal_operations_service.py`
-          tombstoned if nothing but the provider uses it; `codec.py` emits the delivery's
-          neutral fields; `runtime.py` and `bundle.py` build the family provider over the
-          plan; `arkhai_bare_metal.schema.BareMetalAccessResult` deleted.
-        - Bare-metal storefront: `hosted_lifecycle.py` reads the access delivery and
-          treats an active fulfillment naming an endpoint as access-ready; `models.py` and
-          `sqlite_client.py` follow.
-        - Tests: `provisioning/compute/tests/unit/test_job_fulfillment.py` (the provider
-          against a fake plan and a fake job authority: dispatch, the operation id, the host
-          check, status for every `JobStatus`, an undecodable envelope, credentials'
-          allowlist), the contracts test for the delivery; the service's bare-metal
-          fulfillment through the real orchestrator and convergence
-          (`integration/bare_metal_deal.py` and the suites using it); the bare-metal
-          adapter's tests rewritten to the plan; the bare-metal storefront's
-          `test_hosted_lifecycle.py`, `test_hosted_lifecycle_repository.py`,
-          `test_fulfillment_service.py`, `test_http_settlement.py`, `test_persistence.py`;
-          `domains/bare_metal/tests/test_schema.py`, `test_domain_runtime.py`.
+          new `delivery.py`: `AccessEndpoint` (protocol, host, port, user),
+          `DeliveryEvidence` (endpoints, timezone-aware `ready_at`; a create job's result,
+          under a family result kind), `DeliveredCredential` (role, password, key type), and
+          `AccessDelivery` (endpoints, credentials, `ready_at`; no resource list) under its
+          own kind and schema version. `jobs.py`: `JobStatusResponse` loses `escrow_uid`;
+          the jobs list filters by `capacity_reservation_id`.
+        - Family job authority (`provisioning/compute/src/compute_provisioning/jobs/`): new
+          `submission.py`, `JobSubmissionService`: the route key, a registered-host check
+          for every job, contract and operation identity, the queue, and
+          `JobEngine.submit`. `action_request.py`: `JobActionRequest` loses `deal_ref`.
+          `engine.py`: submission records no escrow or deal reference; the list filters by
+          capacity reservation. `db.py` and `route_service.py` follow.
+        - Family kit: new `job_fulfillment.py`:
+          - the prepared job (offering mode, executor action, `host_id`,
+            `executor_target`, opaque parameters);
+          - the domain's plan protocol: prepare a create from the request, the resource,
+            and the pool configuration (honouring `allocate`); prepare a teardown from the
+            settlement result, the create job's parameters, and the pool configuration;
+          - the fulfillment metadata (`create_job_id`, `teardown_job_id`,
+            `current_job_id`, `operation`, `host_id`, `executor_target`);
+          - `JobFulfillmentProvider`, implementing `kit/fulfillment`'s provider protocol:
+            - submission through `JobSubmissionService`, with contract identity
+              `<reservation>:create` or `<reservation>:teardown`, action kind the
+              operation, and the operation id derived from the contract;
+            - a disabled host refused for a create only;
+            - status on `JobStatus`, a succeeded create reported only with valid
+              `DeliveryEvidence`, `failed` with a detail naming it otherwise;
+            - one provisioned resource, `executor_target`, and `resolve_executor_job_id`;
+            - teardown preparation reading the create job's parameters, a missing create
+              job a `ProviderConfigInvalidError`;
+            - the delivery from the create job's evidence and its credentials' allowlist.
+        - Service (`provisioning/compute/service/src/compute_provisioning_service/`):
+          `db/migrations.py` drops the jobs table's `escrow_uid` and `deal_ref`;
+          `controllers/jobs_controller.py` filters by capacity reservation; `container.py`
+          and `app_runtime.py` build the submission service and lose the bare-metal
+          operations service. The compute client's `list_jobs`, async and sync, filters by
+          capacity reservation.
+        - VM, until 5B.12.B moves it: `services/job_submitter.py` passes no escrow;
+          `services/ansible_fulfillment_provider.py`'s contracts carry no `deal_ref`.
+        - Bare-metal adapter: `services/bare_metal_fulfillment_provider.py` becomes the plan
+          (`services/bare_metal_fulfillment_plan.py`: publication and resource binding,
+          `physical_host_id` checked against the declaration, grant parameters, reclaim
+          parameters from the grant job's, the reclaim policy); the provider file and
+          `services/bare_metal_operations_service.py` tombstoned (only the provider uses
+          the latter); `codec.py` emits `DeliveryEvidence` for a grant; `runtime.py` and
+          `bundle.py` build the family provider over the plan.
+        - `arkhai_bare_metal`: `schema.py`'s `BareMetalAccessResult` becomes the domain's
+          buyer result (access method, user, `ready_at`, lease end; no endpoint);
+          `domain_runtime.py`'s result codec and `__init__.py` follow; `evidence.py`'s
+          `BareMetalLeaseReadyResult` loses `access_grant_ref`.
+        - Bare-metal storefront: `hosted_lifecycle.py` reads the access delivery, treats an
+          active fulfillment naming an endpoint as access-ready, and takes `ready_at` from
+          the delivery and `expires_at` from its materialization; `fulfillment_service.py`
+          stores the buyer result and serves `/access` from the live delivery and its
+          materialization; `api.py`, `models.py`, and `sqlite_client.py` follow. Lease
+          registration still passes `host_id` until 5B.12.C.
+        - e2e: `tests/e2e/roles/scenarios/vms/test_listing_shapes.py` filters jobs by
+          capacity reservation.
+        - During A, check whether scheduling places on a disabled host; if it does, a
+          create there waits in dispatch until the host is re-enabled, and the finding is
+          routed to closeout task 2.6.
+        - Tests:
+          - `provisioning/compute/tests/unit/test_job_fulfillment.py`, the provider against
+            a fake plan and job authority: dispatch, contract identity, the operation id,
+            the host checks for a create and a teardown, status for every `JobStatus`, a
+            succeeded create with missing or invalid evidence, an undecodable envelope,
+            teardown from the create job's parameters, a missing create job, the
+            credentials' allowlist (`ssh_key_path_host` and unknown fields refused);
+          - `provisioning/compute/tests/unit/test_job_submission.py`, absorbing
+            `service/tests/unit/services/test_bare_metal_operations_service.py`'s host
+            cases (that file tombstoned);
+          - the contracts' delivery test;
+          - `tests/integration/test_job_authority.py` (the reservation filter);
+          - the service's job-column migration (integration);
+          - the service's bare-metal fulfillment through the real orchestrator and
+            convergence (`integration/bare_metal_deal.py` and the suites using it,
+            `integration/conftest.py`);
+          - the bare-metal adapter's tests rewritten to the plan;
+          - `domains/bare_metal/tests/test_schema.py`, `test_evidence.py`, and
+            `test_domain_runtime.py`;
+          - the bare-metal storefront's `test_hosted_lifecycle.py`,
+            `test_hosted_lifecycle_repository.py`, `test_fulfillment_service.py`,
+            `test_http_settlement.py`, `test_persistence.py`, and its other tests building
+            lease-ready results.
+        - End to end: neither lane exercises bare metal's provisioned fulfillment (the
+          bare-metal lane runs publication and introduction; the deal scenario comes with
+          Section 9), so A's bare-metal evidence is the service's integration suite. Both
+          lanes still run, VM's covering the job-list filter.
+        Done 2026-10-06, as planned:
+        - Delivery contracts and job authority:
+          - `compute_provisioning_contracts.delivery` holds `AccessEndpoint`,
+            `DeliveryEvidence` (result kind `compute.delivery-evidence.v1`),
+            `DeliveredCredential`, and `AccessDelivery` (`compute.access-delivery` v1).
+          - Jobs record no escrow or deal reference. `JobStatusResponse` names a
+            fulfillment job's capacity reservation, and the jobs list, its route, both
+            clients, and the controller filter by it.
+          - Migration `20261006_001_drop_job_deal_correlation` drops the two columns and
+            the escrow index.
+        - `JobSubmissionService` (`jobs/submission.py`):
+          - every job needs a registered host, and a create also needs it enabled;
+          - a contract job takes a UUIDv5 operation id derived from its contract;
+          - an operator's job keeps its own operation id.
+        - `JobFulfillmentProvider` (`job_fulfillment.py`):
+          - contract identity is `<reservation>:<operation>`;
+          - a create is succeeded only with valid evidence, otherwise `failed`;
+          - the provisioned resource is `executor_target`;
+          - teardown is prepared from the create job's parameters, and a missing create
+            job is a configuration error;
+          - the delivery is the create job's evidence plus allowlisted credentials.
+        - Bare metal:
+          - `BareMetalFulfillmentPlan` replaces its provider and operations service (both
+            tombstoned). Its codec reports a grant as delivery evidence, or the raw fact
+            under its own kind when the fact cannot say where to connect.
+          - `BareMetalResult` (account, `ready_at`, lease end, no endpoint) replaces
+            `BareMetalAccessResult`, and the lease-ready result loses `access_grant_ref`.
+          - The storefront reads the access delivery (`access_delivery.py`); `/access`
+            serves the endpoint live, with the lease end from its materialization.
+        - Interim VM changes until 5B.12.B: VM's submitter and provider pass no escrow or
+          deal reference, and its `test_fulfillment_api.py` and provider test drop the job's
+          deal reference.
+        - `storefront-publication`'s delta scenario "Bare-metal result is returned" now names
+          the buyer result and the live endpoint.
+        - Tests:
+          - family kit: `test_job_fulfillment.py`, `test_job_submission.py`, and the
+            reservation filter in `test_job_authority.py`;
+          - contracts: `test_delivery.py`;
+          - bare-metal adapter: `test_bare_metal_fulfillment_plan.py`, including a mock
+            grant delivered and reclaimed through the family provider; the old provider
+            test is tombstoned;
+          - service: `test_bare_metal_mock_profile.py` drives a grant to `active` through
+            convergence, reads the delivery through the result route, and reclaims from
+            the grant's parameters to `torn_down`; also `test_job_deal_correlation_migration.py`
+            (integration), the integration harness composing bare metal as the container
+            does, and `test_database.py` and `test_authority_composition.py` updated;
+          - bare-metal domain and storefront suites on the new shapes, with the hosted
+            evidence's readiness and expiry sources asserted;
+          - e2e `test_listing_shapes.py` filters jobs by reservation.
+        - Versions:
+          - contracts 0.6.0, client 0.5.0, family kit 0.16.0, service 0.14.0;
+          - bare-metal adapter 0.8.0, arkhai-bare-metal 0.8.0, bare-metal storefront 0.9.0;
+          - vms-provisioning-adapter 0.11.1;
+          - vms-storefront 0.11.1, whose exact bare-metal storefront pin moved to 0.9.0;
+          - e2e-tests 0.1.5;
+          - floors raised to match.
+        - Relocking: by `uv_project.py`, except the VM storefront and the bare-metal
+          storefront, which were locked by hand. The latter keeps the snapshot's platform
+          markers, which a relock flips.
+        - Validation:
+          - contracts 60; family kit 224; compute client 50; Ansible distribution 92;
+          - bare-metal domain 132, adapter 39, buyer 13, storefront 230; VM adapter 45;
+          - provisioning service 719 unit and 424 integration;
+          - VM storefront by frozen sync 1109 unit and 348 integration (the two known
+            `test_alkahest` failures);
+          - e2e unit 236 (the known 10.1 failure), and 178 e2e and smoke tests collect;
+          - the root `make -k test` aggregate: its 44 suites pass, failing only where this
+            environment cannot run a suite; the four locks its reinit rewrote were
+            restored;
+          - `make check-locks`, `make check-packaging`, comment hygiene, documentation
+            citations, and OpenSpec strict validation (1.14.0) pass.
+        - Neither lane exercises bare-metal fulfillment, so its evidence is the integration
+          suite above. Not yet run end to end.
+        - Scheduling and admission do not read a host record's enabled flag, so a create can
+          be placed on a disabled host; its dispatch then retries until the host is
+          re-enabled. Routed to closeout task 2.6.
   - [ ] 5B.12.B VM end to end, with the migration.
         - VM adapter: `services/ansible_fulfillment_provider.py` becomes the plan
           (`services/vm_fulfillment_plan.py`: the relay-port lease, playbook override, and
           extra-vars validation), the provider file tombstoned; `services/job_submitter.py`
-          tombstoned, `services/vm_operations_service.py`, `services/host_operations_service.py`,
-          `models/vm_request_model.py`, `legacy_backfill.py`, and `runtime.py` submitting
-          through the family; `fulfillment_results.py` tombstoned; `codec.py` emits the
-          delivery's neutral fields, keeping the guest's internal address in the stored
+          tombstoned; `services/vm_operations_service.py` and
+          `services/host_operations_service.py` submit through `JobSubmissionService`,
+          keeping their request operation ids; `models/vm_request_model.py`,
+          `models/fulfillment_model.py`, `runtime.py`, and `bundle.py` follow;
+          `fulfillment_results.py` tombstoned; `codec.py` emits `DeliveryEvidence` for a
+          create and its credentials, keeping the guest's internal address in the stored
           result only; `legacy_backfill.py` writes the family's shapes.
-        - Service: a migration in `db/migrations.py` rewriting VM's stored prepared
-          operations and fulfillment metadata, and the create-job results of active VM
-          fulfillments, into the family's shapes (bare metal is not live and is not
-          migrated).
+        - Service: a migration in `db/migrations.py` rewriting, for every VM fulfillment in
+          every state, its prepared create and teardown operations, `provider_metadata`
+          and `teardown_provider_metadata` (`vm_target` becomes `executor_target`), and
+          each create-job result it references, into the family's shapes. VM's job
+          parameters are re-wrapped unchanged. Bare metal is not live and is not migrated.
+          Check whether VM's legacy-backfilled records reference create jobs that exist;
+          VM's plan reads create parameters only for teardowns it prepares itself.
         - VM storefront: `services/fulfillment_resume_runtime.py` and
           `services/fulfillment_service.py` read the access delivery (tenant credentials to
           the buyer, root to the seller's own store; no key path, internal address, or
           guest name).
-        - Tests: the migration (`provisioning/compute/service/tests/unit/test_job_fulfillment_migration.py`:
-          each stored shape rewritten, an inactive fulfillment's result left alone,
-          idempotent on a second run); `test_legacy_vm_fulfillment_backfill.py` and
-          `test_fulfillment_convergence_after_legacy_backfill.py` on the new shapes;
-          `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
-          `integration/test_fulfillment_api.py`; the VM storefront's
-          `tests/fulfillment_fixtures.py`, `unit/test_fulfillment_provisioning.py`,
-          `unit/test_fulfillment_resume_runtime.py`, `unit/test_fulfillment_service.py`,
-          `unit/test_loop_gate_wiring.py`, `integration/test_committed_window.py`;
-          `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios reading
-          delivered credentials.
-  - [ ] 5B.12.C Provisioning names the guest; lease registration takes its target from the
-        fulfillment.
+        - Tests:
+          - the migration (`provisioning/compute/service/tests/integration/test_job_fulfillment_migration.py`):
+            each stored shape rewritten in every state, a retried dispatch of a migrated
+            in-flight create returning the existing job, idempotent on a second run;
+          - `test_legacy_vm_fulfillment_backfill.py` and
+            `test_fulfillment_convergence_after_legacy_backfill.py` on the new shapes;
+          - `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
+          - `integration/test_fulfillment_api.py`;
+          - the VM storefront's `tests/fulfillment_fixtures.py`,
+            `unit/test_fulfillment_provisioning.py`,
+            `unit/test_fulfillment_resume_runtime.py`, `unit/test_fulfillment_service.py`,
+            `unit/test_loop_gate_wiring.py`, and `integration/test_committed_window.py`;
+          - `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios reading
+            delivered credentials.
+  - [ ] 5B.12.C Provisioning names the guest.
         - VM's plan derives `executor_target` from the capacity reservation, checked
           against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
           `vm_target`.
-        - Contracts: `LeaseRegistration` loses `executor_target`; the family lease service
+        - Contracts: `LeaseRegistration` loses `executor_target`, the minimum guest naming
+          forces (5B.12.D removes registration); the family lease service
           (`provisioning/compute/src/compute_provisioning/leases.py`) takes it from the
           reservation's fulfillment record.
         - VM storefront: the three generators go (`services/vm_fulfillment_service.py`,
@@ -2650,11 +2800,33 @@ re-verifies them by grep before each move.
           through the real stack; the VM storefront's suites naming `vm_target`; e2e
           stage 08a, `test_non_erc20_settlement.py`, and the VM scenarios' conftest row
           reader.
-  - Each slice's gate: the provisioning-family suites, both adapters, both storefronts
-    (the VM storefront by frozen sync), the e2e unit suite and collection, the root
-    aggregate, `make check-packaging`, comment hygiene, documentation citations, OpenSpec
-    strict validation (1.14.0), and both end-to-end lanes. Versions per slice, recorded
-    in its completion note.
+  - [ ] 5B.12.D **Decision gate**, then lease registration removed. Decide when a lease
+        with no negotiated start begins (`design.md`, "5B.12 implementation audit
+        (2026-10-06)", row 11): (a) at commit, for every domain; (b) when its fulfillment
+        becomes active, for every domain, the site moving the window to the activation,
+        keeping its committed duration, and marking it final, with storefronts reading the
+        window back; (c) VM's post-delivery commit finalizes the window. The maintainer
+        leans to (b). Before deciding, read through: how commit says a deal has no
+        negotiated start; how each storefront reads the final window (bare metal's
+        evidence `expires_at` included); whether any reservation lookup still needs the
+        escrow that registration records on a negotiation-time hold, given the jobs now
+        correlate on the reservation (5B.8.B's end-to-end escrow lookups failed for want of
+        it: `design.md`, "Controls and routes (5B.8)", slice B's implementation review,
+        finding 3); and VM's settlement outcome that defers a deal until registration
+        succeeds. Bring the options back with the code read through, then record the
+        decision and amend this task with the files.
+        After the decision, the direction already agreed: the registration route, its
+        contract, `LeaseRegistration`, and the client methods go; VM's
+        `_register_vm_lease_with_settings` and its resume-runtime step and bare metal's
+        call in `hosted_lifecycle.py` go; provisioning records the target on the
+        reservation from the fulfillment record; the permanent requirements describing
+        registration are modified by the spec delta. If (b), the closeout finding about a
+        commit re-recording a truncated window is retired.
+  - Each slice's gate: the provisioning-family suites, both adapters, both storefronts (the
+    VM storefront by frozen sync), the e2e unit suite and collection, the root aggregate,
+    `make check-packaging`, comment hygiene, documentation citations, OpenSpec strict
+    validation (1.14.0), and both end-to-end lanes. Versions per slice, recorded in its
+    completion note.
 
 ## 6. Bare metal on the kit negotiation runtime
 
@@ -2929,6 +3101,20 @@ service code.
       network, one bridge per host, with no isolation rule, so guests on one host,
       including different buyers', share a layer-2 segment; route to VM's provisioning
       owner.
+      Found in 5B.12's implementation audit (`design.md`, "5B.12 implementation audit
+      (2026-10-06)", rows 6 and 9): the site ledger keys reservation idempotency and
+      release-by-escrow on the escrow, a settlement identity hosted deals lack, while jobs
+      now correlate on the capacity reservation; weigh the site's storefront-facing
+      correlation the same way. And what a storefront keeps of a delivery, and when it
+      stops serving it, differs by domain with no domain requiring it: the VM storefront
+      stores the endpoint in its escrow record and on its listing and submits it with an
+      Alkahest fulfillment, while bare metal serves it live through `/access`. Open a
+      change at closeout, under Goal 4 ("Make a domain a composition of kit"), to make it
+      one kit mechanism.
+      Found in 5B.12.A: site admission and settlement scheduling never read a host
+      record's enabled flag, so a create can be admitted and placed on a disabled host,
+      and its dispatch then retries until an operator re-enables the host. Disabling a host
+      should keep new deliveries off it at admission.
       Found in 5B.10: this change's 19 delta requirements over 500 characters, which
       the validator release after the pinned one fails under `--strict`, are restructured
       here (moving examples and edge cases into scenarios, or splitting) before promotion.

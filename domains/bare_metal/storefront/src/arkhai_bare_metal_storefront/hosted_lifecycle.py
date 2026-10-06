@@ -10,7 +10,6 @@ from typing import Any
 from arkhai_bare_metal import (
     HOSTED_MECHANISM,
     BareMetalAcceptedHostedBinding,
-    BareMetalAccessResult,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     BareMetalMaterialization,
@@ -33,6 +32,7 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
 from .hosted_binding import build_accepted_hosted_obligation
 from .models import BareMetalHostedLifecycle
@@ -765,39 +765,19 @@ class BareMetalHostedLifecycleCallbacks:
             fulfillment_id,
             capacity_reservation_id=reservation_id,
         )
-        payload = result_envelope.payload
-        if (
-            result_envelope.kind != "fulfillment.result.v1"
-            or result_envelope.schema_version != 1
-            or not isinstance(payload, dict)
-            or payload.get("state") != "active"
-        ):
+        try:
+            delivery = active_access_delivery(result_envelope)
+            ssh_endpoint(delivery)
+        except ValueError as exc:
             raise BareMetalHostedLifecycleError(
-                "provisioning returned unsupported fulfillment result"
-            )
-        domain = VersionedEnvelope.model_validate(payload.get("domain_result"))
-        if (
-            domain.kind != "bare_metal.fulfillment.result.v1"
-            or domain.schema_version != 2
-        ):
+                f"executor success lacks authoritative access-ready state: {exc}"
+            ) from exc
+        materialization = await self.db.load_bare_metal_materialization(
+            negotiation_id=binding.negotiation_id
+        )
+        if materialization is None:
             raise BareMetalHostedLifecycleError(
-                "provisioning returned unsupported bare-metal result"
-            )
-        access = BareMetalAccessResult.model_validate(domain.payload)
-        if (
-            access.action != "node_grant_access"
-            or access.status != "success"
-            or access.access_grant_ref is None
-            or access.lease_expires_at is None
-            or access.timestamp is None
-        ):
-            raise BareMetalHostedLifecycleError(
-                "executor success lacks authoritative access-ready state"
-            )
-        ready_at = datetime.fromisoformat(access.timestamp)
-        if ready_at.tzinfo is None:
-            raise BareMetalHostedLifecycleError(
-                "access-ready timestamp is not timezone-aware"
+                "access-ready fulfillment has no recorded materialization"
             )
         # The lease is the family's: register its tail on the reservation, the
         # machine the access was granted on as the target teardown addresses.
@@ -810,7 +790,7 @@ class BareMetalHostedLifecycleCallbacks:
                     "negotiation_id": binding.negotiation_id,
                     "hosted_obligation_ref": binding.obligation_ref,
                 },
-                executor_target=access.host_id,
+                executor_target=materialization.host_id,
             )
         )
         public_result = BareMetalLeaseReadyResult(
@@ -821,11 +801,10 @@ class BareMetalHostedLifecycleCallbacks:
             capacity_reservation_ref=reservation_id,
             settlement_resource_ref=settlement_resource_id,
             fulfillment_ref=fulfillment_id,
-            access_grant_ref=access.access_grant_ref,
             access_method=facts.access_method,
             access_ready=True,
-            access_ready_at=ready_at,
-            expires_at=access.lease_expires_at,
+            access_ready_at=delivery.ready_at,
+            expires_at=materialization.lease_end_utc,
         )
         lifecycle = await self.db.advance_bare_metal_hosted_lifecycle(
             obligation_ref=record.obligation_ref,

@@ -66,9 +66,14 @@ API-credit deal runs inside the VM lane.
   Neither adapter imports the other or the deployed service. The composition root
   builds the one job authority and the one host authority and hands both to every
   adapter runtime.
-  Once that boundary is proven, the two job-backed fulfillment providers' shared shape
-  becomes a helper in `compute_provisioning`, leaving each domain its job preparation
-  and result mapping.
+  Once that boundary is proven, job-backed fulfillment becomes the family's: one provider
+  in `compute_provisioning` submits through one job submission, reads status, and
+  delivers, and each domain contributes only its preparation and its codec. A codec
+  reports a create as typed delivery evidence, which the provider validates before the
+  create succeeds; the delivery says only how to reach what was provisioned; teardown is
+  prepared from the create job's own parameters; jobs correlate on the capacity
+  reservation rather than a deal reference; provisioning names the guests it creates; and
+  lease registration by the storefront is removed, once when a lease begins is decided.
   Job results and credentials are stored and served as envelopes, executors classify
   retryability and redact, a cancelled job stays cancelled, and hosts carry a connection
   envelope whose codec belongs to its implementation (only `ssh` today); connection
@@ -280,6 +285,12 @@ None.
   `openspec/specs/resource-pool-management/spec.md`, `docs/development/ARCHITECTURE.md`.
 - `VersionedEnvelope` lives in `arkhai-core` — `openspec/specs/fulfillment/spec.md`,
   `docs/development/ARCHITECTURE.md`.
+- Job-backed fulfillment is the compute family's: one provider and one job submission,
+  domains contributing preparation and codecs; a create succeeds only with readable
+  delivery evidence; delivery says only how to reach what was provisioned; jobs correlate
+  on the capacity reservation; provisioning names what it provisions —
+  `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`
+  ("Family kits", "Fulfillment status and results").
 
 ## Dependencies
 

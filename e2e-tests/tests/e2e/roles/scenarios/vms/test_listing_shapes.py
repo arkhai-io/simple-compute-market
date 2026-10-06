@@ -310,12 +310,13 @@ class TestStage05_Commitment:
         self, provisioning_client, shape_state
     ):
         require_state(shape_state, "reservation_ids")
-        # A provisioning job records the capacity reservation it fulfils in its
-        # `escrow_uid` field, not the on-chain escrow.
+        # A fulfillment's jobs are listed by the capacity reservation they serve.
         jobs = [
             job
             for reservation_id in shape_state.reservation_ids
-            for job in provisioning_client.list_jobs(escrow_uid=reservation_id).jobs
+            for job in provisioning_client.list_jobs(
+                capacity_reservation_id=reservation_id
+            ).jobs
         ]
         creates = [job for job in jobs if job.params.get("vm_action") == "create"]
         assert creates, (

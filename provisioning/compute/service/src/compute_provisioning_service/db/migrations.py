@@ -2858,6 +2858,20 @@ def _migrate_drop_job_contract_version(engine: Engine) -> None:
         _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["contract_version"])
 
 
+def _migrate_drop_job_deal_correlation(engine: Engine) -> None:
+    """Drop ``ansible_jobs.escrow_uid`` and ``ansible_jobs.deal_ref``.
+
+    A job correlates with its deal through the capacity reservation it serves,
+    which every deal's jobs share whatever its settlement mechanism; a deal's
+    commercial identity does not cross the provisioning boundary. No reader
+    used ``deal_ref``, and ``escrow_uid`` held either an escrow only some deals
+    have or, for VM fulfillment, the reservation itself. The escrow index goes
+    with its column; every other column and index is kept.
+    """
+    if _table_exists(engine, "ansible_jobs"):
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["escrow_uid", "deal_ref"])
+
+
 # The parameters a bare-metal access job stores, in the order the bare-metal
 # adapter writes them.
 _BARE_METAL_JOB_PARAMETERS = (
@@ -3022,5 +3036,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261005_002_reservation_release_requested_at",
         _migrate_reservation_release_requested_at,
+    ),
+    Migration(
+        "20261006_001_drop_job_deal_correlation",
+        _migrate_drop_job_deal_correlation,
     ),
 )

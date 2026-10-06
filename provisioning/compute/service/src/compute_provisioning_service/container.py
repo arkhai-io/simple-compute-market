@@ -12,6 +12,7 @@ from compute_provisioning import JobExecutorTable
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_ansible import (
     ANSIBLE_COMPONENT,
     SSH_CONNECTION_KIND,
@@ -377,6 +378,14 @@ class Container(containers.DeclarativeContainer):
         cfg=config,
     )
 
+    # Every job, a fulfillment's or an operator's, is submitted through this.
+    job_submission = providers.Singleton(
+        JobSubmissionService,
+        engine=job_engine,
+        hosts=host_authority,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+    )
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
@@ -420,14 +429,8 @@ class Container(containers.DeclarativeContainer):
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
         job_engine=job_engine,
-        job_queue_provider=providers.Object(_resolved_job_queue),
+        job_submission=job_submission,
         config=config,
-        host_authority=host_authority,
-    )
-    bare_metal_operations_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("operations_service"),
     )
     bare_metal_mock_executor = providers.Callable(
         _runtime_value,
@@ -633,7 +636,6 @@ resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
-resolved_bare_metal_operations_service: Any | None = None
 resolved_bare_metal_mock_executor: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_lease_route_service: "LeaseRouteService | None" = None

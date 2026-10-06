@@ -58,9 +58,7 @@ class JobRecord(Base):
     retry_count = Column(Integer, default=0, nullable=False)
     max_retries = Column(Integer, default=3, nullable=False)
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
-    escrow_uid = Column(String, nullable=True, index=True)
     capacity_reservation_id = Column(String, nullable=True, index=True)
-    deal_ref = Column(JSON, nullable=True)
     offering_mode = Column(String, nullable=True)
     # The contract action this job was submitted under, part of its contract
     # identity; for a job submitted without a contract, the action it runs.

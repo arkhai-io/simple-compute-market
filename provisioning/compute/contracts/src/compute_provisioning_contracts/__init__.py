@@ -31,6 +31,15 @@ from .contracts import (
     contract_major,
     lease_state_for_reservation_state,
 )
+from .delivery import (
+    ACCESS_DELIVERY_KIND,
+    ACCESS_DELIVERY_SCHEMA_VERSION,
+    AccessDelivery,
+    AccessEndpoint,
+    DELIVERY_EVIDENCE_RESULT_KIND,
+    DeliveredCredential,
+    DeliveryEvidence,
+)
 from .hosts import (
     ConnectionSubmission,
     ConnectionView,
@@ -78,6 +87,13 @@ from .routes import (
 )
 
 __all__ = [
+    "ACCESS_DELIVERY_KIND",
+    "ACCESS_DELIVERY_SCHEMA_VERSION",
+    "AccessDelivery",
+    "AccessEndpoint",
+    "DELIVERY_EVIDENCE_RESULT_KIND",
+    "DeliveredCredential",
+    "DeliveryEvidence",
     "COMPUTE_PROVISIONING_CONTRACT_VERSION",
     "CredentialEnvelope",
     "FulfillmentAcceptanceResponse",

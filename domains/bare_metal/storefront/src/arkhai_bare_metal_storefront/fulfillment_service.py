@@ -9,8 +9,13 @@ from typing import TYPE_CHECKING, Any
 from arkhai_bare_metal import (
     BareMetalMaterialization,
     BareMetalReceipt,
+    BareMetalResult,
 )
 from compute_provisioning_contracts import (
+    ACCESS_DELIVERY_KIND,
+    ACCESS_DELIVERY_SCHEMA_VERSION,
+    AccessDelivery,
+    AccessEndpoint,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
@@ -18,6 +23,7 @@ from core_storefront import StorefrontFulfillmentContext
 from market_core import VersionedEnvelope
 from market_identity import Identity
 
+from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
 
 if TYPE_CHECKING:
@@ -279,41 +285,21 @@ class BareMetalFulfillmentService:
             fulfillment_id=accepted.fulfillment_id,
         )
 
-    async def _active_access_result(
+    async def _active_delivery(
         self,
         *,
         capacity_reservation_id: str,
         fulfillment_id: str,
-    ) -> Any:
+    ) -> tuple[AccessDelivery, AccessEndpoint]:
         result_envelope = await self.fulfillment_client.get_fulfillment_result(
             fulfillment_id,
             capacity_reservation_id=capacity_reservation_id,
         )
-        if (
-            result_envelope.kind != "fulfillment.result.v1"
-            or result_envelope.schema_version != 1
-            or not isinstance(result_envelope.payload, dict)
-            or result_envelope.payload.get("state") != "active"
-        ):
-            raise BareMetalFulfillmentError(
-                "provisioning returned an unsupported fulfillment result"
-            )
         try:
-            domain_envelope = VersionedEnvelope.model_validate(
-                result_envelope.payload["domain_result"]
-            )
-        except Exception as exc:
-            raise BareMetalFulfillmentError(
-                "active fulfillment returned no bare-metal result"
-            ) from exc
-        if (
-            domain_envelope.kind != "bare_metal.fulfillment.result.v1"
-            or domain_envelope.schema_version != 2
-        ):
-            raise BareMetalFulfillmentError(
-                "provisioning returned an unsupported bare-metal result envelope"
-            )
-        return self.db._market_domain.codecs.result(domain_envelope.payload)
+            delivery = active_access_delivery(result_envelope)
+            return delivery, ssh_endpoint(delivery)
+        except ValueError as exc:
+            raise BareMetalFulfillmentError(str(exc)) from exc
 
     async def status(
         self,
@@ -382,15 +368,9 @@ class BareMetalFulfillmentService:
             )
 
         if remote.state == "active":
-            result = (
-                await self._active_access_result(
-                    capacity_reservation_id=str(reservation_id),
-                    fulfillment_id=str(fulfillment_id),
-                )
-            ).model_copy(update={"details": None, "host": None, "port": None})
-            await self.db.save_bare_metal_result(
-                negotiation_id=negotiation_id,
-                result=result,
+            delivery, endpoint = await self._active_delivery(
+                capacity_reservation_id=str(reservation_id),
+                fulfillment_id=str(fulfillment_id),
             )
             materialization = await self.db.load_bare_metal_materialization(
                 negotiation_id=negotiation_id
@@ -399,6 +379,17 @@ class BareMetalFulfillmentService:
                 raise BareMetalFulfillmentError(
                     "bare-metal materialization is missing during recovery"
                 )
+            # The stored result names no endpoint: where to connect is served
+            # live by ``access`` while the lease is active.
+            await self.db.save_bare_metal_result(
+                negotiation_id=negotiation_id,
+                result=BareMetalResult(
+                    access_method=materialization.access_method,
+                    ssh_user=str(endpoint.user),
+                    ready_at=delivery.ready_at,
+                    lease_end_utc=materialization.lease_end_utc,
+                ),
+            )
             await self.db.save_bare_metal_receipt(
                 negotiation_id=negotiation_id,
                 receipt=BareMetalReceipt(
@@ -410,8 +401,8 @@ class BareMetalFulfillmentService:
                     status="ready",
                     access_ref={"fulfillment_id": str(fulfillment_id)},
                     result_ref={
-                        "kind": "bare_metal.fulfillment.result.v1",
-                        "schema_version": 1,
+                        "kind": ACCESS_DELIVERY_KIND,
+                        "schema_version": ACCESS_DELIVERY_SCHEMA_VERSION,
                     },
                 ),
             )
@@ -439,27 +430,22 @@ class BareMetalFulfillmentService:
             raise BareMetalFulfillmentError(
                 "bare-metal fulfillment has no active access identity"
             )
-        result = await self._active_access_result(
+        _, endpoint = await self._active_delivery(
             capacity_reservation_id=str(reservation_id),
             fulfillment_id=str(fulfillment_id),
         )
-        if (
-            result.action != "node_grant_access"
-            or result.status != "success"
-            or result.ssh_user is None
-            or result.host is None
-            or result.port is None
-        ):
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment has no buyer-ready SSH access"
-            )
+        materialization = await self.db.load_bare_metal_materialization(
+            negotiation_id=negotiation_id
+        )
         return {
             "negotiation_id": negotiation_id,
             "method": "ssh",
-            "host": result.host,
-            "port": result.port,
-            "username": result.ssh_user,
-            "expires_at": result.lease_expires_at,
+            "host": endpoint.host,
+            "port": endpoint.port,
+            "username": endpoint.user,
+            "expires_at": (
+                materialization.lease_end_utc if materialization is not None else None
+            ),
         }
 
     async def teardown(

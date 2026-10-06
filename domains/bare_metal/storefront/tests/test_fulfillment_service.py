@@ -214,16 +214,19 @@ class FakeFulfillment:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "host_id": "machine-a",
-                        "physical_host_id": "host-a",
-                        "ssh_user": "tenant-a",
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.10",
+                                "port": 22,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
@@ -305,7 +308,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert ready["state"] == "active"
     assert db.receipt.status == "ready"
     assert db.result.ssh_user == "tenant-a"
-    assert db.result.details is None
+    assert "host" not in db.result.model_dump()
 
     tearing_down = await service.teardown(
         negotiation_id="neg-a",

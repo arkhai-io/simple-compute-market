@@ -16,12 +16,19 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
+from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning_contracts import (
+    ACCESS_DELIVERY_KIND,
+    DELIVERY_EVIDENCE_RESULT_KIND,
+    AccessDelivery,
+    DeliveryEvidence,
+    LeaseTermination,
+)
 
 from .bare_metal_deal import (
     HOST_ID,
@@ -103,11 +110,12 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     finished = await test_client.wait_for_job(grant_job_id, timeout=5.0)
 
     assert finished["status"] == "succeeded", finished
-    access = finished["result"]["value"]
-    assert access["action"] == NODE_GRANT_ACCESS_ACTION
-    assert access["ssh_user"]
-    assert access["host"] == SSH_HOST
-    assert access["port"] == "2201"
+    # The grant's result is the family's delivery evidence for the host.
+    assert finished["result"]["result_kind"] == DELIVERY_EVIDENCE_RESULT_KIND
+    evidence = DeliveryEvidence.model_validate(finished["result"]["value"])
+    (endpoint,) = evidence.endpoints
+    assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", SSH_HOST, 2201)
+    assert endpoint.user
     assert (await test_client.list_bare_metal_mock_rules())[0]["waiting"] == 0
 
 
@@ -170,3 +178,61 @@ async def test_bare_metal_rule_routes_refuse_an_unknown_resume(test_client) -> N
     with pytest.raises(AsyncProvisioningTestClientError) as refused:
         await test_client.resume_bare_metal_rule("missing")
     assert refused.value.status_code == 404
+
+
+async def _converge(clients) -> None:
+    """One convergence cycle, stepped while the timer-driven loop is held."""
+    await clients.family.pause_fulfillment_convergence()
+    try:
+        await clients.family.advance_fulfillment_convergence_cycle()
+    finally:
+        await clients.family.resume_fulfillment_convergence()
+
+
+async def test_a_grant_is_delivered_through_convergence_and_reclaimed_from_its_parameters(
+    test_client, client_and_queue
+) -> None:
+    """The family's job-backed provider, composed as the service composes it:
+    convergence makes the fulfillment active only on the grant's delivery
+    evidence, the result route delivers how to reach the host, and the reclaim
+    is prepared from what the grant job ran with."""
+    clients, job_queue = client_and_queue
+    capacity_reservation_id = await _scheduled(clients, "escrow-bm-delivered")
+    fulfillment_id = await begin(clients, capacity_reservation_id, "escrow-bm-delivered")
+    grant_job_id = create_job_id(capacity_reservation_id)
+    granted = await test_client.wait_for_job(grant_job_id, timeout=5.0)
+    assert granted["status"] == "succeeded", granted
+
+    await _converge(clients)
+
+    status = await clients.family.get_fulfillment_status(fulfillment_id)
+    assert status.state == "active"
+    result = await clients.family.get_fulfillment_result(fulfillment_id)
+    assert result.payload["domain_result"]["kind"] == ACCESS_DELIVERY_KIND
+    delivery = AccessDelivery.model_validate(result.payload["domain_result"]["payload"])
+    (endpoint,) = delivery.endpoints
+    assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", SSH_HOST, 2201)
+    assert endpoint.user
+    assert delivery.credentials == ()
+    assert len(result.payload["provisioned_resources"]) == 1
+
+    await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+    await _converge(clients)
+
+    listed = await clients.family.list_jobs(capacity_reservation_id=capacity_reservation_id)
+    reclaim = next(job for job in listed.jobs if job.job_id != grant_job_id)
+    assert listed.total == 2
+    assert reclaim.capacity_reservation_id == capacity_reservation_id
+    grant_params = (await clients.family.get_job(grant_job_id)).params
+    assert reclaim.params == {
+        **grant_params,
+        "action": NODE_RECLAIM_ACCESS_ACTION,
+        "reclaim_policy": "remove_lease_key",
+    }
+    reclaimed = await test_client.wait_for_job(reclaim.job_id, timeout=5.0)
+    assert reclaimed["status"] == "succeeded", reclaimed
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+
+    await _converge(clients)
+
+    assert (await clients.family.get_fulfillment_status(fulfillment_id)).state == "torn_down"

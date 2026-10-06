@@ -530,18 +530,19 @@ class _ProvisioningClient:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "host_id": "machine-1",
-                        "physical_host_id": "host-1",
-                        "ssh_user": "tenant-a",
-                        "host": "203.0.113.25",
-                        "port": 2222,
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.25",
+                                "port": 2222,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
@@ -630,15 +631,18 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     public_result = result
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
-    assert public_result["result"]["host"] is None
-    assert public_result["result"]["port"] is None
+    # Where to connect is served live by the access route, never stored.
+    assert "host" not in public_result["result"]
+    assert "port" not in public_result["result"]
+    lease_end = public_result["receipt"]["lease_end_utc"]
+    assert public_result["result"]["lease_end_utc"] == lease_end
     assert access == {
         "negotiation_id": negotiation_id,
         "method": "ssh",
         "host": "203.0.113.25",
         "port": 2222,
         "username": "tenant-a",
-        "expires_at": None,
+        "expires_at": lease_end,
     }
     serialized_result = json.dumps(public_result, sort_keys=True)
     for forbidden in (

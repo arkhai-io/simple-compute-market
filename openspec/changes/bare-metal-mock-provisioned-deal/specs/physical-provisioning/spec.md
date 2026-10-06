@@ -227,22 +227,64 @@ storefront calls them.
 ### Requirement: Job-backed fulfillment is the compute family's
 
 A fulfillment provider that executes through the job authority MUST be the compute
-family's: it submits, reads status, resolves provisioned resources, and assembles the
-delivery. A domain MUST contribute only its preparation, which turns a settled resource
-into a job, and its codec. Every job MUST be submitted with one host check and an
-operation id derived from its contract's idempotency key.
+family's: it submits, reads status, resolves the provisioned resource, and assembles the
+delivery. A domain MUST contribute only its codec and its preparation, which turns a
+settled resource into a job and a create job's parameters into its teardown. A job-backed
+fulfillment MUST produce one provisioned resource, the one its `executor_target` names.
 
 #### Scenario: A domain prepares a job
 
 - **WHEN** a domain's preparation returns a job for a settled resource
 - **THEN** the family submits it, tracks it, and delivers its result, with no further domain code
 
+#### Scenario: Teardown undoes what create ran
+
+- **WHEN** a job-backed fulfillment's teardown is prepared
+- **THEN** the domain receives the parameters its create job ran with, and a fulfillment whose create job is missing fails preparation as a configuration error
+
+### Requirement: Jobs are submitted against a registered host
+
+Every job MUST be submitted through the compute family's job submission, which MUST
+refuse a host that is not registered. A fulfillment's create MUST also refuse a disabled
+host; a teardown or an operator's job MUST NOT. A fulfillment job's operation id MUST
+derive from its contract's idempotency key; an operator's job keeps its request's
+operation id.
+
+#### Scenario: A disabled host holds a fulfillment
+
+- **WHEN** a host is disabled while a fulfillment on it is active
+- **THEN** that fulfillment's teardown is submitted, and a new create on the host is refused
+
+### Requirement: Jobs are correlated by capacity reservation
+
+A fulfillment's job MUST record the capacity reservation it serves, and no job MAY record
+a deal reference, because a deal's commercial identity does not cross the provisioning
+boundary for correlation. The job list MUST filter by capacity reservation and MUST NOT
+filter by escrow.
+
+#### Scenario: An operator finds a deal's jobs
+
+- **WHEN** a seller maps a buyer's negotiation to its capacity reservation and filters the job list by it
+- **THEN** the deal's jobs are returned, whatever settlement mechanism the deal used
+
+### Requirement: A create succeeds only with readable delivery evidence
+
+A codec MUST report a successful create job's result as the compute family's delivery
+evidence: the endpoints to connect to and when access became ready. A create job reported
+succeeded MUST NOT make its fulfillment active unless its evidence is valid; otherwise the
+fulfillment MUST fail.
+
+#### Scenario: A create job's evidence is unreadable
+
+- **WHEN** a create job succeeds but its result is not valid delivery evidence
+- **THEN** its fulfillment fails, and its capacity is held as for any failed create
+
 ### Requirement: Delivery says how to reach what was provisioned
 
-A fulfillment's delivery MUST carry only the provisioned resources, the endpoints to
-connect to, the credentials issued (each with its role and the resources it grants),
-and when access became ready. It MUST NOT carry a provisioner-side path, an address
-internal to a host, a deal reference, or a lease window.
+A fulfillment's delivery MUST carry only the endpoints to connect to, the credentials
+issued, each by role with an allowlisted set of fields, and when access became ready. It
+MUST NOT carry a provisioner-side path, an address internal to a host, a deal reference,
+a lease window, or a credential field outside the allowlist.
 
 #### Scenario: A VM is delivered
 

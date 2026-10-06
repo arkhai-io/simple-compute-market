@@ -320,7 +320,6 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             params = self._job_params(operation.parameters)
             contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
-                deal_ref={},
                 offering_mode=params.offering_mode,
                 action_kind="create",
                 idempotency_key=f"{operation.capacity_reservation_id}:create",
@@ -418,7 +417,6 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             params = self._job_params(operation.parameters)
             contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
-                deal_ref={},
                 offering_mode=params.offering_mode,
                 action_kind="teardown",
                 idempotency_key=f"{operation.capacity_reservation_id}:teardown",

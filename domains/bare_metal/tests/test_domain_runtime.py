@@ -11,7 +11,7 @@ from arkhai_bare_metal import (
     BARE_METAL_DOMAIN_IDENTITY,
     BARE_METAL_SCHEMA_KIND,
     NODE_GRANT_ACCESS_ACTION,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -58,8 +58,9 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
         "status": "active",
     })
     result = runtime.codecs.result({
-        "action": NODE_GRANT_ACCESS_ACTION,
-        "host_id": "node-1",
+        "ssh_user": "tenant-a",
+        "ready_at": "2026-10-06T12:00:00+00:00",
+        "lease_end_utc": "2026-10-06T13:00:00+00:00",
     })
 
     assert runtime.identity == BARE_METAL_DOMAIN_IDENTITY
@@ -68,7 +69,7 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
     assert isinstance(terms, BareMetalTerms)
     assert isinstance(materialization, BareMetalMaterialization)
     assert isinstance(receipt, BareMetalReceipt)
-    assert isinstance(result, BareMetalAccessResult)
+    assert isinstance(result, BareMetalResult)
 
     assert_domain_conformance(
         DomainConformanceCase(

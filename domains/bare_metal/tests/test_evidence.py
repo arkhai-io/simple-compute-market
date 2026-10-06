@@ -91,7 +91,6 @@ def lease_ready_result() -> BareMetalLeaseReadyResult:
         capacity_reservation_ref="reservation-a",
         settlement_resource_ref="settlement-resource-a",
         fulfillment_ref="fulfillment-a",
-        access_grant_ref="access-grant-a",
         access_ready_at=NOW + timedelta(minutes=40),
         expires_at=NOW + timedelta(minutes=50),
     )

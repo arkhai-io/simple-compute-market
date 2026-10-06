@@ -46,14 +46,18 @@ class JobRouteService:
         limit: int = 20,
         status: str | None = None,
         sort: str = "created_at_desc",
-        escrow_uid: str | None = None,
+        capacity_reservation_id: str | None = None,
     ) -> JobListResponse:
         if offset < 0 or not 1 <= limit <= 100:
             raise ProvisioningRouteError(422, "offset must be >= 0 and limit between 1 and 100")
         if sort not in _SORTS:
             raise ProvisioningRouteError(422, f"sort must be one of {sorted(_SORTS)}")
         return self._engine.list_jobs(
-            offset=offset, limit=limit, status_filter=status, sort=sort, escrow_uid=escrow_uid
+            offset=offset,
+            limit=limit,
+            status_filter=status,
+            sort=sort,
+            capacity_reservation_id=capacity_reservation_id,
         )
 
     def get_job(self, job_id: str) -> JobStatusResponse:

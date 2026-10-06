@@ -222,11 +222,11 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("capacity_reservations")
     }
 
-    assert "escrow_uid" in ansible_columns
+    assert "escrow_uid" not in ansible_columns
+    assert "deal_ref" not in ansible_columns
     assert "contract_version" not in ansible_columns
     assert {
         "capacity_reservation_id",
-        "deal_ref",
         "offering_mode",
         "action_kind",
         "idempotency_key",
@@ -339,7 +339,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         host = session.query(Host).one()
         job = session.query(JobRecord).one()
         assert host.connection().public["public_host"] is None
-        assert job.escrow_uid is None
+        assert job.capacity_reservation_id is None
         # The pre-existing host (inserted before the migration ran) is
         # backfilled to the default pool by the column's DB-level DEFAULT.
         assert host.pool_id == DEFAULT_POOL_ID
@@ -473,6 +473,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261002_003_bare_metal_job_shapes",
         "20261005_001_drop_job_contract_version",
         "20261005_002_reservation_release_requested_at",
+        "20261006_001_drop_job_deal_correlation",
     }
 
 
@@ -492,11 +493,11 @@ def test_run_migrations_is_idempotent():
         column["name"] for column in inspector.get_columns("capacity_reservations")
     ]
 
-    assert ansible_columns.count("escrow_uid") == 1
+    assert ansible_columns.count("escrow_uid") == 0
     assert ansible_columns.count("contract_version") == 0
     assert reservation_columns.count("release_requested_at") == 1
     assert ansible_columns.count("capacity_reservation_id") == 1
-    assert ansible_columns.count("deal_ref") == 1
+    assert ansible_columns.count("deal_ref") == 0
     assert ansible_columns.count("offering_mode") == 1
     assert ansible_columns.count("action_kind") == 1
     assert ansible_columns.count("idempotency_key") == 1

@@ -15,7 +15,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     PHYSICAL_HOST_ID_REF_KEY,
     SSH_ACCESS_METHOD,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalAccessGrant,
     BareMetalListing,
     BareMetalMaterialization,
@@ -325,23 +325,24 @@ def test_bare_metal_access_actions_are_domain_owned():
     )
 
 
-def test_bare_metal_access_result_accepts_contract_action():
-    result = BareMetalAccessResult(
-        action=NODE_GRANT_ACCESS_ACTION,
-        host_id="bm-node-1",
-        physical_host_id="host-physical-1",
+def test_the_buyer_result_names_the_account_and_window_but_no_endpoint():
+    result = BareMetalResult(
         ssh_user="tenant-a",
-        escrow_uid="0xbm",
+        ready_at=datetime(2026, 10, 6, 12, tzinfo=timezone.utc),
+        lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
     )
 
-    assert result.action == NODE_GRANT_ACCESS_ACTION
-    assert result.host_id == "bm-node-1"
-    assert result.status == "success"
-
-
-def test_bare_metal_access_result_rejects_unknown_action():
+    assert result.access_method == SSH_ACCESS_METHOD
     with pytest.raises(ValidationError):
-        BareMetalAccessResult(
-            action="delete_everything",
-            host_id="bm-node-1",
+        BareMetalResult.model_validate(
+            {**result.model_dump(mode="json"), "host": "203.0.113.7", "port": 22}
+        )
+
+
+def test_the_buyer_result_refuses_naive_times():
+    with pytest.raises(ValidationError):
+        BareMetalResult(
+            ssh_user="tenant-a",
+            ready_at=datetime(2026, 10, 6, 12),
+            lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
         )
