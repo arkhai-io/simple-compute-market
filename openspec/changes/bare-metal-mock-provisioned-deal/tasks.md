@@ -2501,14 +2501,20 @@ re-verifies them by grep before each move.
         routed to closeout task 2.6) and passed in five isolated and three full-suite
         reruns; otherwise only the environmental failures. The locks its reinit rewrote
         were restored. `make check-locks`, `make check-packaging`, comment hygiene, and
-        documentation citations pass. OpenSpec strict validation passes under 1.14.0;
-        1.14.1, published 2026-10-05 23:28 UTC, adds a warning for requirement text over
-        500 characters, which `--strict` fails on 19 of this change's requirements (and
-        21 of the 22 permanent specs). The Helm render
+        documentation citations pass. OpenSpec strict validation passes under 1.14.0,
+        the version `openspec/README.md` now pins: 1.14.1, published 2026-10-05 23:28
+        UTC, fails `--strict` on requirement text over 500 characters (19 of this
+        change's requirements, 21 of the 22 permanent specs). The maintainer chose the
+        pin, with `shorten-long-requirements` opened to restructure the permanent specs
+        and move it forward; this change's own long deltas are restructured at its
+        closeout (task 2.6). The Helm render
         tests were not run (no `helm` binary in this environment); none asserts the
         changed value. Not yet run end to end.
 - [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
+      Status 2026-10-05: the suites, packaging, and hygiene are 5B.10's validation, on
+      the tree this gate covers; the two lanes await a run on the 5B.10 checkpoint
+      (9.B's run, 37342659408, preceded 5B.10's address-book move).
 - [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
       provider shape — prepare a domain job from the settlement resource, submit, map job
       status to fulfillment status, read the result and credential envelopes —
@@ -2785,6 +2791,9 @@ service code.
       first recorded here, was routed on 2026-10-05 to
       `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
       maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in 5B.10: this change's 19 delta requirements over 500 characters, which
+      the validator release after the pinned one fails under `--strict`, are restructured
+      here (moving examples and edge cases into scenarios, or splitting) before promotion.
       Found in 5B.10: the provisioning integration harness runs every session on one
       shared in-memory SQLite connection (`StaticPool`), so a job the bare-metal `begin`
       dispatches can end the transaction the authentication middleware is about to
