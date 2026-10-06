@@ -2,136 +2,401 @@
 
 ## Context
 
-- `kit/site`'s matching contract (`resource_satisfies_requirement`,
-  `dict_resource_satisfies_claim`, `_find_candidate`) answers whether a *specific
-  resource* satisfies a claim right now. It does not answer whether a shape is one the
-  seller would entertain.
-- `kit/resource-pools/hints.py` carries domain-neutral pool policy through
-  `policy_tags`, with typed readers per tag and validation limited to what has a
-  universal meaning. Bounds fit this mechanism exactly.
-- `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` rechecks every
-  published source-derived field, categorical and quantitative, against the listing's
-  own source, and checks availability only for capacity-backed listings. It answers
-  "is this listing still what it says"; admissibility answers "would the seller
-  consider this shape". A pool's `listing_shapes` hint enumerates the shapes it
-  advertises; it does not bound what a buyer may propose.
-- Listing shapes and pool overrides are expressed in the family-grouped capability
-  shape `kit/capability-shape` defines and flattened by its schema-driven utility, with
-  the VM vocabulary in `arkhai_vms.compute_requirements.VM_CAPABILITY_SCHEMA`.
-  Publication refuses a listing shape no member can hold.
-- Negotiation is `kit/negotiation-runtime`'s lifecycle with domain hooks injected. A
-  round cannot yet carry a shape; `negotiation-driven-capacity-resize` adds that and
-  fixes the seller's evaluation order (admissibility, authoritative feasibility,
-  commercial feasibility, pricing).
-- The storefront-side override above the pool hint is `kit/pool-overrides`' site-scoped
-  store, whose VM terms contract is where a storefront could narrow a pool's bounds.
-- The roadmap records that reservable capacity per dimension is expected to become a
-  function of current occupancy rather than a constant.
+Verified against the tree on 2026-10-06.
+
+- **Nothing bounds a requested shape.** `has_matching_inventory_guard`
+  (`domains/vms/negotiation/src/arkhai_vms_negotiation/policies.py`) checks a listing
+  against its own source: every published source-derived field still matches, the
+  published quantity fits what the source declares, and, for a capacity-backed
+  listing, the quantity is free at its site. It says nothing about a shape a buyer
+  proposes. A pool's `listing_shapes` hint lists what the pool advertises; it does not
+  bound what a buyer may ask for. Site admission bounds only physical capacity,
+  offering mode, and the host requirement.
+- **Pool policy travels as `policy_tags`.** `kit/resource-pools/hints.py` owns the
+  domain-neutral keys, typed or raw readers, and write-time structural validators;
+  `listing_shapes` (keyed by offering mode) and `pricing` (family-grouped) are the
+  closest relatives. Tags reach the storefront verbatim through the resource-pool
+  projection's `pool_metadata`. Unknown tags are opaque metadata a consumer ignores.
+- **Storefront tiers are resolved per hint, not inherited.** Pricing resolves family
+  rates through the site-scoped storefront pool override, the pool hint, and the
+  storefront's configured default; listing shapes through override, hint, and the VM
+  default generator (`arkhai_vms.shape_generation.gpu_count_shapes`). `policy_tags`
+  itself carries no precedence.
+- **The precedent for a commercial evaluation over shapes is `kit/capability-pricing`**:
+  a foundation kit depending only on `kit/capability-shape`, an interface plus one
+  implementation, selected by the domain at composition. Unreadable rates and asking
+  rates hold the pool; malformed pricing hints are refused at pool write.
+- **`kit/site` reading pool state is a recorded exception.** `ARCHITECTURE.md`'s kit
+  layers say no new site read of pool state may be added while it stands.
+- **Publication already judges stated shapes** (`market_storefront.services.shape_feasibility`)
+  and reports problems per site; the VM override contribution
+  (`vm_pool_override_contribution.py`) checks an override's stated shapes at write.
+  Bare-metal publication derives one shape per Physical Resource and has its own
+  pool-override terms (`arkhai_bare_metal_storefront.pool_overrides`).
+- **Negotiation cannot yet carry a shape.** `negotiation-driven-capacity-resize` §2 adds
+  it and fixes the seller's order: admissibility, authoritative feasibility
+  (`negotiation-capacity-feasibility-probe`), commercial feasibility, pricing.
+- **The claim is built from an allow-list.** `compute_capacity_claim_from_order` reads
+  only the known identity and dimension keys of a settlement order's `listing_resource`.
 
 ## Goals / Non-Goals
 
-**Goals:** one domain-neutral admissibility concept; an interface that survives the
-move from static to coupled bounds; bounds expressed through existing pool policy.
+**Goals:** one domain-neutral admissibility concept a seller's storefront evaluates; an
+interface that survives a move from a static box to coupled declared constraints and
+supports dimension counter-proposals; bounds declared through existing pool policy and
+the storefront's own tiers; publication that never advertises a shape the seller would
+not sell.
 
-**Non-Goals:** coupled bounds, availability, pricing, categorical constraints.
+**Non-Goals:** occupancy-dependent bounds (that is availability, owned by
+`negotiation-capacity-feasibility-probe` and site admission); pricing; categorical
+constraints; site-enforced limits; disclosing bounds to buyers
+(`publish-shape-bounds`); negotiation wiring (`negotiation-driven-capacity-resize`).
 
 ## Decisions
 
-### A predicate plus a range query, not a readable bounds pair
+### D1. Admissibility is the storefront's own policy
 
-The tempting interface is a getter returning `(min, max)` per dimension, with callers
-comparing against it. It is rejected, and this is the change's central decision.
+Admissibility answers which capacity shapes a storefront will sell. It is final because
+the storefront controls agreement: no other party can make it agree to a shape. It is
+evaluated by the storefront, at publication and in negotiation. Site admission is
+unchanged.
 
-A readable bounds pair leaks the assumption that bounds exist independently of the rest
-of the shape. Every caller that reads it and compares locally encodes that assumption
-in its own code, so replacing the static implementation later means finding and
-rewriting every such caller — the rewrite this change exists to avoid.
+The authority test is what each party can see and control, and who prevails when they
+disagree. The site never sees price, so any price it publishes is a hint. It does see
+every claim dimension, so it prevails on physical capacity, offering mode, and the host
+requirement, and the storefront cannot override those. A storefront can always refuse
+more than the site would; neither can make the other accept.
 
-Two operations are exposed instead:
+A pool-declared bound is therefore a site-supplied default for the storefront's policy,
+advisory to the site exactly as pool pricing is. Admissibility never overrides a
+constraint the site enforces, and admitting a shape says nothing about whether the site
+will serve it.
 
-- **Is this whole shape admissible for this pool?** The caller supplies the entire
-  proposed shape and receives a decision. A coupled implementation needs the whole
-  shape; a box implementation ignores the parts it does not use. The signature does not
-  change between them.
-- **What range is admissible for dimension *d*, given the rest of this shape?** The
-  caller supplies the remainder, so the answer may legitimately depend on it. The static
-  implementation ignores the remainder and returns its configured bounds; a coupled one
-  does not.
+Rejected:
 
-The second exists so a seller can counter-offer usefully — "not 512 GiB, but up to 256
-with those cards" — rather than only rejecting. A bare predicate would force the
-negotiation layer to search for an acceptable value, which is both wasteful and a place
-where the box assumption would reappear as a linear scan.
+- **Site-enforced admission constraint.** Adds a new site read of pool state, puts
+  seller commercial policy inside the admission authority, and still needs a storefront
+  pre-check to avoid site round trips.
+- **Both.** Two evaluators of one declaration, inheriting the first option's costs.
+- **Not building it.** A seller could not exclude a shape it has capacity for.
 
-### Admissibility is separate from availability, deliberately
+A limit the site must enforce whichever storefront asks — a provider that cannot build a
+VM over some size — is a site-admission constraint over claim dimensions, not
+admissibility, and is outside this change.
 
-A shape can be admissible (the seller would sell it) and unservable (nothing free right
-now). Collapsing the two into one answer would mean a transiently full pool reports a
-shape as out of range, and a buyer would reasonably conclude the shape is wrong rather
-than the timing. Keeping them separate lets negotiation distinguish "ask for something
-else" from "ask again shortly," which are different counter-offers.
+### D2. A new foundation kit owns admissibility
 
-This also keeps the two answerable from different sources: admissibility from declared
-pool policy, availability from the authoritative ledger. Only the second requires a
-round trip to the site.
+`kit/capability-admissibility` (`market_capability_admissibility`) depends only on
+`kit/capability-shape` and the standard library. It owns the interface, the static
+implementation, the declaration's structure and its structural check, and the
+domain-neutral evaluation over `family.field` paths. `kit/resource-pools` keeps the tag
+key and a raw reader, and calls the kit's structural check at pool write, as
+`validate_listing_shapes` calls `shape_structure_problems`. The domain binds the
+implementation at composition and validates a declaration against its schema; operator
+configuration does not select it.
 
-### Bounds live in pool policy tags, not a new channel
+Rejected:
 
-`policy_tags` already carries region, SLA, pricing, listing mode, and hold caps, with
-typed readers and universal-meaning validation. Bounds are the same kind of fact.
-Reusing it means bounds inherit projection, precedence, and administration for free, and
-kit gains no new configuration surface.
+- **`kit/site`.** Admissibility is not site authority, and the read is forbidden.
+- **`kit/resource-pools`.** An authority-layer kit holding storefront commercial policy;
+  buyers and non-pool callers would install pool administration to evaluate it.
+- **`kit/capability-shape`.** Its responsibility is capacity vocabulary — structure,
+  flattening, digest — and pricing was kept out of it as commercial evaluation.
+- **Extending `kit/capability-pricing`.** The two share a concept at the level of a
+  one-line description and nothing else: they change for independent reasons
+  (non-linear pricing and amount precision versus coupled constraints), share no code,
+  and are reused apart — pool administration needs admissibility's structural check
+  without pricing, and hold billing and buyer quoting need pricing without
+  admissibility. A merged kit would need a rename and would hold two unrelated halves.
+- **Domain only.** Gives up the domain-neutral concept; a second domain would copy it.
 
-### Kit stays free of dimension names
+### D3. Whole shape in, problems out, never readable bounds
 
-The dimension vocabulary is supplied by the composition root, as `kit/site` already does
-for its dimension names. Kit validates that a bound is well formed — a range with a
-sensible order — and never that `gpu_count` is a real dimension. This is what keeps the
-capability usable by a pod, inference-token, or model-training domain without
-modification, which is the reason it is in kit at all.
+The interface has two operations, both taking shapes and neither exposing unconditional
+bounds:
+
+- **`admissibility_problems(shape)`** returns a tuple of problems, empty when
+  admissible. A problem carries `paths` (a tuple, so a constraint relating several
+  dimensions names all of them), a `code`, and a `message`.
+- **`admissible_values(dimension, partial_shape)`** returns the values `v` for which the
+  partial shape with the dimension set to `v` can still be completed to an admissible
+  shape. Dimensions the partial shape does not state are free; any value it states for
+  the dimension itself is ignored.
+
+The second operation carries a guarantee a counter-proposal policy relies on: fixing
+dimensions one at a time, in any order, each to a value from the current answer, never
+leaves a later answer empty and always ends at an admissible shape. A policy can
+therefore build a counter-shape in whatever priority it chooses without search and
+without assuming the region is a box.
+
+What protects callers from a later rewrite is that the whole shape goes in and no bounds
+come out. A problem naming one path, or a range for one dimension ignoring the rest,
+would encode the box in the return type; a static implementation that "ignores the
+remainder" would encode it in the requirement. Neither is specified.
+
+Rejected:
+
+- **A readable `(min, max)` per dimension.** Every caller comparing locally encodes the
+  box; replacing it means rewriting each caller.
+- **A range for one dimension given every other dimension fixed.** Meaningless when the
+  remainder is itself inadmissible, and ambiguous about dimensions not yet chosen.
+- **Problems that carry a per-dimension range.** Reintroduces the per-path assumption a
+  constraint over two dimensions cannot satisfy.
+- **A nearest-admissible-shape operation.** Which dimension to give up is negotiation
+  policy; it can be built on `admissible_values` in the policy layer.
+- **A boolean predicate.** Publication and negotiation both need the reason.
+
+Both operations ship with the static implementation. `admissible_values` has a
+production caller in the VM default generator (D10) and is the primitive a dimension
+counter-proposal change will use.
+
+### D4. Admissible values are an opaque set
+
+`admissible_values` returns an `AdmissibleValues` that answers questions rather than
+exposing its representation: `is_empty`, `contains(v)`, `at_most(v)` (the greatest
+admissible value not above `v`), `at_least(v)`, `minimum`, and `maximum` (absent when
+unbounded). The static implementation backs it with an interval. An answer is valid only
+for the partial shape it was computed from; a caller that caches an unconditional answer
+as "the bounds" reads bounds directly.
+
+Rejected: an interval type, which cannot represent discrete steps or gaps a later
+constraint produces, so the first such constraint would change the type under every
+caller; and an interval with a step, which invites callers to do step arithmetic
+themselves.
+
+### D5. Bounds are declared as `shape_bounds`, keyed by offering mode, in named sections
+
+```yaml
+shape_bounds:
+  vm:
+    bounds:
+      gpu:    { count: { min: 1, max: 8 } }
+      memory: { gib:   { max: 512 } }
+```
+
+- **Family-grouped paths**, the vocabulary of shapes, `listing_shapes`, and `pricing`,
+  so a listing shape and its bounds cannot name one dimension two ways; flat claim
+  names, still under `settle-capacity-claim-vocabulary`'s review, are not used.
+- **Keyed by offering mode**, as `listing_shapes` is, because one pool may deliver
+  several modes with different limits.
+- **Each mode holds named constraint sections.** This change defines one, `bounds`: a
+  family-nested map of quantity fields to `{min, max}`. Either key may be omitted, not
+  both; values are positive integers with `min ≤ max`. A field appears once.
+- **Strict keys.** A leaf key other than `min` or `max`, or a section the reader does not
+  define, makes the declaration unreadable. Later forms — `ratios` relating two
+  dimensions by `family.field` path, compared by integer cross-multiplication, or a
+  `required` section — are added as sections, and a reader that predates them fails
+  closed rather than enforcing a weaker policy.
+- **Quantity fields only.** The kit checks structure; the domain rejects a bound on an
+  attribute or on any field its schema does not define as a quantity.
+- **The admissible region is the intersection of every section;** no section widens
+  another.
+
+Rejected:
+
+- **A tag per form** (`shape_bounds` now, `shape_constraints` later). Unknown tags are
+  opaque, so an older storefront would silently ignore a newer constraint and sell
+  outside it.
+- **A concept-named tag holding a list of typed constraints.** Fails closed equally, but
+  makes the common case a list of one and permits two `bounds` entries.
+- **Bounds as a list of path entries.** Permits duplicates and departs from the family
+  nesting.
+- **A minimum shape and a maximum shape.** Cannot reuse shape validation because a bound
+  must not state required attributes, and invites flattening "the maximum" and
+  comparing.
+- **A `step` key now.** No seller needs discrete values yet; strict keys let it be added
+  later safely.
+- **Bounds keyed by attribute value** (per GPU model). A limit depending on another
+  value is a constraint of its own kind and would be a section.
+
+### D6. A dimension a shape omits is free
+
+A shape is admissible when the dimensions it states, with the ones it leaves free, can be
+completed to an admissible shape — the meaning `admissible_values` already has, so the
+two operations never disagree. A shape that omits a dimension commits to nothing on it:
+the claim does not reserve it and the pool's defaults or provisioning supply it, which is
+the site's decision, not the storefront's. For `bounds`, an omitted field never violates.
+
+Rejected: a `min` requiring the dimension to be stated (mixes a range with a requirement,
+and adding a memory minimum would withhold every GPU-only listing); judging the omitted
+dimension at the pool default (provider-specific, site-decided, and undefined without a
+default).
+
+### D7. An absent bound commits nothing
+
+A pool, mode, or field with no declared bound broadcasts no commitment on it. The
+storefront decides what applies, through its own tiers (D9); where no tier bounds a
+field, admissibility does not constrain it, and site admission remains the backstop.
+This is not a permissive default awaiting a fail-closed alternative; it is what absence
+means, as an unrated family is in pricing.
+
+### D8. A known answer closes listings; nothing heard keeps the hold
+
+The test is whether the storefront heard nothing or heard a commitment it cannot honour.
+
+- **An empty merged range is a known answer.** The resolved policy admits nothing on that
+  dimension, so the pool's listings close under the publication rule (D10) and the
+  report names the conflicting tiers and values.
+- **A declaration the storefront cannot read or evaluate is a heard commitment it cannot
+  honour**: malformed, a path its schema does not define as a quantity, or a section or
+  key newer than its kit. The pool's listings close, nothing is published from the pool,
+  and revised shapes are refused until the declaration is usable. Selling despite it
+  would drop a stated site preference, which D9 forbids.
+- **A malformed configured default prevents the storefront from starting.**
+- **A pool whose projection has not loaded keeps the existing hold.** The site has said
+  nothing new.
+
+The report names the tier, the path, and the problem. Pricing holds where this closes
+because a last-published price is still an offer the storefront itself made; a bound is
+the site's stated restriction on what is sold.
+
+Rejected: holding listings open on last-known-good bounds (sells against a policy the
+seller may have tightened); holding listings and refusing only revised shapes (sells
+published shapes a new constraint may exclude); ignoring the unusable declaration (sells
+beyond a stated policy).
+
+### D9. Tiers merge per field; a higher tier replaces, never removes
+
+`shape_bounds` resolves per offering mode from three tiers, highest first: the
+site-scoped storefront pool override, the pool hint, and the storefront's configured
+default. They merge per leaf (`family.field.min`, `family.field.max`): for each leaf the
+highest tier stating it wins, and a tier that does not state a leaf leaves the lower
+tier's value in place.
+
+```text
+hint:      gpu.count {min: 1, max: 8}     memory.gib {max: 512}
+override:  gpu.count {max: 4}
+default:   memory.gib {min: 16}
+resolved:  gpu.count {min: 1, max: 4}     memory.gib {min: 16, max: 512}
+```
+
+A storefront may change a site's bound, including widening it — the hint is advisory and
+site admission still bounds physical capacity — but may not remove one: omitting a stated
+site preference is not available to a higher tier. A per-leaf merge can produce an empty
+range: an override write is refused when it would empty a range against the current
+hint, and an empty range found when a projection arrives is handled by D8. A future
+section's merge rule is set when that section is defined; `bounds` merges per leaf.
+
+Rejected: hint only (leaves the storefront no way to state policy where the pool is
+silent); whole-declaration replacement per tier (drops site bounds an override does not
+restate); intersection across tiers (narrowing only, contradicting D1's advisory hint).
+
+### D10. Publication never advertises an inadmissible shape
+
+- **A stated listing shape** — from an override or the pool's `listing_shapes` — that is
+  inadmissible under the resolved bounds is not published, an open listing for it
+  closes, and it is reported with its source tier and problems.
+- **An override write** whose own `listing_shapes` would be inadmissible under the
+  resolution it produces is refused, beside the contribution's existing feasibility
+  check.
+- **A pool write is not refused** when its `listing_shapes` fall outside its own
+  `shape_bounds`: a storefront tier may widen the bound, and the provisioning service
+  cannot see those tiers.
+- **The VM default generator generates only admissible shapes**, choosing GPU counts
+  from `admissible_values` rather than generating and filtering. Generated shapes are
+  nobody's statement, so none is reported.
+- **Reports.** The per-site derivation report gains inadmissible listing shapes (tier,
+  shape, problems) and unusable shape bounds (tier, path, problem, or the conflicting
+  values of an empty range), served by system status beside `unreadable_asking_rates`
+  and logged once per change.
+- **Bounds that change after publication** advance the projection's revision;
+  reconciliation then closes listings whose shapes became inadmissible. Every shape the
+  storefront agrees to is admissible under the bounds in force when it agrees; enforcing
+  that in negotiation is `negotiation-driven-capacity-resize`'s composition.
+
+### D11. Permanent destinations are confirmed in planning and review
+
+`site-capacity` is not a destination: nothing about the site changes. The proposal's
+`Knowledge to promote` names a provisional destination for each decision; planning and
+review confirm or move them. Two are fixed: the negotiation invariant and the
+omitted-dimension refusal belong to `negotiation-driven-capacity-resize`, because
+nothing here enforces them, and `docs/development/ARCHITECTURE.md` gains the foundation
+kit and an authority-boundary row.
+
+### D12. VM composes fully; bare metal enforces at publication
+
+- **VM**: tiers, publication, generator, override write check, reports, and — through
+  `negotiation-driven-capacity-resize` — negotiation.
+- **Bare metal**: each Physical Resource's derived shape is judged against the resolved
+  bounds for the `bare_metal` mode, through the same three tiers and its existing pool
+  overrides; inadmissible shapes and unusable declarations are handled as in D8 and D10.
+  Bare metal negotiates no shape, so there is no negotiation composition. This keeps D8
+  and D9 uniform: every storefront that publishes capability shapes honours
+  `shape_bounds` for its mode.
+- **API credits** is not a listing-shape domain and does not read the tag.
+
+The kit's neutrality is proven at the lowest level: an import-boundary test, and unit
+tests against a synthetic schema with no compute vocabulary.
+
+### D13. Buyer disclosure is a separate change
+
+Hardware bounds are not commercially sensitive, unlike rates, and a buyer should be able
+to discover them. Disclosure is owned by `publish-shape-bounds`, so this change closes
+out without a registry prerequisite. Decided inputs carried there: the resolved
+declaration is disclosed and evaluated through this kit; VM listings only; registry
+filtering is decided with the carrier. Its open question is how to represent a base
+offering, a range around each base value, and pairwise ratios concisely; neither a field
+inside `listing_resource` nor a separate top-level `shape_bounds` beside it was found
+satisfactory.
+
+## Inputs to other changes
+
+To `negotiation-driven-capacity-resize`, for its own design:
+
+- Every shape the storefront agrees to is admissible under the bounds in force when it
+  agrees, whether the listing's own shape or a revised one.
+- By default, a revised shape that states a dimension the listing's shape omits is
+  refused: under shape pricing an unrated family contributes nothing, so accepting it
+  would give the dimension away. How omitted dimensions are negotiated is a replaceable
+  policy a storefront selects at composition.
+- An admissibility refusal carries the kit's problems (`paths`, `code`) and may carry
+  `admissible_values` for each refused path given the rest, so a buyer can counter.
 
 ## Risks / Trade-offs
 
-- **[The interface is heavier than a static box needs]** → Accepted deliberately. The
-  extra cost is one parameter that the first implementation ignores; the avoided cost is
-  rewriting every caller when bounds become coupled.
-- **[Callers bypass the interface and read the tags directly]** → The failure mode that
-  would undo the whole design. `policy_tags` is readable, so this needs an explicit
-  check at closeout rather than trust.
-- **[Admissible-but-unservable confuses buyers]** → Mitigated by keeping the two
-  answers distinct so negotiation can say which one failed. Conflating them is the worse
-  outcome.
-- **[Bounds go stale relative to real capacity]** → True of any declared bound and
-  unchanged by this design; the coupled implementation is what eventually addresses it,
-  which is why the interface is shaped for it now.
+- **A caller reads the declaration directly** → undoes D3. Only the kit interprets a
+  declaration; closeout verifies no other reader of `shape_bounds` beyond the raw reader
+  and the kit, including cached unconditional `admissible_values` answers.
+- **Closing on an unusable declaration churns listings** → accepted: closed listings
+  republish as successors once the declaration is usable. Honouring the site's stated
+  commitment is the better failure.
+- **A storefront that does not compose admissibility ignores the hint** → each
+  shape-publishing storefront composes it (D12); a domain that negotiates shapes without
+  it says "not checked" under `negotiation-driven-capacity-resize`'s contract.
+- **`admissible_values` is wider than its first caller needs** → accepted to support
+  dimension counter-proposals without changing the interface later.
 
 ## Migration Plan
 
-Purely additive. No pool declares bounds initially, and a pool with no bounds admits any
-shape — preserving today's behavior, where no shape check exists. Rollback is a code
-revert; declared tags on unmigrated pools are ignored by the restored reader.
+Additive. No pool declares `shape_bounds` initially; with no tier stating a bound,
+nothing is constrained and publication is unchanged. The VM generator's output is
+unchanged where no bound applies. Rollback is a code revert; stored hints and overrides
+carrying the key are then ignored as unknown metadata.
 
 ## Open Questions
 
-- **Should a pool with no declared bounds admit everything, or nothing?** Admit
-  everything is chosen here to make the change additive, but a fail-closed default is
-  defensible once bounds are routinely declared. Deferrable: it is a default, changeable
-  without touching the interface or its callers.
-- **Should the range query report a reason when a dimension has no admissible range at
-  all?** Useful for counter-offer messages, but the vocabulary for such reasons is a
-  negotiation concern. Deferrable until a caller needs it.
+- **Upgrade ordering when site and storefront operators differ.** A new section written
+  to a pool closes that pool's listings on storefronts whose kit predates it. Today one
+  business operates both. Revisit at the first major release, when operators are not all
+  known, with operator guidance on upgrading storefronts before writing new sections.
+- **A `required` section.** For a seller who needs every deal to state a dimension rather
+  than leave it to the pool default.
+- **Bounds keyed by attribute value.** For a pool whose members carry different GPU
+  models with different per-VM limits.
+- **Site-enforced shape limits.** For a delivery limit within physical capacity that a
+  storefront ignoring the hint would turn into a failed fulfillment.
 
-## Callers
+## Findings outside this change
 
-- **Publication.** Once bounds exist, publication asks the admissibility predicate
-  whether the pool admits each stated listing shape and treats an inadmissible shape
-  as it treats one no member can hold: no listing, reported. This is the predicate's
-  first production caller and is enough to land the change independently.
-- **Negotiation.** The predicate is the first step of the VM `evaluate_round`
-  composition for a round that carries a shape, in the order
-  `negotiation-driven-capacity-resize` fixes, with a distinct refusal reason.
-- **Bounds share the shape vocabulary.** Bounds are declared in the same family-grouped
-  form, through the same flattening utility, so a listing shape and the bounds it must
-  fall within cannot name one dimension two ways.
-- **Narrowing per storefront** is not in scope; if a seller ever wants to sell less
-  than the site admits, the site-scoped override store is the tier for it.
+- `kit/resource-pools` duplicates the pricing rate-list structural check
+  (`validate_pricing_rates`) rather than calling one owned by `kit/capability-pricing`,
+  unlike `listing_shapes`, which calls the shape kit's check.
+- `docs/development/ROADMAP.md` Goal 2 says the seller's own feasibility check compares
+  region and GPU model by equality and no quantitative dimension; the inventory guard
+  also checks the published quantity against its source. Corrected at this change's
+  roadmap currency step.
+- A pool default outside the resolved bounds (a dimension a shape omits being supplied
+  above its maximum) is a site configuration fact under D1 and D6; publication could
+  report it as a warning. No change owns it.
+- This change's `tasks.md` predates these decisions and is replanned after design
+  review.

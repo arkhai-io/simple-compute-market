@@ -71,7 +71,16 @@ to repair by hand.
       site and separate reporting of inadmissible shapes. Amended the skill at
       the owner's direction: open with a summary of the change, then
       corrections, then each decision as context, alternatives, and a
-      recommendation with its reason.
+      recommendation with its reason. After the design was recorded, the owner's
+      review of the session amended it again: decisions are classified as
+      judgement, consequence, or convention, with the latter two batched;
+      documentation placement is never asked; absence of a caller is not on its
+      own a reason to leave a capability out; representations are shown as
+      concrete example documents; every caller is walked through a new
+      interface; a corrected premise reopens the decision resting on it; the
+      owner's redirections are logged to the ledger; and before recording, the
+      rationales, callers, scope growth, and unrecorded principles are checked
+      as a whole.
 - [ ] 3.3 Pilot: design `add-full-stack-ci-job` from its proposal.
 
 ## 4. Change review

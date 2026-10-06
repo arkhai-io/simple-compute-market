@@ -78,6 +78,7 @@ A seller can price a shape. Rates are stated per capacity family -- per card-hou
 | Open gap | Owned by |
 |---|---|
 | Nothing expresses which shapes a seller will consider, or what range remains admissible for one dimension given the rest | [`capacity-shape-envelope`](../../openspec/changes/capacity-shape-envelope/) |
+| A buyer cannot discover which shapes a seller would sell, so it learns a listing's admissible range only from refusals | [`publish-shape-bounds`](../../openspec/changes/publish-shape-bounds/) |
 | The authoritative site is not consulted until terms are already agreed, so an unservable shape fails after both parties commit | [`negotiation-capacity-feasibility-probe`](../../openspec/changes/negotiation-capacity-feasibility-probe/) |
 | The storefront persists the whole capacity claim under a key named for its categorical half, and the compute family's flat dimension names, which the VM and bare-metal domains share from one schema, are a recorded exception to the family-prefixed convention | [`settle-capacity-claim-vocabulary`](../../openspec/changes/settle-capacity-claim-vocabulary/) |
 | No negotiation round after the first can express a shape change, the negotiated quantity is an absolute amount that stops being comparable once shape varies, and the agreed shape does not reach the claim | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
