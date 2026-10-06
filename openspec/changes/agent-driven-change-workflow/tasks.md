@@ -85,16 +85,25 @@ to repair by hand.
 
 ## 4. Change review
 
-- [ ] 4.1 Write the `change-review` skill, taking the review kind (`design`,
+- [x] 4.1 Write the `change-review` skill, taking the review kind (`design`,
       `implementation`, `pre-closeout`, `closeout`) and the change: documents to
       read first, the diff to inspect, the questions per kind tagged by lens,
       prompting for the `direction` lens as design discussion and for the
       compliance lenses as exhaustive cited checking, reading earlier reviews and
       triage from `reviews/`, and producing one Markdown review whose findings
       carry lens, basis, severity, and evidence in the fixed field layout.
-- [ ] 4.2 Add `make review CHANGE=<change> KIND=<kind>`, running the skill in Codex
+      Written at `.agents/skills/change-review/`. Beyond the owner's questions,
+      the design review also walks every caller through each new interface,
+      checks each rationale against the other decisions, and compares scope with
+      the original proposal — the gaps the first pilot design discussion left.
+- [x] 4.2 Add `make review CHANGE=<change> KIND=<kind>`, running the skill in Codex
       non-interactively with a read-only sandbox and capturing its final message
       as the next numbered file in `reviews/`.
+      `scripts/run_change_review.py`, tests in
+      `scripts/tests/test_run_change_review.py`. The full session goes to
+      `reviews/NN-<kind>.log` beside the review, for the session export. The
+      implementation kinds take `REVIEW_BASE` (default `dev`); `MODEL` overrides
+      the Codex model. A failed or empty run leaves no review record.
 - [ ] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.
