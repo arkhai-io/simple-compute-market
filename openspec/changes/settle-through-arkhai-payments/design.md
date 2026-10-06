@@ -38,7 +38,7 @@ The payments service never parses the agreement, so the two can evolve independe
 - `from`: the buyer's Arkhai account, which the buyer supplies as `payer_account` in its `SettlementSelection.params` and the Agreement carries as `settlement_params`; `to`: the payee account in the option params. Core treats both params maps as opaque.
 - one `once` part: the agreed amount in the option's asset (payments notation, e.g. `USD/2`), held for `start_utc − accepted_at + duration_seconds + window`. The window is declared in the option params, so buyers see it before negotiating, and it absorbs a late provisioning start.
 - `fee`: the service's published fee policy.
-- `authorities`: `reverse` lists the seller and Arkhai's dispute authority, which the service requires; `start` and `stop` are empty.
+- `authorities`: the kit's defaults. `start` and `stop` list buyer and seller; `reverse` lists the seller and Arkhai's dispute authority, which the service requires. The buyer is never a `reverse` authority, since that would let it claw back earned funds and defeat the hold. The wire keeps every list explicit; defaults live in the kit, not the service.
 - `nonce`: fixed, since `negotiation_id` already makes each agreement unique.
 
 The transaction id is `sha256(JCS(mandate))`, so both sides know it before approval. The buyer's kit checks the mandate against the agreement and its own policy (payee, amount, hold, `deal`) and approves it, attaching the agreement. Both sides poll `GET /transactions/{id}`; the seller provisions once the receipt matches. A push hook from the payments service is expected to replace polling (see Resolved Questions).

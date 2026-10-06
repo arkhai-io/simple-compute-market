@@ -135,6 +135,10 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
     if expires <= accepted_at or expires > MAX_SAFE_INTEGER:
         raise MandatePolicyError("mandate expiry must follow acceptance and fit the wire range")
 
+    # SDK lifecycle defaults; the wire requires every list explicitly. The payer is
+    # never a reverse authority: that would let the buyer claw back earned funds
+    # and defeat the hold. The service requires the dispute authority there.
+    parties = list(dict.fromkeys((policy.buyer_account, policy.option.payee_account)))
     reverse = list(dict.fromkeys((policy.option.payee_account, policy.dispute_authority)))
     mandate = {
         "from": policy.buyer_account,
@@ -149,7 +153,7 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
         ],
         "deal": agreement_hash(agreement_json),
         "fee": {"bps": policy.fee_bps},
-        "authorities": {"start": [], "stop": [], "reverse": reverse},
+        "authorities": {"start": parties, "stop": parties, "reverse": reverse},
         "nonce": PAYMENTS_NONCE,
         "expires": expires,
     }
