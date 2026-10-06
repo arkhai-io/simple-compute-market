@@ -2,9 +2,13 @@
 """Run a review of an OpenSpec change in Codex and record it under the change.
 
 The review is produced by the `change-review` skill in a read-only Codex sandbox,
-so the reviewer cannot change what it reviews. Its final message is the review and
-is written to the change's next numbered `reviews/NN-<kind>.md`; the full session
-output goes beside it as `NN-<kind>.log`. Both are untracked review records.
+so the reviewer cannot change what it reviews. Its final message is the review. It
+is checked for the review format before it is published as the change's next
+numbered `reviews/NN-<kind>.md`, which is the only authoritative record of its
+findings. The full session goes to `reviews/transcripts/NN-<kind>.log`: a
+non-authoritative transcript that no review or triage step reads, kept for export.
+A run whose output is not a review publishes nothing; its output is kept beside the
+transcript as `NN-<kind>.rejected.md`.
 
 Contract: openspec/specs/change-workflow/spec.md.
 """
@@ -22,7 +26,18 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANGES = Path("openspec/changes")
 KINDS = ("design", "implementation", "pre-closeout", "closeout")
 DEFAULT_BASE = "dev"
+TRANSCRIPTS = "transcripts"
+SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
+FIELDS = {
+    "Lens": {"direction", "consistency", "testing", "documentation", "architecture",
+             "scope", "readiness"},
+    "Basis": {"specification", "guidance", "evidence", "judgement"},
+    "Severity": {"blocking", "should", "minor"},
+    "Evidence": None,
+}
 _NUMBERED = re.compile(r"^(\d+)-")
+_FINDING = re.compile(r"^### F\d+\b", re.M)
+_FIELD = re.compile(r"^- \*\*(\w+):\*\*\s*(.*?)\s*$", re.M)
 
 Runner = Callable[[Sequence[str], Path], int]
 
@@ -32,13 +47,48 @@ class ReviewError(RuntimeError):
 
 
 def next_review_path(reviews: Path, kind: str) -> Path:
-    """The next numbered review file, after every record already in `reviews`."""
-    numbers = [
-        int(match.group(1))
-        for entry in reviews.iterdir()
-        if (match := _NUMBERED.match(entry.name))
-    ] if reviews.is_dir() else []
+    """The next numbered review file, after every record and transcript in `reviews`.
+
+    A failed run keeps its number through its transcript, so a later run never
+    overwrites the evidence of an earlier one.
+    """
+    entries = [entry for directory in (reviews, reviews / TRANSCRIPTS) if directory.is_dir()
+               for entry in directory.iterdir()]
+    numbers = [int(match.group(1)) for entry in entries if (match := _NUMBERED.match(entry.name))]
     return reviews / f"{max(numbers, default=0) + 1:02d}-{kind}.md"
+
+
+def review_problems(text: str, kind: str, change: str) -> list[str]:
+    """Why `text` is not a review in the `change-review` format; empty when it is."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ["the output is empty"]
+    title = lines[0].lower()
+    if not (title.startswith("# ") and f"{kind} review" in title and change.lower() in title):
+        return [f"the first line is not the title of a {kind} review of {change}: {lines[0][:80]!r}"]
+    problems = []
+    positions = [text.find(f"\n## {section}\n") for section in SECTIONS]
+    for section, position in zip(SECTIONS, positions):
+        if position < 0:
+            problems.append(f"missing section '## {section}'")
+    present = [position for position in positions if position >= 0]
+    if present != sorted(present):
+        problems.append(f"sections are not in the order {', '.join(SECTIONS)}")
+    if problems:
+        return problems
+    findings = text[positions[3]:positions[4]]
+    starts = [match.start() for match in _FINDING.finditer(findings)] + [len(findings)]
+    for start, end in zip(starts, starts[1:]):
+        block = findings[start:end]
+        name = block.splitlines()[0][4:].split()[0]
+        fields = {key: value for key, value in _FIELD.findall(block)}
+        for field, allowed in FIELDS.items():
+            value = fields.get(field, "")
+            if not value:
+                problems.append(f"{name} has no {field}")
+            elif allowed is not None and value.lower() not in allowed:
+                problems.append(f"{name} has {field} {value!r}, not one of {', '.join(sorted(allowed))}")
+    return problems
 
 
 def review_prompt(kind: str, change: str, base: str) -> str:
@@ -48,11 +98,14 @@ def review_prompt(kind: str, change: str, base: str) -> str:
     return prompt
 
 
-def codex_command(prompt: str, output: Path, root: Path, model: str | None) -> list[str]:
+def codex_command(prompt: str, output: Path, root: Path, model: str | None,
+                  effort: str | None = None) -> list[str]:
     command = ["codex", "exec", "--sandbox", "read-only", "--cd", str(root),
                "--output-last-message", str(output)]
     if model:
         command += ["--model", model]
+    if effort:
+        command += ["--config", f'model_reasoning_effort="{effort}"']
     return command + [prompt]
 
 
@@ -63,20 +116,27 @@ def _run_codex(command: Sequence[str], log: Path) -> int:
 
 
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
-               root: Path = ROOT, runner: Runner = _run_codex) -> Path:
+               effort: str | None = None, root: Path = ROOT, runner: Runner = _run_codex) -> Path:
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     change_dir = root / CHANGES / change
     if change in ("", "archive") or "/" in change or not change_dir.is_dir():
         raise ReviewError(f"no active change {change!r} under {CHANGES}")
     reviews = change_dir / "reviews"
-    reviews.mkdir(exist_ok=True)
+    transcripts = reviews / TRANSCRIPTS
+    transcripts.mkdir(parents=True, exist_ok=True)
     output = next_review_path(reviews, kind)
-    log = output.with_suffix(".log")
-    status = runner(codex_command(review_prompt(kind, change, base), output, root, model), log)
-    if status != 0 or not output.is_file() or not output.read_text("utf-8").strip():
-        output.unlink(missing_ok=True)
-        raise ReviewError(f"the reviewer produced no review (exit {status}); see {log.relative_to(root)}")
+    log = transcripts / output.with_suffix(".log").name
+    draft = transcripts / output.with_suffix(".rejected.md").name
+    status = runner(codex_command(review_prompt(kind, change, base), draft, root, model, effort), log)
+    text = draft.read_text("utf-8") if draft.is_file() else ""
+    problems = [f"the reviewer exited {status}"] if status != 0 else review_problems(text, kind, change)
+    if problems:
+        if not text.strip():
+            draft.unlink(missing_ok=True)
+        raise ReviewError("the reviewer produced no review: " + "; ".join(problems)
+                          + f"; see {log.relative_to(root)}")
+    draft.replace(output)
     return output
 
 
@@ -86,9 +146,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--kind", required=True, choices=KINDS)
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--effort", default=None)
     args = parser.parse_args(argv)
     try:
-        output = run_review(args.change, args.kind, base=args.base, model=args.model or None)
+        output = run_review(args.change, args.kind, base=args.base, model=args.model or None,
+                            effort=args.effort or None)
     except ReviewError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

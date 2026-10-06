@@ -148,12 +148,15 @@ where the harness supports it is an optimization, never a dependency.
 
 ```text
 openspec/changes/<change>/reviews/        (untracked)
-  01-design.md                review: summary, assessment, findings
+  01-design.md                review: summary, assessment, questions, findings
   01-design.triage.md         implementing agent's positions + owner dispositions
   02-validation.md            pre-review validation report
   03-implementation.md
   03-implementation.triage.md
-  ...
+  transcripts/
+    01-design.log             raw reviewer session, for export only
+    03-implementation.log
+    ...
 openspec/changes/<change>/interventions.jsonl   (tracked)
 ```
 
@@ -182,7 +185,19 @@ schema:
 ```
 
 The reviewer runs with a read-only sandbox, so it does not write the file itself:
-`make review` captures the reviewer's final message as the review.
+`make review` captures the reviewer's final message, checks that it is a review —
+its title names the kind and change, its sections are present in order, and every
+finding carries the four fields with allowed values — and only then publishes it
+under its number. Anything else, such as an error message or a truncated answer,
+publishes nothing and is kept beside the transcript as `NN-<kind>.rejected.md`. A
+failed run keeps its number, so a rerun never overwrites its evidence.
+
+The reviewer's whole session is kept as a transcript under `reviews/transcripts/`,
+because the owner's session export carries each change's full review history. A
+transcript is not a record: it holds the reviewer's intermediate reasoning, and a
+later reviewer or triage step reading it would inherit exactly the session context
+the file-based exchange exists to exclude. No review or triage step reads
+transcripts; the numbered Markdown review is the only record of its findings.
 
 ### A finding has a lens, a basis, and a severity
 
@@ -246,7 +261,25 @@ Nothing is applied until the owner has recorded a disposition.
 On each disposition, one line is appended to the change's
 `interventions.jsonl`: the review kind, the `tasks.md` section the finding concerns
 when it concerns one, lens, basis, severity, the agent's position, the owner's
-disposition, and a one-line summary of the finding. The section lets the owner see
+disposition, and a one-line summary of the finding.
+
+The ledger also records the owner redirecting a design discussion, because those
+are the interventions the owner's guidance reviews most need to see. Both kinds of
+entry share one shape:
+
+| Field | Review disposition | Design redirection |
+|---|---|---|
+| `review` | the review record, e.g. `03-implementation` | `design` |
+| `finding` | `F<n>` | the decision, `D<n>` |
+| `section` | the `tasks.md` section, when the finding concerns one | absent |
+| `lens`, `basis` | the finding's | `direction`, `judgement` |
+| `severity` | the finding's | `null` |
+| `agent_position` | agree, disagree, or partly, with reason | the agent's recommendation |
+| `owner_disposition` | what the owner decided | what the owner decided instead, and why |
+| `summary` | one line | one line |
+
+A design discussion logs only decisions where the owner changed or reversed the
+agent's recommendation; accepted recommendations are not interventions. The section lets the owner see
 whether findings still cluster in particular slices, which would mean those slices
 were sized too large. Unlike
 `reviews/`, the ledger is tracked. It sits in the change directory so it travels

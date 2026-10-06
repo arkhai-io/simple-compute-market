@@ -104,6 +104,17 @@ to repair by hand.
       `reviews/NN-<kind>.log` beside the review, for the session export. The
       implementation kinds take `REVIEW_BASE` (default `dev`); `MODEL` overrides
       the Codex model. A failed or empty run leaves no review record.
+- [x] 4.2a Amended after implementation review 1 (browser): the reviewer's
+      session moved to `reviews/transcripts/`, which no review or triage step
+      reads, so the Markdown review stays the only record of its findings; the
+      reviewer writes to a draft that is published only when it has the review
+      format (title, ordered sections, four fields per finding with allowed
+      values), and anything else is kept as `NN-<kind>.rejected.md` beside the
+      transcript; a failed run keeps its number. `make code-snapshot` now stores
+      symlinks as links (`zip -y`), guarded by
+      `scripts/tests/test_code_snapshot.py`, which fails without the flag. The
+      ledger schema now covers design redirections (`design.md`, the
+      `change-workflow` delta).
 - [ ] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.

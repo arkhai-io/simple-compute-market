@@ -964,11 +964,14 @@ check-agent-skills: ## Fail if an agent skill is not loaded from its one source 
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py
 
+# `zip -y` stores a symlink as a link. Without it the agent-skill links under
+# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
+# longer shows which skills each harness loads.
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
-	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"
 
@@ -1028,11 +1031,12 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 
 REVIEW_BASE ?= dev
 REVIEW_MODEL ?= gpt-6-sol
-review: ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [MODEL=<codex model>])
-	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(MODEL)),--model "$(MODEL)")
+REVIEW_EFFORT ?= high
+review: ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high])
+	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)")
 
-design-review: ## Design review of an OpenSpec change in Codex (CHANGE=<change> [REVIEW_MODEL=gpt-6-sol])
-	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design MODEL="$(REVIEW_MODEL)"
+design-review: ## Design review of an OpenSpec change in Codex (CHANGE=<change>)
+	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
 
 run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \

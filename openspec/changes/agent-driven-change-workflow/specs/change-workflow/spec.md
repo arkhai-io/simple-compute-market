@@ -55,6 +55,26 @@ permanent documentation through the ordinary promotion path before archival.
 - **THEN** it reads the earlier reviews and their triage from `reviews/` and
   answers for every earlier finding
 
+A review's raw session MAY be kept as a transcript under the change's
+`reviews/transcripts/`, untracked like the records. A transcript is not a record of
+findings: no review or triage step SHALL read one. A reviewer's output SHALL be
+published as a review record only after it is checked to have the review format, so
+an error message or a truncated answer never becomes review history.
+
+#### Scenario: A later review runs beside a transcript
+
+- **WHEN** a pre-closeout review runs for a change whose earlier review left a
+  transcript
+- **THEN** it reads the earlier review's Markdown record and triage, and not the
+  transcript
+
+#### Scenario: The reviewer returns an error instead of a review
+
+- **WHEN** the reviewing agent's final output is an error message rather than a
+  review
+- **THEN** no review record is published, and the output is kept beside the
+  transcript
+
 #### Scenario: A review finding changes the design
 
 - **WHEN** a review finding leads to an accepted design decision
@@ -97,6 +117,18 @@ concerns when it concerns one, the finding's lens, basis, and severity,
 the implementing agent's position, the owner's disposition, and a one-line summary.
 The ledger MUST be tracked by version control, MUST remain in the change directory,
 and MUST be archived with the change.
+
+Each time the owner changes or reverses the agent's recommendation during a design
+discussion, an entry MUST be appended in the same shape, with `review` set to
+`design`, the decision as `finding`, lens `direction`, basis `judgement`, and a null
+severity. A recommendation the owner accepts MUST NOT be logged.
+
+#### Scenario: The owner reverses a design recommendation
+
+- **WHEN** the owner chooses a different option than the one the agent recommended
+  for a design decision
+- **THEN** one ledger entry records the decision, the agent's recommendation, and
+  what the owner chose and why
 
 #### Scenario: A reviewed change is archived
 

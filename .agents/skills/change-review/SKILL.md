@@ -12,7 +12,7 @@ Agreement adds nothing; do not soften a finding to be agreeable, and do not inve
 one to seem thorough.
 
 This is review only. Change no file. Your final message is the review itself, in
-the format in section 5, and nothing else: it is saved verbatim as the review
+the format in section 6, and nothing else: it is saved verbatim as the review
 record.
 
 You are told the **review kind** (`design`, `implementation`, `pre-closeout`, or
@@ -30,9 +30,11 @@ Read all of this before forming a view:
   campaign, and dependencies in `openspec/changes/README.md`.
 - Every file in `openspec/changes/<change>/`, including `specs/` and
   `interventions.jsonl`.
-- Every earlier review and triage in `openspec/changes/<change>/reviews/`. They are
-  the history of this change's review; you did not write them and must not rely on
-  remembering them.
+- Every earlier review and triage in `openspec/changes/<change>/reviews/`: the
+  numbered `NN-*.md` files only. They are the history of this change's review; you
+  did not write them and must not rely on remembering them. Never read
+  `reviews/transcripts/`: those are raw sessions, not records, and reading them
+  would carry an earlier reviewer's reasoning into yours.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its `architecture.md` companion when one exists.
 - The code the change cites, and the code it changes or would change. Read enough
@@ -45,14 +47,19 @@ Check claims against the files, never against the prose describing them. A check
 task, a "promoted to" note, or a "verified" line is a claim; open the file and
 confirm it.
 
+What the change already records about itself — its own findings, open questions,
+known-stale documents, deferred work — is not a new finding. Raise it only when the
+recorded handling is wrong or insufficient, and say why.
+
 ## 2. Ask the questions for the review kind
 
 Each question names the lens its findings carry.
 
 ### Design review
 
-Open the review's summary by stating the change's purpose, its scope, and the design
-itself, in your own words, so the reader can check your understanding first. Then:
+Open the review's summary with three short paragraphs, in your own words: the
+change's purpose, its scope and non-goals, and its central decisions. The reader
+checks your understanding here before reading anything that rests on it. Then:
 
 1. **`consistency`** — Is the change consistent with the current codebase? Verify
    every factual claim the design makes about existing code, guidance, and other
@@ -61,13 +68,26 @@ itself, in your own words, so the reader can check your understanding first. The
    other decisions?
 2. **`direction`** — What would you change about this design? Treat this as a design
    discussion: for each point, state the context, the alternatives with their
-   trade-offs, and what you recommend and why.
+   trade-offs, and what you recommend and why. Engage every central decision the
+   design records, not only the ones you would change: for each, say whether you
+   would decide differently and why. Settled decisions are not exempt. When you
+   disagree with one, state the rationale the design records for it and why that
+   rationale does not hold, and title the finding "Challenges D<n>": the owner then
+   reaffirms or changes the decision before implementation.
 3. **`architecture`** — Does the design place behavior in the right layer and with
    the right authority, under `ARCHITECTURE.md`'s layers, authority boundaries, and
    the test for which party is authoritative? For every interface the design creates
-   or changes, list each caller and what it must do, and confirm it can do that
-   through the interface alone; a caller that would have to interpret the
-   interface's internals is a missing operation.
+   or changes — a kit's operations, a declaration or wire format, a report, a hook
+   another kit must call — walk it visibly:
+   - **Callers.** List each caller, in this change and in changes that depend on
+     it, what it must do, and whether the interface provides that. A caller that
+     would have to interpret the interface's internals is a missing operation.
+   - **Seams.** Where a caller lives in another package, confirm the seam it needs
+     exists there today, and name the package that must change if it does not.
+   - **Semantics.** State what the interface does for absent input versus present
+     but empty input, for an unknown or wrong-kind argument, for malformed values,
+     and for operations on an empty result; and whether its results carry the
+     provenance its callers must report. Undefined semantics are findings.
 4. **`documentation`** — Does the proposal name a permanent destination for every
    material decision? Does every delta requirement describe only behavior this
    change implements, with a WHEN/THEN scenario? Does any open question have its
@@ -119,7 +139,13 @@ itself, in your own words, so the reader can check your understanding first. The
    against the permanent documents it names.
 2. **`readiness`** — Is the change ready for archival?
 
-## 3. Classify every finding
+## 3. Answer every question
+
+Every question of the review kind gets an answer under `## Questions`, by its lens,
+whether or not it produced a finding. When it produced none, say what you checked
+and why it holds. The reader must be able to tell "no issue" from "not examined".
+
+## 4. Classify every finding
 
 **Basis** — what the finding rests on:
 
@@ -139,13 +165,17 @@ itself, in your own words, so the reader can check your understanding first. The
 A finding that is a written rule broken but never mechanically checked is worth
 saying so in its text: it tells the owner a check is missing.
 
-## 4. Before writing
+## 5. Before writing
 
 Re-read your findings. Drop any you cannot support with evidence or a stated
 judgement. Merge duplicates. Make sure every finding says what to do, not only what
 is wrong.
 
-## 5. The review format
+Cite evidence as repository-relative `path:line`, in backticks — never absolute
+paths and never Markdown links. Reviews are exported and read outside this
+checkout.
+
+## 6. The review format
 
 Your final message is exactly this, with no text before or after:
 
@@ -163,6 +193,14 @@ base and commit range.>
 <Your overall view of the direction, in prose: what is sound, what most needs
 attention, and how the findings below relate to each other.>
 
+## Questions
+
+### <lens> — <the question>
+
+<Your answer. Name the findings it produced, or say what you checked and why no
+finding was needed. For the architecture question, include the caller, seam, and
+semantics walk for each interface.>
+
 ## Findings
 
 ### F1 — <the claim in one line>
@@ -170,7 +208,7 @@ attention, and how the findings below relate to each other.>
 - **Lens:** <direction | consistency | testing | documentation | architecture | scope | readiness>
 - **Basis:** <specification | guidance | evidence | judgement>
 - **Severity:** <blocking | should | minor>
-- **Evidence:** <paths with line numbers, requirement or heading citations>
+- **Evidence:** <`path:line` references and requirement or heading citations>
 
 <The finding: what is wrong or missing and why it matters. For a direction finding,
 the context, alternatives, and trade-offs.>
