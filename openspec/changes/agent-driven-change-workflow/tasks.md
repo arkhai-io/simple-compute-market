@@ -122,7 +122,7 @@ to repair by hand.
 
 ## 5. Review triage and the intervention ledger
 
-- [ ] 5.1 Write the `change-triage` skill: a position with evidence on every
+- [x] 5.1 Write the `change-triage` skill: a position with evidence on every
       finding, every finding presented ordered by lens then severity, owner
       dispositions recorded in the triage file, one line per disposition appended
       to the change's tracked `interventions.jsonl` naming the `tasks.md` section
@@ -131,6 +131,13 @@ to repair by hand.
       the triage file, and, when a phase-closing gate passes, moves the index row
       to the next phase's `ready for` status per the transition table in
       `design.md`.
+      Written at `.agents/skills/change-triage/`. It also saves a pasted external
+      review as the next numbered record (`NN-<kind>-external.md`) and triages
+      it beside the harness review of the same kind, merging duplicate findings;
+      classifies each accepted finding's outcome as an edit, a design decision
+      (sent to `change-design`, never settled in triage), a task, or none; and
+      never dismisses a finding that challenges an owner decision on the
+      grounds that the owner made it.
 - [ ] 5.2 Pilot: triage the 4.3 and 4.4 reviews, passing each design gate.
 
 ## 6. Planning
