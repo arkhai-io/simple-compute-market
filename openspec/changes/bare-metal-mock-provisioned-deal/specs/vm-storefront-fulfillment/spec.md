@@ -27,3 +27,15 @@ obligation of a delivered deal.
 - **WHEN** restart convergence cannot commit the reservation or register the lease
 - **THEN** it stops before publishing the evidence, and a later pass completes the deal once
   the provisioning service answers
+
+### Requirement: A VM deal records only how to reach its VM
+
+The connection details a VM storefront records for a deal MUST be the delivery's SSH
+endpoint (host, port, and tenant account), when access became ready, and the provisioned
+resource identities, and nothing else: no guest name, address internal to a host, or key
+path. A record with no buyer-facing address MUST omit the host rather than name another.
+
+#### Scenario: A VM becomes ready
+
+- **WHEN** a VM fulfillment becomes active
+- **THEN** the storefront records the delivered endpoint, readiness, and resource identities as the deal's connection details

@@ -269,15 +269,21 @@ filter by escrow.
 
 ### Requirement: A create succeeds only with readable delivery evidence
 
-A codec MUST report a successful create job's result as the compute family's delivery
-evidence: the endpoints to connect to and when access became ready. A create job reported
-succeeded MUST NOT make its fulfillment active unless its evidence is valid; otherwise the
-fulfillment MUST fail.
+A codec MUST report a create job's result as the compute family's create result: the
+delivery evidence (the endpoints to connect to and when access became ready), or none
+when the output cannot say, and a detail mapping of non-secret operator data. A create
+job reported succeeded MUST NOT make its fulfillment active unless its evidence is valid;
+otherwise the fulfillment MUST fail. The family MUST NOT read or deliver the detail.
 
 #### Scenario: A create job's evidence is unreadable
 
-- **WHEN** a create job succeeds but its result is not valid delivery evidence
+- **WHEN** a create job succeeds but its result carries no valid delivery evidence
 - **THEN** its fulfillment fails, and its capacity is held as for any failed create
+
+#### Scenario: A relay-backed VM is delivered
+
+- **WHEN** a VM is created behind a relay
+- **THEN** its delivery's endpoint is the relay's address and leased port, not its host's
 
 ### Requirement: Delivery says how to reach what was provisioned
 

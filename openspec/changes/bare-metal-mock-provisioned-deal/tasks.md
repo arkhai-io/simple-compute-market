@@ -2745,42 +2745,86 @@ re-verifies them by grep before each move.
         - Scheduling and admission do not read a host record's enabled flag, so a create can
           be placed on a disabled host; its dispatch then retries until the host is
           re-enabled. Routed to closeout task 2.6.
-  - [ ] 5B.12.B VM end to end, with the migration.
-        - VM adapter: `services/ansible_fulfillment_provider.py` becomes the plan
-          (`services/vm_fulfillment_plan.py`: the relay-port lease, playbook override, and
-          extra-vars validation), the provider file tombstoned; `services/job_submitter.py`
-          tombstoned; `services/vm_operations_service.py` and
-          `services/host_operations_service.py` submit through `JobSubmissionService`,
-          keeping their request operation ids; `models/vm_request_model.py`,
-          `models/fulfillment_model.py`, `runtime.py`, and `bundle.py` follow;
-          `fulfillment_results.py` tombstoned; `codec.py` emits `DeliveryEvidence` for a
-          create and its credentials, keeping the guest's internal address in the stored
-          result only; `legacy_backfill.py` writes the family's shapes.
+  - [ ] 5B.12.B VM end to end, with the migration. Amended 2026-10-06 by the 5B.12.B
+        implementation audit (`design.md`, "5B.12.B implementation audit (2026-10-06)").
+        - Contracts (`compute_provisioning_contracts/delivery.py`): `CreateJobResult`
+          (`compute.create-result.v1`): the `DeliveryEvidence` or none, and a non-secret
+          `detail` mapping. It replaces `DELIVERY_EVIDENCE_RESULT_KIND` as a create job's
+          result. Family kit (`job_fulfillment.py`): a create succeeds only on a
+          `CreateJobResult` carrying valid evidence; the detail is never read or delivered.
+        - Bare metal, onto the one shape: `codec.py` reports a grant as a `CreateJobResult`
+          with the access fact as its detail, and with no evidence when the fact cannot
+          say how to connect (replacing the raw-fact fallback under its own kind).
+        - VM adapter:
+          - `services/ansible_fulfillment_provider.py` becomes the plan
+            (`services/vm_fulfillment_plan.py`: the relay-port lease, playbook override,
+            and extra-vars validation; teardown from the metadata's target, the lease's
+            relay, and the pool's playbook); the provider file is tombstoned.
+          - `services/job_submitter.py` is tombstoned. `services/vm_operations_service.py`
+            and `services/host_operations_service.py` submit through
+            `JobSubmissionService`, keeping their request operation ids;
+            `models/vm_request_model.py`, `models/fulfillment_model.py`, `runtime.py`, and
+            `bundle.py` follow.
+          - `fulfillment_results.py` is tombstoned.
+          - `codec.py` reports a create as a `CreateJobResult`: the evidence endpoint is
+            the relay's address and leased port when the playbook reports the relay
+            enabled, else the host's buyer-facing address and external port; the detail
+            keeps the rest of the result, the guest's internal address included.
+          - `legacy_backfill.py` builds the family's prepared teardown and metadata from
+            VM's plan directly.
         - Service: a migration in `db/migrations.py` rewriting, for every VM fulfillment in
           every state, its prepared create and teardown operations, `provider_metadata`
           and `teardown_provider_metadata` (`vm_target` becomes `executor_target`), and
-          each create-job result it references, into the family's shapes. VM's job
-          parameters are re-wrapped unchanged. Bare metal is not live and is not migrated.
-          Check whether VM's legacy-backfilled records reference create jobs that exist;
-          VM's plan reads create parameters only for teardowns it prepares itself.
-        - VM storefront: `services/fulfillment_resume_runtime.py` and
-          `services/fulfillment_service.py` read the access delivery (tenant credentials to
-          the buyer, root to the seller's own store; no key path, internal address, or
-          guest name).
+          each create-job result it references, into the family's shapes.
+          - A create result becomes a `CreateJobResult`: the evidence by the relay rule,
+            from its stored relay facts; every other field kept in its detail.
+          - VM's job parameters are re-wrapped unchanged.
+          - A record naming no target takes it from its create job's parameters, and the
+            migration aborts atomically when neither names one.
+          - Bare metal is not live and is not migrated.
+        - VM storefront:
+          - `services/fulfillment_service.py`, `services/fulfillment_resume_runtime.py`,
+            and `services/vm_fulfillment_service.py` read the access delivery: tenant
+            credentials to the buyer, root to the seller's own store; no key path,
+            internal address, or guest name.
+          - `connection_details` becomes `host`, `port`, `user`, `ready_at`, and the
+            provisioned-resource ids.
+          - A data migration in `utils/migrations.py` rewrites stored `connection_details`
+            (escrows) and `fulfillment_resource` (listings) into that shape: `host` from
+            `host_ip` where a row has one, otherwise omitted.
+        - VM buyer: `buy_cli.py`'s quiet output reads `host`, `port`, and `user` from
+          `connection_details` and prints the connect line when all three are present;
+          version bump and hand-lock.
+        - Spec deltas, written with the audit: `physical-provisioning`'s "A create
+          succeeds only with readable delivery evidence" names the create result, its
+          detail, and the relay endpoint; the `vm-storefront-fulfillment` delta adds "A VM
+          deal records only how to reach its VM".
         - Tests:
-          - the migration (`provisioning/compute/service/tests/integration/test_job_fulfillment_migration.py`):
-            each stored shape rewritten in every state, a retried dispatch of a migrated
-            in-flight create returning the existing job, idempotent on a second run;
+          - `provisioning/compute/service/tests/integration/test_job_fulfillment_migration.py`:
+            - each stored shape rewritten, in every state;
+            - a relay-backed result taking the relay's endpoint;
+            - operator data kept in the detail;
+            - a missing target taken from the create job, and the abort when neither
+              names one;
+            - a retried dispatch of a migrated in-flight create returning the existing
+              job;
+            - idempotent on a second run.
+          - VM's codec on both endpoint paths, the stored tenant command agreeing with
+            the endpoint, and an operator create keeping its detail.
           - `test_legacy_vm_fulfillment_backfill.py` and
             `test_fulfillment_convergence_after_legacy_backfill.py` on the new shapes;
-          - `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
-          - `integration/test_fulfillment_api.py`;
-          - the VM storefront's `tests/fulfillment_fixtures.py`,
+            `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
+            `integration/test_fulfillment_api.py`.
+          - Bare metal's codec, plan, and mock-profile tests on `CreateJobResult`; the
+            family kit's and contracts' tests likewise.
+          - The VM storefront's `tests/fulfillment_fixtures.py`,
             `unit/test_fulfillment_provisioning.py`,
             `unit/test_fulfillment_resume_runtime.py`, `unit/test_fulfillment_service.py`,
-            `unit/test_loop_gate_wiring.py`, and `integration/test_committed_window.py`;
-          - `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios reading
-            delivered credentials.
+            `unit/test_loop_gate_wiring.py`, `integration/test_committed_window.py`, and
+            its data migration (integration).
+          - The VM buyer's quiet output.
+          - `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios
+            reading delivered credentials or connection details.
   - [ ] 5B.12.C Provisioning names the guest.
         - VM's plan derives `executor_target` from the capacity reservation, checked
           against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
