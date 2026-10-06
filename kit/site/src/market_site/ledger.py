@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -627,6 +627,7 @@ class CapacityLedgerService:
         unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
         mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
         release_guard: CapacityReleaseGuard | None = None,
+        release_effect: Callable[[Any, str, str], None] | None = None,
         host_requirement: HostRequirement | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
@@ -654,6 +655,15 @@ class CapacityLedgerService:
         leaves the reservation and its capacity as they were. With no guard,
         every reclaim is permitted.
 
+        ``release_effect``, if supplied, runs in that same transaction once a
+        reclaim is decided, guarded or forced, with the session, the
+        reservation's id, and the state it was released to. It is how what a
+        deployment holds for a reservation's lifetime, such as a relay port, is
+        returned exactly when the reservation's capacity is: never earlier,
+        while an operator might still find something running, and never
+        separately, so a crash cannot leave one returned and not the other. It
+        writes in the session and never commits; raising aborts the reclaim.
+
         ``host_requirement`` maps each fulfillment provider identity to whether
         its delivery needs a host. When supplied, a declaration that names no
         host is not an admission candidate in a pool whose provider needs one,
@@ -668,6 +678,7 @@ class CapacityLedgerService:
         self._unit_claim_keys = tuple(unit_claim_keys)
         self._mirror_dimension = mirror_dimension
         self._release_guard = release_guard
+        self._release_effect = release_effect
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -1521,6 +1532,7 @@ class CapacityLedgerService:
             reservation.released_at = datetime.now(timezone.utc).isoformat()
             reservation.failure_reason = failure_reason
             reservation.failure_message = failure_message
+            self._run_release_effect(db, reservation.capacity_reservation_id, state)
             db.add(
                 CapacityEvent(
                     kind="released",
@@ -1615,6 +1627,9 @@ class CapacityLedgerService:
             old_reservation.state = ReservationState.released.value
             old_reservation.released_at = datetime.now(timezone.utc).isoformat()
             old_reservation.failure_reason = "superseded"
+            self._run_release_effect(
+                db, old_capacity_reservation_id, ReservationState.released.value
+            )
             db.add(
                 CapacityEvent(
                     kind="released",
@@ -2128,6 +2143,10 @@ class CapacityLedgerService:
             else None
         )
 
+
+    def _run_release_effect(self, db: Any, capacity_reservation_id: str, state: str) -> None:
+        if self._release_effect is not None:
+            self._release_effect(db, capacity_reservation_id, state)
     def _release_permitted(self, db: Session, capacity_reservation_id: str) -> bool:
         """Whether the composition's guard permits freeing this reservation."""
         if self._release_guard is None:
@@ -2180,6 +2199,9 @@ class CapacityLedgerService:
             reservation.state = ReservationState.released.value
             reservation.released_at = now.isoformat()
             reservation.failure_reason = "hold_expired"
+            self._run_release_effect(
+                db, reservation.capacity_reservation_id, ReservationState.released.value
+            )
             db.add(
                 CapacityEvent(
                     kind="released",

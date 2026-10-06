@@ -11,8 +11,9 @@ this path set out to remove.
 Allocation happens before the job is dispatched. Allocating afterwards would
 mean a crash between the two leaves a port bound on the relay that no record
 claims. The cost of allocating first is that a lease outlives any path that
-fails before a teardown would run, which is why release is attached to every
-terminal outcome and why reconciliation exists beneath it.
+fails before a teardown would run, which is why the lease is returned with its
+reservation's capacity, whatever path releases it, and why reconciliation
+exists beneath that.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from compute_provisioning import fulfillment_is_terminal
+from compute_provisioning import reservation_is_released
 from vm_provisioning_adapter.db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
@@ -175,8 +176,8 @@ class RelayPortAllocator:
     def release_in_session(db: Session, *, owner_kind: str, owner_id: str) -> int:
         """Release inside the caller's transaction, without committing.
 
-        The terminal-state writer uses this so the release and the state that
-        makes it correct commit together. Releasing afterwards, in its own
+        The release effect uses this so the port and the reservation's capacity
+        are returned together. Releasing afterwards, in its own
         transaction, reintroduces on every crash exactly the leak that
         reconciliation exists to bound for paths nobody enumerated.
         """
@@ -221,9 +222,8 @@ class RelayPortAllocator:
         """Release every lease held by one owner. Returns how many were released.
 
         Idempotent, and safe to call on a path that may already have released:
-        every terminal outcome of a VM's life calls this, and a set of code
-        paths is never provably exhaustive, so the ones that overlap must not
-        fail each other.
+        a set of code paths is never provably exhaustive, so the ones that
+        overlap must not fail each other.
         """
         with self._session_factory() as db, db.begin():
             return self.release_in_session(
@@ -233,27 +233,22 @@ class RelayPortAllocator:
     def reconcile(
         self,
         *,
-        is_owner_terminal: Any,
+        is_owner_released: Any,
         grace: timedelta = timedelta(hours=1),
     ) -> int:
-        """Release leases whose owner has been terminal beyond a grace period.
+        """Release leases whose owner was released beyond a grace period.
 
-        One terminal state is reached only here rather than through the
-        settlement record's terminal transition. Capacity reclamation abandons
-        an aggregate that never dispatched, from a component that knows nothing
-        about ports — and allocation runs in its own transaction, so a lease
-        taken during an acceptance that then rolls back survives while the
-        record reverts to assigned and is later abandoned. That window is
-        narrow and real, and this is what closes it.
+        The release effect returns a port in the transaction that releases its
+        reservation's capacity, and that is still not sufficient on its own:
+        a set of code paths is never provably exhaustive, and the one that is
+        missed is the one nobody thought of. This converts an unenumerated
+        leak into a bounded one.
 
-        Release is attached to every terminal outcome, and that is still not
-        sufficient on its own: a set of code paths is never provably
-        exhaustive, and the one that is missed is the one nobody thought of.
-        This converts an unenumerated leak into a bounded one.
-
-        ``is_owner_terminal`` is supplied by the caller rather than queried
-        here, because what makes a job or a fulfillment terminal belongs to
-        those subsystems and not to port accounting.
+        ``is_owner_released`` is supplied by the caller rather than queried
+        here, because when an owner is released belongs to the site's
+        reservations and not to port accounting. It must answer exactly as the
+        release effect decides, so this never returns a port that decision
+        would hold.
         """
         cutoff = datetime.now(timezone.utc) - grace
         released = 0
@@ -268,7 +263,7 @@ class RelayPortAllocator:
             )
             now = datetime.now(timezone.utc)
             for lease in candidates:
-                if not is_owner_terminal(lease.owner_kind, lease.owner_id):
+                if not is_owner_released(lease.owner_kind, lease.owner_id):
                     continue
                 lease.released_at = now
                 released += 1
@@ -285,16 +280,16 @@ class RelayPortAllocator:
     async def run_reconciliation(
         self,
         *,
-        is_owner_terminal: Any,
+        is_owner_released: Any,
         poll_interval_seconds: float,
         grace: timedelta,
     ) -> None:
-        """Periodically release leases the terminal transition did not.
+        """Periodically release leases the release effect did not.
 
-        A backstop, not the mechanism: release is attached to the settlement
-        record's terminal transition, in that transition's own transaction.
-        What this recovers is a lease whose owner reached terminal by some path
-        that bypassed it — which is, by definition, a path nobody enumerated,
+        A backstop, not the mechanism: a port is returned with its
+        reservation's capacity, in the transaction that releases it. What this
+        recovers is a lease whose reservation was released by some path that
+        bypassed it — which is, by definition, a path nobody enumerated,
         which is why this exists at all rather than being reasoned away.
 
         Every release here is logged at warning level. A quiet sweep means the
@@ -305,7 +300,7 @@ class RelayPortAllocator:
 
         while True:
             try:
-                self.reconcile(is_owner_terminal=is_owner_terminal, grace=grace)
+                self.reconcile(is_owner_released=is_owner_released, grace=grace)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -407,37 +402,40 @@ class RelayPortAllocator:
 FULFILLMENT_OWNER_KIND = "fulfillment"
 
 
-def release_fulfillment_ports(db: Session, capacity_reservation_id: str, state: str) -> None:
-    """The fulfillment terminal effect: return the record's relay port.
+def release_reservation_ports(db: Session, capacity_reservation_id: str, state: str) -> None:
+    """VM's release effect: the reservation's relay port goes back to its relay.
 
-    A terminal record has no VM reachable through its tunnel, so the remote
-    port goes back to the relay's window, in the transaction that made the
-    record terminal.
+    Runs in the site ledger's transaction that releases the reservation's
+    capacity. A fulfillment's state alone never returns a port: a ``failed``
+    create may have left a guest running with its tunnel bound, so the port is
+    held, with the capacity, until an operator verifies the host and forces
+    the release.
     """
     released = RelayPortAllocator.release_in_session(
         db, owner_kind=FULFILLMENT_OWNER_KIND, owner_id=capacity_reservation_id
     )
     if released:
         logger.info(
-            "Released %d relay port lease(s) for %s on reaching %s",
+            "Released %d relay port lease(s) for %s with its capacity (%s)",
             released,
             capacity_reservation_id,
             state,
         )
 
 
-def fulfillment_lease_owner_is_terminal(session_factory) -> Any:
-    """The reconciliation predicate: whether a lease's owner has finished.
+def fulfillment_lease_owner_is_released(session_factory) -> Any:
+    """The reconciliation predicate: whether a lease's reservation is released.
 
-    Supplied to the allocator rather than queried inside it: what makes a
-    fulfillment terminal belongs to fulfillment, not to port accounting. A
-    lease whose owner is not a fulfillment is never reclaimed by it.
+    The backstop beneath the release effect asks the same question the effect
+    answers, so it never returns a port the release decision would hold. A
+    lease whose owner is not a reservation's fulfillment is never reclaimed by
+    it.
     """
 
-    def is_owner_terminal(owner_kind: str, owner_id: str) -> bool:
+    def is_owner_released(owner_kind: str, owner_id: str) -> bool:
         if owner_kind != FULFILLMENT_OWNER_KIND:
             return False
         with session_factory() as db:
-            return fulfillment_is_terminal(db, owner_id)
+            return reservation_is_released(db, owner_id)
 
-    return is_owner_terminal
+    return is_owner_released

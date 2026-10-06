@@ -343,13 +343,27 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     contributed = _container_module.resolved_background_tasks
     if contributed is None:
         raise RuntimeError("contributed background tasks are not composed")
-    tasks.extend(contributed)
-    return tuple(tasks)
+    return _unambiguous_tasks((*tasks, *contributed))
 
 
 async def close_storefront_client() -> None:
     await container.lifecycle_event_sink().close()
 
+
+
+def _unambiguous_tasks(tasks) -> tuple:
+    """The tasks to start, refusing two with one name.
+
+    Composition refuses a name two adapters contribute; this also refuses a
+    contributed name the service already uses for one of its own workers, so
+    every running task has the identity it declares.
+    """
+    seen: set[str] = set()
+    for task in tasks:
+        if task.name in seen:
+            raise RuntimeError(f"two background tasks are named {task.name!r}")
+        seen.add(task.name)
+    return tuple(tasks)
 
 def shutdown_steps() -> tuple[ComputeProvisioningShutdownStep, ...]:
     return (

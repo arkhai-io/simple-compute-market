@@ -16,7 +16,6 @@ from market_fulfillment import (
     SettlementRecordState,
     SettlementResource,
 )
-from compute_provisioning import FulfillmentTerminalHooks
 from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
@@ -37,15 +36,11 @@ class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
     def __init__(self, *, session_factory, repository, provider_registry, settings,
-                 terminal_hooks: FulfillmentTerminalHooks | None = None,
                  worker_id: str | None = None) -> None:
         self._session_factory = session_factory
         self._repository = repository
         self._providers = provider_registry
         self._settings = settings
-        # The domains' terminal effects; a composition with none owes nothing
-        # when a record becomes terminal.
-        self._terminal_hooks = terminal_hooks
         self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
         self._limit = int(getattr(settings, "fulfillment_convergence_batch_size", 50))
         self._backoff = Backoff(
@@ -404,24 +399,8 @@ class FulfillmentConvergenceWatchdog:
     ) -> None:
         def apply(db) -> None:
             self._repository.transition(db, reservation_id, target_state, **updates)
-            self._run_terminal_hooks(db, reservation_id, target_state)
 
         self._with_owned_record(reservation_id, expected_state, apply)
-
-    def _run_terminal_hooks(self, db, reservation_id: str, target_state: str) -> None:
-        """Run the domains' terminal effects if this transition is terminal.
-
-        Inside the caller's transaction, so each effect and the state that
-        justifies it commit together. Outside it, a crash between the two
-        leaves what the effect would have returned claimed by nothing.
-
-        Attached here rather than to teardown, cancellation, and expiry
-        individually because a set of call sites is never provably complete and
-        the one that is missed is the one nobody thought of. Every terminal
-        transition convergence writes passes through here.
-        """
-        if self._terminal_hooks is not None:
-            self._terminal_hooks.run(db, reservation_id, target_state)
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
@@ -452,12 +431,6 @@ class FulfillmentConvergenceWatchdog:
         def apply(db) -> None:
             self._repository.mark_provisioned_resources_torn_down(db, reservation_id)
             self._repository.transition(
-                db, reservation_id, SettlementRecordState.torn_down.value
-            )
-            # This path writes its terminal state directly rather than through
-            # _apply_transition, so it runs the terminal effects explicitly, in
-            # the same transaction for the same reason.
-            self._run_terminal_hooks(
                 db, reservation_id, SettlementRecordState.torn_down.value
             )
 

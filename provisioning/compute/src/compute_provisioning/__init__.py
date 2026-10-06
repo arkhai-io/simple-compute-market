@@ -21,12 +21,7 @@ from .composition import (
 )
 from .definition_documents import DefinitionDocumentContribution
 from .events import IdempotentLifecycleEventSink, LifecycleEventSink
-from .fulfillment_terminal import (
-    FULFILLMENT_TERMINAL_STATES,
-    FulfillmentTerminalHook,
-    FulfillmentTerminalHooks,
-    fulfillment_is_terminal,
-)
+from .release_effects import ReleaseEffect, ReleaseEffects, reservation_is_released
 from .inventory_views import (
     InventoryViewProjection,
     InventoryViews,
@@ -59,10 +54,9 @@ __all__ = [
     "compose_adapter_bundles",
     "compose_inventory_views",
     "DefinitionDocumentContribution",
-    "FULFILLMENT_TERMINAL_STATES",
-    "FulfillmentTerminalHook",
-    "FulfillmentTerminalHooks",
-    "fulfillment_is_terminal",
+    "ReleaseEffect",
+    "ReleaseEffects",
+    "reservation_is_released",
     "InventoryViewProjection",
     "InventoryViews",
     "JobExecutor",

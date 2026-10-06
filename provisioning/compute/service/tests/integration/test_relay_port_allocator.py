@@ -6,9 +6,8 @@ a port the other cannot, and the relay's refusal of a second registration
 arrives asynchronously in a tunnel client's log rather than as a failed
 allocation.
 
-Release is asserted per terminal path rather than through one representative,
-because the point of attaching it to every ending is that no ending is missed —
-a test that exercises only teardown proves the opposite of what is wanted.
+Release is the allocator's primitive here; when it runs is the site ledger's
+release decision, asserted where that decision is made.
 
 External boundary: SQLAlchemy against in-memory SQLite. The uniqueness
 constraint is the thing under test, so the real engine enforces it rather than
@@ -195,8 +194,8 @@ class TestTheReleasePrimitive:
     def test_releasing_in_a_caller_session_does_not_commit(
         self, allocator, session_factory
     ):
-        """The terminal-state writer needs release to join its transaction, so
-        that the release and the state justifying it land together."""
+        """The release effect needs release to join the ledger's transaction, so
+        that the port and the reservation's capacity are returned together."""
         _relay(session_factory)
         allocator.allocate(
             relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
@@ -235,7 +234,7 @@ class TestReconciliation:
             )
             lease.created_at = (datetime.now(timezone.utc) - delta).replace(tzinfo=None)
 
-    def test_a_lease_whose_owner_is_terminal_beyond_the_grace_is_released(
+    def test_a_lease_whose_owner_is_released_beyond_the_grace_is_released(
         self, allocator, session_factory
     ):
         _relay(session_factory)
@@ -243,7 +242,7 @@ class TestReconciliation:
         self._age(session_factory, "cr-1", timedelta(hours=3))
 
         released = allocator.reconcile(
-            is_owner_terminal=lambda kind, owner: True, grace=timedelta(hours=1)
+            is_owner_released=lambda kind, owner: True, grace=timedelta(hours=1)
         )
 
         assert released == 1
@@ -259,13 +258,13 @@ class TestReconciliation:
         self._age(session_factory, "cr-1", timedelta(hours=3))
 
         released = allocator.reconcile(
-            is_owner_terminal=lambda kind, owner: False, grace=timedelta(hours=1)
+            is_owner_released=lambda kind, owner: False, grace=timedelta(hours=1)
         )
 
         assert released == 0
         assert allocator.held_ports("site-a") == [lease.remote_port]
 
-    def test_a_recent_lease_is_left_alone_even_when_terminal(
+    def test_a_recent_lease_is_left_alone_even_when_released(
         self, allocator, session_factory
     ):
         """The grace period is what keeps reconciliation from racing the
@@ -274,7 +273,7 @@ class TestReconciliation:
         allocator.allocate(relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1")
 
         released = allocator.reconcile(
-            is_owner_terminal=lambda kind, owner: True, grace=timedelta(hours=1)
+            is_owner_released=lambda kind, owner: True, grace=timedelta(hours=1)
         )
 
         assert released == 0
@@ -282,13 +281,12 @@ class TestReconciliation:
     def test_an_abandoned_owner_is_recovered_by_the_sweep(
         self, allocator, session_factory
     ):
-        """The one terminal state the transition path cannot cover.
+        """A release the effect did not see, recovered by the sweep.
 
-        Capacity reclamation abandons an aggregate that never dispatched, from
-        a component that knows nothing about ports. Allocation runs in its own
-        transaction, so a lease taken during an acceptance that then rolls back
-        outlives the record's return to `assigned`. Nothing on the settlement
-        transition path sees that, which is why the backstop has to.
+        Allocation runs in its own transaction, so a lease taken during an
+        acceptance that then rolls back can outlive anything that would release
+        it with the reservation; the backstop recovers it once the reservation
+        is released.
         """
         _relay(session_factory)
         allocator.allocate(
@@ -296,12 +294,12 @@ class TestReconciliation:
         )
         self._age(session_factory, "cr-abandoned", timedelta(hours=3))
 
-        def terminal(kind: str, owner: str) -> bool:
+        def released(kind: str, owner: str) -> bool:
             # What the deployed predicate reports for an abandoned record.
             return kind == "fulfillment" and owner == "cr-abandoned"
 
         assert allocator.reconcile(
-            is_owner_terminal=terminal, grace=timedelta(hours=1)
+            is_owner_released=released, grace=timedelta(hours=1)
         ) == 1
         assert allocator.held_ports("site-a") == []
 
@@ -309,7 +307,7 @@ class TestReconciliation:
         self, allocator, session_factory
     ):
         """A record that no longer exists is orphaned by definition; the
-        deployed predicate reports it terminal for that reason."""
+        deployed predicate reports it released for that reason."""
         _relay(session_factory)
         allocator.allocate(
             relay_id="site-a", owner_kind="fulfillment", owner_id="cr-gone"
@@ -317,6 +315,6 @@ class TestReconciliation:
         self._age(session_factory, "cr-gone", timedelta(hours=3))
 
         assert allocator.reconcile(
-            is_owner_terminal=lambda kind, owner: True, grace=timedelta(hours=1)
+            is_owner_released=lambda kind, owner: True, grace=timedelta(hours=1)
         ) == 1
 

@@ -2136,3 +2136,100 @@ def test_oversight_is_refused_once_the_lease_is_not_leased(
 
     assert seeded.record_unmanaged(reservation_id, reason="oversight_released") is None
     assert seeded.get_reservation(reservation_id)["state"] == state
+
+
+# ----------------------------------------------------------------------
+# Release effects: what a deployment returns exactly when capacity is
+# ----------------------------------------------------------------------
+
+
+class _Effect:
+    def __init__(self, *, fails: bool = False) -> None:
+        self.fails = fails
+        self.ran: list[tuple[str, str]] = []
+
+    def __call__(self, db, capacity_reservation_id: str, state: str) -> None:
+        if self.fails:
+            raise RuntimeError("release effect failed")
+        self.ran.append((capacity_reservation_id, state))
+
+
+def _with_effect(*, permit: bool = True, fails: bool = False):
+    effect = _Effect(fails=fails)
+    ledger = _make_ledger(release_guard=_Guard(permit), release_effect=effect)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    reservation_id = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"market": "vms"}
+    )["capacity_reservation_id"]
+    return ledger, effect, reservation_id
+
+
+def test_a_guarded_release_runs_the_effect_once_and_a_retry_does_not():
+    ledger, effect, reservation_id = _with_effect()
+
+    ledger.release(capacity_reservation_id=reservation_id)
+    ledger.release(capacity_reservation_id=reservation_id)
+
+    assert effect.ran == [(reservation_id, "released")]
+
+
+def test_a_refused_release_runs_no_effect():
+    ledger, effect, reservation_id = _with_effect(permit=False)
+
+    assert ledger.release(capacity_reservation_id=reservation_id) is None
+    assert effect.ran == []
+
+
+def test_a_forced_release_runs_the_effect_though_the_guard_would_refuse():
+    """The operator's override returns what the reservation held along with
+    its capacity: the only way a refused reservation's effects ever run."""
+    ledger, effect, reservation_id = _with_effect(permit=False)
+
+    ledger.release(capacity_reservation_id=reservation_id, state="force_released")
+
+    assert effect.ran == [(reservation_id, "force_released")]
+
+
+def test_a_failing_effect_aborts_the_release():
+    ledger, effect, reservation_id = _with_effect(fails=True)
+
+    with pytest.raises(RuntimeError, match="release effect failed"):
+        ledger.release(capacity_reservation_id=reservation_id)
+
+    assert ledger.get_reservation(reservation_id)["state"] == "reserved"
+    assert ledger.snapshot()[0]["available_units"] == 3
+
+
+def test_a_lapsed_hold_runs_the_effect():
+    effect = _Effect()
+    ledger = _make_ledger(release_effect=effect)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    reservation_id = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1},
+        deal_ref={"market": "vms"},
+        ttl_seconds=60,
+    )["capacity_reservation_id"]
+    from market_site.db import CapacityReservation
+
+    with ledger._session_factory() as db:
+        row = db.get(CapacityReservation, reservation_id)
+        row.hold_expires_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        db.commit()
+
+    # The next admission sweeps lapsed holds before it reserves.
+    ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"market": "vms"})
+
+    assert effect.ran == [(reservation_id, "released")]
+
+
+def test_a_resize_runs_the_effect_for_the_superseded_reservation():
+    ledger, effect, reservation_id = _with_effect()
+
+    replacement = ledger.resize_reservation(
+        old_capacity_reservation_id=reservation_id,
+        new_claim={"offering_mode": "vm", "gpu_count": 2},
+        deal_ref={"market": "vms"},
+    )
+
+    assert replacement is not None
+    assert effect.ran == [(reservation_id, "released")]

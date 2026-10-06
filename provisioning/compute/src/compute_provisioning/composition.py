@@ -16,7 +16,7 @@ from typing import Any
 
 from .adapters import JobExecutorTable
 from .definition_documents import DefinitionDocumentContribution
-from .fulfillment_terminal import FulfillmentTerminalHook, FulfillmentTerminalHooks
+from .release_effects import ReleaseEffect, ReleaseEffects
 from .inventory_views import InventoryViewProjection, InventoryViews, compose_inventory_views
 from .jobs.executor import JobExecutor
 from .startup import ComputeProvisioningBackgroundTask
@@ -47,8 +47,8 @@ class ExecutorAdapterBundle:
     adapter exports. Execution readiness is not either: the composition root
     reports it from the executors it composed.
 
-    ``fulfillment_terminal_hooks`` run whenever a fulfillment record becomes
-    terminal, in that transaction; ``definition_documents`` are imported at
+    ``release_effects`` run whenever the site releases a reservation's
+    capacity, in that transaction; ``definition_documents`` are imported at
     startup before the service's own documents; ``background_tasks`` start
     with the service's own workers.
     """
@@ -58,7 +58,7 @@ class ExecutorAdapterBundle:
     fulfillment_providers: Mapping[str, FulfillmentProvider] = field(default_factory=dict)
     pool_config_handlers: Mapping[str, Any] = field(default_factory=dict)
     inventory_views: tuple[InventoryViewProjection, ...] = ()
-    fulfillment_terminal_hooks: tuple[FulfillmentTerminalHook, ...] = ()
+    release_effects: tuple[ReleaseEffect, ...] = ()
     definition_documents: tuple[DefinitionDocumentContribution, ...] = ()
     background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = ()
 
@@ -201,7 +201,7 @@ def compose_adapter_bundles(
     *,
     host_requirement: Mapping[str, bool],
     job_executors: JobExecutorTable,
-    terminal_hooks: FulfillmentTerminalHooks | None = None,
+    release_effects: ReleaseEffects | None = None,
 ) -> ComposedComputeAdapters:
     """Compose bundles and reject ambiguous registrations before startup.
 
@@ -209,10 +209,10 @@ def compose_adapter_bundles(
     site ledger and scheduler; it must match the registered providers exactly.
     ``job_executors`` is the table the job service was built with; every
     bundle's job executors are registered into it, refusing a key registered
-    twice, and it is frozen before composition returns. ``terminal_hooks`` is
-    the registry everything that makes a fulfillment record terminal holds; every
-    contributed hook is registered into it, and it is frozen with the table. A
-    contributed hook with no registry to receive it is refused rather than
+    twice, and it is frozen before composition returns. ``release_effects`` is
+    the registry the site ledger runs when it releases capacity; every
+    contributed effect is registered into it, and it is frozen with the table.
+    A contributed effect with no registry to receive it is refused rather than
     dropped.
     """
 
@@ -222,7 +222,7 @@ def compose_adapter_bundles(
     providers: dict[str, FulfillmentProvider] = {}
     pool_config_handlers: dict[str, Any] = {}
     inventory_views: list[tuple[str, InventoryViewProjection]] = []
-    terminal_hooks_contributed: list[tuple[str, FulfillmentTerminalHook]] = []
+    effects_contributed: list[tuple[str, ReleaseEffect]] = []
     document_owners: dict[str, str] = {}
     definition_documents: list[DefinitionDocumentContribution] = []
     task_owners: dict[str, str] = {}
@@ -291,8 +291,8 @@ def compose_adapter_bundles(
         inventory_views.extend(
             (bundle_name, projection) for projection in bundle.inventory_views
         )
-        terminal_hooks_contributed.extend(
-            (bundle_name, hook) for hook in bundle.fulfillment_terminal_hooks
+        effects_contributed.extend(
+            (bundle_name, effect) for effect in bundle.release_effects
         )
 
         for document in bundle.definition_documents:
@@ -322,17 +322,17 @@ def compose_adapter_bundles(
 
     _validate_host_requirement(providers, host_requirement)
     composed_views = compose_inventory_views(inventory_views)
-    if terminal_hooks_contributed and terminal_hooks is None:
-        owners = sorted({owner for owner, _ in terminal_hooks_contributed})
+    if effects_contributed and release_effects is None:
+        owners = sorted({owner for owner, _ in effects_contributed})
         raise ValueError(
-            "fulfillment terminal hooks contributed by "
+            "release effects contributed by "
             + ", ".join(repr(owner) for owner in owners)
             + " but no registry was given to run them"
         )
-    if terminal_hooks is not None:
-        for _owner, hook in terminal_hooks_contributed:
-            terminal_hooks.register(hook)
-        terminal_hooks.freeze()
+    if release_effects is not None:
+        for _owner, effect in effects_contributed:
+            release_effects.register(effect)
+        release_effects.freeze()
     job_executors.freeze()
 
     return ComposedComputeAdapters(

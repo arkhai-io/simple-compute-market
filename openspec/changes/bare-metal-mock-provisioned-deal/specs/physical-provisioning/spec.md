@@ -195,25 +195,23 @@ composed MUST answer 503.
 - **THEN** the routes resolve them through the accessors at request time, and a request
   arriving before composition answers 503
 
-### Requirement: Fulfillment terminal effects run in the terminal transaction
+### Requirement: What is held for a reservation is returned with its capacity
 
-A domain effect owed when a fulfillment record becomes terminal (`failed`, `torn_down`, or
-`abandoned`), such as returning a relay port, MUST be contributed by the domain's adapter
-and MUST run in the same transaction that makes the record terminal, on every path that
-does so: fulfillment convergence's transitions and the release guard's abandonment. The
-provisioning service MUST NOT name such an effect. A failing effect MUST leave the record
-as it was, so the transition is retried rather than committed without it.
+A domain resource held for a reservation's lifetime, such as a relay port, MUST be
+returned in the transaction that releases the reservation's capacity, whether the
+release guard permits it or an operator forces it, and never on a fulfillment state
+alone. The provisioning service MUST NOT name the resource, and a failing return MUST
+abort the release.
 
-#### Scenario: A torn-down VM returns its relay port
+#### Scenario: A failed fulfillment holds its port
 
-- **WHEN** convergence records a VM fulfillment `torn_down`
-- **THEN** its relay port is released in that transaction
+- **WHEN** a VM's fulfillment fails and the release guard refuses its capacity
+- **THEN** its relay port stays held until an operator forces the release, which returns both
 
 #### Scenario: An abandoned hold returns a port leased before dispatch
 
-- **WHEN** the release guard abandons an `assigned` aggregate whose create was prepared
-  and leased a relay port
-- **THEN** the port is released in the ledger's transaction, not left to reconciliation
+- **WHEN** the release guard abandons an `assigned` aggregate whose create was prepared and leased a relay port
+- **THEN** the port is returned in the ledger's transaction, not left to reconciliation
 
 ### Requirement: Relay administration admits only the administrator
 
@@ -454,6 +452,49 @@ For every offering mode, lease release SHALL initiate teardown through a narrow 
 - **THEN** release begins the bare-metal fulfillment's teardown, the aggregate leaves `active`, and capacity stays held until it reaches `torn_down`
 
 ## MODIFIED Requirements
+
+### Requirement: Relay port leases are unique per relay
+
+The provisioning service MUST allocate a VM's relay port from the referenced relay's window before dispatch, record the allocation against that relay and the VM, and pass the port to the job as an input. The playbook MUST apply the port it is given and MUST NOT select one.
+
+A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
+
+A lease MUST be released with its reservation's capacity, in the transaction that releases it, whatever path releases it, and MUST NOT be released on a fulfillment state alone. A failed creation may leave a guest running with its tunnel bound, so its port is held, with its capacity, until an operator verifies the host and forces the release. A periodic reconciliation MUST release leases whose reservation has been released beyond a grace period, as a backstop rather than as the primary mechanism.
+
+Allocation MUST be idempotent for one owner: allocating twice for the same fulfillment MUST return the lease already held rather than issuing a second port.
+
+A pool whose referenced relay has no usable allocation window MUST be rejected before dispatch rather than producing a VM with no external route.
+
+#### Scenario: Two hosts share a relay
+
+- **WHEN** a port is leased for a VM on one host and a VM on a second host requests an allocation from the same relay
+- **THEN** the second allocation selects a different port, rather than reissuing a port already bound on that relay
+
+#### Scenario: A VM creation fails before teardown would run
+
+- **WHEN** a VM's fulfillment fails, including after its provider reported the create succeeded
+- **THEN** its port lease is held until an operator forces the release of its capacity, and is released then
+
+#### Scenario: A release path is missed
+
+- **WHEN** a lease's reservation has been released beyond the grace period and the lease is still held
+- **THEN** reconciliation releases it
+
+#### Scenario: An accepted fulfillment allocates twice
+
+- **WHEN** allocation runs a second time for a fulfillment that already holds an active lease
+- **THEN** the existing lease is returned and no second port is issued
+
+#### Scenario: Validation is requested
+
+- **WHEN** a fulfillment request is validated rather than accepted
+- **THEN** no port is leased and no durable state is written
+
+#### Scenario: A relay is configured with no usable window
+
+- **WHEN** a fulfillment is requested against a pool whose relay has no usable allocation window
+- **THEN** the request is rejected before dispatch rather than creating a VM with no route
+
 
 ### Requirement: Ansible fulfillment adapter
 

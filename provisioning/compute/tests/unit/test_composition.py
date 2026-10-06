@@ -391,7 +391,7 @@ def test_a_duplicate_job_executor_names_the_bundle():
 from compute_provisioning import (  # noqa: E402
     ComputeProvisioningBackgroundTask,
     DefinitionDocumentContribution,
-    FulfillmentTerminalHooks,
+    ReleaseEffects,
 )
 
 
@@ -412,12 +412,12 @@ def _task(name: str) -> ComputeProvisioningBackgroundTask:
     return ComputeProvisioningBackgroundTask(name, run)
 
 
-def _compose_contributions(*bundles, terminal_hooks=None):
+def _compose_contributions(*bundles, release_effects=None):
     return compose_adapter_bundles(
         list(bundles),
         host_requirement={},
         job_executors=JobExecutorTable(),
-        terminal_hooks=terminal_hooks,
+        release_effects=release_effects,
     )
 
 
@@ -427,26 +427,26 @@ def _bundle(name, mode, **contributions):
     )
 
 
-def test_contributed_hooks_are_registered_and_the_registry_frozen():
+def test_contributed_effects_are_registered_and_the_registry_frozen():
     calls = []
-    hooks = FulfillmentTerminalHooks()
+    effects = ReleaseEffects()
 
     def recording(db, capacity_reservation_id, state):
         calls.append(capacity_reservation_id)
 
     _compose_contributions(
-        _bundle("vm", "vm", fulfillment_terminal_hooks=(recording,)),
-        terminal_hooks=hooks,
+        _bundle("vm", "vm", release_effects=(recording,)),
+        release_effects=effects,
     )
-    hooks.run(object(), "cr-1", "torn_down")
+    effects(object(), "cr-1", "released")
 
-    assert hooks.frozen
+    assert effects.frozen
     assert calls == ["cr-1"]
 
 
-def test_a_contributed_hook_with_no_registry_is_refused_rather_than_dropped():
+def test_a_contributed_effect_with_no_registry_is_refused_rather_than_dropped():
     with pytest.raises(ValueError, match="no registry"):
-        _compose_contributions(_bundle("vm", "vm", fulfillment_terminal_hooks=(_hook,)))
+        _compose_contributions(_bundle("vm", "vm", release_effects=(_hook,)))
 
 
 def test_documents_and_tasks_are_carried_in_bundle_order():

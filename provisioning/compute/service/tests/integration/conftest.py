@@ -645,19 +645,18 @@ async def client_and_queue(
     # The providers' host requirement exactly as the production container
     # builds it, so admission and scheduling here refuse what they refuse there.
     host_requirement = _container_module.Container.host_requirement()
-    # The terminal-effect registry exactly as the production container builds
-    # it, filled and frozen by composing the bundles below and held by the
-    # guard and convergence, the two writers that make a record terminal.
-    terminal_hooks = _container_module._make_terminal_hooks()
+    # The release-effect registry exactly as the production container builds
+    # it, filled and frozen by composing the bundles below and run by the
+    # ledger whenever it releases capacity.
+    release_effects = _container_module._make_release_effects()
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
         # The release guard exactly as the production container composes it,
         # so capacity is freed here only on the proof it needs there.
-        release_guard=FulfillmentReleaseGuard(
-            SettlementRepository(), terminal_hooks=terminal_hooks
-        ),
+        release_guard=FulfillmentReleaseGuard(SettlementRepository()),
+        release_effect=release_effects,
     )
 
     host_authority = HostAuthority(
@@ -795,7 +794,7 @@ async def client_and_queue(
         ],
         host_requirement=host_requirement,
         job_executors=job_executor_table,
-        terminal_hooks=terminal_hooks,
+        release_effects=release_effects,
     )
     fulfillment_service = FulfillmentOrchestrator(
         provider_registry=composed_adapters.provider_registry,
@@ -860,7 +859,6 @@ async def client_and_queue(
         repository=SettlementRepository(),
         provider_registry=composed_adapters.provider_registry,
         settings=mock_settings,
-        terminal_hooks=terminal_hooks,
     )
     # Status composed as production composes it: the composed executor table,
     # the lease lifecycle, and the readiness components the container builds.

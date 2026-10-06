@@ -2418,8 +2418,9 @@ re-verifies them by grep before each move.
         - The service: `db/models.py` loses the three models; `db/database.py` creates VM's
           metadata after the pool tables; `db/migrations.py` reads VM's models (two new
           allowlisted pairs; the relay controller's exception is gone); `container.py`,
-          `app_runtime.py`, `main.py`, and `config.py` lose the relay wiring, and the
-          terminal-effect registry starts empty. Its runtime dependency on VM's operator
+          `app_runtime.py`, `main.py`, and `config.py` lose relay implementation
+          ownership (they still compose VM's relay service into VM's router, as a
+          composition root must), and the terminal-effect registry starts empty. Its runtime dependency on VM's operator
           client is gone.
         - The relay route declarations admit only `admin`.
         - `relay-vm-access-without-a-dashboard`'s pending-move note now records the new
@@ -2509,12 +2510,59 @@ re-verifies them by grep before each move.
         and move it forward; this change's own long deltas are restructured at its
         closeout (task 2.6). The Helm render
         tests were not run (no `helm` binary in this environment); none asserts the
-        changed value. Not yet run end to end.
+        changed value.
+      - End-to-end (run 37431438099, on the 5B.10 checkpoint: service 0.12.0, VM adapter
+        0.10.0, kit-alkahest 0.3.0, VM storefront 0.11.0): the bare-metal lane passed 16
+        and the VM lane 135, nothing failed or skipped, and neither lane's service logs
+        show a traceback, a 5xx, a 401, or a 403; expired leases were released.
+- [x] 5B.10.D Fixes from the implementation review of 5B.9 and 5B.10 (2026-10-06;
+      `design.md`, "Implementation review of 5B.9 and 5B.10"). Supersedes 5B.9.A's
+      terminal hooks.
+      - Release effects (finding 1): `kit/site`'s `CapacityLedgerService` takes
+        `release_effect`, run before commit in every transaction that releases capacity
+        (`release`, guarded or forced; the lapsed-hold sweep; `resize_reservation`'s
+        supersede); `compute_provisioning/release_effects.py` (`ReleaseEffects`,
+        `reservation_is_released`) replaces `fulfillment_terminal.py`; the bundle's
+        `release_effects`; the release guard and fulfillment convergence run no effects;
+        the container hands the registry to the ledger; VM's `release_reservation_ports`
+        and `fulfillment_lease_owner_is_released`, with the allocator's and
+        `RelayPortLease`'s docstrings; the spec delta's requirement rewritten and the
+        permanent "Relay port leases are unique per relay" modified.
+      - Task names (finding 2): `app_runtime.background_tasks()` refuses a name used twice
+        across the service's workers and the contributions.
+      - Classification (finding 3): the convergence suite's database tests, and the relay
+        administration, port allocator, port lease, and pool-configuration suites, move to
+        `provisioning/compute/service/tests/integration/`; the backoff test is
+        `unit/services/test_fulfillment_convergence_backoff.py`.
+      - Records (finding 4): 5B.9.B's note corrected.
+      - Tests: `kit/site`'s ledger suite (the effect on a guarded, a forced, and a lapsed
+        release and a resize's supersede; none on a refusal or a retry; a failing effect
+        aborting the release); the family's `test_release_effects.py`, composition cases,
+        and `test_release.py` (an abandoning release's effect in its transaction, a
+        failing effect, a failed fulfillment holding until forced); the service's
+        convergence suite (a failed create, a created guest whose identity cannot be
+        resolved, and a successful create all keep their port; reconciliation follows the
+        reservation's state), `test_authority_composition.py` (the ledger runs the
+        registry composition fills), `test_worker.py` (a contribution named
+        `lease-watchdog` refused).
+      - Versions: kit-site 0.9.0, compute-provisioning 0.15.0 (kit-site floor 0.9.0),
+        compute-provisioning-service 0.13.0 (floors: kit-site 0.9.0, family kit 0.15.0, VM
+        adapter 0.11.0), vms-provisioning-adapter 0.11.0 (family-kit floor 0.15.0);
+        relocked: `kit/site`, `kit/fulfillment`, the family kit, the Ansible
+        distribution, both adapters, the service, the API-credit service, the bare-metal
+        storefront, e2e-tests; the VM storefront by hand.
+      - Validation: `kit/site` 286; family kit 196; provisioning service 726 unit and
+        421 integration. The root `make -k test` aggregate passes its 44 suites, failing
+        only where this environment cannot run a suite; an earlier aggregate run hit the
+        recorded harness race once more (closeout task 2.6). The four locks its reinit
+        rewrites were restored. `make check-locks`, `make check-packaging`, comment
+        hygiene, documentation citations, and OpenSpec strict validation (1.14.0) pass.
+        Not yet run end to end.
 - [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
-      Status 2026-10-05: the suites, packaging, and hygiene are 5B.10's validation, on
-      the tree this gate covers; the two lanes await a run on the 5B.10 checkpoint
-      (9.B's run, 37342659408, preceded 5B.10's address-book move).
+      Status 2026-10-06: run 37431438099 passed both lanes on the 5B.10 checkpoint, but
+      5B.10.D changes when relay ports are returned, so the gate runs again on the
+      5B.10.D tree before it is checked.
 - [ ] 5B.12 Job-backed fulfillment. Re-planned 2026-10-05 before implementation, after the
       design review (`design.md`, "Job-backed fulfillment (5B.12)"): the family owns the
       whole job-backed provider and one delivery envelope; domains contribute preparation
@@ -2873,6 +2921,10 @@ service code.
       first recorded here, was routed on 2026-10-05 to
       `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
       maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in 5B.10.D: the relay administration, port allocator, port lease, and
+      pool-configuration suites are integration tests in the service's suite; they test
+      VM-owned behavior and belong in VM's adapter, with schema fixtures of VM's own
+      rather than the service's migrations.
       Found in 5B.12's design review: every VM guest attaches to libvirt's `default` NAT
       network, one bridge per host, with no isolation rule, so guests on one host,
       including different buyers', share a layer-2 segment; route to VM's provisioning
@@ -2884,7 +2936,10 @@ service code.
       shared in-memory SQLite connection (`StaticPool`), so a job the bare-metal `begin`
       dispatches can end the transaction the authentication middleware is about to
       commit; `test_a_bare_metal_lease_is_registered_on_the_family_surface` failed once
-      that way ("cannot commit - no transaction is active") and passed on every rerun.
+      that way ("cannot commit - no transaction is active") and passed on every rerun;
+      in 5B.10.D, `test_a_release_is_durable_before_teardown_and_a_restart_resumes_it`
+      failed the same way once, in the authentication middleware's replay-record commit
+      during a bare-metal `begin`, and passed on the rerun.
       Production uses a file database with a connection per session. The harness needs
       the same, or an equivalent that gives each session its own connection.
       Found in slice C: the system worker controls' response bodies are untyped dicts

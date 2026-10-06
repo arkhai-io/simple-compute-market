@@ -51,7 +51,7 @@ from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning import FulfillmentTerminalHooks, compose_adapter_bundles
+from compute_provisioning import ReleaseEffects, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -218,24 +218,23 @@ def _make_job_engine(session_factory, job_executors, host_authority, cfg):
     )
 
 
-def _make_terminal_hooks():
-    """The one registry of fulfillment terminal effects.
+def _make_release_effects():
+    """The one registry of what domains return with a reservation's capacity.
 
-    Created empty, filled and frozen by adapter composition, and held by the
-    release guard and fulfillment convergence, the two writers that make a
-    fulfillment record terminal.
+    Created empty, filled and frozen by adapter composition, and run by the
+    site ledger in every transaction that releases capacity.
     """
-    return FulfillmentTerminalHooks()
+    return ReleaseEffects()
 
 
 def _compose_adapters(
-    vm_bundle, bare_metal_bundle, host_requirement, job_executors, terminal_hooks
+    vm_bundle, bare_metal_bundle, host_requirement, job_executors, release_effects
 ):
     return compose_adapter_bundles(
         [vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
         job_executors=job_executors,
-        terminal_hooks=terminal_hooks,
+        release_effects=release_effects,
     )
 
 
@@ -317,9 +316,8 @@ class Container(containers.DeclarativeContainer):
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
 
-    # Declared ahead of the ledger: the release guard runs it when it abandons
-    # an aggregate.
-    fulfillment_terminal_hooks = providers.Singleton(_make_terminal_hooks)
+    # Declared ahead of the ledger, which runs it whenever it releases capacity.
+    release_effects = providers.Singleton(_make_release_effects)
 
     host_requirement = providers.Object(
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
@@ -339,8 +337,8 @@ class Container(containers.DeclarativeContainer):
         release_guard=providers.Singleton(
             FulfillmentReleaseGuard,
             settlement_repository=settlement_repository,
-            terminal_hooks=fulfillment_terminal_hooks,
         ),
+        release_effect=release_effects,
     )
 
     # Declared ahead of vm_runtime: host inventory derives capacity
@@ -449,7 +447,7 @@ class Container(containers.DeclarativeContainer):
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
         job_executors=job_executor_table,
-        terminal_hooks=fulfillment_terminal_hooks,
+        release_effects=release_effects,
     )
 
     inventory_views = providers.Singleton(
@@ -587,7 +585,6 @@ class Container(containers.DeclarativeContainer):
         repository=settlement_repository,
         provider_registry=provider_registry,
         settings=config,
-        terminal_hooks=fulfillment_terminal_hooks,
     )
 
     status_components = providers.Singleton(

@@ -135,10 +135,12 @@ class RelayPortLease(Base):
 
     A lease is recorded before the job that will use it is dispatched, so a
     crash between the two cannot leave a port bound on the relay that no record
-    claims. It is released on every terminal outcome rather than on teardown
-    alone, because a dispatch that never starts, a permanently failed creation,
-    a cancellation, and an expiry all end a VM's life without a teardown
-    running. Reconciliation bounds whatever path is missed.
+    claims. It is released with its reservation's capacity, whatever releases
+    it: a torn-down VM's lease release, an abandoned dispatch, a lapsed hold,
+    or an operator's forced release after verifying a host whose creation
+    failed. A failed creation alone releases nothing, because it may have left
+    a guest running with its tunnel bound. Reconciliation bounds whatever path
+    is missed.
     """
 
     __tablename__ = "relay_port_leases"
@@ -155,7 +157,7 @@ class RelayPortLease(Base):
     # Recorded for operator visibility and reconciliation, not for uniqueness.
     host_id = Column(String, nullable=True)
     pool_id = Column(String, nullable=True)
-    # The job or fulfillment whose terminal state releases this lease.
+    # The reservation whose released capacity releases this lease.
     owner_kind = Column(String, nullable=False)
     owner_id = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())

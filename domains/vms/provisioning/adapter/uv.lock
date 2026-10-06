@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -59,7 +59,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -211,7 +211,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -223,7 +223,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -243,7 +243,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.10.0"
+version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -272,7 +272,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning", specifier = ">=0.14.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.15.0" },
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },

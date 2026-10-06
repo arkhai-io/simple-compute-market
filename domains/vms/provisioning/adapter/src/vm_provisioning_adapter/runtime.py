@@ -29,7 +29,7 @@ from vm_provisioning_adapter.services.relay_definitions import (
 )
 from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayPortAllocator,
-    fulfillment_lease_owner_is_terminal,
+    fulfillment_lease_owner_is_released,
 )
 from vm_provisioning_adapter.services.relay_service import RelayService
 from vm_provisioning_adapter.services.relay_execution import (
@@ -98,9 +98,9 @@ class VmProvisioningRuntime:
         )
 
     def relay_reconciliation(self) -> tuple[ComputeProvisioningBackgroundTask, ...]:
-        """The backstop beneath the terminal release: a periodic sweep returning
-        leases whose owner finished by a path that bypassed it. Enabled unless
-        the deployment turns it off."""
+        """The backstop beneath the release effect: a periodic sweep returning
+        leases whose reservation was released by a path that bypassed it.
+        Enabled unless the deployment turns it off."""
         if not bool(getattr(self.config, "relay_port_reconciliation_enabled", True)):
             logger.info(
                 "Relay port reconciliation disabled "
@@ -111,12 +111,12 @@ class VmProvisioningRuntime:
             getattr(self.config, "relay_port_reconciliation_poll_interval_seconds", 300)
         )
         grace = float(getattr(self.config, "relay_port_reconciliation_grace_seconds", 3600))
-        is_owner_terminal = fulfillment_lease_owner_is_terminal(self.session_factory)
+        is_owner_released = fulfillment_lease_owner_is_released(self.session_factory)
         return (
             ComputeProvisioningBackgroundTask(
                 "relay-port-reconciliation",
                 lambda: self.relay_port_allocator.run_reconciliation(
-                    is_owner_terminal=is_owner_terminal,
+                    is_owner_released=is_owner_released,
                     poll_interval_seconds=poll,
                     grace=timedelta(seconds=grace),
                 ),

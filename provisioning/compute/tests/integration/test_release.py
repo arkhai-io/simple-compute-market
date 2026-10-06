@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
-from compute_provisioning import FulfillmentTerminalHooks
+from compute_provisioning import ReleaseEffects
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobRecord
 from compute_provisioning.release import (
@@ -57,7 +57,7 @@ def world():
     return _world()
 
 
-def _world(terminal_hooks=None):
+def _world(release_effects=None):
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -78,7 +78,8 @@ def _world(terminal_hooks=None):
         factory,
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
-        release_guard=FulfillmentReleaseGuard(repository, terminal_hooks=terminal_hooks),
+        release_guard=FulfillmentReleaseGuard(repository),
+        release_effect=release_effects,
     )
     ledger.register_resource(resource_id="r1", total_units=4, pool_id=DEFAULT_POOL_ID)
     port = _TeardownPort(factory)
@@ -192,20 +193,20 @@ def test_dispatch_provenance_without_an_aggregate_refuses_and_abandons_nothing(w
 
 
 # ----------------------------------------------------------------------
-# Terminal effects: abandoning makes the record terminal
+# Release effects: what a deployment returns with the capacity
 # ----------------------------------------------------------------------
 
 
-def _hooked_world(hook):
-    hooks = FulfillmentTerminalHooks()
-    hooks.register(hook)
-    hooks.freeze()
-    return _world(terminal_hooks=hooks)
+def _effects_world(effect):
+    effects = ReleaseEffects()
+    effects.register(effect)
+    effects.freeze()
+    return _world(release_effects=effects)
 
 
-def test_abandoning_runs_the_terminal_effects_in_the_reclaiming_transaction():
-    """The effect writes in the guard's session, so it commits with the
-    abandonment and the freed capacity."""
+def test_an_abandoning_release_runs_the_effect_in_the_reclaiming_transaction():
+    """The guard abandons the hold and the ledger frees its capacity in one
+    transaction, and the effect writes in it too."""
     calls = []
 
     def effect(db, capacity_reservation_id, state):
@@ -220,12 +221,13 @@ def test_abandoning_runs_the_terminal_effects_in_the_reclaiming_transaction():
             )
         )
 
-    factory, ledger, _, _ = _hooked_world(effect)
+    factory, ledger, _, _ = _effects_world(effect)
     reservation_id = _leased(ledger)
     _aggregate(factory, reservation_id, _State.assigned.value, fulfillment_id=None)
 
     assert ledger.release(capacity_reservation_id=reservation_id)["state"] == "released"
-    assert calls == [(reservation_id, _State.abandoned.value)]
+    assert calls == [(reservation_id, "released")]
+    assert _state(factory, reservation_id) == _State.abandoned.value
     with factory() as db:
         assert db.get(JobRecord, f"effect-{reservation_id}") is not None
 
@@ -234,7 +236,7 @@ def test_a_failing_effect_aborts_the_reclaim_and_abandons_nothing():
     def failing(db, capacity_reservation_id, state):
         raise RuntimeError("effect failed")
 
-    factory, ledger, _, _ = _hooked_world(failing)
+    factory, ledger, _, _ = _effects_world(failing)
     reservation_id = _leased(ledger)
     _aggregate(factory, reservation_id, _State.assigned.value, fulfillment_id=None)
 
@@ -244,19 +246,20 @@ def test_a_failing_effect_aborts_the_reclaim_and_abandons_nothing():
     assert ledger.get_reservation(reservation_id)["state"] == "leased"
 
 
-@pytest.mark.parametrize("aggregate", [None, _State.active.value, _State.torn_down.value])
-def test_no_effect_runs_when_nothing_is_abandoned(aggregate):
-    """A refusal writes nothing, and freeing capacity behind an absent or
-    already-terminal aggregate makes nothing terminal."""
+def test_a_failed_fulfillment_keeps_what_it_holds_until_an_operator_forces_release():
+    """A failed fulfillment may have left something running, so the guard
+    refuses and nothing is returned; the operator's forced release returns
+    the capacity and the effect together."""
     calls = []
-    factory, ledger, _, _ = _hooked_world(lambda db, rid, state: calls.append(rid))
+    factory, ledger, _, _ = _effects_world(lambda db, rid, state: calls.append(state))
     reservation_id = _leased(ledger)
-    if aggregate is not None:
-        _aggregate(factory, reservation_id, aggregate)
+    _aggregate(factory, reservation_id, _State.failed.value)
 
-    ledger.release(capacity_reservation_id=reservation_id)
-
+    assert ledger.release(capacity_reservation_id=reservation_id) is None
     assert calls == []
+
+    ledger.release(capacity_reservation_id=reservation_id, state="force_released")
+    assert calls == ["force_released"]
 
 
 class _DispatchWinsRepository(SettlementRepository):
