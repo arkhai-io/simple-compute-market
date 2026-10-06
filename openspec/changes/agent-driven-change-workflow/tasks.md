@@ -137,7 +137,14 @@ to repair by hand.
       classifies each accepted finding's outcome as an edit, a design decision
       (sent to `change-design`, never settled in triage), a task, or none; and
       never dismisses a finding that challenges an owner decision on the
-      grounds that the owner made it.
+      grounds that the owner made it. Amended after its first use, where the owner could
+      not decide from the triage without opening the review: each finding now
+      states what the change says now, the reviewer's reasoning, why it matters,
+      and the agent's position in prose; findings needing no choice are
+      confirmed in one batch, and each finding needing a design choice is
+      presented alone with its alternatives, so choosing the option is the
+      disposition; one label per issue throughout. `change-design` now triages
+      waiting reviews before opening its own discussion.
 - [ ] 5.2 Pilot: triage the 4.3 and 4.4 reviews, passing each design gate.
 
 ## 6. Planning

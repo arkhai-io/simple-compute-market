@@ -42,6 +42,16 @@ When the change has been through design before, find what has moved since:
 `git log` over the code the design cites, and any dependency that has landed.
 A stale design is the most common reason a change returns here.
 
+### Triage waiting reviews first
+
+If the change has a numbered review in `reviews/` with no `NN-<kind>.triage.md`
+beside it, or the owner brings a review to this session, triage it with
+`change-triage` before opening the discussion below. Its findings that need a
+decision become this discussion's decisions, under their finding labels; do not
+restate them as separate corrections or questions with a second numbering. Open the
+discussion of section 3 only for what the reviews did not already raise, and
+continue the same numbering scheme rather than starting a parallel one.
+
 ## 2. Mark the change as in design
 
 Set the change's `Status` cell in `openspec/changes/README.md` to `in design`

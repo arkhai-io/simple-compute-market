@@ -32,6 +32,11 @@ When two reviews of the same kind await triage — typically one from `make revi
 and one pasted — triage them together. Where both raise the same issue, present it
 once, naming both findings.
 
+Each issue has exactly one label for its whole life: its finding ID, or the joined
+IDs of merged duplicates (`03 F2 / 04 F4a`). Carry that label into the design
+discussion and the records. Do not introduce a second numbering — questions,
+corrections, or new decision numbers — for issues a review already named.
+
 Then read what you need to judge the findings: `AGENTS.md` and the documents it
 requires, every file in the change, earlier reviews and their triage, and the code,
 specifications, and guidance each finding cites.
@@ -64,17 +69,41 @@ changes the decision.
 
 ## 3. Present every finding
 
-Present all of them, none withheld for being minor or uncontested, ordered by lens
-— `direction` first, then `consistency`, `architecture`, `testing`,
-`documentation`, `scope`, `readiness` — and within a lens by severity. For each:
+The owner must be able to decide every finding from what you write, without
+opening the review, the design, or the code. A one-line claim and a pointer-laden
+position are not enough: the owner needs the design's current state and the
+consequence, not only the reviewer's objection.
 
-- the finding in one line, with its review and number (`03-design F2`);
-- what it claims, recapped so the owner need not open the review;
-- your position, with its reason and evidence;
-- the outcome you propose if it is accepted.
+For each finding, write five parts:
 
-Then ask for a disposition of each. The owner often answers tersely by number;
-follow up only where an answer is ambiguous or a decision needs more than a word.
+- **What the change says now.** The decision, requirement, or text the finding
+  concerns, and the reasoning the change records for it, in plain words.
+- **What the reviewer says.** Their reasoning and suggested fix, including any
+  example they gave.
+- **Why it matters.** A concrete consequence if nothing changes — a scenario, or,
+  when the finding is about a representation, an example document.
+- **Your position.** `agree`, `disagree`, or `partly`, argued in prose. File and
+  line references go on an evidence line beneath it; they support the argument
+  and never replace it.
+- **If accepted.** The outcome, as classified in step 2.
+
+Present in two passes.
+
+**First pass, in one message:** every finding that needs no choice between
+alternatives — outcomes `edit`, `task`, or `none`, and findings you disagree with —
+ordered by lens (`direction`, `consistency`, `architecture`, `testing`,
+`documentation`, `scope`, `readiness`) and within a lens by severity. Close by
+listing, by label only, the findings left for the second pass. The owner disposes
+of the first pass together, often tersely by label; follow up only where an answer
+is ambiguous.
+
+**Second pass, one finding per message:** every finding whose outcome is a
+`decision`. Present it as `change-design` presents a decision — its context,
+each alternative with its trade-offs and examples where it concerns a
+representation, and your recommendation with what would change your mind. Here the
+owner's choice of an option is the disposition; never ask the owner to accept a
+problem whose fixes they have not been shown. Record the choice as the settled
+decision in the design discussion, under the finding's label.
 
 ## 4. Record the dispositions
 
@@ -109,9 +138,10 @@ the shape `design.md` and the `change-workflow` delta define:
 ## 5. Carry out the accepted outcomes
 
 - **edit:** make it, and record it in the finding's `Result`.
-- **decision:** list the decisions for the design discussion and leave them open.
-  Do not settle a design decision during triage, even an obvious one; the owner
-  settles designs in `change-design`.
+- **decision:** settled with the owner in the second pass, in the same session, as
+  part of the design discussion. Do not settle one yourself, even an obvious one.
+  Record each settled decision in the change's `design.md` when the design is
+  settled, as `change-design` records decisions.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
 
