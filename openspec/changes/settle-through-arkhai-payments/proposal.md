@@ -25,7 +25,7 @@ Fiat is charge-first: money moves at payment and is undone by refund or dispute.
 ## Non-Goals
 
 - Identity and negotiation as advertised listing slots, and per-stage kit declarations (deferred; see design).
-- Rates, spot and on-demand deals through `arkhai.payments.v1`. That is the payments service's next release.
+- Rate parts, and spot and interruptible deals through `arkhai.payments.v1`. They are the payments service's first product, and come next in `spot-deals-through-arkhai-payments`. This change settles `once` parts only.
 - Cash movement. Stripe top-ups and payouts are internal to the payments service; SCM trusts the ledger.
 
 ## Impact
