@@ -14,6 +14,16 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 - Payments `rate-parts` (arkhai-io/arkhai-payments): rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
 - `route-settlement-by-mechanism`: the continuation lives in the VM payment seller stage.
 
+## Payments contract this builds on
+
+The payments `rate-parts` spec (arkhai-io/arkhai-payments `docs/issues/rate-parts.md`) settles the seller-side needs below:
+- `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
+- `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the domain's teardown time, and the SDK supplies a default.
+- The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated, never future-dated, and any stop ends the whole transaction.
+- Per-transaction event sequence numbers give causal order.
+- Billing is per started period (period = quantum), and periods count from `start`. The first batch, including any `once` parts, is reserved at approval.
+- Platform credits are `USD/6`, so payment options and derived mandates use asset `USD/6`. The examples and kit docs written for `settle-through-arkhai-payments` use `USD/2` and move to `USD/6` here; no production code hardcodes an asset.
+
 ## What the seller needs from the payments service
 
 - **A funded-through time per transaction in the signed snapshot.** This is the end of the currently reserved quantum. With it, the seller enforces locally (deliver until funded-through, tear down unless it moves), and polling or webhooks only make teardown prompter; they aren't needed for correctness. Without it, delivery between an exhaustion and the seller noticing is unpaid, and that gap is as long as the polling interval.
