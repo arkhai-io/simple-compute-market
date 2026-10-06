@@ -2440,8 +2440,15 @@ re-verifies them by grep before each move.
           passes its 44 suites, failing only where this environment cannot run a suite;
           the four locks its reinit rewrites were restored. `make check-locks`,
           `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
-          strict validation pass. Not yet run end to end.
-- [ ] 5B.10 Boundary check. Amended 2026-10-05: the dependency removals this task named
+          strict validation pass.
+        - End-to-end (run 37342659408, on the 9.B checkpoint): the archive holds the two
+          lanes' service logs but not the run's `actions.log`, so its pass counts are not
+          recorded here. The logs identify 9.B's composition: VM's relay reconciliation
+          starts after the service's own workers, as a contributed task, where before it
+          started ahead of convergence. Neither lane's service logs show a traceback, a
+          5xx, a 401, or a 403; the relay document kind and the reconciliation task ran
+          at startup, and both expired VM leases were released.
+- [x] 5B.10 Boundary check. Amended 2026-10-05: the dependency removals this task named
       are done (bare metal's in 5B.8.C, VM's in 5B.9.B), each when its adapter stopped
       importing the service; what remains is the check. Add
       an import-boundary test asserting neither adapter imports
@@ -2459,6 +2466,47 @@ re-verifies them by grep before each move.
       `market_resource_pools_contracts` import no persistence, web-framework, or service
       module, and neither client distribution imports a kit or service beyond its
       contracts.
+      Done 2026-10-05 (`design.md`, "Boundary check (5B.10)").
+      - Every Python boundary the task names already held; one deployment rule did not:
+        API credits' compose mounted the dev chain's Alkahest address book from VM's
+        storefront package. The maintainer chose the move (option (a)): the address book
+        is now `kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json`, with
+        `market_alkahest.dev_chain.anvil_address_book_path()`; the generator and
+        `make build-anvil-state` run in the kit's environment; the VM, API-credit, and
+        root bare-metal compose files mount it from the kit at the unchanged
+        `/app/alkahest_anvil_addresses.json`; the Helm fixture names that path (it named
+        one no image contains); the VM storefront's two tests, the e2e buyer CLI helper,
+        the escrow helper, and four scenarios read it from the kit.
+      - The service's `tests/unit/test_import_boundaries.py` resolves every import of each
+        module (relative ones resolved, function-local, `TYPE_CHECKING`, and guarded ones
+        counted) and asserts: neither adapter imports the service or the other adapter; no
+        neutral provisioning package imports `vm_provisioning_operator`; the family's job
+        and host authorities import no Ansible or SSH module; no domain's deployment files
+        name another domain's tree; the Ansible distribution names no domain's inventory
+        group or playbook. It replaces the narrower composition-module scan. Each check was
+        shown to fail on a real violation (the old mount line; function-local, relative,
+        and `TYPE_CHECKING` imports). The compute client gains its own allowlist test,
+        beside the contracts' and the resource-pool packages' existing ones.
+      - Versions: kit-alkahest 0.3.0 (the address book and its accessor), vms-storefront
+        0.11.0 (its package data no longer carries the address book; its kit floor
+        0.3.0), e2e-tests 0.1.4 (kit floor 0.3.0). Relocked with `uv_project.py`: the kit,
+        `kit/storefront`, API credits' four projects, bare metal's buyer and storefront,
+        and e2e-tests; by hand from the wheelhouse: the VM storefront and VM buyer.
+      - Validation: Alkahest kit 182; compute client 50; provisioning service 874 unit and
+        277 integration; VM storefront by frozen sync 1109 unit and 348 integration (the
+        two known `test_alkahest` failures); e2e unit 236 (the known 10.1 failure), and
+        178 e2e and smoke tests collect. The root `make -k test` aggregate ran its 44
+        suites; one provisioning integration test failed once
+        (`test_a_bare_metal_lease_is_registered_on_the_family_surface`, a harness race
+        routed to closeout task 2.6) and passed in five isolated and three full-suite
+        reruns; otherwise only the environmental failures. The locks its reinit rewrote
+        were restored. `make check-locks`, `make check-packaging`, comment hygiene, and
+        documentation citations pass. OpenSpec strict validation passes under 1.14.0;
+        1.14.1, published 2026-10-05 23:28 UTC, adds a warning for requirement text over
+        500 characters, which `--strict` fails on 19 of this change's requirements (and
+        21 of the 22 permanent specs). The Helm render
+        tests were not run (no `helm` binary in this environment); none asserts the
+        changed value. Not yet run end to end.
 - [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
 - [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
@@ -2737,6 +2785,13 @@ service code.
       first recorded here, was routed on 2026-10-05 to
       `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
       maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in 5B.10: the provisioning integration harness runs every session on one
+      shared in-memory SQLite connection (`StaticPool`), so a job the bare-metal `begin`
+      dispatches can end the transaction the authentication middleware is about to
+      commit; `test_a_bare_metal_lease_is_registered_on_the_family_surface` failed once
+      that way ("cannot commit - no transaction is active") and passed on every rerun.
+      Production uses a file database with a connection per session. The harness needs
+      the same, or an equivalent that gives each session its own connection.
       Found in slice C: the system worker controls' response bodies are untyped dicts
       (review point 3), and `openspec/specs/site-capacity/spec.md`'s evidence line for
       the pool-metadata provider gate should cite

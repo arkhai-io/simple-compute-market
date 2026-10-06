@@ -90,6 +90,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import resources
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import get_recipient_arbiter
 from e2e_harness.settings import settings
@@ -175,9 +176,7 @@ ACCEPTED_ESCROWS = [{
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
 
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:
@@ -531,7 +530,7 @@ class TestStage00g_AlkahestConfigured:
 
             [chains.anvil]
             rpc_url = "http://anvil:8545"
-            alkahest_address_config_path = "/app/src/.../alkahest_anvil_addresses.json"
+            alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
         """
         require_state(deal_state, "_storefront_healthy")
         status = storefront_admin_client.get_system_status()

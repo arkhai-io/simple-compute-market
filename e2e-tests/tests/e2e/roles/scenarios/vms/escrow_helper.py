@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from importlib import resources
 
 from alkahest_py import AlkahestClient
 from market_alkahest.alkahest import (
@@ -29,6 +28,7 @@ from market_alkahest.alkahest import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
+from market_alkahest.dev_chain import anvil_address_book_path
 
 log = logging.getLogger(__name__)
 
@@ -79,14 +79,9 @@ def _ensure_ws_rpc_url(rpc_url: str) -> str:
 
 
 def _alkahest_addresses_path() -> str:
-    """Locate the bundled alkahest_anvil_addresses.json shipped with
-    market-storefront. It's the same file the seller container uses,
-    and it's installed into the e2e-tests venv as a
-    transitive resource via the ``market-storefront`` dependency."""
-    ref = resources.files("market_storefront.data").joinpath(
-        "alkahest_anvil_addresses.json"
-    )
-    return str(ref)
+    """The dev chain's Alkahest address book, shipped with the Alkahest kit:
+    the same file each seller container mounts."""
+    return str(anvil_address_book_path())
 
 
 def create_buyer_escrow(

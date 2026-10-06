@@ -88,6 +88,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import resources
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
@@ -164,14 +165,12 @@ DEMAND_RESOURCE = {
     "amount": 10 * 10**18,
 }
 # Listing-side accepted_escrows. The escrow_address is resolved from the
-# same alkahest_anvil_addresses.json that ships with market-storefront and
+# same alkahest_anvil_addresses.json that ships with the Alkahest kit and
 # that the seller's `market publish` flow reads at listing-create time —
 # so the listing mirrors what a real seller would publish, and the buyer
 # CLI's signed EscrowProposal (which derives the same address from the
 # same file) matches under the storefront's strict (chain, address) check.
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _ALKAHEST_CFG = resolve_alkahest_address_config(
     get_alkahest_network("anvil"),
     config_path=_ALKAHEST_ADDRESSES_PATH,

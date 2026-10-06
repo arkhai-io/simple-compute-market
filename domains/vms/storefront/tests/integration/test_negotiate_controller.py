@@ -9,12 +9,12 @@ from __future__ import annotations
 
 
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_capacity_publication import publication_binding
 
@@ -269,11 +269,7 @@ async def client(db, monkeypatch):
             "vm_host": "kvm1",
         },
     )
-    address_config_path = (
-        Path(_negotiation_runtime.__file__).resolve().parent
-        / "data"
-        / "alkahest_anvil_addresses.json"
-    )
+    address_config_path = anvil_address_book_path()
     monkeypatch.setattr(
         _negotiation_runtime,
         "CHAINS",

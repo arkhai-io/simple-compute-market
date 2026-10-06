@@ -33,6 +33,7 @@ import logging
 from importlib import resources
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
@@ -89,9 +90,7 @@ OFFER_RESOURCE = {
 DEMAND_TOKEN_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 DEMAND_AMOUNT = 10 * 10**18
 
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _ALKAHEST_CFG = resolve_alkahest_address_config(
     get_alkahest_network("anvil"),
     config_path=_ALKAHEST_ADDRESSES_PATH,

@@ -1830,6 +1830,17 @@ narrows the roles.
 | The relay unit tests the plan would run under VM's adapter target build their databases through the service's migrations | They stay in the service's suite, which already hosts VM's tests; VM's adapter target is unchanged |
 | The restart-safety tests imported the relay document through the service, which no longer builds it | They take it from VM's runtime (`relay_definitions`), so they exercise the contribution as composed |
 
+### Boundary check (5B.10)
+
+**Design review (2026-10-05).** 5B.10 was audited before implementation. Every Python
+boundary it names already held; one deployment rule did not, and was put to the
+maintainer.
+
+| Finding | Decision |
+|---|---|
+| "No domain's compose files, profiles, or inventory settings name another domain's tree" failed on `domains/apicredits/compose.yml`, which mounted the local dev chain's Alkahest address book from VM's storefront package (`market_storefront/data/alkahest_anvil_addresses.json`). The generator wrote it there, and the buyer CLI helper and e2e scenarios read it as VM's package data | Option (a) of three (move the file to a neutral home; scope the check to the compute provisioning family and route the reference to closeout; a named exception). The address book moves to the Alkahest kit (`market_alkahest/data/`), beside the `alkahest-py` pin it is generated from, so the two cannot drift; every storefront, every buyer, and the e2e suite already install the kit. `market_alkahest.dev_chain.anvil_address_book_path()` locates it for a process running from the installed kit. Deployments keep mounting it at `/app/alkahest_anvil_addresses.json`, so no storefront's settings change. The generator runs in the kit's environment |
+| The plan named one test covering every boundary | Split, with the maintainer's agreement: each thin distribution proves its own boundary in its own suite (the compute client gains the one it lacked); the cross-package rules (adapters, neutral modules, the family's job and host authorities, deployment configuration, the Ansible distribution) are in the service's boundary test, which already scans both adapters from the repository tree |
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

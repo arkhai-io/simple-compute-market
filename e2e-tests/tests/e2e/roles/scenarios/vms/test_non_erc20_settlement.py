@@ -5,10 +5,10 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from importlib import resources
 from typing import Any
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -44,9 +44,7 @@ pytestmark = [
 ]
 
 _CHAIN_NAME = "anvil"
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
 _MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _ANVIL_GOD_PRIVATE_KEY = (

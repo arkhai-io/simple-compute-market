@@ -161,10 +161,9 @@ services:
       # override $APICREDITS_STOREFRONT_CONFIG to point at a different chain's
       # TOML (the default is the dev/anvil seller config).
       - ${APICREDITS_STOREFRONT_CONFIG:-./storefront/storefront.credits.toml}:/etc/arkhai/storefront.toml:ro
-      # The dev chain's deployed Alkahest contract addresses, borrowed from
-      # the VM storefront's data tree (the canonical anvil address book). A
-      # non-Anvil deployment supplies its own address book here.
-      - ../vms/storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
+      # The dev chain's deployed Alkahest contract addresses, shipped with the
+      # Alkahest kit. A non-Anvil deployment supplies its own address book here.
+      - ../../kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       - ${APICREDITS_ADMIN_KEY_FILE:?set API-credits admin credential file}:/run/secrets/arkhai/api-credits-admin-key:ro
       - api-credits-storefront-data:/app/data
     restart: unless-stopped

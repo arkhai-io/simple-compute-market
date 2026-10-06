@@ -658,7 +658,7 @@ build-buyer: init-prerequisites init-buyer
 # Runs through the storefront venv, which pins alkahest_py; the relative
 # --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
+	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
 	cd dev-env && make build
