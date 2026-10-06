@@ -65,7 +65,9 @@ checks your understanding here before reading anything that rests on it. Then:
    every factual claim the design makes about existing code, guidance, and other
    changes. Is it consistent with itself: do the proposal, design, and delta specs
    say the same thing, and does every decision's rationale still hold given the
-   other decisions?
+   other decisions? Re-read the proposal's `Why` and `What Changes` against the
+   settled decisions: a motivating claim the design no longer delivers — a promise
+   broader than what the decisions actually constrain — is a finding.
 2. **`direction`** — What would you change about this design? Treat this as a design
    discussion: for each point, state the context, the alternatives with their
    trade-offs, and what you recommend and why. Engage every central decision the
@@ -84,13 +86,18 @@ checks your understanding here before reading anything that rests on it. Then:
      would have to interpret the interface's internals is a missing operation.
    - **Seams.** Where a caller lives in another package, confirm the seam it needs
      exists there today, and name the package that must change if it does not.
+     Check behavior, not only data: a seam must let the caller *do* what the design
+     requires of it — refuse a write, report a problem, reach a value it needs —
+     not merely give the data somewhere to live.
    - **Semantics.** State what the interface does for absent input versus present
      but empty input, for an unknown or wrong-kind argument, for malformed values,
      and for operations on an empty result; and whether its results carry the
      provenance its callers must report. Undefined semantics are findings.
 4. **`documentation`** — Does the proposal name a permanent destination for every
    material decision? Does every delta requirement describe only behavior this
-   change implements, with a WHEN/THEN scenario? Does any open question have its
+   change implements, with a WHEN/THEN scenario, and does the delta modify every
+   existing requirement its behavior contradicts rather than only adding new ones?
+   Does any open question have its
    answer prescribed elsewhere (`openspec/README.md#open-questions-and-prescribed-tasks`)?
    Does every cited path resolve?
 5. **`scope`** — Has the scope grown beyond the original proposal, and should any of
