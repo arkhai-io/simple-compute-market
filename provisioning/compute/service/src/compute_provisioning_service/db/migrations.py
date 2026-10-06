@@ -20,7 +20,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
-from market_resource_pools.hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
@@ -29,11 +29,13 @@ from market_resource_pools.hints import (
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
-    AnsiblePoolConfig,
-    Base,
     DEFAULT_POOL_ID,
     ResourcePool,
 )
+# VM's tables are VM's metadata, held in this database; this history creates and
+# evolves them.
+from vm_provisioning_adapter.db import AnsiblePoolConfig
+from vm_provisioning_adapter.db import Base as VmBase
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ def apply_schema_migrations(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
+    default_host_id: str | None = None,
 ) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
@@ -77,6 +80,8 @@ def apply_schema_migrations(
                 default_playbook_path=default_playbook_path,
                 default_inventory_group=default_inventory_group,
             )
+        elif migration.id == "20261002_002_job_envelopes":
+            _migrate_job_envelopes(engine, default_host_id=default_host_id)
         else:
             migration.apply(engine)
         _record_migration(engine, migration.id)
@@ -201,12 +206,12 @@ def _drop_columns_via_table_rebuild(
     ``PRAGMA foreign_key_check`` before committing, and restores whatever
     the connection's foreign-key setting was before this function ran.
 
-    Does not preserve triggers, views, or outbound foreign-key constraints
-    *defined on this table* — ``capacity_reservations`` (this helper's
-    only caller today) has none of those, confirmed by inspection, and
-    this function refuses to run against a table that does rather than
-    silently dropping them unnoticed. Extend it deliberately if a future
-    caller needs that.
+    Outbound foreign-key constraints defined on this table are recreated on
+    the rebuilt table, with their referenced columns and ``ON UPDATE`` and
+    ``ON DELETE`` actions, provided none of their columns is being dropped;
+    dropping a column a foreign key uses is refused. Does not preserve
+    triggers or views, and refuses to run against a table that has them
+    rather than silently dropping them unnoticed.
     """
     _validate_sql_identifier(table_name)
     for column in columns_to_drop:
@@ -234,13 +239,31 @@ def _drop_columns_via_table_rebuild(
         outbound_fks = connection.execute(
             text(f"PRAGMA foreign_key_list({table_name})")
         ).fetchall()
-        if outbound_fks:
-            raise NotImplementedError(
-                f"_drop_columns_via_table_rebuild does not preserve "
-                f"outbound foreign key constraints, but {table_name!r} "
-                f"has some. Extend this helper before using it on this "
-                "table."
+        foreign_keys: dict[int, list] = {}
+        for row in outbound_fks:
+            fk_id, _seq, referenced, from_column, to_column, on_update, on_delete, _match = row
+            if from_column in present:
+                raise ValueError(
+                    f"Refusing to drop {from_column!r} from {table_name!r}: a "
+                    "foreign key uses it"
+                )
+            foreign_keys.setdefault(fk_id, []).append(
+                (referenced, from_column, to_column, on_update, on_delete)
             )
+        foreign_key_clauses = []
+        for parts in foreign_keys.values():
+            referenced = _validate_sql_identifier(parts[0][0])
+            from_columns = ", ".join(_validate_sql_identifier(p[1]) for p in parts)
+            to_columns = ", ".join(_validate_sql_identifier(p[2]) for p in parts)
+            clause = (
+                f"FOREIGN KEY ({from_columns}) REFERENCES {referenced} ({to_columns})"
+            )
+            on_update, on_delete = parts[0][3], parts[0][4]
+            if on_update and on_update.upper() != "NO ACTION":
+                clause += f" ON UPDATE {on_update.upper()}"
+            if on_delete and on_delete.upper() != "NO ACTION":
+                clause += f" ON DELETE {on_delete.upper()}"
+            foreign_key_clauses.append(clause)
 
         # PRAGMA foreign_keys can only be changed with no transaction
         # open -- read and set it before starting the rebuild's own
@@ -290,7 +313,7 @@ def _drop_columns_via_table_rebuild(
                 connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
                 connection.execute(text(
                     f"CREATE TABLE {rebuild_table} "
-                    f"({', '.join(_column_def(c) for c in keep)})"
+                    f"({', '.join([*(_column_def(c) for c in keep), *foreign_key_clauses])})"
                 ))
                 column_list = ", ".join(keep_names)
                 connection.execute(text(
@@ -941,7 +964,7 @@ def _migrate_resource_pools_and_hosts_pool_id(
     from market_resource_pools.db import Base as PoolsBase
 
     PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
-    Base.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
+    VmBase.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
 
     with Session(engine) as session:
         exists = (
@@ -2585,6 +2608,546 @@ def _migrate_drop_reservation_release_mirror(engine: Engine) -> None:
         engine, "capacity_reservations", ["vm_remove_job_id"]
     )
 
+# The host connection columns the connection envelope replaced, and the
+# ``ssh`` connection kind and key scheme existing rows convert to.
+_LEGACY_HOST_CONNECTION_COLUMNS = (
+    "ssh_host",
+    "public_host",
+    "ssh_user",
+    "ssh_port",
+    "ssh_key_type",
+    "ssh_key_value",
+)
+
+
+def _migrate_host_connection_envelope(engine: Engine) -> None:
+    """Hold each host's connection as an envelope instead of SSH columns.
+
+    Every existing host is reached over SSH, so each row becomes an ``ssh``
+    connection: its address, port, user, and public address become public
+    fields; a ``path`` key becomes ``key_path``; an ``embedded`` key's stored
+    ciphertext, which the service encrypted with its Fernet key when the key
+    was submitted, becomes the ``fernet-v1`` protected ``private_key`` byte for
+    byte, so nothing here encrypts or decrypts. The SSH columns are then
+    dropped.
+
+    On a database created from the current model the SSH columns some earlier
+    migrations add back are empty and are simply dropped. Irreversible through
+    this chain; rerunning it after the columns are gone is a no-op.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    present = [
+        column
+        for column in _LEGACY_HOST_CONNECTION_COLUMNS
+        if _column_exists(engine, "hosts", column)
+    ]
+    if not present:
+        return
+    _add_column_if_missing(
+        engine, "hosts", "connection_kind", "VARCHAR NOT NULL DEFAULT 'ssh'"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_version", "INTEGER NOT NULL DEFAULT 1"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_public", "JSON NOT NULL DEFAULT '{}'"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_protected", "JSON NOT NULL DEFAULT '{}'"
+    )
+    if "ssh_host" in present:
+        with engine.begin() as connection:
+            rows = connection.execute(text(
+                "SELECT host_id, " + ", ".join(present) + " FROM hosts"
+            )).mappings().all()
+            for row in rows:
+                key_type = row.get("ssh_key_type") or "path"
+                key_value = row.get("ssh_key_value")
+                public = {
+                    "ssh_host": row.get("ssh_host"),
+                    "public_host": row.get("public_host"),
+                    "ssh_port": int(row.get("ssh_port") or 22),
+                    "ssh_user": row.get("ssh_user") or "root",
+                    "key_path": key_value if key_type == "path" else None,
+                }
+                protected = (
+                    {"private_key": {"scheme": "fernet-v1", "ciphertext": key_value}}
+                    if key_type == "embedded" and key_value
+                    else {}
+                )
+                connection.execute(
+                    text(
+                        "UPDATE hosts SET connection_kind = 'ssh', "
+                        "connection_version = 1, connection_public = :public, "
+                        "connection_protected = :protected WHERE host_id = :host_id"
+                    ),
+                    {
+                        "public": json.dumps(public, sort_keys=True),
+                        "protected": json.dumps(protected, sort_keys=True),
+                        "host_id": row["host_id"],
+                    },
+                )
+    _drop_columns_via_table_rebuild(engine, "hosts", present)
+
+
+# The kind a VM or bare-metal job's result is labelled with, named by the
+# action its executor ran, as the executors label new results. Every job that
+# predates this migration ran one of those two modes.
+def _legacy_result_kind(offering_mode: str | None, action: str | None) -> str:
+    if offering_mode == "bare_metal":
+        return "bare_metal_access"
+    return f"vm_{action}"
+
+
+_LEGACY_CREDENTIAL_COLUMNS = (
+    "role", "password", "ssh_commands", "ssh_key_path_host", "key_type",
+)
+
+
+def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None) -> None:
+    """Store jobs' results and credentials as envelopes, with neutral routing columns.
+
+    A job row gains ``host_id``, taken from its parameters with the fallback job
+    execution applied (the parameter, else the job's target, else the
+    deployment's default host), has its ``offering_mode`` and ``action_kind``
+    filled from its parameters where they were never recorded, gains
+    ``executor_action`` (the action its executor runs, which routing reads and a
+    contract action may differ from), and gains ``execution_handle``, the executor's opaque
+    cancellation handle, in place of ``process_id`` (a bare process id becomes
+    ``{"pid": n}``). A stored result becomes a ``ResultEnvelope`` labelled by the
+    action its executor ran, and each credential row becomes the
+    ``CredentialEnvelope`` the compute contract route built from it: the job's
+    offering mode, the row's
+    role as its kind, and its non-empty columns as its value. Every job before
+    this migration ran a VM or bare-metal action, so this one conversion may
+    name their result kinds. The replaced columns are then dropped.
+
+    Irreversible through this chain; rerunning it after the columns are gone
+    is a no-op.
+    """
+    if not _table_exists(engine, "ansible_jobs"):
+        return
+    _add_column_if_missing(engine, "ansible_jobs", "host_id", "VARCHAR")
+    _add_column_if_missing(engine, "ansible_jobs", "execution_handle", "JSON")
+    _add_column_if_missing(engine, "ansible_jobs", "executor_action", "VARCHAR")
+    has_process_id = _column_exists(engine, "ansible_jobs", "process_id")
+    credentials_legacy = _table_exists(engine, "credentials") and _column_exists(
+        engine, "credentials", "role"
+    )
+    if credentials_legacy:
+        _add_column_if_missing(
+            engine, "credentials", "envelope", "JSON NOT NULL DEFAULT '{}'"
+        )
+
+    with engine.begin() as connection:
+        select = (
+            "SELECT id, params, result, offering_mode, action_kind, executor_action, host_id"
+        )
+        if has_process_id:
+            select += ", process_id"
+        jobs = connection.execute(text(select + " FROM ansible_jobs")).mappings().all()
+        modes: dict[str, str | None] = {}
+        for job in jobs:
+            params = _json_mapping(job["params"], label=f"ansible_jobs {job['id']} params")
+            # A job predating offering modes was a VM job.
+            offering_mode = job["offering_mode"] or params.get("offering_mode") or "vm"
+            # The action the executor ran, which a contract action may differ
+            # from (a VM teardown runs ``destroy``).
+            action = (
+                job["executor_action"]
+                or params.get("executor_action")
+                or params.get("vm_action")
+                or "create"
+            )
+            modes[job["id"]] = offering_mode
+            host_id = job["host_id"] or params.get("host_id") or (
+                params.get("executor_target") or params.get("vm_target") or default_host_id
+            )
+            # The route key every job is executed by, recorded on the row so
+            # nothing reads it out of a job's parameters again.
+            updates: dict[str, object] = {
+                "id": job["id"],
+                "host_id": host_id,
+                "offering_mode": offering_mode,
+                "action_kind": job["action_kind"] or action,
+                "executor_action": action,
+            }
+            assignments = [
+                "host_id = :host_id",
+                "offering_mode = :offering_mode",
+                "action_kind = :action_kind",
+                "executor_action = :executor_action",
+            ]
+            result = job["result"]
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            if isinstance(result, dict) and not (
+                {"offering_mode", "result_kind", "value"} <= set(result)
+            ):
+                updates["result"] = json.dumps({
+                    "offering_mode": offering_mode,
+                    "result_kind": _legacy_result_kind(offering_mode, action),
+                    "value": result,
+                }, sort_keys=True)
+                assignments.append("result = :result")
+            if has_process_id and job["process_id"]:
+                raw = str(job["process_id"])
+                handle = json.loads(raw) if raw.startswith("{") else {"pid": int(raw)}
+                updates["handle"] = json.dumps(handle, sort_keys=True)
+                assignments.append("execution_handle = :handle")
+            connection.execute(
+                text("UPDATE ansible_jobs SET " + ", ".join(assignments) + " WHERE id = :id"),
+                updates,
+            )
+
+        if credentials_legacy:
+            rows = connection.execute(text(
+                "SELECT id, job_id, " + ", ".join(_LEGACY_CREDENTIAL_COLUMNS)
+                + " FROM credentials"
+            )).mappings().all()
+            for row in rows:
+                value = {}
+                for column in _LEGACY_CREDENTIAL_COLUMNS[1:]:
+                    item = row[column]
+                    if item is None:
+                        continue
+                    if column == "ssh_commands" and isinstance(item, str):
+                        item = json.loads(item)
+                    value[column] = item
+                envelope = {
+                    "offering_mode": modes.get(row["job_id"]) or "vm",
+                    "credential_kind": row["role"] or "access",
+                    "value": value,
+                }
+                connection.execute(
+                    text("UPDATE credentials SET envelope = :envelope WHERE id = :id"),
+                    {"envelope": json.dumps(envelope, sort_keys=True), "id": row["id"]},
+                )
+
+    if has_process_id:
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["process_id"])
+    if credentials_legacy:
+        _drop_columns_via_table_rebuild(
+            engine, "credentials", list(_LEGACY_CREDENTIAL_COLUMNS)
+        )
+
+
+def _migrate_reservation_release_requested_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.release_requested_at``.
+
+    The lease lifecycle times a stalled teardown from when release began.
+    Reservations already releasing have no recorded start; the lifecycle times
+    those from the lease's end, as it did before the column existed.
+    """
+    _add_column_if_missing(
+        engine, "capacity_reservations", "release_requested_at", "VARCHAR"
+    )
+
+
+def _migrate_drop_job_contract_version(engine: Engine) -> None:
+    """Drop ``ansible_jobs.contract_version``.
+
+    A job's correlation identity is its reservation, offering mode, action, and
+    idempotency key; no route serves a job's record by a contract version, so
+    the column records nothing a reader uses. Every other column, and the
+    reservation index and contract-identity uniqueness that reference them, is
+    kept.
+    """
+    if _table_exists(engine, "ansible_jobs"):
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["contract_version"])
+
+
+def _migrate_drop_job_deal_correlation(engine: Engine) -> None:
+    """Drop ``ansible_jobs.escrow_uid`` and ``ansible_jobs.deal_ref``.
+
+    A job correlates with its deal through the capacity reservation it serves,
+    which every deal's jobs share whatever its settlement mechanism; a deal's
+    commercial identity does not cross the provisioning boundary. No reader
+    used ``deal_ref``, and ``escrow_uid`` held either an escrow only some deals
+    have or, for VM fulfillment, the reservation itself. The escrow index goes
+    with its column; every other column and index is kept.
+    """
+    if _table_exists(engine, "ansible_jobs"):
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["escrow_uid", "deal_ref"])
+
+
+# The parameters a bare-metal access job stores, in the order the bare-metal
+# adapter writes them.
+_BARE_METAL_JOB_PARAMETERS = (
+    "action", "host_id", "physical_host_id", "escrow_uid", "executor_ref",
+    "access_ref", "ssh_user", "ssh_public_key", "reclaim_policy",
+)
+
+
+def _migrate_bare_metal_job_shapes(engine: Engine) -> None:
+    """Store bare-metal access jobs' parameters and results in bare metal's shape.
+
+    Bare-metal jobs were submitted with the VM job parameters (their bare-metal
+    fields filled, the VM ones empty) and their results were VM's result payload
+    with the access fact nested under ``ansible_result``. A bare-metal job's
+    parameters become the bare-metal parameter model (``action`` from the
+    executor action, ``reclaim_policy`` from ``bare_metal_reclaim_policy``), and
+    its result's value becomes the access fact itself; a result that carried no
+    fact is removed. Rows already in that shape are left as they are, so a rerun
+    changes nothing.
+    """
+    if not _table_exists(engine, "ansible_jobs"):
+        return
+    with engine.begin() as connection:
+        jobs = connection.execute(text(
+            "SELECT id, params, result FROM ansible_jobs WHERE offering_mode = 'bare_metal'"
+        )).mappings().all()
+        for job in jobs:
+            params = _json_mapping(job["params"], label=f"ansible_jobs {job['id']} params")
+            updates: dict[str, object] = {"id": job["id"]}
+            assignments: list[str] = []
+            if "vm_action" in params or "executor_action" in params:
+                converted = {
+                    "action": params.get("executor_action") or params.get("vm_action"),
+                    "host_id": params.get("host_id"),
+                    "physical_host_id": params.get("physical_host_id"),
+                    "escrow_uid": params.get("escrow_uid"),
+                    "executor_ref": params.get("executor_ref"),
+                    "access_ref": params.get("access_ref"),
+                    "ssh_user": params.get("ssh_user"),
+                    "ssh_public_key": params.get("ssh_public_key"),
+                    "reclaim_policy": params.get("bare_metal_reclaim_policy"),
+                }
+                updates["params"] = json.dumps(
+                    {name: converted[name] for name in _BARE_METAL_JOB_PARAMETERS}
+                )
+                assignments.append("params = :params")
+            result = job["result"]
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, dict) and "ansible_result" in value:
+                fact = value["ansible_result"]
+                if isinstance(fact, dict):
+                    updates["result"] = json.dumps({**result, "value": fact}, sort_keys=True)
+                else:
+                    updates["result"] = None
+                assignments.append("result = :result")
+            if assignments:
+                connection.execute(
+                    text("UPDATE ansible_jobs SET " + ", ".join(assignments) + " WHERE id = :id"),
+                    updates,
+                )
+
+
+# The compute family's job-backed shapes, frozen here as this migration writes
+# them: the prepared operation's kind and version, and a create job's result kind.
+_JOB_OPERATION_KIND = "compute.job-fulfillment.operation"
+_CREATE_RESULT_KIND = "compute.create-result.v1"
+# VM's prepared-operation kinds and a VM create's result kind before them.
+_VM_OPERATION_KINDS = {"vm.ansible.create.v1": "create", "vm.ansible.teardown.v1": "teardown"}
+_VM_CREATE_RESULT_KIND = "vm_create"
+# A VM create result's operator detail, as VM's codec projects it.
+_VM_CREATE_DETAIL = (
+    "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
+    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
+    "result_message", "note", "operation_initiated",
+)
+# The fields VM's job parameters gained at submission that its prepared
+# operation's parameters did not carry: the relay endpoint, filled at execution.
+_VM_EXECUTION_ONLY_PARAMETERS = ("relay_addr", "relay_port", "relay_token")
+
+
+class VmJobBackedMigrationError(RuntimeError):
+    """A VM fulfillment cannot be rewritten into the job-backed shapes safely."""
+
+
+def _vm_submitted_parameters(parameters: dict) -> dict:
+    """VM's job parameters as a dispatch submitted them from a prepared operation."""
+    submitted = dict(parameters)
+    for name in _VM_EXECUTION_ONLY_PARAMETERS:
+        submitted.setdefault(name, None)
+    if not submitted.get("executor_action"):
+        submitted["executor_action"] = submitted.get("vm_action")
+    if submitted.get("executor_target") is None:
+        submitted["executor_target"] = submitted.get("vm_target") or submitted.get("host_id")
+    return submitted
+
+
+def _vm_create_evidence(value: dict, params: dict) -> dict | None:
+    """A stored VM create result's delivery evidence, by VM's relay rule.
+
+    A create that leased a relay port is reached at the relay's address and
+    that port, and its reported port must agree with the lease; otherwise at
+    the host's buyer-facing address and forwarded port.
+    """
+    leased = params.get("vm_remote_port")
+    if params.get("relay_id") or leased is not None:
+        frp = value.get("frp") if isinstance(value.get("frp"), dict) else {}
+        enabled = str(frp.get("enabled")).lower() == "true"
+        if not enabled or leased is None or str(frp.get("remote_port")) != str(leased):
+            return None
+        host, port = frp.get("relay_addr"), leased
+    else:
+        host, port = value.get("host_ip"), value.get("ssh_port")
+    user, ready_at = value.get("tenant_user"), value.get("timestamp")
+    if not isinstance(host, str) or not host.strip() or host.strip() == "N/A":
+        return None
+    try:
+        port = int(str(port))
+    except ValueError:
+        return None
+    if not 1 <= port <= 65535 or not isinstance(ready_at, str) or not ready_at:
+        return None
+    endpoint = {"protocol": "ssh", "host": host.strip(), "port": port, "user": user or None}
+    return {"endpoints": [endpoint], "ready_at": ready_at}
+
+
+def _vm_metadata(metadata, *, create_job_id: str | None, target: str | None, where: str) -> dict:
+    metadata = _json_mapping(metadata, label=where)
+    executor_target = metadata.get("executor_target") or metadata.get("vm_target") or target
+    if not executor_target:
+        raise VmJobBackedMigrationError(f"{where} names no target")
+    return {
+        "create_job_id": metadata.get("create_job_id") or create_job_id,
+        "teardown_job_id": metadata.get("teardown_job_id"),
+        "current_job_id": metadata.get("current_job_id"),
+        "operation": metadata.get("operation"),
+        "host_id": metadata.get("host_id"),
+        "executor_target": executor_target,
+    }
+
+
+def _vm_operation(envelope, *, create_job_id: str | None, where: str):
+    envelope = _json_mapping(envelope, label=where)
+    if envelope.get("kind") == _JOB_OPERATION_KIND:
+        return envelope
+    operation = _VM_OPERATION_KINDS.get(envelope.get("kind"))
+    if operation is None:
+        raise VmJobBackedMigrationError(f"{where} is an unknown {envelope.get('kind')!r}")
+    payload = envelope.get("payload") or {}
+    parameters = _vm_submitted_parameters(payload.get("parameters") or {})
+    target = parameters.get("vm_target") or parameters.get("executor_target")
+    if not target:
+        raise VmJobBackedMigrationError(f"{where} names no target")
+    rewritten = {
+        "capacity_reservation_id": payload.get("capacity_reservation_id"),
+        "operation": operation,
+        "offering_mode": parameters.get("offering_mode"),
+        "action": parameters.get("executor_action"),
+        "host_id": parameters.get("host_id"),
+        "executor_target": target,
+        "parameters": parameters,
+        "create_job_id": create_job_id if operation == "teardown" else None,
+    }
+    return {"kind": _JOB_OPERATION_KIND, "schema_version": 1, "payload": rewritten}
+
+
+def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
+    """Rewrite VM fulfillments and their create jobs into the job-backed shapes.
+
+    The compute family's job-backed provider reads only its own shapes. For
+    every VM fulfillment, in every state, this rewrites its prepared create and
+    teardown operations, its create and teardown metadata (``vm_target``
+    becomes ``executor_target``), and the result of the create job it names
+    (``vm_create`` becomes the family's create result: delivery evidence by
+    VM's relay rule, and VM's operator fields as its detail).
+
+    A prepared create keeps its job parameters exactly as dispatch submitted
+    them, taken from the job when it exists, so a retried dispatch finds that
+    job rather than being refused for different parameters. A record naming no
+    target takes it from its create job's parameters; one where neither names
+    a target aborts the whole migration, since nothing can tear down a VM no
+    record names. Rows already in the job-backed shapes are left alone, so a
+    rerun changes nothing.
+    """
+    if not (_table_exists(engine, "settlement_records") and _table_exists(engine, "ansible_jobs")):
+        return
+    with engine.begin() as connection:
+        jobs = {
+            row["id"]: row
+            for row in connection.execute(text(
+                "SELECT id, params, result FROM ansible_jobs"
+            )).mappings()
+        }
+
+        def job_params(job_id):
+            row = jobs.get(job_id) if job_id else None
+            return _json_mapping(row["params"], label=f"job {job_id}") if row else None
+
+        records = connection.execute(text(
+            "SELECT capacity_reservation_id, prepared_create_operation, "
+            "prepared_teardown_operation, provider_metadata, teardown_provider_metadata "
+            "FROM settlement_records WHERE provider = 'ansible'"
+        )).mappings().all()
+        for record in records:
+            reservation = record["capacity_reservation_id"]
+            where = f"settlement record {reservation}"
+            metadata = _json_mapping(record["provider_metadata"] or {}, label=where)
+            create_job_id = metadata.get("create_job_id") or None
+            create_params = job_params(create_job_id) or {}
+            job_target = create_params.get("vm_target") or create_params.get("executor_target")
+            updates: dict[str, object] = {"id": reservation}
+
+            if metadata:
+                updates["provider_metadata"] = json.dumps(_vm_metadata(
+                    metadata, create_job_id=create_job_id, target=job_target, where=where
+                ))
+                target = json.loads(updates["provider_metadata"])["executor_target"]
+            else:
+                target = job_target
+            if record["teardown_provider_metadata"]:
+                updates["teardown_provider_metadata"] = json.dumps(_vm_metadata(
+                    record["teardown_provider_metadata"],
+                    create_job_id=create_job_id,
+                    target=target,
+                    where=f"{where} teardown",
+                ))
+            if record["prepared_create_operation"]:
+                rewritten = _vm_operation(
+                    record["prepared_create_operation"], create_job_id=None, where=where
+                )
+                if create_job_id and create_job_id in jobs and job_params(create_job_id):
+                    rewritten["payload"]["parameters"] = job_params(create_job_id)
+                updates["prepared_create_operation"] = json.dumps(rewritten)
+            if record["prepared_teardown_operation"]:
+                updates["prepared_teardown_operation"] = json.dumps(_vm_operation(
+                    record["prepared_teardown_operation"],
+                    create_job_id=create_job_id,
+                    where=f"{where} teardown",
+                ))
+            if len(updates) > 1:
+                connection.execute(
+                    text(
+                        "UPDATE settlement_records SET "
+                        + ", ".join(f"{name} = :{name}" for name in updates if name != "id")
+                        + " WHERE capacity_reservation_id = :id"
+                    ),
+                    updates,
+                )
+
+            create_job = jobs.get(create_job_id) if create_job_id else None
+            result = create_job["result"] if create_job else None
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            if isinstance(result, dict) and result.get("result_kind") == _VM_CREATE_RESULT_KIND:
+                value = result.get("value") or {}
+                created = {
+                    "evidence": _vm_create_evidence(value, create_params),
+                    "detail": {
+                        name: value[name]
+                        for name in _VM_CREATE_DETAIL
+                        if value.get(name) not in (None, "")
+                    },
+                }
+                connection.execute(
+                    text("UPDATE ansible_jobs SET result = :result WHERE id = :id"),
+                    {
+                        "id": create_job_id,
+                        "result": json.dumps(
+                            {**result, "result_kind": _CREATE_RESULT_KIND, "value": created},
+                            sort_keys=True,
+                        ),
+                    },
+                )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2665,5 +3228,33 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260927_001_drop_reservation_release_mirror",
         _migrate_drop_reservation_release_mirror,
+    ),
+    Migration(
+        "20261002_001_host_connection_envelope",
+        _migrate_host_connection_envelope,
+    ),
+    Migration(
+        "20261002_002_job_envelopes",
+        _migrate_job_envelopes,
+    ),
+    Migration(
+        "20261002_003_bare_metal_job_shapes",
+        _migrate_bare_metal_job_shapes,
+    ),
+    Migration(
+        "20261005_001_drop_job_contract_version",
+        _migrate_drop_job_contract_version,
+    ),
+    Migration(
+        "20261005_002_reservation_release_requested_at",
+        _migrate_reservation_release_requested_at,
+    ),
+    Migration(
+        "20261006_001_drop_job_deal_correlation",
+        _migrate_drop_job_deal_correlation,
+    ),
+    Migration(
+        "20261006_002_vm_job_backed_fulfillment",
+        _migrate_vm_job_backed_fulfillment,
     ),
 )

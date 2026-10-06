@@ -29,7 +29,6 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
         get_fulfillment_result=AsyncMock(
             return_value=vm_fulfillment_result(
                 provisioned_resource_id="vm-1",
-                connection_info={"vm_name": "tenant-1", "host": "kvm1"},
             )
         ),
     )
@@ -178,7 +177,15 @@ async def test_post_physical_convergence_records_ready_and_claim():
         store_credential=AsyncMock(),
         update_listing=AsyncMock(),
     )
-    capacity = SimpleNamespace(commit=AsyncMock())
+    # The lease was registered before this pass, so the site keeps its
+    # recorded window and returns it, not the one this pass computed.
+    recorded = {
+        "capacity_reservation_id": "reservation-1",
+        "state": "leased",
+        "lease_start_utc": "2026-01-01T00:00:00+00:00",
+        "lease_end_utc": "2026-01-01 01:00",
+    }
+    capacity = SimpleNamespace(commit=AsyncMock(return_value=recorded))
     register = AsyncMock()
     submit = AsyncMock(return_value="attestation-1")
     bind_fulfillment = AsyncMock()
@@ -229,8 +236,8 @@ async def test_post_physical_convergence_records_ready_and_claim():
         escrow_uid="escrow-1",
         vm_host="kvm-1",
         vm_target="tenant-1",
-        lease_start_utc=capacity.commit.await_args.kwargs["lease_start_utc"],
-        lease_end_utc=capacity.commit.await_args.kwargs["lease_end_utc"],
+        lease_start_utc=recorded["lease_start_utc"],
+        lease_end_utc=recorded["lease_end_utc"],
     )
     assert any(
         call.kwargs.get("status") == "ready"
@@ -266,7 +273,7 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             escrow=escrow,
             context={"fulfillment_request": {"payload": {}}},
             sqlite_client=db,
-            capacity_client=SimpleNamespace(commit=AsyncMock()),
+            capacity_client=SimpleNamespace(commit=AsyncMock(return_value=_RECORDED)),
             connection_details={},
             authentication=None,
             submit_fulfillment=submit,
@@ -305,3 +312,97 @@ async def test_hosted_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
     remote.schedule_resource.assert_not_awaited()
     remote.begin_fulfillment.assert_not_awaited()
     remote.get_fulfillment_status.assert_not_awaited()
+
+
+def _post_physical_inputs(capacity, register, submit):
+    db = SimpleNamespace(
+        update_escrow=AsyncMock(),
+        store_credential=AsyncMock(),
+        update_listing=AsyncMock(),
+    )
+    return dict(
+        escrow={
+            "escrow_uid": "escrow-1",
+            "negotiation_id": "neg-1",
+            "obligation_ref": "obligation-1",
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc",
+            "capacity_reservation_id": "reservation-1",
+            "settlement_resource_id": "resource-1",
+            "fulfillment_phase": "physical_result_recorded",
+        },
+        context={
+            "listing_id": "listing-1",
+            "seller_order_id": "order-1",
+            "duration_seconds": 3600,
+            "fulfillment_request": {"payload": {"vm_target": "tenant-1"}},
+        },
+        sqlite_client=db,
+        capacity_client=capacity,
+        connection_details={"host": "kvm-1", "vm_name": "tenant-1"},
+        authentication=None,
+        register_lease=register,
+        submit_fulfillment=submit,
+        bind_fulfillment_fn=AsyncMock(),
+        alkahest_client=object(),
+        site_id="site-1",
+    )
+
+
+_RECORDED = {
+    "capacity_reservation_id": "reservation-1",
+    "state": "leased",
+    "lease_start_utc": "2026-01-01T00:00:00+00:00",
+    "lease_end_utc": "2026-01-01 01:00",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("commit", "register"),
+    [
+        (AsyncMock(side_effect=RuntimeError("site down")), AsyncMock()),
+        (AsyncMock(return_value={"capacity_reservation_id": "reservation-1"}), AsyncMock()),
+        (AsyncMock(return_value=_RECORDED), AsyncMock(side_effect=RuntimeError("down"))),
+    ],
+    ids=["commit fails", "commit records no window", "registration fails"],
+)
+async def test_the_resume_pass_publishes_no_evidence_before_the_lease_is_registered(
+    commit, register
+):
+    """The lease's registration is an obligation of a delivered deal: until the
+    reservation is committed and the lease registered, the pass stops before
+    publishing the fulfillment, and the next pass retries."""
+    from market_storefront.services.fulfillment_resume_runtime import (
+        converge_post_physical_delivery,
+    )
+
+    submit = AsyncMock(return_value="attestation-1")
+    inputs = _post_physical_inputs(SimpleNamespace(commit=commit), register, submit)
+
+    with pytest.raises(Exception):
+        await converge_post_physical_delivery(**inputs)
+
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_retried_pass_registers_and_publishes_once_provisioning_answers():
+    from market_storefront.services.fulfillment_resume_runtime import (
+        converge_post_physical_delivery,
+    )
+
+    register = AsyncMock(side_effect=[RuntimeError("down"), None])
+    submit = AsyncMock(return_value="attestation-1")
+    capacity = SimpleNamespace(commit=AsyncMock(return_value=_RECORDED))
+
+    with pytest.raises(RuntimeError):
+        await converge_post_physical_delivery(**_post_physical_inputs(capacity, register, submit))
+    assert await converge_post_physical_delivery(
+        **_post_physical_inputs(capacity, register, submit)
+    )
+
+    assert register.await_count == 2
+    submit.assert_awaited_once()
+
+

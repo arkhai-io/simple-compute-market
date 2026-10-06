@@ -30,9 +30,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from arkhai_vms import VmConnectionDetails
 
-from compute_provisioning import ComputeProvisioningTimeoutError
-from market_fulfillment import VersionedEnvelope
+from compute_provisioning_client import ComputeProvisioningTimeoutError
+from market_core import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
 from market_storefront.services import vm_fulfillment_service as vfs
 from tests.fulfillment_fixtures import (
@@ -41,96 +42,47 @@ from tests.fulfillment_fixtures import (
 )
 
 
-class TestFulfillmentResultToLegacyShape:
-    def test_maps_root_and_tenant_credentials(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [{"provisioned_resource_id": "res-1", "status": "active"}],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "connection_info": {
-                            "vm_name": "agent-vm-01",
-                            "host": "kvm1",
-                            "timestamp": "2026-07-26T00:00:00Z",
-                            "tenant_user": "mockuser",
-                            "vm_ip_internal": "192.168.122.2",
-                            "ssh_port": "2222",
-                        },
-                        "credentials": [
-                            {
-                                "role": "root",
-                                "password": "root-pw",
-                                "ssh_commands": {"internal": "ssh root@192.168.122.2"},
-                                "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                            {
-                                "role": "tenant",
-                                "password": "tenant-pw",
-                                "ssh_commands": {"external": "ssh -p 2222 mockuser@127.0.0.1"},
-                                "key_type": "generated",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                        ],
-                    },
-                },
-            },
+class TestFulfillmentResultToConnection:
+    def test_the_delivery_becomes_the_deals_connection_details(self):
+        envelope = vm_fulfillment_result(
+            provisioned_resource_id="res-1",
+            credentials=(
+                {"role": "root", "password": "root-pw", "key_type": None},
+                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+            ),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        result = fs._fulfillment_result_to_connection(envelope)
 
-        assert result["vm_name"] == "agent-vm-01"
-        assert result["host"] == "kvm1"
-        assert result["vm_ip_internal"] == "192.168.122.2"
-        assert result["ssh_port"] == "2222"
-        assert result["provisioned_resource_ids"] == ["res-1"]
+        auth = result.pop("authentication")
+        assert VmConnectionDetails.model_validate(result) == VmConnectionDetails(
+            host="203.0.113.10",
+            port=2222,
+            user="tenant1",
+            ready_at="2030-01-01T00:00:01+00:00",
+            provisioned_resource_ids=("res-1",),
+        )
+        assert auth == {
+            "root": {"password": "root-pw", "key_type": None},
+            "tenant": {"password": "tenant-pw", "key_type": "generated"},
+        }
 
-        auth = result["authentication"]
-        assert auth["root"]["password"] == "root-pw"
-        assert auth["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
-        assert "key_type" not in auth["root"]
-        assert auth["tenant"]["password"] == "tenant-pw"
-        assert auth["tenant"]["key_type"] == "generated"
-        assert "ssh_key_path_host" not in auth["tenant"]
-
-    def test_no_domain_result_means_no_authentication_key(self):
+    def test_a_result_without_the_access_delivery_is_refused(self):
         envelope = VersionedEnvelope(
             kind="fulfillment.result.v1",
             schema_version=1,
             payload={"provisioned_resources": [], "domain_result": None},
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        with pytest.raises(RuntimeError, match="unsupported delivery"):
+            fs._fulfillment_result_to_connection(envelope)
 
-        assert "authentication" not in result
-        assert result["provisioned_resource_ids"] == []
-        assert result.get("vm_name") is None
-
-    def test_unknown_credential_role_is_ignored(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "credentials": [
-                            {"role": "admin", "password": "x", "provisioned_resource_ids": []},
-                        ],
-                    },
-                },
-            },
+    def test_an_unknown_credential_role_is_not_kept(self):
+        envelope = vm_fulfillment_result(
+            credentials=({"role": "admin", "password": "x"},),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
-
-        assert "authentication" not in result
+        assert "authentication" not in fs._fulfillment_result_to_connection(envelope)
 
 
 class TestTheStorefrontSelectsNoRelay:
@@ -182,7 +134,6 @@ class TestDoProvision:
             get_fulfillment_result=AsyncMock(
                 return_value=vm_fulfillment_result(
                     provisioned_resource_id="res-1",
-                    connection_info={"vm_name": "vm-1"},
                 )
             ),
         )
@@ -264,7 +215,8 @@ class TestDoProvision:
         )
 
         assert job_ids == ["fulfillment-1"]
-        assert result["vm_name"] == "vm-1"
+        assert (result["host"], result["port"], result["user"]) == ("203.0.113.10", 2222, "tenant1")
+        assert "vm_name" not in result
         assert result["provisioned_resource_ids"] == ["res-1"]
 
     async def test_no_connectivity_is_placed_in_the_request(
@@ -318,7 +270,7 @@ class TestDoProvision:
             raising=False,
         )
 
-        from compute_provisioning import ComputeProvisioningJobError
+        from compute_provisioning_client import ComputeProvisioningJobError
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
@@ -473,7 +425,14 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
             "vm_host": "host-1",
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        # Commit returns the reservation with the window the site recorded,
+        # which the lease is then registered with.
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
     observed: dict[str, str] = {}
 
@@ -506,7 +465,6 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=validating_provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=register_lease,
     )
     await asyncio.sleep(0)
@@ -568,7 +526,14 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
             # No resource_id/vm_host -- the real opaque-reservation shape.
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        # Commit returns the reservation with the window the site recorded,
+        # which the lease is then registered with.
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
 
     async def provision_vm(
@@ -590,7 +555,6 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        schedule_shutdown=AsyncMock(),
         register_lease=register_lease,
     )
     await asyncio.sleep(0)
@@ -610,3 +574,102 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     assert register_lease.await_args.kwargs["capacity_reservation_id"] == "reservation-1"
     assert register_lease.await_args.kwargs["resource_id"] is None
     assert register_lease.await_args.kwargs["vm_host"] is None
+
+
+_RECORDED_WINDOW = {
+    "capacity_reservation_id": "reservation-1",
+    "state": "leased",
+    "lease_start_utc": "2026-01-01T00:00:00+00:00",
+    "lease_end_utc": "2026-01-01 01:00",
+}
+
+
+async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_lease):
+    """Run the VM main path to past provisioning with the given commit and
+    registration; the VM itself is always provisioned."""
+    plan = SimpleNamespace(order_id="listing-1", required_attributes={"vcpu_count": 2})
+    monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "deferral.db")
+    sqlite_client = lifecycle.db
+
+    async def capacity_binding_for_listing(repository, listing_id):
+        return lifecycle.capacity_binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        capacity_binding_for_listing,
+    )
+    capacity = SimpleNamespace(
+        reserve=AsyncMock(return_value={"capacity_reservation_id": "reservation-1", "site": "site-1"}),
+        commit=commit,
+    )
+    provisioned: list[str] = []
+
+    async def provision_vm(ssh_public_key, *, vm_target, on_job_submitted, **_):
+        await on_job_submitted("fulfillment-1")
+        provisioned.append(vm_target)
+        return {"vm_name": vm_target, "authentication": {}}
+
+    result = await vfs.fulfill_vm_obligation(
+        client=None,
+        escrow_uid="escrow-1",
+        ssh_public_key="ssh-ed25519 test",
+        order={"listing_id": "listing-1"},
+        listing_id="listing-1",
+        site_id="site-1",
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=capacity,
+        stage_event=lambda *args, **kwargs: None,
+        provision_vm=provision_vm,
+        register_lease=register_lease,
+    )
+    await asyncio.sleep(0)
+    assert provisioned, "the VM was provisioned"
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("commit", "register_lease"),
+    [
+        (AsyncMock(return_value={"capacity_reservation_id": "reservation-1"}), AsyncMock()),
+        (AsyncMock(return_value=_RECORDED_WINDOW), AsyncMock(side_effect=RuntimeError("down"))),
+    ],
+    ids=["commit records no window", "registration fails"],
+)
+async def test_a_deal_whose_lease_is_not_registered_is_deferred_not_published(
+    monkeypatch, tmp_path, commit, register_lease
+):
+    """The VM is running but its lease is not registered: the deal is deferred
+    for the resume pass, and its evidence is not published yet."""
+    submit = AsyncMock(return_value="fulfillment-uid")
+    monkeypatch.setattr(vfs, "submit_compute_fulfillment", submit)
+
+    result = await _fulfil_after_provisioning(
+        monkeypatch, tmp_path, commit=commit, register_lease=register_lease
+    )
+
+    assert result["status"] == "deferred"
+    assert "lease registration" in result["message"]
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_evidence_publication_after_provisioning_is_deferred(
+    monkeypatch, tmp_path
+):
+    """Publishing the fulfillment is retried by the resume pass rather than
+    failing a deal whose VM is running."""
+    monkeypatch.setattr(
+        vfs, "submit_compute_fulfillment", AsyncMock(side_effect=RuntimeError("rpc down"))
+    )
+
+    result = await _fulfil_after_provisioning(
+        monkeypatch,
+        tmp_path,
+        commit=AsyncMock(return_value=_RECORDED_WINDOW),
+        register_lease=AsyncMock(),
+    )
+
+    assert result["status"] == "deferred"
+    assert "evidence publication" in result["message"]
