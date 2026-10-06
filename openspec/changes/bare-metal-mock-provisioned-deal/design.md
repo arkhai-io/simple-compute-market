@@ -1918,6 +1918,21 @@ and added four refinements (rows 6 to 9). Row 1 refines row 1 of the audit above
 | 8. Design review: the storefront and the buyer CLI each rebuilt a free-form dict | One typed `VmConnectionDetails` in `arkhai_vms` (host, port, user, `ready_at`, provisioned-resource ids), which the storefront writes and the buyer reads; both already depend on the domain package |
 | 9. Design review: a backfilled fulfillment's prepared teardown must stay executable without its create job | A persisted prepared teardown is dispatched as persisted: the orchestrator reuses it, and the provider's dispatch reads no job; only preparing a new teardown reads the create job's parameters. The migration's tests cover a record with a metadata target, a blank target recovered from the create job, the abort when neither names one, and a legacy prepared teardown dispatched after its create job is gone |
 
+**Implementation review of 5B.12.B (2026-10-06).** The review approved the slice's
+architecture: the domain-neutral provider, VM contributing preparation and result
+interpretation, `CreateJobResult` separating delivery evidence from operator detail, and
+the storefront and buyer consuming the delivery. It raised six findings. Each was
+discussed with the maintainer and fixed as 5B.12.B.D.
+
+| Finding | Decision |
+|---|---|
+| 1. High: the migration wrote no evidence for a VM fulfillment in any state, so an `active` fulfillment could stay active with a delivery the new provider cannot produce (its relay-mismatch test did exactly that). A missing create job or result on an active row also passed | For an `active` fulfillment the migration aborts atomically unless its create job exists and its result converts into valid evidence. It never marks the fulfillment `failed`, since its VM may be running. Other states may migrate to no evidence: one in flight then fails through the provider's own rule, and a teardown never reads the delivery |
+| 2. High: a dispatch that submitted its create job and crashed before recording it leaves the job unnamed in the metadata, so the migration missed its result; a retry then found the job and read an old-shape result as a failed create | A record naming no create job takes it from the engine's contract identity (the reservation, action kind `create`, key `<reservation>:create`) when exactly one job matches. The prepared operation is rewritten from that job's parameters and its result is converted; the metadata stays empty for the retried dispatch to fill |
+| 3. High: the storefront's connection-details migration paired an older record's `host_ip` with its `ssh_port`; behind a relay those were the KVM host's address and the relay's port, the defect 5B.12.B fixed for new jobs, which the buyer CLI's now-working connect line would print | A record whose relay was enabled takes its host and port from its relay record, and omits the host when that record lacks either; otherwise `host_ip` and the forwarded port. Records written since fulfillment already omit the host. Rejected: parsing the stored `ssh_command` as a fallback, whose format varies by key and mode and would be a second derivation able to disagree with the first |
+| 4. Medium: both SSH codecs returned evidence with no username, so an SSH create could become active with an endpoint nobody can connect to | Each codec reports no evidence without a non-empty tenant account; the provisioning migration applies the same rule. `AccessEndpoint.user` stays optional for protocols that have none |
+| 5. Medium: the task note claimed the migration tests proved each shape "in every state"; they covered few states | The migration's tests enumerate the states that store differently, and the note names exactly those |
+| 6. Medium/low: VM's plan tests were filed in the deployed service's suite, and VM's adapter target reached outside its package to run them | Moved now to `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; the adapter target runs its own tests and the one service-hosted inventory-view file. The service-hosted VM codec suite (`test_vm_codec.py`) joins the relay and pool-configuration suites already routed to closeout task 2.6 |
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

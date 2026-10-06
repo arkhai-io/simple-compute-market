@@ -106,6 +106,9 @@ def grant_evidence(fact: Mapping[str, Any]) -> DeliveryEvidence | None:
     instant; a fact missing the host, the port, the account, or the time says
     nothing a buyer can use.
     """
+    user = fact.get("ssh_user")
+    if not isinstance(user, str) or not user.strip():
+        return None
     try:
         return DeliveryEvidence(
             endpoints=(
@@ -113,7 +116,7 @@ def grant_evidence(fact: Mapping[str, Any]) -> DeliveryEvidence | None:
                     protocol="ssh",
                     host=str(fact.get("host") or ""),
                     port=int(str(fact.get("port") or "0")),
-                    user=str(fact.get("ssh_user") or "") or None,
+                    user=user.strip(),
                 ),
             ),
             ready_at=fact.get("timestamp"),

@@ -549,6 +549,7 @@ def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> Delivery
     A job that leased a relay port is reached through the relay, at exactly
     that port; a run reporting none, or another, yields nothing. Otherwise the
     guest is reached at its host's buyer-facing address and forwarded port.
+    Either way the endpoint names the tenant account, or there is no evidence.
     """
     if params.relay_id or params.vm_remote_port is not None:
         relay = _relay_reported(payload)
@@ -561,6 +562,11 @@ def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> Delivery
         host, port = payload.get("host_ip"), payload.get("ssh_port")
     if not isinstance(host, str) or not host.strip() or host.strip() == "N/A":
         return None
+    # SSH access is to the tenant account; an endpoint naming none cannot be
+    # connected to, so it is not evidence of delivery.
+    user = payload.get("tenant_user")
+    if not isinstance(user, str) or not user.strip():
+        return None
     try:
         return DeliveryEvidence(
             endpoints=(
@@ -568,7 +574,7 @@ def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> Delivery
                     protocol="ssh",
                     host=host.strip(),
                     port=int(str(port)),
-                    user=str(payload.get("tenant_user") or "") or None,
+                    user=user.strip(),
                 ),
             ),
             ready_at=payload.get("timestamp"),

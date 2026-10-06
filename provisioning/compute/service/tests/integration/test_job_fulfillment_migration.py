@@ -12,11 +12,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning import JobExecutorTable
-from compute_provisioning.job_fulfillment import job_contract
+from compute_provisioning.job_fulfillment import delivery_evidence, job_contract
 from compute_provisioning.jobs import JobRetryPolicy
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.submission import JobSubmissionService
-from compute_provisioning_contracts import CreateJobResult
+from compute_provisioning_contracts import CreateJobResult, ResultEnvelope
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
     VmJobBackedMigrationError,
@@ -140,26 +140,74 @@ def test_an_active_vm_fulfillment_and_its_create_job_take_the_job_backed_shapes(
     assert "ansible_result" not in created.detail
 
 
-@pytest.mark.parametrize(("reported", "evidence"), [("40001", True), ("40002", False)])
-def test_a_relay_backed_create_is_reached_at_the_relay_and_its_leased_port(reported, evidence):
-    engine = _engine()
+def _relayed_job(engine, reported: str) -> None:
     params = {**_JOB_PARAMS, "relay_id": "site-a", "vm_remote_port": 40001}
-    _record(engine, "r-1", metadata=_old_metadata())
     _job(engine, "job-1", reservation="r-1", params=params, result={
         **_RESULT,
         "frp": {"enabled": "True", "relay_addr": "relay.example", "remote_port": reported},
     })
 
-    _migrate_vm_job_backed_fulfillment(engine)
 
-    created = CreateJobResult.model_validate(
+def _created(engine) -> CreateJobResult:
+    return CreateJobResult.model_validate(
         _json(engine, "SELECT result FROM ansible_jobs WHERE id = 'job-1'")["value"]
     )
-    if evidence:
-        (endpoint,) = created.evidence.endpoints
-        assert (endpoint.host, endpoint.port) == ("relay.example", 40001)
-    else:
-        assert created.evidence is None
+
+
+def test_a_relay_backed_create_is_reached_at_the_relay_and_its_leased_port():
+    engine = _engine()
+    _record(engine, "r-1", metadata=_old_metadata())
+    _relayed_job(engine, "40001")
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    (endpoint,) = _created(engine).evidence.endpoints
+    assert (endpoint.host, endpoint.port) == ("relay.example", 40001)
+
+
+def test_an_in_flight_create_reporting_another_relay_port_migrates_to_no_evidence():
+    """It then fails as any unreadable create does."""
+    engine = _engine()
+    _record(engine, "r-1", state="dispatching", metadata=_old_metadata())
+    _relayed_job(engine, "40002")
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    assert _created(engine).evidence is None
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["relay-port-disagrees", "no-tenant-account", "no-result", "create-job-missing"],
+)
+def test_an_active_fulfillment_whose_delivery_would_be_unreadable_refuses_the_upgrade(case):
+    """Its VM may be running: the upgrade stops rather than leave it active with
+    a delivery no reader can produce, or fail it."""
+    engine = _engine()
+    _record(engine, "r-0", metadata=_old_metadata(create_job_id="job-0", current_job_id="job-0"),
+            prepared=_prepared_create("r-0"))
+    _job(engine, "job-0", reservation="r-0", params=_JOB_PARAMS, result=_RESULT)
+    _record(engine, "r-1", metadata=_old_metadata())
+    if case == "relay-port-disagrees":
+        _relayed_job(engine, "40002")
+    elif case == "no-tenant-account":
+        _job(engine, "job-1", reservation="r-1", params=_JOB_PARAMS,
+             result={**_RESULT, "tenant_user": None})
+    elif case == "no-result":
+        _job(engine, "job-1", reservation="r-1", params=_JOB_PARAMS)
+
+    with pytest.raises(VmJobBackedMigrationError, match="is active"):
+        _migrate_vm_job_backed_fulfillment(engine)
+
+    # Nothing was written, the record that could be rewritten included.
+    prepared = _json(
+        engine, "SELECT prepared_create_operation FROM settlement_records "
+        "WHERE capacity_reservation_id = 'r-0'"
+    )
+    assert prepared["kind"] == "vm.ansible.create.v1"
+    assert _json(engine, "SELECT result FROM ansible_jobs WHERE id = 'job-0'")[
+        "result_kind"
+    ] == "vm_create"
 
 
 def test_a_blank_target_is_taken_from_the_create_job():
@@ -180,6 +228,7 @@ def test_a_blank_target_is_taken_from_the_create_job():
 def test_a_record_naming_no_target_anywhere_aborts_the_whole_migration():
     engine = _engine()
     _record(engine, "r-0", metadata=_old_metadata(), prepared=_prepared_create("r-0"))
+    _job(engine, "job-1", reservation="r-0", params=_JOB_PARAMS, result=_RESULT)
     _record(engine, "r-1", state="dispatching", metadata=_old_metadata(
         target="", create_job_id="job-missing", current_job_id="job-missing",
     ))
@@ -195,16 +244,8 @@ def test_a_record_naming_no_target_anywhere_aborts_the_whole_migration():
     assert prepared["kind"] == "vm.ansible.create.v1"
 
 
-def test_a_migrated_in_flight_create_redispatched_finds_its_job():
-    """A dispatch retried after the upgrade, under the family's contract
-    identity and the migrated parameters, names the job already submitted."""
-    engine = _engine()
-    _record(engine, "r-1", state="dispatch_pending", metadata={},
-            prepared=_prepared_create("r-1"))
-    _job(engine, "job-old", reservation="r-1", params=_JOB_PARAMS)
-    _migrate_vm_job_backed_fulfillment(engine)
-    prepared = _json(engine, "SELECT prepared_create_operation FROM settlement_records")
-    submission = JobSubmissionService(
+def _submission(engine) -> JobSubmissionService:
+    return JobSubmissionService(
         engine=JobEngine(
             sessionmaker(bind=engine),
             executors=JobExecutorTable(),
@@ -215,7 +256,9 @@ def test_a_migrated_in_flight_create_redispatched_finds_its_job():
         job_queue_provider=lambda: None,
     )
 
-    response = asyncio.run(submission.submit(
+
+def _redispatch(engine, prepared):
+    return asyncio.run(_submission(engine).submit(
         offering_mode="vm",
         action=prepared["payload"]["action"],
         host_id=prepared["payload"]["host_id"],
@@ -223,7 +266,75 @@ def test_a_migrated_in_flight_create_redispatched_finds_its_job():
         contract=job_contract("r-1", "create", "vm"),
     ))
 
-    assert response.job_id == "job-old"
+
+def test_a_dispatch_pending_create_with_no_job_keeps_its_prepared_parameters():
+    engine = _engine()
+    _record(engine, "r-1", state="dispatch_pending", metadata={},
+            prepared=_prepared_create("r-1"))
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    prepared = _json(engine, "SELECT prepared_create_operation FROM settlement_records")
+    assert prepared["payload"]["parameters"] == _JOB_PARAMS
+    assert _json(engine, "SELECT provider_metadata FROM settlement_records") == {}
+
+
+@pytest.mark.parametrize("result", [None, _RESULT], ids=["queued", "succeeded"])
+def test_an_unrecorded_create_job_is_found_by_its_contract_and_redispatch_finds_it(result):
+    """Dispatch submitted the job, which may even have finished, but crashed
+    before recording it: the migration finds it as a retried dispatch does,
+    and converts its result, and the retry then names that job."""
+    engine = _engine()
+    _record(engine, "r-1", state="dispatch_pending", metadata={},
+            prepared=_prepared_create("r-1"))
+    _job(engine, "job-old", reservation="r-1", params=_JOB_PARAMS, result=result)
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    assert _json(engine, "SELECT provider_metadata FROM settlement_records") == {}
+    prepared = _json(engine, "SELECT prepared_create_operation FROM settlement_records")
+    assert _redispatch(engine, prepared).job_id == "job-old"
+    stored = _json(engine, "SELECT result FROM ansible_jobs WHERE id = 'job-old'")
+    if result is None:
+        assert stored is None
+    else:
+        job = SimpleNamespace(job_id="job-old", result=ResultEnvelope.model_validate(stored))
+        (endpoint,) = delivery_evidence(job).endpoints
+        assert (endpoint.host, endpoint.port) == ("203.0.113.1", 2222)
+
+
+def test_a_dispatching_create_with_metadata_is_rewritten():
+    engine = _engine()
+    _record(engine, "r-1", state="dispatching", metadata=_old_metadata(),
+            prepared=_prepared_create("r-1"))
+    _job(engine, "job-1", reservation="r-1", params=_JOB_PARAMS)
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    metadata = _json(engine, "SELECT provider_metadata FROM settlement_records")
+    assert (metadata["create_job_id"], metadata["executor_target"]) == ("job-1", "vm-1")
+
+
+def test_a_teardown_side_row_keeps_its_prepared_teardown_in_the_family_shape():
+    engine = _engine()
+    _record(engine, "r-1", state="teardown_dispatch_pending", metadata=_old_metadata())
+    _job(engine, "job-1", reservation="r-1", params=_JOB_PARAMS, result=_RESULT)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE settlement_records SET prepared_teardown_operation = :prepared"
+        ), {"prepared": json.dumps({
+            "kind": "vm.ansible.teardown.v1", "schema_version": 2,
+            "payload": {"capacity_reservation_id": "r-1", "action": "teardown",
+                        "parameters": {**_PREPARED_PARAMS, "vm_action": "vm_remove"}},
+        })})
+
+    _migrate_vm_job_backed_fulfillment(engine)
+
+    teardown = _json(engine, "SELECT prepared_teardown_operation FROM settlement_records")
+    assert teardown["kind"] == "compute.job-fulfillment.operation"
+    assert teardown["payload"]["operation"] == "teardown"
+    assert teardown["payload"]["create_job_id"] == "job-1"
+    assert teardown["payload"]["action"] == "vm_remove"
 
 
 def test_a_second_run_changes_nothing():

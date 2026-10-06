@@ -819,7 +819,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.12.0"
+version = "0.12.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -869,7 +869,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.12.1-py3-none-any.whl" },
 ]
 
 [[package]]

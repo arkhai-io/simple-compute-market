@@ -139,6 +139,19 @@ def test_a_grant_whose_fact_cannot_say_how_to_connect_reports_no_evidence() -> N
     }
 
 
+def test_a_grant_naming_no_tenant_account_reports_no_evidence() -> None:
+    fact = (
+        '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
+        '"ssh_user": "", "timestamp": "2030-01-01T00:00:01Z"}'
+    )
+
+    outcome = BareMetalAnsibleCodec().interpret(
+        job_run(_grant()), inventory_target(HOST), _granted(fact)
+    )
+
+    assert outcome.result.value["evidence"] is None
+
+
 def test_a_reclaim_reports_its_fact() -> None:
     reclaim = _grant().model_copy(
         update={"action": NODE_RECLAIM_ACCESS_ACTION, "reclaim_policy": "remove_lease_key"}

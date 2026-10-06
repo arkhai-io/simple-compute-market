@@ -2975,7 +2975,8 @@ def _vm_create_evidence(value: dict, params: dict) -> dict | None:
 
     A create that leased a relay port is reached at the relay's address and
     that port, and its reported port must agree with the lease; otherwise at
-    the host's buyer-facing address and forwarded port.
+    the host's buyer-facing address and forwarded port. SSH access needs the
+    tenant account: a result naming none yields no evidence.
     """
     leased = params.get("vm_remote_port")
     if params.get("relay_id") or leased is not None:
@@ -2989,13 +2990,15 @@ def _vm_create_evidence(value: dict, params: dict) -> dict | None:
     user, ready_at = value.get("tenant_user"), value.get("timestamp")
     if not isinstance(host, str) or not host.strip() or host.strip() == "N/A":
         return None
+    if not isinstance(user, str) or not user.strip():
+        return None
     try:
         port = int(str(port))
     except ValueError:
         return None
     if not 1 <= port <= 65535 or not isinstance(ready_at, str) or not ready_at:
         return None
-    endpoint = {"protocol": "ssh", "host": host.strip(), "port": port, "user": user or None}
+    endpoint = {"protocol": "ssh", "host": host.strip(), "port": port, "user": user.strip()}
     return {"endpoints": [endpoint], "ready_at": ready_at}
 
 
@@ -3056,6 +3059,20 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
     a target aborts the whole migration, since nothing can tear down a VM no
     record names. Rows already in the job-backed shapes are left alone, so a
     rerun changes nothing.
+
+    A record whose dispatch submitted its create job but crashed before
+    recording it has no create job in its metadata; the job is found as the
+    engine finds it on a retry, by its contract identity (the reservation,
+    action kind ``create``, and key ``<reservation>:create``), and its result
+    is converted too. The metadata stays empty for the retried dispatch to fill.
+
+    An ``active`` fulfillment's delivery is read from its create job, so the
+    migration aborts unless that job exists and its result converts into valid
+    delivery evidence: the fulfillment would otherwise stay active with a
+    delivery no reader can produce. It is never failed instead, because its VM
+    may well be running. A fulfillment in any other state may migrate to no
+    evidence: one still in flight then fails as any unreadable create does, and
+    a teardown never reads the delivery.
     """
     if not (_table_exists(engine, "settlement_records") and _table_exists(engine, "ansible_jobs")):
         return
@@ -3063,16 +3080,27 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
         jobs = {
             row["id"]: row
             for row in connection.execute(text(
-                "SELECT id, params, result FROM ansible_jobs"
+                "SELECT id, params, result, capacity_reservation_id, action_kind, "
+                "idempotency_key FROM ansible_jobs"
             )).mappings()
         }
+
+        def contract_job(reservation):
+            matches = [
+                job_id
+                for job_id, row in jobs.items()
+                if row["capacity_reservation_id"] == reservation
+                and row["action_kind"] == "create"
+                and row["idempotency_key"] == f"{reservation}:create"
+            ]
+            return matches[0] if len(matches) == 1 else None
 
         def job_params(job_id):
             row = jobs.get(job_id) if job_id else None
             return _json_mapping(row["params"], label=f"job {job_id}") if row else None
 
         records = connection.execute(text(
-            "SELECT capacity_reservation_id, prepared_create_operation, "
+            "SELECT capacity_reservation_id, state, prepared_create_operation, "
             "prepared_teardown_operation, provider_metadata, teardown_provider_metadata "
             "FROM settlement_records WHERE provider = 'ansible'"
         )).mappings().all()
@@ -3080,7 +3108,7 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
             reservation = record["capacity_reservation_id"]
             where = f"settlement record {reservation}"
             metadata = _json_mapping(record["provider_metadata"] or {}, label=where)
-            create_job_id = metadata.get("create_job_id") or None
+            create_job_id = metadata.get("create_job_id") or contract_job(reservation)
             create_params = job_params(create_job_id) or {}
             job_target = create_params.get("vm_target") or create_params.get("executor_target")
             updates: dict[str, object] = {"id": reservation}
@@ -3126,6 +3154,18 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
             result = create_job["result"] if create_job else None
             if isinstance(result, str):
                 result = json.loads(result) if result else None
+            active = record["state"] == "active"
+            if active and create_job is None:
+                raise VmJobBackedMigrationError(
+                    f"{where} is active, but its create job {create_job_id!r} is missing"
+                )
+            if active and not (
+                isinstance(result, dict)
+                and result.get("result_kind") in (_VM_CREATE_RESULT_KIND, _CREATE_RESULT_KIND)
+            ):
+                raise VmJobBackedMigrationError(
+                    f"{where} is active, but its create job reported no VM create result"
+                )
             if isinstance(result, dict) and result.get("result_kind") == _VM_CREATE_RESULT_KIND:
                 value = result.get("value") or {}
                 created = {
@@ -3136,6 +3176,11 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
                         if value.get(name) not in (None, "")
                     },
                 }
+                if active and created["evidence"] is None:
+                    raise VmJobBackedMigrationError(
+                        f"{where} is active, but its create job's result says nothing a "
+                        "buyer can connect with, so its delivery could not be read"
+                    )
                 connection.execute(
                     text("UPDATE ansible_jobs SET result = :result WHERE id = :id"),
                     {

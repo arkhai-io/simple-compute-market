@@ -129,15 +129,24 @@ def _populate(engine):
                 "provider_extra_vars": {"machine_id": "operator-value"},
             }},
         }),
-        metadata=json.dumps({"vm_host": "kvm1", "vm_target": "t1"}),
+        metadata=json.dumps({"vm_host": "kvm1", "vm_target": "t1", "create_job_id": "job-1"}),
     )
     _execute(
         engine,
         "INSERT INTO ansible_jobs (id, status, params, result, retry_count, "
         "max_retries, created_at, updated_at) VALUES ('job-1', 'succeeded', "
         ":params, :result, 0, 3, '2026-01-01', '2026-01-01')",
-        params=json.dumps({"vm_host": "kvm1"}),
-        result=json.dumps({"vm_host_ip": "203.0.113.9"}),
+        # What the dispatch submitted: the prepared operation's parameters.
+        params=json.dumps({
+            "vm_host": "kvm1", "vm_target": "t1", "vm_action": "create",
+            "provider_extra_vars": {"machine_id": "operator-value"},
+        }),
+        # An active fulfillment's create result must say how to connect, or the
+        # job-backed migration refuses the upgrade.
+        result=json.dumps({
+            "vm_host_ip": "203.0.113.9", "ssh_port": "2222", "tenant_user": "t",
+            "timestamp": "2030-01-01T00:00:01Z",
+        }),
     )
 
 
@@ -196,13 +205,17 @@ def test_the_previous_schema_is_migrated_on_every_surface():
         assert connection.execute(text(
             "SELECT resource_host_id, resource_attributes FROM settlement_records"
         )).one() == ("kvm1", "{}")
-    assert _json(engine, "SELECT params FROM ansible_jobs") == {"host_id": "kvm1"}
-    # Results are then stored as the envelope the contract route served.
-    assert _json(engine, "SELECT result FROM ansible_jobs") == {
-        "offering_mode": "vm",
-        "result_kind": "vm_create",
-        "value": {"host_ip": "203.0.113.9"},
+    assert _json(engine, "SELECT params FROM ansible_jobs") == {
+        "host_id": "kvm1", "vm_target": "t1", "vm_action": "create",
+        "provider_extra_vars": {"machine_id": "operator-value"},
     }
+    # Results are then stored as the envelope the contract route served.
+    # The create result ends as the family's create result, its endpoint at the
+    # address the identity migration renamed.
+    result = _json(engine, "SELECT result FROM ansible_jobs")
+    assert result["result_kind"] == "compute.create-result.v1"
+    assert result["value"]["evidence"]["endpoints"][0]["host"] == "203.0.113.9"
+    assert result["value"]["detail"]["host_ip"] == "203.0.113.9"
     with engine.begin() as connection:
         assert connection.execute(text("SELECT host_id FROM ansible_jobs")).scalar() == "kvm1"
 

@@ -2809,7 +2809,7 @@ re-verifies them by grep before each move.
           deal records only how to reach its VM".
         - Tests:
           - `provisioning/compute/service/tests/integration/test_job_fulfillment_migration.py`:
-            - each stored shape rewritten, in every state;
+            - each stored shape rewritten (the states proven are those 5B.12.B.D lists);
             - a relay-backed result taking the relay's endpoint;
             - operator data kept in the detail;
             - a record with a metadata target; a blank target taken from the create job;
@@ -2890,7 +2890,9 @@ re-verifies them by grep before each move.
         - Relocking: by `uv_project.py`, except the VM storefront, the VM buyer, and the
           bare-metal storefront, which were locked by hand. The 5B.12.A checkpoint had
           shipped the bare-metal storefront's lock with its platform markers flipped from
-          the snapshot's form (same packages); this slice restores the snapshot's form.
+          the snapshot's form (same packages). This slice hand-locked it back, but the
+          storefront's `make test` reinit rewrote it again before packaging, so this
+          checkpoint shipped the flipped form too; 5B.12.B.D restores it.
         - Validation:
           - contracts 61; family kit 225; compute client 50; Ansible distribution 92;
           - bare-metal domain 132, adapter 39, storefront 230, buyer 13; VM adapter 22;
@@ -2906,7 +2908,71 @@ re-verifies them by grep before each move.
             documentation citations, and OpenSpec strict validation (1.14.0) pass.
           - Unscoped citations fail on the same 11 pre-existing references as the
             baseline.
-        - Not yet run end to end. The VM lane exercises this slice's delivery path.
+        - End-to-end: run 37464569194, on this checkpoint, installed
+          compute-provisioning-service 0.15.0, compute-provisioning 0.17.0, contracts 0.7.0,
+          bare-metal adapter 0.9.0, VM adapter 0.12.0, vms-storefront 0.12.0, vms-buyer
+          0.6.0, arkhai-vms 0.6.0, and e2e-tests 0.1.6. The VM lane passed 135, through this slice's delivery
+          path, and the bare-metal lane 16; nothing failed or was skipped; neither lane's
+          service logs show a traceback, a 5xx, a 401, or a 403, or a create failed for
+          want of delivery evidence; expired leases were released.
+  - [x] 5B.12.B.D Fixes from the implementation review of 5B.12.B (2026-10-06;
+        `design.md`, "Implementation review of 5B.12.B").
+        - Provisioning migration (`20261006_002_vm_job_backed_fulfillment`):
+          - an `active` VM fulfillment aborts the migration atomically unless its create
+            job exists and its result converts into valid evidence (findings 1 and 4);
+          - a record naming no create job finds it by the engine's contract identity,
+            rewriting its prepared parameters from the job and converting its result,
+            with the metadata left empty (finding 2);
+          - its evidence requires the tenant account.
+        - Codecs: VM's and bare metal's SSH evidence requires a non-empty tenant account
+          (finding 4).
+        - VM storefront migration (`20261006_011_connection_details_to_delivery`): a
+          relayed record takes its host and port from its relay record, and omits the
+          host when that record lacks either (finding 3).
+        - Test placement: `test_vm_fulfillment_plan.py` moved to
+          `domains/vms/provisioning/adapter/tests/unit/` (the service's copy tombstoned),
+          and VM's adapter target runs its own tests; the two permanent evidence lines
+          follow; the service-hosted VM codec suite is routed to closeout task 2.6
+          (finding 6).
+        - Records: 5B.12.B's note gains its end-to-end run and corrects its lock and
+          migration-state claims (finding 5).
+        - Bare-metal storefront lock: back in the snapshot's marker form, hand-locked after
+          the last suite run, with every lock's markers checked against the snapshot
+          before packaging.
+        - Tests:
+          - `integration/test_job_fulfillment_migration.py` (15), proving:
+            - `dispatch_pending` with no metadata and no job;
+            - `dispatch_pending` with no metadata and a queued, or succeeded, old-shape
+              job, found by contract and named again by a redispatch;
+            - `dispatching` with metadata, and with a disagreeing relay port (no
+              evidence);
+            - `active` with valid evidence, and `active` with a disagreeing relay port,
+              no tenant account, no result, or a missing create job, each refused;
+            - a blank target from the create job, and the abort when none names one;
+            - a teardown-side row's prepared teardown in the family's shape;
+            - a second run changing nothing;
+          - missing-account cases for both codecs;
+          - the storefront migration's relayed and unprovable-relay records;
+          - the migration chain's fixtures (`test_database.py`,
+            `test_host_identity_migration.py`) give their active VM fulfillment a
+            complete create job, since the chain now refuses one without.
+        - Versions: compute-provisioning-service 0.15.1 (adapter floors 0.12.1 and 0.9.1),
+          vms-provisioning-adapter 0.12.1, bare-metal-provisioning-adapter 0.9.1,
+          vms-storefront 0.12.1; relocked by `uv_project.py`, and the VM storefront by
+          hand.
+        - Validation:
+          - provisioning service 1121, unit and integration together;
+          - VM adapter 22; bare-metal adapter 40;
+          - contracts 61; family kit 225; compute client 50; Ansible distribution 92;
+          - bare-metal domain 132, storefront 230, buyer 13; arkhai-vms 47;
+          - VM storefront by frozen sync 1109 unit and 350 integration (the two known
+            `test_alkahest` failures);
+          - the root `make -k test` aggregate passes its 44 suites, failing only where
+            this environment cannot run a suite; the four locks its reinit rewrote were
+            restored;
+          - `make check-locks`, `make check-packaging`, comment hygiene, the change's
+            documentation citations, and OpenSpec strict validation (1.14.0) pass.
+        - Not yet run end to end.
   - [ ] 5B.12.C Provisioning names the guest.
         - VM's plan derives `executor_target` from the capacity reservation, checked
           against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
@@ -3222,7 +3288,9 @@ service code.
       Found in 5B.10.D: the relay administration, port allocator, port lease, and
       pool-configuration suites are integration tests in the service's suite; they test
       VM-owned behavior and belong in VM's adapter, with schema fixtures of VM's own
-      rather than the service's migrations.
+      rather than the service's migrations. Found in 5B.12.B's implementation review: so
+      does the service-hosted VM codec suite,
+      `provisioning/compute/service/tests/unit/services/test_vm_codec.py`.
       Found in 5B.12's design review: every VM guest attaches to libvirt's `default` NAT
       network, one bridge per host, with no isolation rule, so guests on one host,
       including different buyers', share a layer-2 segment; route to VM's provisioning

@@ -21,6 +21,16 @@ _SINCE_FULFILLMENT = {
     "tenant_user": "tenant2", "vm_ip_internal": "192.168.122.9", "ssh_port": "40001",
     "provisioned_resource_ids": ["res-2"],
 }
+# Behind a relay, the stored result paired the KVM host's address with the relay's port.
+_RELAYED = {
+    **_BEFORE_DELIVERIES, "ssh_port": "40001",
+    "frp": {"enabled": True, "relay_addr": "relay.example", "remote_port": "40001"},
+}
+# Behind a relay, with no relay address recorded: the route cannot be proven.
+_RELAY_UNPROVEN = {
+    **_BEFORE_DELIVERIES, "ssh_port": "40001",
+    "frp": {"enabled": "True", "relay_addr": "N/A", "remote_port": "40001"},
+}
 _CURRENT = {"host": "203.0.113.5", "port": 22, "user": "t", "provisioned_resource_ids": []}
 
 
@@ -31,6 +41,8 @@ def _database() -> sqlite3.Connection:
     rows = {
         "before": json.dumps(_BEFORE_DELIVERIES),
         "since": json.dumps(_SINCE_FULFILLMENT),
+        "relayed": json.dumps(_RELAYED),
+        "relay-unproven": json.dumps(_RELAY_UNPROVEN),
         "current": json.dumps(_CURRENT),
         "unreadable": "not json",
         "empty": None,
@@ -67,6 +79,15 @@ def test_escrows_and_listings_are_rewritten_into_the_delivery_shape():
             "provisioned_resource_ids": ["res-2"],
         }
         assert VmConnectionDetails.model_validate(since).connect is None
+        relayed = VmConnectionDetails.model_validate_json(
+            _stored(conn, table, column, key_column, "relayed")
+        )
+        # Never the KVM host's address with the relay's port.
+        assert relayed.connect == "ssh -p 40001 tenant1@relay.example"
+        unproven = VmConnectionDetails.model_validate_json(
+            _stored(conn, table, column, key_column, "relay-unproven")
+        )
+        assert unproven.host is None and unproven.connect is None
         assert json.loads(_stored(conn, table, column, key_column, "current")) == _CURRENT
         assert _stored(conn, table, column, key_column, "unreadable") == "not json"
         assert _stored(conn, table, column, key_column, "empty") is None

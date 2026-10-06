@@ -649,6 +649,10 @@ class TestCreateResult:
     def test_a_relayed_guest_with_no_relay_reported_yields_no_evidence(self):
         assert create_result(_DIRECT, _create_params(relay_id="r1", vm_remote_port=40001)).evidence is None
 
+    @pytest.mark.parametrize("user", [None, "", "  "])
+    def test_an_endpoint_naming_no_tenant_account_is_no_evidence(self, user):
+        assert create_result({**_DIRECT, "tenant_user": user}, _create_params()).evidence is None
+
     def test_the_detail_is_the_named_operator_fields_and_never_the_raw_fact(self):
         created = create_result(_DIRECT, _create_params())
 

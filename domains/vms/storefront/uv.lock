@@ -720,7 +720,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.12.0"
+version = "0.12.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },

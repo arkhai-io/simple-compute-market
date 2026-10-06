@@ -51,8 +51,12 @@ def _create_pre_migration_tables(engine):
         ))
         connection.execute(text(
             """
-            INSERT INTO ansible_jobs (id, status, params)
-            VALUES ('job-1', 'queued', '{}')
+            INSERT INTO ansible_jobs (id, status, params, result)
+            VALUES (
+                'job-1', 'succeeded', '{"vm_action": "create", "vm_target": "vm-active"}',
+                '{"host_ip": "203.0.113.9", "ssh_port": "2222", "tenant_user": "t1",
+                  "timestamp": "2030-01-01T00:00:01Z"}'
+            )
             """
         ))
         connection.execute(text(

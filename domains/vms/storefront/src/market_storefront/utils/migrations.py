@@ -478,17 +478,37 @@ _CONNECTION_FIELDS = frozenset({"host", "port", "user", "ready_at", "provisioned
 def _connection_details(stored: dict[str, Any]) -> dict[str, Any]:
     """An older record's connection details, rewritten to what a delivery holds.
 
-    Only a buyer-facing address is a ``host``: records that predate deliveries
-    name it ``host_ip``; later ones recorded only the KVM host's inventory name,
-    which never granted a buyer access, so their host is omitted. A field the
-    record cannot supply is omitted rather than invented.
+    Only a buyer-facing address is a ``host``. A record that predates
+    deliveries names it ``host_ip``, except behind a relay: there the buyer
+    connects to the relay's address and the relay's port, and such a record's
+    ``host_ip`` is the KVM host's address while its ``ssh_port`` is the relay's
+    port, a pair that never granted access. A relayed record therefore takes
+    both from its relay record, and omits the host when that record lacks
+    either. Later records named only the KVM host's inventory name, so their
+    host is omitted. A field the record cannot supply is omitted rather than
+    invented.
     """
-    ansible_result = stored.get("ansible_result")
-    port = stored.get("ssh_port") or (
-        ansible_result.get("external_ssh_port") if isinstance(ansible_result, dict) else None
-    )
+    frp = stored.get("frp") if isinstance(stored.get("frp"), dict) else {}
+    if str(frp.get("enabled")).lower() == "true":
+        relay_addr = frp.get("relay_addr")
+        relay_port = frp.get("remote_port")
+        proven = (
+            isinstance(relay_addr, str)
+            and relay_addr.strip() not in ("", "N/A")
+            and str(relay_port).isdigit()
+        )
+        host = relay_addr.strip() if proven else None
+        port = relay_port if proven else None
+    else:
+        ansible_result = stored.get("ansible_result")
+        host = stored.get("host_ip") or None
+        port = stored.get("ssh_port") or (
+            ansible_result.get("external_ssh_port")
+            if isinstance(ansible_result, dict)
+            else None
+        )
     candidate: dict[str, Any] = {
-        "host": stored.get("host_ip") or None,
+        "host": host,
         "port": int(str(port)) if port is not None and str(port).isdigit() else None,
         "user": stored.get("tenant_user") or None,
         "ready_at": stored.get("timestamp") or None,
