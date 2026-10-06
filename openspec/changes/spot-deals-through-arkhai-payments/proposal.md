@@ -7,6 +7,7 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 - VM interruptible listings (the existing `interruptible` offering mode) gain an `arkhai.payments.v1` option priced as a rate per period. Its derived mandate is one `rate` part with `until: stop`, and `stop` authorities on both buyer and seller.
 - The VM seller's payment stage gains a continuation that runs while the VM lives. It tears down by the transaction's funded-through time unless the funding extends, and immediately on a stop event. Restart recomputes the deadline from the signed snapshot.
 - Seller preemption and buyer cancellation issue `stop` events at their effective time.
+- Spot and on-demand are the same at the payments layer: both use the kit's default authorities. "Won't preempt" is a promise in the Agreement, remedied through `reverse` and dispute, not by removing the seller from `stop` (that only removes the honest way to stop billing). An on-demand buyer may ask for `stop: [payer]` to be written in. Reserved deals add a `once` part for the committed term.
 - Bare metal and API credits keep `once` parts. Reserved and fixed-interval deals stay on `once` until prepaid credits suit them.
 
 ## Dependencies
