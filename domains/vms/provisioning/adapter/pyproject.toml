@@ -1,14 +1,14 @@
 [project]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.11.1"
+version = "0.12.0"
 license = "MIT"
 description = "VM and Ansible adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.1.0",
+    "arkhai-compute-provisioning-contracts>=0.7.0",
     "arkhai-core>=0.4.0",
     "arkhai-kit-config",
-    "arkhai-compute-provisioning>=0.16.0",
+    "arkhai-compute-provisioning>=0.17.0",
     "arkhai-compute-provisioning-ansible>=0.1.0",
     "arkhai-vms-provisioning-operator-client>=0.7.0",
     "arkhai-vms>=0.3.0",

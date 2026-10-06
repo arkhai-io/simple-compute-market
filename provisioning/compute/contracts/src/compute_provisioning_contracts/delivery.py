@@ -1,11 +1,18 @@
-"""What a job-backed fulfillment delivers, and the evidence a create job reports.
+"""What a job-backed fulfillment delivers, and what a create job reports.
 
-A domain's codec reports a successful create job's result as
-``DeliveryEvidence``: the endpoints to connect to and when access became
-ready, stored by the job authority as the job's ``ResultEnvelope`` under
-``DELIVERY_EVIDENCE_RESULT_KIND``. The family's job-backed provider accepts a
-create as succeeded only when that evidence validates, so a fulfillment never
-becomes active with a delivery nobody can read.
+A domain's codec reports every successful create job's result as a
+``CreateJobResult``, stored by the job authority as the job's
+``ResultEnvelope`` under ``CREATE_JOB_RESULT_KIND``, whoever submitted the job.
+It carries the ``DeliveryEvidence`` (the endpoints to connect to and when access
+became ready), or none when the run's output cannot say, and a ``detail``
+mapping. The family's job-backed provider accepts a create as succeeded only
+when the evidence validates, so a fulfillment never becomes active with a
+delivery nobody can read.
+
+The detail is the domain's operator data: opaque to the family, which never
+reads or delivers it, but projected deliberately by the domain's codec, never a
+copy of raw execution output. It holds nothing secret; a secret is a credential
+and is reported as one.
 
 ``AccessDelivery`` is what the fulfillment result carries for an active
 fulfillment: the evidence's endpoints and ``ready_at``, and each credential the
@@ -19,11 +26,12 @@ address: a credential field outside ``DeliveredCredential`` never crosses.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-#: The ``ResultEnvelope.result_kind`` under which a create job reports its evidence.
-DELIVERY_EVIDENCE_RESULT_KIND = "compute.delivery-evidence.v1"
+#: The ``ResultEnvelope.result_kind`` under which every create job reports its result.
+CREATE_JOB_RESULT_KIND = "compute.create-result.v1"
 
 #: The kind and schema version of the delivery a fulfillment result carries.
 ACCESS_DELIVERY_KIND = "compute.access-delivery"
@@ -58,6 +66,15 @@ class DeliveryEvidence(BaseModel):
     _ready_at_is_aware = field_validator("ready_at")(_aware)
 
 
+class CreateJobResult(BaseModel):
+    """A successful create job's result: its delivery evidence and operator detail."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evidence: DeliveryEvidence | None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 class DeliveredCredential(BaseModel):
     """One credential a create job issued, by role, reduced to its delivered fields.
 
@@ -89,7 +106,8 @@ __all__ = [
     "ACCESS_DELIVERY_SCHEMA_VERSION",
     "AccessDelivery",
     "AccessEndpoint",
-    "DELIVERY_EVIDENCE_RESULT_KIND",
+    "CREATE_JOB_RESULT_KIND",
+    "CreateJobResult",
     "DeliveredCredential",
     "DeliveryEvidence",
 ]

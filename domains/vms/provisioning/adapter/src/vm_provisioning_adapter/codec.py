@@ -6,6 +6,16 @@ stores, the variables the VM-operations playbook reads (golden-image root
 credentials and relay endpoints included), which VM failures are not worth
 retrying, the facts the playbook prints for each action, the result payload
 those facts become, and the ``root`` and ``tenant`` credentials it carries.
+
+A create's result is the compute family's ``CreateJobResult``, whoever submitted
+the job. Its evidence says how a buyer reaches the guest. Behind a relay that
+is the relay's address and the port leased for the guest: the lease, recorded
+in the job's parameters, is the authority for the port, and a run reporting
+another port says nothing a buyer can use, so it reports no evidence. A guest
+on the direct path is reached at its host's buyer-facing address and the
+external port the playbook forwarded. Its detail is VM's named operator facts,
+the guest's internal address among them; secrets are never among them, being
+reported as credentials.
 """
 
 from __future__ import annotations
@@ -18,7 +28,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
+from compute_provisioning_contracts import (
+    CREATE_JOB_RESULT_KIND,
+    AccessEndpoint,
+    CreateJobResult,
+    CredentialEnvelope,
+    DeliveryEvidence,
+    ResultEnvelope,
+)
+from pydantic import ValidationError
 from compute_provisioning.jobs import JobRun
 from compute_provisioning_ansible import (
     AnsibleJobInterpretation,
@@ -203,6 +221,15 @@ class VmAnsibleCodec:
         value, credentials = split_credentials(
             build_result_payload(parsed), run.offering_mode
         )
+        if run.action == "create":
+            return AnsibleJobInterpretation(
+                result=ResultEnvelope(
+                    offering_mode=run.offering_mode,
+                    result_kind=CREATE_JOB_RESULT_KIND,
+                    value=create_result(value, params).model_dump(mode="json"),
+                ),
+                credentials=credentials,
+            )
         return AnsibleJobInterpretation(
             result=ResultEnvelope(
                 offering_mode=run.offering_mode,
@@ -497,6 +524,71 @@ def build_result_payload(result: VmPlaybookOutput) -> dict:
     return payload
 
 
+#: A create result's fields kept as its operator detail. None is secret: the
+#: playbook's credentials have already been split out as credentials.
+VM_CREATE_DETAIL = (
+    "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
+    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
+    "result_message", "note", "operation_initiated",
+)
+
+
+def _relay_reported(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    frp = payload.get("frp")
+    if not isinstance(frp, Mapping):
+        return None
+    enabled = frp.get("enabled")
+    if enabled is True or str(enabled).lower() == "true":
+        return frp
+    return None
+
+
+def create_evidence(payload: Mapping[str, Any], params: VmJobParams) -> DeliveryEvidence | None:
+    """How a buyer reaches the guest a create reported, or ``None``.
+
+    A job that leased a relay port is reached through the relay, at exactly
+    that port; a run reporting none, or another, yields nothing. Otherwise the
+    guest is reached at its host's buyer-facing address and forwarded port.
+    """
+    if params.relay_id or params.vm_remote_port is not None:
+        relay = _relay_reported(payload)
+        if relay is None or params.vm_remote_port is None:
+            return None
+        if str(relay.get("remote_port")) != str(params.vm_remote_port):
+            return None
+        host, port = relay.get("relay_addr"), params.vm_remote_port
+    else:
+        host, port = payload.get("host_ip"), payload.get("ssh_port")
+    if not isinstance(host, str) or not host.strip() or host.strip() == "N/A":
+        return None
+    try:
+        return DeliveryEvidence(
+            endpoints=(
+                AccessEndpoint(
+                    protocol="ssh",
+                    host=host.strip(),
+                    port=int(str(port)),
+                    user=str(payload.get("tenant_user") or "") or None,
+                ),
+            ),
+            ready_at=payload.get("timestamp"),
+        )
+    except (TypeError, ValueError, ValidationError):
+        return None
+
+
+def create_result(payload: Mapping[str, Any], params: VmJobParams) -> CreateJobResult:
+    """A create's result: its delivery evidence, and its named operator detail."""
+    return CreateJobResult(
+        evidence=create_evidence(payload, params),
+        detail={
+            name: payload[name]
+            for name in VM_CREATE_DETAIL
+            if payload.get(name) not in (None, "")
+        },
+    )
+
+
 def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
     for role in _CREDENTIAL_ROLES:
         role_data = auth.get(role) or {}
@@ -509,10 +601,13 @@ __all__ = [
     "VM_INVENTORY_GROUP",
     "VM_NON_RETRYABLE_FAILURES",
     "VM_RESULT_FACTS",
+    "VM_CREATE_DETAIL",
     "VM_SECRET_FIELDS",
     "VmAnsibleCodec",
     "VmPlaybookOutput",
     "build_result_payload",
+    "create_evidence",
+    "create_result",
     "extract_ssh_port",
     "extract_tenant_user",
     "extract_vm_fact",

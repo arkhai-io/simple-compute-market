@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.16.0"
+version = "0.17.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -59,7 +59,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.16.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.17.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -80,7 +80,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -88,7 +88,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -228,7 +228,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -238,12 +238,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.11.1"
+version = "0.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -272,9 +272,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning", specifier = ">=0.16.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.17.0" },
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.1.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.1.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.7.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },

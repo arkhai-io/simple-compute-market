@@ -2936,6 +2936,218 @@ def _migrate_bare_metal_job_shapes(engine: Engine) -> None:
                 )
 
 
+# The compute family's job-backed shapes, frozen here as this migration writes
+# them: the prepared operation's kind and version, and a create job's result kind.
+_JOB_OPERATION_KIND = "compute.job-fulfillment.operation"
+_CREATE_RESULT_KIND = "compute.create-result.v1"
+# VM's prepared-operation kinds and a VM create's result kind before them.
+_VM_OPERATION_KINDS = {"vm.ansible.create.v1": "create", "vm.ansible.teardown.v1": "teardown"}
+_VM_CREATE_RESULT_KIND = "vm_create"
+# A VM create result's operator detail, as VM's codec projects it.
+_VM_CREATE_DETAIL = (
+    "action", "status", "vm_name", "vm_state", "host", "timestamp", "tenant_user",
+    "host_ip", "ssh_port", "vm_ip_internal", "gpu", "network", "frp",
+    "result_message", "note", "operation_initiated",
+)
+# The fields VM's job parameters gained at submission that its prepared
+# operation's parameters did not carry: the relay endpoint, filled at execution.
+_VM_EXECUTION_ONLY_PARAMETERS = ("relay_addr", "relay_port", "relay_token")
+
+
+class VmJobBackedMigrationError(RuntimeError):
+    """A VM fulfillment cannot be rewritten into the job-backed shapes safely."""
+
+
+def _vm_submitted_parameters(parameters: dict) -> dict:
+    """VM's job parameters as a dispatch submitted them from a prepared operation."""
+    submitted = dict(parameters)
+    for name in _VM_EXECUTION_ONLY_PARAMETERS:
+        submitted.setdefault(name, None)
+    if not submitted.get("executor_action"):
+        submitted["executor_action"] = submitted.get("vm_action")
+    if submitted.get("executor_target") is None:
+        submitted["executor_target"] = submitted.get("vm_target") or submitted.get("host_id")
+    return submitted
+
+
+def _vm_create_evidence(value: dict, params: dict) -> dict | None:
+    """A stored VM create result's delivery evidence, by VM's relay rule.
+
+    A create that leased a relay port is reached at the relay's address and
+    that port, and its reported port must agree with the lease; otherwise at
+    the host's buyer-facing address and forwarded port.
+    """
+    leased = params.get("vm_remote_port")
+    if params.get("relay_id") or leased is not None:
+        frp = value.get("frp") if isinstance(value.get("frp"), dict) else {}
+        enabled = str(frp.get("enabled")).lower() == "true"
+        if not enabled or leased is None or str(frp.get("remote_port")) != str(leased):
+            return None
+        host, port = frp.get("relay_addr"), leased
+    else:
+        host, port = value.get("host_ip"), value.get("ssh_port")
+    user, ready_at = value.get("tenant_user"), value.get("timestamp")
+    if not isinstance(host, str) or not host.strip() or host.strip() == "N/A":
+        return None
+    try:
+        port = int(str(port))
+    except ValueError:
+        return None
+    if not 1 <= port <= 65535 or not isinstance(ready_at, str) or not ready_at:
+        return None
+    endpoint = {"protocol": "ssh", "host": host.strip(), "port": port, "user": user or None}
+    return {"endpoints": [endpoint], "ready_at": ready_at}
+
+
+def _vm_metadata(metadata, *, create_job_id: str | None, target: str | None, where: str) -> dict:
+    metadata = _json_mapping(metadata, label=where)
+    executor_target = metadata.get("executor_target") or metadata.get("vm_target") or target
+    if not executor_target:
+        raise VmJobBackedMigrationError(f"{where} names no target")
+    return {
+        "create_job_id": metadata.get("create_job_id") or create_job_id,
+        "teardown_job_id": metadata.get("teardown_job_id"),
+        "current_job_id": metadata.get("current_job_id"),
+        "operation": metadata.get("operation"),
+        "host_id": metadata.get("host_id"),
+        "executor_target": executor_target,
+    }
+
+
+def _vm_operation(envelope, *, create_job_id: str | None, where: str):
+    envelope = _json_mapping(envelope, label=where)
+    if envelope.get("kind") == _JOB_OPERATION_KIND:
+        return envelope
+    operation = _VM_OPERATION_KINDS.get(envelope.get("kind"))
+    if operation is None:
+        raise VmJobBackedMigrationError(f"{where} is an unknown {envelope.get('kind')!r}")
+    payload = envelope.get("payload") or {}
+    parameters = _vm_submitted_parameters(payload.get("parameters") or {})
+    target = parameters.get("vm_target") or parameters.get("executor_target")
+    if not target:
+        raise VmJobBackedMigrationError(f"{where} names no target")
+    rewritten = {
+        "capacity_reservation_id": payload.get("capacity_reservation_id"),
+        "operation": operation,
+        "offering_mode": parameters.get("offering_mode"),
+        "action": parameters.get("executor_action"),
+        "host_id": parameters.get("host_id"),
+        "executor_target": target,
+        "parameters": parameters,
+        "create_job_id": create_job_id if operation == "teardown" else None,
+    }
+    return {"kind": _JOB_OPERATION_KIND, "schema_version": 1, "payload": rewritten}
+
+
+def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
+    """Rewrite VM fulfillments and their create jobs into the job-backed shapes.
+
+    The compute family's job-backed provider reads only its own shapes. For
+    every VM fulfillment, in every state, this rewrites its prepared create and
+    teardown operations, its create and teardown metadata (``vm_target``
+    becomes ``executor_target``), and the result of the create job it names
+    (``vm_create`` becomes the family's create result: delivery evidence by
+    VM's relay rule, and VM's operator fields as its detail).
+
+    A prepared create keeps its job parameters exactly as dispatch submitted
+    them, taken from the job when it exists, so a retried dispatch finds that
+    job rather than being refused for different parameters. A record naming no
+    target takes it from its create job's parameters; one where neither names
+    a target aborts the whole migration, since nothing can tear down a VM no
+    record names. Rows already in the job-backed shapes are left alone, so a
+    rerun changes nothing.
+    """
+    if not (_table_exists(engine, "settlement_records") and _table_exists(engine, "ansible_jobs")):
+        return
+    with engine.begin() as connection:
+        jobs = {
+            row["id"]: row
+            for row in connection.execute(text(
+                "SELECT id, params, result FROM ansible_jobs"
+            )).mappings()
+        }
+
+        def job_params(job_id):
+            row = jobs.get(job_id) if job_id else None
+            return _json_mapping(row["params"], label=f"job {job_id}") if row else None
+
+        records = connection.execute(text(
+            "SELECT capacity_reservation_id, prepared_create_operation, "
+            "prepared_teardown_operation, provider_metadata, teardown_provider_metadata "
+            "FROM settlement_records WHERE provider = 'ansible'"
+        )).mappings().all()
+        for record in records:
+            reservation = record["capacity_reservation_id"]
+            where = f"settlement record {reservation}"
+            metadata = _json_mapping(record["provider_metadata"] or {}, label=where)
+            create_job_id = metadata.get("create_job_id") or None
+            create_params = job_params(create_job_id) or {}
+            job_target = create_params.get("vm_target") or create_params.get("executor_target")
+            updates: dict[str, object] = {"id": reservation}
+
+            if metadata:
+                updates["provider_metadata"] = json.dumps(_vm_metadata(
+                    metadata, create_job_id=create_job_id, target=job_target, where=where
+                ))
+                target = json.loads(updates["provider_metadata"])["executor_target"]
+            else:
+                target = job_target
+            if record["teardown_provider_metadata"]:
+                updates["teardown_provider_metadata"] = json.dumps(_vm_metadata(
+                    record["teardown_provider_metadata"],
+                    create_job_id=create_job_id,
+                    target=target,
+                    where=f"{where} teardown",
+                ))
+            if record["prepared_create_operation"]:
+                rewritten = _vm_operation(
+                    record["prepared_create_operation"], create_job_id=None, where=where
+                )
+                if create_job_id and create_job_id in jobs and job_params(create_job_id):
+                    rewritten["payload"]["parameters"] = job_params(create_job_id)
+                updates["prepared_create_operation"] = json.dumps(rewritten)
+            if record["prepared_teardown_operation"]:
+                updates["prepared_teardown_operation"] = json.dumps(_vm_operation(
+                    record["prepared_teardown_operation"],
+                    create_job_id=create_job_id,
+                    where=f"{where} teardown",
+                ))
+            if len(updates) > 1:
+                connection.execute(
+                    text(
+                        "UPDATE settlement_records SET "
+                        + ", ".join(f"{name} = :{name}" for name in updates if name != "id")
+                        + " WHERE capacity_reservation_id = :id"
+                    ),
+                    updates,
+                )
+
+            create_job = jobs.get(create_job_id) if create_job_id else None
+            result = create_job["result"] if create_job else None
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            if isinstance(result, dict) and result.get("result_kind") == _VM_CREATE_RESULT_KIND:
+                value = result.get("value") or {}
+                created = {
+                    "evidence": _vm_create_evidence(value, create_params),
+                    "detail": {
+                        name: value[name]
+                        for name in _VM_CREATE_DETAIL
+                        if value.get(name) not in (None, "")
+                    },
+                }
+                connection.execute(
+                    text("UPDATE ansible_jobs SET result = :result WHERE id = :id"),
+                    {
+                        "id": create_job_id,
+                        "result": json.dumps(
+                            {**result, "result_kind": _CREATE_RESULT_KIND, "value": created},
+                            sort_keys=True,
+                        ),
+                    },
+                )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3040,5 +3252,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261006_001_drop_job_deal_correlation",
         _migrate_drop_job_deal_correlation,
+    ),
+    Migration(
+        "20261006_002_vm_job_backed_fulfillment",
+        _migrate_vm_job_backed_fulfillment,
     ),
 )

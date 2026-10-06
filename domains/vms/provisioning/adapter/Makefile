@@ -9,4 +9,4 @@ reinit:
 	python3 ../../../../scripts/uv_project.py reinit
 
 test: reinit
-	uv run --find-links $(DIST_DIR) pytest ../../../../provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py ../../../../provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py -q
+	uv run --find-links $(DIST_DIR) pytest ../../../../provisioning/compute/service/tests/unit/services/test_vm_fulfillment_plan.py ../../../../provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py -q

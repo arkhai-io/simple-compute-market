@@ -29,7 +29,6 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
         get_fulfillment_result=AsyncMock(
             return_value=vm_fulfillment_result(
                 provisioned_resource_id="vm-1",
-                connection_info={"vm_name": "tenant-1", "host": "kvm1"},
             )
         ),
     )

@@ -99,7 +99,7 @@ class AnsiblePoolConfig(Base):
     )
     inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
-    # Fulfillment-time fallback shape, read only by AnsibleFulfillmentProvider's
+    # Fulfillment-time fallback shape, read only by VM's fulfillment plan's
     # three-tier precedence (derived > requirements > pool default) when
     # neither the negotiated requirements nor a requirement delegate
     # supplies a dimension. Nullable: a pool with no configured default

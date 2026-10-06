@@ -30,6 +30,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from arkhai_vms import VmConnectionDetails
 
 from compute_provisioning_client import ComputeProvisioningTimeoutError
 from market_core import VersionedEnvelope
@@ -41,96 +42,47 @@ from tests.fulfillment_fixtures import (
 )
 
 
-class TestFulfillmentResultToLegacyShape:
-    def test_maps_root_and_tenant_credentials(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [{"provisioned_resource_id": "res-1", "status": "active"}],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "connection_info": {
-                            "vm_name": "agent-vm-01",
-                            "host": "kvm1",
-                            "timestamp": "2026-07-26T00:00:00Z",
-                            "tenant_user": "mockuser",
-                            "vm_ip_internal": "192.168.122.2",
-                            "ssh_port": "2222",
-                        },
-                        "credentials": [
-                            {
-                                "role": "root",
-                                "password": "root-pw",
-                                "ssh_commands": {"internal": "ssh root@192.168.122.2"},
-                                "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                            {
-                                "role": "tenant",
-                                "password": "tenant-pw",
-                                "ssh_commands": {"external": "ssh -p 2222 mockuser@127.0.0.1"},
-                                "key_type": "generated",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                        ],
-                    },
-                },
-            },
+class TestFulfillmentResultToConnection:
+    def test_the_delivery_becomes_the_deals_connection_details(self):
+        envelope = vm_fulfillment_result(
+            provisioned_resource_id="res-1",
+            credentials=(
+                {"role": "root", "password": "root-pw", "key_type": None},
+                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+            ),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        result = fs._fulfillment_result_to_connection(envelope)
 
-        assert result["vm_name"] == "agent-vm-01"
-        assert result["host"] == "kvm1"
-        assert result["vm_ip_internal"] == "192.168.122.2"
-        assert result["ssh_port"] == "2222"
-        assert result["provisioned_resource_ids"] == ["res-1"]
+        auth = result.pop("authentication")
+        assert VmConnectionDetails.model_validate(result) == VmConnectionDetails(
+            host="203.0.113.10",
+            port=2222,
+            user="tenant1",
+            ready_at="2030-01-01T00:00:01+00:00",
+            provisioned_resource_ids=("res-1",),
+        )
+        assert auth == {
+            "root": {"password": "root-pw", "key_type": None},
+            "tenant": {"password": "tenant-pw", "key_type": "generated"},
+        }
 
-        auth = result["authentication"]
-        assert auth["root"]["password"] == "root-pw"
-        assert auth["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
-        assert "key_type" not in auth["root"]
-        assert auth["tenant"]["password"] == "tenant-pw"
-        assert auth["tenant"]["key_type"] == "generated"
-        assert "ssh_key_path_host" not in auth["tenant"]
-
-    def test_no_domain_result_means_no_authentication_key(self):
+    def test_a_result_without_the_access_delivery_is_refused(self):
         envelope = VersionedEnvelope(
             kind="fulfillment.result.v1",
             schema_version=1,
             payload={"provisioned_resources": [], "domain_result": None},
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        with pytest.raises(RuntimeError, match="unsupported delivery"):
+            fs._fulfillment_result_to_connection(envelope)
 
-        assert "authentication" not in result
-        assert result["provisioned_resource_ids"] == []
-        assert result.get("vm_name") is None
-
-    def test_unknown_credential_role_is_ignored(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "credentials": [
-                            {"role": "admin", "password": "x", "provisioned_resource_ids": []},
-                        ],
-                    },
-                },
-            },
+    def test_an_unknown_credential_role_is_not_kept(self):
+        envelope = vm_fulfillment_result(
+            credentials=({"role": "admin", "password": "x"},),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
-
-        assert "authentication" not in result
+        assert "authentication" not in fs._fulfillment_result_to_connection(envelope)
 
 
 class TestTheStorefrontSelectsNoRelay:
@@ -182,7 +134,6 @@ class TestDoProvision:
             get_fulfillment_result=AsyncMock(
                 return_value=vm_fulfillment_result(
                     provisioned_resource_id="res-1",
-                    connection_info={"vm_name": "vm-1"},
                 )
             ),
         )
@@ -264,7 +215,8 @@ class TestDoProvision:
         )
 
         assert job_ids == ["fulfillment-1"]
-        assert result["vm_name"] == "vm-1"
+        assert (result["host"], result["port"], result["user"]) == ("203.0.113.10", 2222, "tenant1")
+        assert "vm_name" not in result
         assert result["provisioned_resource_ids"] == ["res-1"]
 
     async def test_no_connectivity_is_placed_in_the_request(

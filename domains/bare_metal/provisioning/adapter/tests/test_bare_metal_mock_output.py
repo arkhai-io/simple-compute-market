@@ -10,9 +10,9 @@ from compute_provisioning.jobs import JobFailure, JobSuccess
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_contracts import (
-    DELIVERY_EVIDENCE_RESULT_KIND,
+    CREATE_JOB_RESULT_KIND,
     AccessEndpoint,
-    DeliveryEvidence,
+    CreateJobResult,
 )
 
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams
@@ -53,9 +53,10 @@ async def test_default_grant_reports_the_access_fact_for_the_registered_host() -
 
     assert isinstance(outcome, JobSuccess)
     assert outcome.credentials == ()
-    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
-    evidence = DeliveryEvidence.model_validate(outcome.result.value)
-    assert evidence.endpoints == (
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
+    created = CreateJobResult.model_validate(outcome.result.value)
+    assert created.detail["physical_host_id"] == "physical-1"
+    assert created.evidence.endpoints == (
         AccessEndpoint(protocol="ssh", host="10.0.0.5", port=2201, user="tenant-a"),
     )
 
@@ -67,7 +68,7 @@ async def test_default_grant_without_a_tenant_names_the_mock_user() -> None:
         _params(NODE_GRANT_ACCESS_ACTION, ssh_user=None),
     )
 
-    assert outcome.result.value["endpoints"][0]["user"] == DEFAULT_MOCK_SSH_USER
+    assert outcome.result.value["evidence"]["endpoints"][0]["user"] == DEFAULT_MOCK_SSH_USER
 
 
 @pytest.mark.asyncio
@@ -113,5 +114,5 @@ async def test_a_rule_for_another_domains_runner_never_meets_a_bare_metal_job() 
 
     outcome = await _execute(bare_metal, _params(NODE_GRANT_ACCESS_ACTION))
 
-    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     assert bare_metal.list_rules() == []

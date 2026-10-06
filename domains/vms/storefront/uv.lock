@@ -255,7 +255,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -263,7 +263,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -627,7 +627,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -637,12 +637,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -666,7 +666,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_vms_buyer-0.5.2-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -720,7 +720,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.11.1"
+version = "0.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -802,7 +802,7 @@ requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
     { name = "arkhai-bare-metal-storefront", specifier = "==0.9.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.3.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.4.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.8.0" },
@@ -825,7 +825,7 @@ requires-dist = [
     { name = "arkhai-kit-site", specifier = ">=0.4.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.8.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.2.0" },
-    { name = "arkhai-vms", specifier = ">=0.5.0" },
+    { name = "arkhai-vms", specifier = ">=0.6.0" },
     { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.4.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.3.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.2.0" },

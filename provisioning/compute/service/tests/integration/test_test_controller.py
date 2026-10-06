@@ -59,7 +59,7 @@ from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_service.services.job_retry import retry_policy_from
-from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
@@ -166,8 +166,10 @@ async def client_and_queue(
         host_lookup=host_authority.lookup,
         retry_policy=retry_policy_from(mock_settings),
     )
-    job_submitter = VmJobSubmitter(job_engine, default_host_id=mock_settings.default_host_id)
     job_queue = AsyncJobQueue(max_concurrent=2)
+    job_submission = JobSubmissionService(
+        engine=job_engine, hosts=host_authority, job_queue_provider=lambda: job_queue
+    )
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
@@ -197,16 +199,9 @@ async def client_and_queue(
         host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(),
         job_engine=job_engine,
-        job_submitter=job_submitter,
-        vm_operations_service=VmOperationsService(
-            job_submitter=job_submitter,
-            job_queue_provider=lambda: job_queue,
-        ),
-        host_operations_service=HostOperationsService(
-            host_service=host_authority,
-            job_submitter=job_submitter,
-            job_queue_provider=lambda: job_queue,
-        ),
+        job_submission=job_submission,
+        vm_operations_service=VmOperationsService(submission=job_submission),
+        host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=RelayPortAllocator(session_factory),
         relay_service=RelayService(session_factory=session_factory, settings=mock_settings),
     )

@@ -2740,12 +2740,18 @@ re-verifies them by grep before each move.
             restored;
           - `make check-locks`, `make check-packaging`, comment hygiene, documentation
             citations, and OpenSpec strict validation (1.14.0) pass.
-        - Neither lane exercises bare-metal fulfillment, so its evidence is the integration
-          suite above. Not yet run end to end.
+        - End-to-end: run 37453176468, on this checkpoint,
+          installed compute-provisioning-service 0.14.0, compute-provisioning 0.16.0,
+          contracts 0.6.0, bare-metal adapter 0.8.0, VM adapter 0.11.1, vms-storefront
+          0.11.1, and bare-metal storefront 0.9.0. The VM lane passed 135 (its listing-shapes
+          scenario filtering jobs by capacity reservation) and the bare-metal lane 16;
+          nothing failed or was skipped; neither lane's service logs show a traceback, a
+          5xx, a 401, or a 403; expired leases were released. Neither lane exercises
+          bare-metal fulfillment, so that path's evidence is the integration suite above.
         - Scheduling and admission do not read a host record's enabled flag, so a create can
           be placed on a disabled host; its dispatch then retries until the host is
           re-enabled. Routed to closeout task 2.6.
-  - [ ] 5B.12.B VM end to end, with the migration. Amended 2026-10-06 by the 5B.12.B
+  - [x] 5B.12.B VM end to end, with the migration. Amended 2026-10-06 by the 5B.12.B
         implementation audit (`design.md`, "5B.12.B implementation audit (2026-10-06)").
         - Contracts (`compute_provisioning_contracts/delivery.py`): `CreateJobResult`
           (`compute.create-result.v1`): the `DeliveryEvidence` or none, and a non-secret
@@ -2767,9 +2773,10 @@ re-verifies them by grep before each move.
             `bundle.py` follow.
           - `fulfillment_results.py` is tombstoned.
           - `codec.py` reports a create as a `CreateJobResult`: the evidence endpoint is
-            the relay's address and leased port when the playbook reports the relay
-            enabled, else the host's buyer-facing address and external port; the detail
-            keeps the rest of the result, the guest's internal address included.
+            the relay's address and the leased port when the job leased one (a reported
+            port that disagrees yields no evidence), else the host's buyer-facing address
+            and external port; the detail is VM's named operator fields, the guest's
+            internal address included, without the raw fact.
           - `legacy_backfill.py` builds the family's prepared teardown and metadata from
             VM's plan directly.
         - Service: a migration in `db/migrations.py` rewriting, for every VM fulfillment in
@@ -2787,14 +2794,15 @@ re-verifies them by grep before each move.
             and `services/vm_fulfillment_service.py` read the access delivery: tenant
             credentials to the buyer, root to the seller's own store; no key path,
             internal address, or guest name.
-          - `connection_details` becomes `host`, `port`, `user`, `ready_at`, and the
-            provisioned-resource ids.
+          - `connection_details` becomes `arkhai_vms.VmConnectionDetails` (`host`,
+            `port`, `user`, `ready_at`, the provisioned-resource ids), the one model the
+            storefront writes and the buyer reads.
           - A data migration in `utils/migrations.py` rewrites stored `connection_details`
             (escrows) and `fulfillment_resource` (listings) into that shape: `host` from
             `host_ip` where a row has one, otherwise omitted.
-        - VM buyer: `buy_cli.py`'s quiet output reads `host`, `port`, and `user` from
-          `connection_details` and prints the connect line when all three are present;
-          version bump and hand-lock.
+        - VM buyer: `buy_cli.py`'s quiet output reads `VmConnectionDetails` and prints the
+          connect line when host, port, and user are all present; version bumps and
+          hand-locks for the buyer and `arkhai_vms`.
         - Spec deltas, written with the audit: `physical-provisioning`'s "A create
           succeeds only with readable delivery evidence" names the create result, its
           detail, and the relay endpoint; the `vm-storefront-fulfillment` delta adds "A VM
@@ -2804,13 +2812,16 @@ re-verifies them by grep before each move.
             - each stored shape rewritten, in every state;
             - a relay-backed result taking the relay's endpoint;
             - operator data kept in the detail;
-            - a missing target taken from the create job, and the abort when neither
-              names one;
+            - a record with a metadata target; a blank target taken from the create job;
+              the abort when neither names one;
+            - a legacy prepared teardown dispatched after its create job is gone;
+            - a relay port disagreeing with the leased one yielding no evidence;
             - a retried dispatch of a migrated in-flight create returning the existing
               job;
             - idempotent on a second run.
           - VM's codec on both endpoint paths, the stored tenant command agreeing with
-            the endpoint, and an operator create keeping its detail.
+            the endpoint, a reported relay port disagreeing with the lease, and an
+            operator create keeping its projected detail.
           - `test_legacy_vm_fulfillment_backfill.py` and
             `test_fulfillment_convergence_after_legacy_backfill.py` on the new shapes;
             `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
@@ -2825,6 +2836,77 @@ re-verifies them by grep before each move.
           - The VM buyer's quiet output.
           - `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios
             reading delivered credentials or connection details.
+        Done 2026-10-06, as amended:
+        - Create results:
+          - `CreateJobResult` (`compute.create-result.v1`) is every create's result, and
+            `DELIVERY_EVIDENCE_RESULT_KIND` is gone.
+          - The family provider fails a create without valid evidence, and exports
+            `teardown_operation` for a teardown prepared without reading a job.
+          - Bare metal's grant reports one, with its fact's named fields as detail.
+        - VM adapter:
+          - `VmFulfillmentPlan` replaces VM's provider; the provider, `VmJobSubmitter`,
+            and `fulfillment_results.py` are tombstoned.
+          - The operator services submit through `JobSubmissionService`, and the
+            operation routes answer 404 for an unregistered host.
+          - The codec reports a create as `CreateJobResult` under the relay rule (the
+            leased port is authoritative), with `VM_CREATE_DETAIL` as its projected
+            detail; the legacy backfill writes the family's shapes.
+          - Finding fixed: a relay-backed VM had always been delivered with its KVM
+            host's address and the relay's port.
+          - Its `make test` now runs `test_vm_fulfillment_plan.py`.
+        - Service migration `20261006_002_vm_job_backed_fulfillment`, in plain JSON (the
+          boundary test admits only VM's `db` and `legacy_backfill` there).
+        - VM storefront:
+          - it records the delivery as `arkhai_vms.VmConnectionDetails` and stores only
+            the delivered credential fields;
+          - migration `20261006_011_connection_details_to_delivery` rewrites escrows and
+            listings, `host` from `host_ip` or omitted.
+        - VM buyer: the quiet output prints `VmConnectionDetails.connect`. The "connect"
+          line never printed before; it now does.
+        - Five VM scenarios' mock creates print the playbook's create fact with its
+          forwarded port and time, without which a create now fails.
+        - Spec deltas:
+          - `physical-provisioning` removes "VM fulfillment result payload";
+          - two permanent evidence lines that cited the tombstoned provider test now cite
+            `test_vm_fulfillment_plan.py` (`physical-provisioning` and
+            `storefront-publication`).
+        - Tests:
+          - new: `test_vm_fulfillment_plan.py` (16),
+            `integration/test_job_fulfillment_migration.py` (7), `test_vm_codec.py`'s
+            `TestCreateResult`, the contracts' create-result test, the VM storefront's
+            `integration/test_connection_details_migration.py`, and `arkhai_vms`'s
+            `test_connection_details.py`;
+          - harnesses register their delivery hosts;
+          - an operator job on an unregistered host is refused at submission;
+          - `test_legacy_backfill_teardown.py` proves a persisted teardown dispatches
+            with no job authority;
+          - tombstoned: `test_ansible_fulfillment_provider.py` and `test_job_submitter.py`.
+        - Versions:
+          - contracts 0.7.0, family kit 0.17.0, service 0.15.0;
+          - bare-metal adapter 0.9.0, VM adapter 0.12.0;
+          - arkhai-vms 0.6.0, vms-storefront 0.12.0, vms-buyer 0.6.0;
+          - e2e-tests 0.1.6;
+          - floors raised to match.
+        - Relocking: by `uv_project.py`, except the VM storefront, the VM buyer, and the
+          bare-metal storefront, which were locked by hand. The 5B.12.A checkpoint had
+          shipped the bare-metal storefront's lock with its platform markers flipped from
+          the snapshot's form (same packages); this slice restores the snapshot's form.
+        - Validation:
+          - contracts 61; family kit 225; compute client 50; Ansible distribution 92;
+          - bare-metal domain 132, adapter 39, storefront 230, buyer 13; VM adapter 22;
+          - provisioning service 1119, unit and integration together;
+          - VM storefront by frozen sync 1109 unit and 348 integration (the two known
+            `test_alkahest` failures);
+          - VM buyer 206; arkhai-vms 47;
+          - e2e unit 236 (the known 10.1 failure), and 178 e2e and smoke tests collect;
+          - the root `make -k test` aggregate passes its 44 suites, failing only where
+            this environment cannot run a suite; the four locks its reinit rewrote were
+            restored;
+          - `make check-locks`, `make check-packaging`, comment hygiene, the change's
+            documentation citations, and OpenSpec strict validation (1.14.0) pass.
+          - Unscoped citations fail on the same 11 pre-existing references as the
+            baseline.
+        - Not yet run end to end. The VM lane exercises this slice's delivery path.
   - [ ] 5B.12.C Provisioning names the guest.
         - VM's plan derives `executor_target` from the capacity reservation, checked
           against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
@@ -3155,6 +3237,9 @@ service code.
       Alkahest fulfillment, while bare metal serves it live through `/access`. Open a
       change at closeout, under Goal 4 ("Make a domain a composition of kit"), to make it
       one kit mechanism.
+      Found in 5B.12.B's audit (row 7): no end-to-end lane runs a relay-backed pool, which
+      is why a relay-backed VM's wrong delivered address went unnoticed; add a VM lane
+      scenario with a relay.
       Found in 5B.12.A: site admission and settlement scheduling never read a host
       record's enabled flag, so a create can be admitted and placed on a disabled host,
       and its dispatch then retries until an operator re-enables the host. Disabling a host

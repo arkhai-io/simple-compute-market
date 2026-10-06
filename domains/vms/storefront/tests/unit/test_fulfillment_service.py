@@ -448,26 +448,17 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
                         {"provisioned_resource_id": "provisioned-vm-e2e-1", "status": "active"}
                     ],
                     "domain_result": {
-                        "kind": "vm.fulfillment.result.v1",
+                        "kind": "compute.access-delivery",
                         "schema_version": 1,
                         "payload": {
-                            "connection_info": {"vm_name": "vm-e2e-1", "host": "host-1"},
-                            "credentials": [
-                                {
-                                    "role": "root",
-                                    "password": "root-pw",
-                                    "ssh_commands": {"internal": "ssh root@host-1"},
-                                    "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                    "provisioned_resource_ids": ["provisioned-vm-e2e-1"],
-                                },
-                                {
-                                    "role": "tenant",
-                                    "password": "tenant-pw",
-                                    "ssh_commands": {"external": "ssh tenant@host-1"},
-                                    "key_type": "generated",
-                                    "provisioned_resource_ids": ["provisioned-vm-e2e-1"],
-                                },
+                            "endpoints": [
+                                {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
                             ],
+                            "credentials": [
+                                {"role": "root", "password": "root-pw", "key_type": None},
+                                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+                            ],
+                            "ready_at": "2030-01-01T00:00:01+00:00",
                         },
                     },
                 },
@@ -530,7 +521,8 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     roles = {row["role"]: row for row in stored}
     assert set(roles) == {"root", "tenant"}
     assert roles["root"]["password"] == "root-pw"
-    assert roles["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
+    # A delivery carries no key path on a provisioner host, so none is stored.
+    assert roles["root"]["ssh_key_path_host"] is None
     assert roles["tenant"]["password"] == "tenant-pw"
     assert roles["tenant"]["key_type"] == "generated"
 
@@ -576,18 +568,16 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
                 {"provisioned_resource_id": "provisioned-vm-dup-1", "status": "active"}
             ],
             "domain_result": {
-                "kind": "vm.fulfillment.result.v1",
+                "kind": "compute.access-delivery",
                 "schema_version": 1,
                 "payload": {
-                    "connection_info": {"vm_name": "vm-dup-1"},
-                    "credentials": [
-                        {
-                            "role": "tenant",
-                            "password": "tenant-pw",
-                            "ssh_commands": {"external": "ssh tenant@host-1"},
-                            "provisioned_resource_ids": ["provisioned-vm-dup-1"],
-                        },
+                    "endpoints": [
+                        {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
                     ],
+                    "credentials": [
+                        {"role": "tenant", "password": "tenant-pw", "key_type": None},
+                    ],
+                    "ready_at": "2030-01-01T00:00:01+00:00",
                 },
             },
         },

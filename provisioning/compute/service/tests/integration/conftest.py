@@ -378,7 +378,6 @@ from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import probe_connectivity
 from compute_provisioning_service.services.job_retry import retry_policy_from
-from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from compute_provisioning_service.services.system_status import SystemStatusService
@@ -694,7 +693,14 @@ async def client_and_queue(
         host_lookup=host_authority.lookup,
         retry_policy=retry_policy_from(mock_settings),
     )
-    job_submitter = VmJobSubmitter(job_engine, default_host_id=mock_settings.default_host_id)
+    from compute_provisioning.jobs.submission import JobSubmissionService
+    # Every job's submission, as the container builds it; the queue is read
+    # when a job is submitted, after it is created below.
+    job_submission = JobSubmissionService(
+        engine=job_engine,
+        hosts=host_authority,
+        job_queue_provider=lambda: job_queue,
+    )
 
     async def probe_ssh(host):
         return await probe_connectivity(fake_ansible, host)
@@ -719,22 +725,13 @@ async def client_and_queue(
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
-    from compute_provisioning.jobs.submission import JobSubmissionService
-    # Every job's submission, as the container builds it; the queue is read
-    # when a job is submitted, after it is created below.
-    job_submission = JobSubmissionService(
-        engine=job_engine,
-        hosts=host_authority,
-        job_queue_provider=lambda: job_queue,
-    )
 
     from market_fulfillment import (
         FulfillmentOrchestrator,
         SqlAlchemyFulfillmentUnitOfWork,
     )
-    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-        AnsibleFulfillmentProvider,
-    )
+    from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+    from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
@@ -746,16 +743,17 @@ async def client_and_queue(
     relay_port_allocator = RelayPortAllocator(session_factory)
     relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
 
-    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
-        job_submitter=job_submitter,
+    ansible_fulfillment_provider = JobFulfillmentProvider(
+        plan=VmFulfillmentPlan(
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+            # Without this a relay-backed pool cannot lease a port, so every
+            # relay-backed fulfillment is rejected as invalid provider
+            # configuration — which reads as a bad request rather than as a
+            # harness that cannot reach the path.
+            port_allocator=relay_port_allocator,
+        ),
+        submission=job_submission,
         jobs=job_engine,
-        job_queue_provider=lambda: job_queue,
-        reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
-        # Without this a relay-backed pool cannot lease a port, so every
-        # relay-backed fulfillment is rejected as invalid provider
-        # configuration — which reads as a bad request rather than as a
-        # harness that cannot reach the path.
-        port_allocator=relay_port_allocator,
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
@@ -767,7 +765,6 @@ async def client_and_queue(
     from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
         BareMetalFulfillmentPlan,
     )
-    from compute_provisioning.job_fulfillment import JobFulfillmentProvider
     from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
     from compute_provisioning import compose_adapter_bundles
     from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
@@ -842,16 +839,9 @@ async def client_and_queue(
         host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
         job_engine=job_engine,
-        job_submitter=job_submitter,
-        vm_operations_service=VmOperationsService(
-            job_submitter=job_submitter,
-            job_queue_provider=lambda: job_queue,
-        ),
-        host_operations_service=HostOperationsService(
-            host_service=host_authority,
-            job_submitter=job_submitter,
-            job_queue_provider=lambda: job_queue,
-        ),
+        job_submission=job_submission,
+        vm_operations_service=VmOperationsService(submission=job_submission),
+        host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=relay_port_allocator,
         relay_service=relay_service,
     )

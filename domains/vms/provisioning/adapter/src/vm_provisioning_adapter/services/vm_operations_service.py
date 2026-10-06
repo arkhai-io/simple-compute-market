@@ -1,36 +1,50 @@
 """Service boundary for direct admin/operator VM operations.
 
 The controller layer owns HTTP routing and schema metadata.  This service owns
-conversion from VM operation requests into Ansible job submissions, including
-queue selection.  Lease-aware teardown is intentionally not exposed here; market
+conversion from VM operation requests into job submissions through the compute
+family's job submission.  Lease-aware teardown is intentionally not exposed here; market
 managed VM removal belongs to the lease lifecycle service.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+import dataclasses
+from typing import Optional
 
-from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_contracts import JobSubmitResponse
-from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
-from compute_provisioning.jobs.queue import AsyncJobQueue
+from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 
-if TYPE_CHECKING:
-    from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
+from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
+
+
+async def submit_vm_job(
+    submission: JobSubmissionService,
+    params: VmJobParams,
+    *,
+    operation_id: str | None = None,
+) -> JobSubmitResponse:
+    """Submit an operator's VM job, under the operation id its request names.
+
+    An operator's job is not a fulfillment's: it has no contract, and its host
+    need only be registered.
+    """
+    return await submission.submit(
+        offering_mode=params.offering_mode,
+        action=str(params.executor_action),
+        host_id=params.host_id,
+        params=dataclasses.asdict(params),
+        operation_id=operation_id,
+        max_retries=params.max_retries,
+    )
 
 
 class VmOperationsService:
     """Submit direct VM operation jobs for admin/operator endpoints."""
 
-    def __init__(
-        self,
-        *,
-        job_submitter: "VmJobSubmitter",
-        job_queue_provider: Callable[[], AsyncJobQueue],
-    ) -> None:
-        self._job_submitter = job_submitter
-        self._job_queue_provider = job_queue_provider
+    def __init__(self, *, submission: JobSubmissionService) -> None:
+        self._submission = submission
 
     async def create_vm(
         self,
@@ -40,10 +54,8 @@ class VmOperationsService:
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         """Submit a VM creation job for ``host``."""
-        return await self._job_submitter.submit(
-            build_create_params(host, body),
-            self._job_queue_provider(),
-            operation_id=operation_id,
+        return await submit_vm_job(
+            self._submission, build_create_params(host, body), operation_id=operation_id
         )
 
     async def list_vms(
@@ -88,9 +100,8 @@ class VmOperationsService:
         vm_name: Optional[str] = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        params = build_simple_params(action, host, body, vm_name)
-        return await self._job_submitter.submit(
-            params,
-            self._job_queue_provider(),
+        return await submit_vm_job(
+            self._submission,
+            build_simple_params(action, host, body, vm_name),
             operation_id=operation_id,
         )

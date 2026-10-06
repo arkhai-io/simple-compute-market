@@ -30,9 +30,10 @@ import hashlib
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi_utils.cbv import cbv
 
+from compute_provisioning.hosts.service import HostNotFoundError
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.controllers.route_binding import dependency
@@ -42,6 +43,18 @@ _POLL_NOTE = (
     "Poll ``GET /api/v1/jobs/{job_id}`` for status. "
     "Terminal statuses: ``succeeded``, ``failed``, ``cancelled``."
 )
+
+
+async def _submitted(submission):
+    """A submitted job's response; an unregistered host is not found.
+
+    Every job is refused at submission when its host is not registered, rather
+    than accepted and failed when it runs.
+    """
+    try:
+        return await submission
+    except HostNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 def _request_operation_id(
@@ -105,11 +118,12 @@ def make_vms_router(
 
             """ + _POLL_NOTE + """
 
-            On success, ``result`` contains SSH connection details.
-            Credentials are stored separately — fetch with
+            On success, ``result`` is the compute family's create result: how
+            to connect to the VM, and the VM's own details. Credentials are
+            stored separately — fetch with
             ``GET /api/v1/jobs/{job_id}/credentials``.
             """
-            return await self._vm_operations.create_vm(
+            return await _submitted(self._vm_operations.create_vm(
                 host=host,
                 body=body,
                 operation_id=_request_operation_id(
@@ -117,7 +131,7 @@ def make_vms_router(
                     action="create",
                     host=host,
                 ),
-            )
+            ))
 
         @router.get(
             "/",
@@ -137,7 +151,7 @@ def make_vms_router(
 
             On success, ``result`` contains the list of VM names and their states.
             """
-            return await self._vm_operations.list_vms(
+            return await _submitted(self._vm_operations.list_vms(
                 host=host,
                 body=body,
                 operation_id=_request_operation_id(
@@ -145,7 +159,7 @@ def make_vms_router(
                     action="list",
                     host=host,
                 ),
-            )
+            ))
 
         # ------------------------------------------------------------------
         # Single-VM lifecycle actions
@@ -167,7 +181,7 @@ def make_vms_router(
             """Start a stopped KVM virtual machine.
 
             """ + _POLL_NOTE
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="start",
                 host=host,
                 vm_name=vm_name,
@@ -178,7 +192,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.post(
             "/{vm_name}/shutdown",
@@ -198,7 +212,7 @@ def make_vms_router(
             Use ``/destroy`` for an immediate force-kill.
 
             """ + _POLL_NOTE
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="shutdown",
                 host=host,
                 vm_name=vm_name,
@@ -209,7 +223,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.post(
             "/{vm_name}/reboot",
@@ -227,7 +241,7 @@ def make_vms_router(
             """Send an ACPI reboot signal to the VM.
 
             """ + _POLL_NOTE
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="reboot",
                 host=host,
                 vm_name=vm_name,
@@ -238,7 +252,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.post(
             "/{vm_name}/destroy",
@@ -261,7 +275,7 @@ def make_vms_router(
             through the lease lifecycle API.
 
             """ + _POLL_NOTE
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="destroy",
                 host=host,
                 vm_name=vm_name,
@@ -272,7 +286,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.post(
             "/{vm_name}/undefine",
@@ -294,7 +308,7 @@ def make_vms_router(
             Market-managed teardown will be exposed through the lease lifecycle API.
 
             """ + _POLL_NOTE
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="undefine",
                 host=host,
                 vm_name=vm_name,
@@ -305,7 +319,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.get(
             "/{vm_name}/monitor",
@@ -328,7 +342,7 @@ def make_vms_router(
 
             On success, ``result.resources`` contains the stats.
             """
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="monitor",
                 host=host,
                 vm_name=vm_name,
@@ -339,7 +353,7 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
         @router.post(
             "/{vm_name}/reset-password",
@@ -359,7 +373,7 @@ def make_vms_router(
             Fetch updated credentials via
             ``GET /api/v1/jobs/{job_id}/credentials`` once the job succeeds.
             """
-            return await self._vm_operations.submit_action(
+            return await _submitted(self._vm_operations.submit_action(
                 action="reset_password",
                 host=host,
                 vm_name=vm_name,
@@ -370,6 +384,6 @@ def make_vms_router(
                     host=host,
                     vm_name=vm_name,
                 ),
-            )
+            ))
 
     return router

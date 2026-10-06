@@ -2,36 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
-
-from compute_provisioning.hosts.service import HostNotFoundError
-from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_operator.models import VmActionRequest
 
 from vm_provisioning_adapter.models.vm_request_model import build_simple_params
-
-if TYPE_CHECKING:
-    from compute_provisioning.hosts.service import HostAuthority
-    from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
+from vm_provisioning_adapter.services.vm_operations_service import submit_vm_job
 
 
 class HostOperationsService:
-    def __init__(
-        self,
-        *,
-        host_service: "HostAuthority",
-        job_submitter: "VmJobSubmitter",
-        job_queue_provider: Callable[[], AsyncJobQueue],
-    ) -> None:
-        self._host_service = host_service
-        self._job_submitter = job_submitter
-        self._job_queue_provider = job_queue_provider
+    def __init__(self, *, submission: JobSubmissionService) -> None:
+        self._submission = submission
 
     async def check_capacity(self, *, host: str, body: VmActionRequest) -> JobSubmitResponse:
-        """Submit a capacity check job for a registered host."""
-        if self._host_service.get_host(host) is None:
-            raise HostNotFoundError(f"Host '{host}' not found")
-        params = build_simple_params("check", host, body)
-        return await self._job_submitter.submit(params, self._job_queue_provider())
+        """Submit a capacity check job for a registered host.
+
+        Raises ``HostNotFoundError`` for an unregistered host, as every job's
+        submission does.
+        """
+        return await submit_vm_job(self._submission, build_simple_params("check", host, body))

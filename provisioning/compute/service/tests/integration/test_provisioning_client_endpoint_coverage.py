@@ -72,9 +72,20 @@ class TestHostClientEndpointCoverage:
         assert result.hosts[0].host_id == HOST
 
 
+async def _registered(client) -> None:
+    """The host the coverage jobs run against; every job needs a registered one."""
+    from compute_provisioning_ansible import ssh_connection
+    from compute_provisioning_contracts import HostCreate
+
+    await client.family.register_host(HostCreate(
+        host_id=HOST, connection=ssh_connection(ssh_host="192.0.2.40", key_path="/keys/id"),
+    ))
+
+
 class TestJobClientEndpointCoverage:
     async def test_job_list_logs_and_cancel_use_client_contract(self, client_and_queue):
         client, _ = client_and_queue
+        await _registered(client)
         submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
 
         jobs = await client.family.list_jobs(limit=5)
@@ -92,6 +103,7 @@ class TestJobClientEndpointCoverage:
         """Two jobs are given distinct creation times, since two submissions in
         quick succession may share one; the list then reads them in each order."""
         client, _ = client_and_queue
+        await _registered(client)
         older = await client.vm.create_vm(HOST, CreateVmRequest(vm_target="vm-older"))
         newer = await client.vm.create_vm(HOST, CreateVmRequest(vm_target="vm-newer"))
         with _container_module.resolved_session_factory() as db, db.begin():

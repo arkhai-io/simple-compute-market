@@ -59,3 +59,18 @@ def test_a_delivery_carries_no_resource_list_or_lease_window():
         AccessDelivery.model_validate(
             {**delivery.model_dump(mode="json"), "lease_end_utc": _READY.isoformat()}
         )
+
+
+def test_a_create_result_carries_evidence_or_none_and_a_detail():
+    from compute_provisioning_contracts import CreateJobResult
+
+    with_evidence = CreateJobResult.model_validate({
+        "evidence": {"endpoints": [_ENDPOINT], "ready_at": _READY.isoformat()},
+        "detail": {"vm_name": "guest-1"},
+    })
+    without = CreateJobResult(evidence=None, detail={"host": "10.0.0.5"})
+
+    assert with_evidence.evidence.endpoints[0].host == "203.0.113.7"
+    assert without.evidence is None
+    with pytest.raises(ValidationError):
+        CreateJobResult.model_validate({"detail": {}, "raw": "output"})

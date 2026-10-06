@@ -223,6 +223,18 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
             provider_config=_PROVIDER_CONFIG,
         )
     )
+    # The host the declaration is delivered through; every job is submitted
+    # against a registered host.
+    from compute_provisioning_ansible import ssh_connection
+    from compute_provisioning_contracts import HostCreate
+
+    hosts = _container_module.resolved_host_authority
+    if hosts.get_host("kvm-fulfillment-1") is None:
+        hosts.register_host(HostCreate(
+            host_id="kvm-fulfillment-1",
+            connection=ssh_connection(ssh_host="192.0.2.30", key_path="/keys/id"),
+            pool_id=pool_id,
+        ))
     capacity_ledger_service.register_resource(
         resource_id=f"{pool_id}-r1",
         resource_type="compute.gpu",
@@ -292,12 +304,15 @@ class TestBeginPersistsPreparedCreateInput:
             record = SettlementRepository().get(db, capacity_reservation_id)
             assert record is not None
             prepared = record.prepared_create_operation
-            assert prepared["kind"] == "vm.ansible.create.v1"
-            assert prepared["schema_version"] == 2
+            assert prepared["kind"] == "compute.job-fulfillment.operation"
+            assert prepared["schema_version"] == 1
 
             operation = prepared["payload"]
             assert operation["capacity_reservation_id"] == capacity_reservation_id
-            assert operation["action"] == "create"
+            assert operation["operation"] == "create"
+            assert (operation["host_id"], operation["executor_target"]) == (
+                "kvm-fulfillment-1", "vm-fulfillment-1",
+            )
 
             params = operation["parameters"]
             assert params["host_id"] == "kvm-fulfillment-1"
@@ -315,7 +330,7 @@ class TestBeginPersistsPreparedCreateInput:
 
             metadata = record.provider_metadata
             assert metadata["host_id"] == "kvm-fulfillment-1"
-            assert metadata["vm_target"] == "vm-fulfillment-1"
+            assert metadata["executor_target"] == "vm-fulfillment-1"
             assert metadata["operation"] == "create"
             assert metadata["create_job_id"]
 
@@ -462,17 +477,8 @@ class TestTeardownPreparation:
             pool_config = dict(pool.provider_config)
 
         from market_fulfillment import SettlementResource
-        from vm_provisioning_adapter.codec import VmAnsibleCodec
-        from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-            AnsibleFulfillmentProvider,
-        )
 
-        provider = AnsibleFulfillmentProvider(
-            job_submitter=app.container.vm_runtime().job_submitter,
-            jobs=_container_module.resolved_job_engine,
-            job_queue_provider=lambda: _container_module.resolved_job_queue,
-            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
-        )
+        provider = app.container.vm_runtime().fulfillment_provider()
         settlement_result = SettlementResult(
             capacity_reservation_id=capacity_reservation_id,
             fulfillment_id=begin_result["fulfillment_id"],
@@ -489,10 +495,11 @@ class TestTeardownPreparation:
         )
 
         prepared = provider.prepare_teardown(settlement_result, pool_config)
-        assert prepared.kind == "vm.ansible.teardown.v1"
-        assert prepared.schema_version == 2
+        assert prepared.kind == "compute.job-fulfillment.operation"
+        assert prepared.schema_version == 1
         assert prepared.payload["capacity_reservation_id"] == capacity_reservation_id
-        assert prepared.payload["action"] == "teardown"
+        assert prepared.payload["operation"] == "teardown"
+        assert prepared.payload["create_job_id"] == provider_metadata["create_job_id"]
         teardown_params = prepared.payload["parameters"]
         assert teardown_params["host_id"] == "kvm-fulfillment-1"
         assert teardown_params["vm_target"] == "vm-fulfillment-1"
@@ -504,11 +511,6 @@ class TestTeardownPreparation:
         from compute_provisioning_contracts import HostCreate
         from compute_provisioning_ansible import ssh_connection
 
-        _container_module.resolved_host_authority.register_host(HostCreate(
-            host_id="kvm-fulfillment-1",
-            connection=ssh_connection(ssh_host="192.0.2.30", key_path="/keys/id"),
-            pool_id=pool_id,
-        ))
         result = await provider.dispatch_teardown(
             VersionedEnvelope.model_validate(prepared.model_dump(mode="json"))
         )
@@ -612,19 +614,10 @@ class TestAcknowledgementFailureRecovery:
                     raise RuntimeError("simulated acknowledgement failure")
                 return super().acknowledge_create(*args, **kwargs)
 
-        from vm_provisioning_adapter.codec import VmAnsibleCodec
-        from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-            AnsibleFulfillmentProvider,
-        )
 
         session_factory = _container_module.resolved_session_factory
         resource_pool_service = _container_module.resolved_resource_pool_service
-        provider = AnsibleFulfillmentProvider(
-            job_submitter=app.container.vm_runtime().job_submitter,
-            jobs=_container_module.resolved_job_engine,
-            job_queue_provider=lambda: _container_module.resolved_job_queue,
-            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
-        )
+        provider = app.container.vm_runtime().fulfillment_provider()
         faulty_orchestrator = FulfillmentOrchestrator(
             provider_registry=ProviderRegistry({"ansible": provider}),
             unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
@@ -766,33 +759,23 @@ class TestStatusAndResultQueries:
             "provisioned-vm-result-2"
         ]
         domain_result = payload["domain_result"]
-        assert domain_result["kind"] == "vm.fulfillment.result.v1"
-        credentials = domain_result["payload"]["credentials"]
-        roles = {c["role"] for c in credentials}
+        assert domain_result["kind"] == "compute.access-delivery"
+        delivery = domain_result["payload"]
+        roles = {c["role"] for c in delivery["credentials"]}
         assert roles == {"root", "tenant"}
-        for credential in credentials:
+        # Only the allowlisted credential fields cross: no key path on the
+        # host, no commands, no resource list of their own.
+        for credential in delivery["credentials"]:
+            assert set(credential) == {"role", "password", "key_type"}
             assert credential["password"]
-            assert credential["ssh_commands"]
-            # Every credential is associated with every produced output --
-            # correct for the single-resource-per-VM-fulfillment case this
-            # adapter handles today, but not a real per-credential mapping;
-            # see AnsibleFulfillmentProvider.fetch_credentials.
-            assert credential["provisioned_resource_ids"] == ["provisioned-vm-result-2"]
-        # ssh_key_path_host/key_type were silently
-        # dropped by fetch_credentials before this fix (present on the
-        # underlying job Credential row, never copied into
-        # VmFulfillmentCredential). At least one of the two roles carries
-        # each field non-null in this fixture's mocked Ansible output.
-        assert any(c.get("ssh_key_path_host") for c in credentials)
-        assert any(c.get("key_type") for c in credentials)
-        # VM identity/connection metadata beyond credentials, also
-        # previously dropped entirely by the new fulfillment path (only
-        # available through the legacy job result before this fix).
-        connection_info = domain_result["payload"]["connection_info"]
-        assert connection_info["vm_name"]
-        assert connection_info["host"]
-        assert connection_info["vm_ip_internal"]
-        assert connection_info["ssh_port"]
+        assert any(c["key_type"] for c in delivery["credentials"])
+        (endpoint,) = delivery["endpoints"]
+        assert endpoint["protocol"] == "ssh"
+        assert endpoint["host"] and endpoint["port"] and endpoint["user"]
+        assert delivery["ready_at"]
+        # The guest's name and internal address stay in the job's own result.
+        assert "vm_ip_internal" not in str(delivery)
+        assert "vm_name" not in str(delivery)
 
 
 class TestScheduleEndpoint:

@@ -245,13 +245,17 @@ class TestStage03_Provisioning:
             rule_id=CREATE_RULE_ID,
             match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_HOST},
             pause_before_result=False,
+            # The create fact the VM playbook prints, with the forwarded port and
+            # the time access became ready: a create reporting neither says
+            # nothing a buyer can use, and fails.
             result_stdout=(
-                '{"vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
-                '"tenant_ssh_key_path": "/tmp/e2e-shapes.key", '
-                '"frp": {"enabled": false}, '
+                'ok: [kvm1] => {\n    "vm_creation_data": '
+                '{"action": "create", "vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
+                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
                 '"authentication": {"tenant": {"ssh_commands": '
                 '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}'
+                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
             ),
             fail_with=None,
         )

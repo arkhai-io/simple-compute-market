@@ -164,23 +164,24 @@ def vm_fulfillment_result(
     fulfillment_id: str = "fulfillment-1",
     capacity_reservation_id: str = "reservation-1",
     provisioned_resource_id: str = "resource-1",
-    connection_info: Mapping[str, Any] | None = None,
+    endpoint: Mapping[str, Any] | None = None,
     credentials: tuple[Mapping[str, Any], ...] = (),
+    ready_at: str = "2030-01-01T00:00:01+00:00",
 ) -> VersionedEnvelope[Any]:
-    """Build the authoritative generic result with a VM-domain envelope."""
+    """Build the authoritative generic result carrying the family's access delivery."""
 
     domain_result = VersionedEnvelope(
-        kind="vm.fulfillment.result.v1",
+        kind="compute.access-delivery",
         schema_version=1,
         payload={
-            "connection_info": dict(connection_info or {}),
-            "credentials": [dict(credential) for credential in credentials],
-            "provisioned_resources": [
-                {
-                    "provisioned_resource_id": provisioned_resource_id,
-                    "status": "active",
-                }
+            "endpoints": [
+                dict(
+                    endpoint
+                    or {"protocol": "ssh", "host": "203.0.113.10", "port": 2222, "user": "tenant1"}
+                )
             ],
+            "credentials": [dict(credential) for credential in credentials],
+            "ready_at": ready_at,
         },
     )
     return build_fulfillment_result_envelope(

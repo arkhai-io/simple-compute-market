@@ -4,8 +4,8 @@
 over the family's job authority. It submits, tracks, and delivers; a domain
 contributes only a ``JobFulfillmentPlan``, which turns a settled resource into a
 ``PreparedJob`` and a create job's parameters into its teardown, and the codec
-its executor runs with, which reports a successful create as
-``DeliveryEvidence``.
+its executor runs with, which reports a successful create as a
+``CreateJobResult``.
 
 What the provider owns, the same for every domain:
 
@@ -22,8 +22,9 @@ What the provider owns, the same for every domain:
   dispatch finds the job it already submitted. A create needs its host enabled;
   a teardown does not.
 - **Status.** One table over ``JobStatus``. A create job that succeeded is a
-  successful create only if its result is valid ``DeliveryEvidence``; otherwise
-  the create has failed. An executor that reported success with output nobody
+  successful create only if its result is a ``CreateJobResult`` carrying valid
+  ``DeliveryEvidence``; otherwise the create has failed. The result's detail is
+  the domain's operator data and is never read here. An executor that reported success with output nobody
   can read may still have left something running, so the fulfillment is failed
   and holds its capacity as any failed create does, rather than becoming active
   with a delivery that cannot be produced.
@@ -42,7 +43,8 @@ from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
     ACCESS_DELIVERY_SCHEMA_VERSION,
     AccessDelivery,
-    DELIVERY_EVIDENCE_RESULT_KIND,
+    CREATE_JOB_RESULT_KIND,
+    CreateJobResult,
     DeliveredCredential,
     DeliveryEvidence,
     JobCredentialsResponse,
@@ -190,19 +192,22 @@ def job_contract(
 
 
 def delivery_evidence(job: JobStatusResponse) -> DeliveryEvidence:
-    """A create job's result as delivery evidence; ``ValueError`` if it is not."""
+    """A create job's delivery evidence; ``ValueError`` if it reported none usable."""
     result = job.result
     if result is None:
         raise ValueError(f"job {job.job_id} reported no result")
-    if result.result_kind != DELIVERY_EVIDENCE_RESULT_KIND:
+    if result.result_kind != CREATE_JOB_RESULT_KIND:
         raise ValueError(
             f"job {job.job_id} reported a {result.result_kind!r} result, "
-            f"not {DELIVERY_EVIDENCE_RESULT_KIND!r}"
+            f"not {CREATE_JOB_RESULT_KIND!r}"
         )
     try:
-        return DeliveryEvidence.model_validate(result.value)
+        evidence = CreateJobResult.model_validate(result.value).evidence
     except ValidationError as exc:
-        raise ValueError(f"job {job.job_id} reported invalid delivery evidence: {exc}") from exc
+        raise ValueError(f"job {job.job_id} reported an invalid create result: {exc}") from exc
+    if evidence is None:
+        raise ValueError(f"job {job.job_id} reported no delivery evidence")
+    return evidence
 
 
 _DELIVERED_FIELDS = tuple(name for name in DeliveredCredential.model_fields if name != "role")
@@ -244,6 +249,29 @@ def _envelope(operation: PreparedJobOperation) -> VersionedEnvelope[Any]:
         kind=JOB_OPERATION_KIND,
         schema_version=JOB_OPERATION_SCHEMA_VERSION,
         payload=operation.model_dump(mode="json"),
+    )
+
+
+def teardown_operation(
+    capacity_reservation_id: str, prepared: PreparedJob, *, create_job_id: str
+) -> VersionedEnvelope[Any]:
+    """A prepared teardown, as the fulfillment kit freezes it before dispatch.
+
+    For a caller that already holds the teardown job, such as a backfill
+    recording one for a fulfillment created before this provider existed. Its
+    dispatch reads no job: only preparing a teardown reads the create job.
+    """
+    return _envelope(
+        PreparedJobOperation(
+            capacity_reservation_id=capacity_reservation_id,
+            operation="teardown",
+            offering_mode=prepared.offering_mode,
+            action=prepared.action,
+            host_id=prepared.host_id,
+            executor_target=prepared.executor_target,
+            parameters=dict(prepared.parameters),
+            create_job_id=create_job_id,
+        )
     )
 
 
@@ -376,17 +404,10 @@ class JobFulfillmentProvider(FulfillmentProvider):
             raise ProviderConfigInvalidError(
                 "a teardown must address the host and target its create recorded"
             )
-        return _envelope(
-            PreparedJobOperation(
-                capacity_reservation_id=settlement_result.capacity_reservation_id,
-                operation="teardown",
-                offering_mode=prepared.offering_mode,
-                action=prepared.action,
-                host_id=prepared.host_id,
-                executor_target=prepared.executor_target,
-                parameters=dict(prepared.parameters),
-                create_job_id=metadata.create_job_id,
-            )
+        return teardown_operation(
+            settlement_result.capacity_reservation_id,
+            prepared,
+            create_job_id=metadata.create_job_id,
         )
 
     async def dispatch_teardown(self, prepared: VersionedEnvelope[Any]) -> FulfillmentResult:
@@ -499,4 +520,5 @@ __all__ = [
     "delivered_credential",
     "delivery_evidence",
     "job_contract",
+    "teardown_operation",
 ]

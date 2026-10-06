@@ -13,9 +13,7 @@ from compute_provisioning import (
 )
 
 from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
@@ -32,7 +30,7 @@ ANSIBLE_PROVIDER = "ansible"
 #: to the site ledger, which is built before any provider instance exists;
 #: composition refuses to start if it disagrees with the registered instances.
 HOST_REQUIREMENT = MappingProxyType(
-    {ANSIBLE_PROVIDER: AnsibleFulfillmentProvider.needs_host}
+    {ANSIBLE_PROVIDER: JobFulfillmentProvider.needs_host}
 )
 
 #: Every action a VM job runs, whether submitted through the operator VM and
@@ -56,7 +54,7 @@ VM_JOB_ACTIONS = frozenset(
 
 def build_vm_adapter_bundle(
     *,
-    fulfillment_provider: AnsibleFulfillmentProvider,
+    fulfillment_provider: JobFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
     job_executor: JobExecutor,
     definition_documents: tuple[DefinitionDocumentContribution, ...] = (),

@@ -727,3 +727,13 @@ release-status lookup by offering mode, no longer describe the system.
 
 **Migration**: Replaced by "Lease release delegates to durable fulfillment teardown"
 above, which states the same delegation for every offering mode.
+
+### Requirement: VM fulfillment result payload
+
+**Reason**: A job-backed fulfillment's result is the compute family's access delivery for
+every domain, assembled by the family's provider. VM's own result envelope, its
+`connection_info`, and its credential fields beyond the allowlist no longer exist.
+
+**Migration**: Replaced by "Delivery says how to reach what was provisioned" and "A create
+succeeds only with readable delivery evidence" above. The VM storefront records the
+delivered endpoint as the deal's connection details.

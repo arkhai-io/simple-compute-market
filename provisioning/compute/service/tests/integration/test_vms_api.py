@@ -137,12 +137,16 @@ class TestCreateVmViaClient:
         final = await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         assert final.result.offering_mode == "vm"
-        assert final.result.result_kind == "vm_create"
-        result = final.result.value
-        assert result["vm_name"] == VM_NAME
-        assert result["tenant_user"] == "agentvm01"
-        assert result["ssh_port"] == "54321"
-        assert result["host_ip"] == "10.0.0.1"
+        assert final.result.result_kind == "compute.create-result.v1"
+        # An operator's create reports the same create result a fulfillment's
+        # does: how a buyer would connect, and the VM's details for operators.
+        created = final.result.value
+        assert created["detail"]["vm_name"] == VM_NAME
+        assert created["detail"]["host_ip"] == "10.0.0.1"
+        (endpoint,) = created["evidence"]["endpoints"]
+        assert (endpoint["host"], endpoint["port"], endpoint["user"]) == (
+            "10.0.0.1", 54321, "agentvm01",
+        )
 
     async def test_create_vm_ansible_called_with_correct_params(self, client_and_queue, fake_ansible):
         client, job_queue = client_and_queue
@@ -253,7 +257,7 @@ class TestCreateVmViaClient:
 
 
 class TestDispatchRequiresARegisteredHost:
-    async def test_a_job_for_an_unregistered_host_fails_before_any_playbook(
+    async def test_a_job_for_an_unregistered_host_is_refused_before_it_is_recorded(
         self, client_and_queue, fake_ansible, tmp_path, monkeypatch
     ):
         """Dispatch renders only from the host registry. A configured inventory
@@ -272,18 +276,16 @@ class TestDispatchRequiresARegisteredHost:
             "resolved_inventory_path",
             inventory,
         )
-        client, job_queue = client_and_queue
-        dispatched = _make_event_seam(job_queue)
+        client, _ = client_and_queue
 
-        submit = await client.vm.create_vm(
-            "unregistered-kvm", CreateVmRequest(vm_target=VM_NAME)
-        )
-        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        # Refused at submission: every job needs a registered host, so none is
+        # recorded or run for this one.
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.vm.create_vm("unregistered-kvm", CreateVmRequest(vm_target=VM_NAME))
 
-        with pytest.raises(ComputeProvisioningJobError, match="'unregistered-kvm' is not registered"):
-            await client.family.poll_until_complete(
-                submit.job_id, timeout=5.0, poll_interval=0.05
-            )
+        assert refused.value.status_code == 404
+        assert "'unregistered-kvm' is not registered" in str(refused.value)
+        assert (await client.family.list_jobs()).total == 0
         fake_ansible.start_playbook.assert_not_called()
         fake_ansible.write_inventory.assert_not_called()
 
@@ -311,4 +313,4 @@ class TestDispatchRequiresARegisteredHost:
         start = fake_ansible.start_playbook.call_args.kwargs
         assert start["inventory_path"] == fake_ansible.write_inventory.return_value.path
         # No public address is configured, so tenants get the connection address.
-        assert final.result.value["host_ip"] == "192.0.2.10"
+        assert final.result.value["detail"]["host_ip"] == "192.0.2.10"

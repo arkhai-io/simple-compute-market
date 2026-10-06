@@ -40,9 +40,8 @@ from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 from vm_provisioning_adapter.codec import VmAnsibleCodec
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _INVENTORY_GROUP = "legacy_hosts"
@@ -143,9 +142,12 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     settlement_repository = SettlementRepository()
     fulfillment_service = FulfillmentOrchestrator(
         provider_registry=ProviderRegistry({
-            "ansible": AnsibleFulfillmentProvider(
-                job_submitter=None, jobs=None, job_queue_provider=lambda: None,
-                reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+            # No job authority: a backfilled teardown is dispatched as
+            # persisted, and preparing nothing reads no create job.
+            "ansible": JobFulfillmentProvider(
+                plan=VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys),
+                submission=None,
+                jobs=None,
             ),
         }),
         unit_of_work=SqlAlchemyFulfillmentUnitOfWork(

@@ -15,7 +15,9 @@ from compute_provisioning import (
 )
 
 from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning_ansible import AnsibleJobExecutor
 from compute_provisioning_ansible.runner import AnsibleRunner
 from vm_provisioning_adapter.services.relay_rebinding import (
@@ -35,16 +37,13 @@ from vm_provisioning_adapter.services.relay_service import RelayService
 from vm_provisioning_adapter.services.relay_execution import (
     RelayExecutionResolver,
 )
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
 from vm_provisioning_adapter.services.host_operations_service import (
     HostOperationsService,
 )
-from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ class VmProvisioningRuntime:
     host_authority: HostAuthority
     pool_config_handler: AnsiblePoolConfigHandler
     job_engine: JobEngine
-    job_submitter: VmJobSubmitter
+    job_submission: JobSubmissionService
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
     # One allocator for every relay port VM leases, releases, and reconciles.
@@ -79,13 +78,17 @@ class VmProvisioningRuntime:
             additional_non_retryable_errors=self.config.additional_non_retryable_errors,
         )
 
-    def fulfillment_provider(self):
-        return AnsibleFulfillmentProvider(
-            job_submitter=self.job_submitter,
-            jobs=self.job_engine,
-            job_queue_provider=self.job_queue_provider,
+    def fulfillment_plan(self) -> VmFulfillmentPlan:
+        return VmFulfillmentPlan(
             reserved_var_keys=self.codec.reserved_var_keys,
             port_allocator=self.relay_port_allocator,
+        )
+
+    def fulfillment_provider(self) -> JobFulfillmentProvider:
+        return JobFulfillmentProvider(
+            plan=self.fulfillment_plan(),
+            submission=self.job_submission,
+            jobs=self.job_engine,
         )
 
     def relay_definitions(self) -> DefinitionDocumentContribution:
@@ -163,6 +166,7 @@ def build_vm_runtime(
     job_queue_provider: Callable[[], Any],
     host_authority: HostAuthority,
     job_engine: JobEngine,
+    job_submission: JobSubmissionService,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -177,13 +181,6 @@ def build_vm_runtime(
     else:
         ansible_service = AnsibleRunner(config)
 
-    job_submitter = VmJobSubmitter(
-        job_engine, default_host_id=config.default_host_id
-    )
-    vm_operations_service = VmOperationsService(
-        job_submitter=job_submitter,
-        job_queue_provider=job_queue_provider,
-    )
     codec = VmAnsibleCodec(
         golden_image=GoldenImageCredentials(
             root_ssh_filename=str(config.golden_root_ssh_filename or ""),
@@ -206,13 +203,9 @@ def build_vm_runtime(
         host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(settings=config),
         job_engine=job_engine,
-        job_submitter=job_submitter,
-        vm_operations_service=vm_operations_service,
-        host_operations_service=HostOperationsService(
-            host_service=host_authority,
-            job_submitter=job_submitter,
-            job_queue_provider=job_queue_provider,
-        ),
+        job_submission=job_submission,
+        vm_operations_service=VmOperationsService(submission=job_submission),
+        host_operations_service=HostOperationsService(submission=job_submission),
         relay_port_allocator=RelayPortAllocator(session_factory),
         relay_service=RelayService(session_factory=session_factory, settings=config),
     )

@@ -31,11 +31,13 @@ from compute_provisioning_ansible.runner import (
 from types import SimpleNamespace
 
 from vm_provisioning_adapter.codec import (
+    VM_CREATE_DETAIL,
     VM_INVENTORY_GROUP,
     GoldenImageCredentials,
     VmAnsibleCodec,
     VmPlaybookOutput,
     build_result_payload,
+    create_result,
     extract_ssh_port,
     extract_tenant_user,
     extract_vm_fact,
@@ -44,6 +46,7 @@ from vm_provisioning_adapter.codec import (
     vm_job_params,
 )
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
+from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND, CreateJobResult
 
 _ANSIBLE_ROOT = (
     Path(__file__).resolve().parents[6] / "domains/vms/provisioning/iac/ansible"
@@ -593,13 +596,80 @@ def test_a_run_reports_the_vm_result_and_credentials() -> None:
     )
 
     assert isinstance(outcome, JobSuccess)
-    assert outcome.result.result_kind == "vm_create"
-    assert outcome.result.value["host_ip"] == "203.0.113.1"
-    assert outcome.result.value["ssh_port"] == "2222"
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
+    created = CreateJobResult.model_validate(outcome.result.value)
+    assert created.evidence is None  # the fact reported no time it became ready
+    assert created.detail["host_ip"] == "203.0.113.1"
+    assert created.detail["ssh_port"] == "2222"
     assert [c.credential_kind for c in outcome.credentials] == ["root", "tenant"]
-    assert "authentication" not in outcome.result.value
+    assert "authentication" not in str(outcome.result.value)
     assert '"password": "[REDACTED]"' in outcome.logs
     assert runner.write_inventory.call_args.kwargs["group"] == VM_INVENTORY_GROUP
+
+
+_DIRECT = {
+    "action": "create", "status": "running", "vm_name": "tenant-1", "host": "kvm1",
+    "timestamp": "2030-01-01T00:00:01Z", "tenant_user": "tenant1",
+    "host_ip": "203.0.113.1", "ssh_port": "2222", "vm_ip_internal": "192.168.122.9",
+    "ansible_result": {"raw": "fact"},
+}
+_RELAY = {
+    **_DIRECT,
+    "ssh_port": "40001",
+    "frp": {"enabled": "True", "relay_addr": "relay.example", "remote_port": "40001"},
+}
+
+
+def _create_params(**fields) -> VmJobParams:
+    return VmJobParams(host_id="kvm1", vm_action="create", offering_mode="vm", **fields)
+
+
+class TestCreateResult:
+    """A create's result: evidence by the relay rule, and a projected detail."""
+
+    def test_a_direct_guest_is_reached_at_its_hosts_address_and_forwarded_port(self):
+        created = create_result(_DIRECT, _create_params())
+
+        (endpoint,) = created.evidence.endpoints
+        assert (endpoint.host, endpoint.port, endpoint.user) == ("203.0.113.1", 2222, "tenant1")
+        assert created.evidence.ready_at.isoformat() == "2030-01-01T00:00:01+00:00"
+
+    def test_a_relayed_guest_is_reached_at_the_relay_and_its_leased_port(self):
+        created = create_result(_RELAY, _create_params(relay_id="r1", vm_remote_port=40001))
+
+        (endpoint,) = created.evidence.endpoints
+        assert (endpoint.host, endpoint.port) == ("relay.example", 40001)
+
+    def test_a_reported_relay_port_other_than_the_lease_yields_no_evidence(self):
+        created = create_result(_RELAY, _create_params(relay_id="r1", vm_remote_port=40002))
+
+        assert created.evidence is None
+        assert created.detail["frp"]["remote_port"] == "40001"
+
+    def test_a_relayed_guest_with_no_relay_reported_yields_no_evidence(self):
+        assert create_result(_DIRECT, _create_params(relay_id="r1", vm_remote_port=40001)).evidence is None
+
+    def test_the_detail_is_the_named_operator_fields_and_never_the_raw_fact(self):
+        created = create_result(_DIRECT, _create_params())
+
+        assert created.detail["vm_ip_internal"] == "192.168.122.9"
+        assert created.detail["vm_name"] == "tenant-1"
+        assert set(created.detail) <= set(VM_CREATE_DETAIL)
+        assert "ansible_result" not in created.detail
+
+    def test_the_playbooks_tenant_command_uses_the_same_address_and_port(self):
+        """The playbook builds the tenant's external command from the forwarded
+        port and the host's tenant address on the direct path, and from the
+        leased port and the relay's address behind a relay: the pairs the
+        evidence names on each path."""
+        create = (_ANSIBLE_ROOT / "roles/vm-management/tasks/vm-create.yml").read_text()
+        tenant = next(
+            line for line in create.splitlines()
+            if "external:" in line and "<your_private_key>" in line
+        )
+        direct, relay = tenant.split(" else ", 1)
+        assert "external_ssh_port" in direct and "tenant_ssh_host" in direct
+        assert "vm_remote_port" in relay and "frp_server_addr" in relay
 
 
 class TestPlaybookContract:

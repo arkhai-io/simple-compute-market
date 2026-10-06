@@ -42,11 +42,13 @@ def test_one_engine_and_one_host_authority_reach_both_runtimes():
 
     assert vm.job_engine is job_engine
     assert vm.host_authority is host_authority
-    assert vm.job_submitter._engine is job_engine
+    assert vm.job_submission is container.job_submission()
     submission = container.job_submission()
     assert submission._engine is job_engine
     assert submission._hosts is host_authority
-    # Bare metal's job-backed provider submits through it and reads the engine.
+    # Both domains' job-backed providers submit through it and read the engine.
+    assert vm.fulfillment_provider()._submission is submission
+    assert vm.fulfillment_provider()._jobs is job_engine
     assert bare_metal.fulfillment_provider._submission is submission
     assert bare_metal.fulfillment_provider._jobs is job_engine
     # The engine resolves each job's host through the same authority.

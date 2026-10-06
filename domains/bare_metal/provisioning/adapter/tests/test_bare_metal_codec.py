@@ -10,7 +10,7 @@ import pydantic
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
-from compute_provisioning_contracts import DELIVERY_EVIDENCE_RESULT_KIND
+from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND
 
 from bare_metal_provisioning_adapter.codec import (
     BARE_METAL_INVENTORY_GROUP,
@@ -100,28 +100,42 @@ def test_a_grant_reports_delivery_evidence_and_no_credential() -> None:
     )
 
     assert outcome.credentials == ()
-    assert outcome.result.result_kind == DELIVERY_EVIDENCE_RESULT_KIND
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     assert outcome.result.offering_mode == "bare_metal"
     assert outcome.result.value == {
-        "endpoints": [
-            {"protocol": "ssh", "host": "10.0.0.5", "port": 2201, "user": "tenant-a"}
-        ],
-        "ready_at": "2030-01-01T00:00:01Z",
+        "evidence": {
+            "endpoints": [
+                {"protocol": "ssh", "host": "10.0.0.5", "port": 2201, "user": "tenant-a"}
+            ],
+            "ready_at": "2030-01-01T00:00:01Z",
+        },
+        "detail": {
+            "action": "node_grant_access",
+            "host": "10.0.0.5",
+            "port": "2201",
+            "ssh_user": "tenant-a",
+            "timestamp": "2030-01-01T00:00:01Z",
+            "physical_host_id": "physical-1",
+        },
     }
 
 
-def test_a_grant_whose_fact_cannot_say_where_to_connect_stores_the_fact() -> None:
-    """The family's provider then fails the create, and an operator can read
-    what the role printed."""
-    fact = '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201"}'
+def test_a_grant_whose_fact_cannot_say_how_to_connect_reports_no_evidence() -> None:
+    """The family's provider then fails the create, and an operator can still
+    read the fact's named fields; anything else the role printed is not kept."""
+    fact = (
+        '{"action": "node_grant_access", "host": "10.0.0.5", "port": "2201", '
+        '"unvetted": "x"}'
+    )
 
     outcome = BareMetalAnsibleCodec().interpret(
         job_run(_grant()), inventory_target(HOST), _granted(fact)
     )
 
-    assert outcome.result.result_kind == "bare_metal_access"
+    assert outcome.result.result_kind == CREATE_JOB_RESULT_KIND
     assert outcome.result.value == {
-        "action": "node_grant_access", "host": "10.0.0.5", "port": "2201"
+        "evidence": None,
+        "detail": {"action": "node_grant_access", "host": "10.0.0.5", "port": "2201"},
     }
 
 

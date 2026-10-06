@@ -5,13 +5,14 @@ family's Ansible executor. A grant installs the buyer's key for a tenant account
 on the whole host the lease sells; a reclaim removes access by the configured
 reclaim policy. Each job stores a ``BareMetalJobParams``.
 
-A grant's result is the compute family's ``DeliveryEvidence``: the host and port
-the buyer connects to, the tenant account, and when access became ready, read
-from the fact the ``bare-metal-access`` role prints. A grant whose fact cannot
-say that stores the fact itself instead, under bare metal's own result kind, so
-the family's provider fails the create and an operator can read what the role
-printed. A reclaim's result is its fact. No result carries a credential: the
-buyer already holds the private half of the key that was installed.
+A grant's result is the compute family's ``CreateJobResult``: the delivery
+evidence (the host and port the buyer connects to, the tenant account, and when
+access became ready), read from the fact the ``bare-metal-access`` role prints,
+and the fact's named fields as operator detail. A grant whose fact cannot say
+how to connect reports no evidence, so the family's provider fails the create
+while an operator can still read the detail. A reclaim's result is its fact. No
+result carries a credential: the buyer already holds the private half of the
+key that was installed.
 """
 
 from __future__ import annotations
@@ -25,8 +26,9 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from compute_provisioning_contracts import (
-    DELIVERY_EVIDENCE_RESULT_KIND,
+    CREATE_JOB_RESULT_KIND,
     AccessEndpoint,
+    CreateJobResult,
     DeliveryEvidence,
     ResultEnvelope,
 )
@@ -42,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 #: The inventory group the bare-metal access playbook targets.
 BARE_METAL_INVENTORY_GROUP = "bare_metal_nodes"
 
-#: The kind of the result both access actions produce.
+#: The kind of a reclaim's result; a grant's is the family's create result.
 BARE_METAL_ACCESS_RESULT_KIND = "bare_metal_access"
 
 #: What a reclaim does to the tenant account: remove only the lease's key,
@@ -87,6 +89,14 @@ class BareMetalJobParams(BaseModel):
     ssh_public_key: str | None = None
     # Set on a reclaim only; a grant has nothing to reclaim.
     reclaim_policy: str | None = None
+
+
+#: The grant fact's fields kept as operator detail: what the role did, on which
+#: machine, for which account and deal. None is secret.
+BARE_METAL_GRANT_DETAIL = (
+    "action", "status", "host_id", "physical_host_id", "ssh_user", "escrow_uid",
+    "host", "port", "timestamp",
+)
 
 
 def grant_evidence(fact: Mapping[str, Any]) -> DeliveryEvidence | None:
@@ -135,13 +145,20 @@ class BareMetalAnsibleCodec:
         fact = extract_fact(output.stdout, BARE_METAL_RESULT_FACTS[run.action])
         if fact is None:
             return AnsibleJobInterpretation(result=None)
-        evidence = grant_evidence(fact) if run.action == NODE_GRANT_ACCESS_ACTION else None
-        if evidence is not None:
+        if run.action == NODE_GRANT_ACCESS_ACTION:
+            created = CreateJobResult(
+                evidence=grant_evidence(fact),
+                detail={
+                    name: fact[name]
+                    for name in BARE_METAL_GRANT_DETAIL
+                    if fact.get(name) not in (None, "")
+                },
+            )
             return AnsibleJobInterpretation(
                 result=ResultEnvelope(
                     offering_mode=run.offering_mode,
-                    result_kind=DELIVERY_EVIDENCE_RESULT_KIND,
-                    value=evidence.model_dump(mode="json"),
+                    result_kind=CREATE_JOB_RESULT_KIND,
+                    value=created.model_dump(mode="json"),
                 )
             )
         return AnsibleJobInterpretation(
@@ -179,6 +196,7 @@ class BareMetalAnsibleCodec:
 
 __all__ = [
     "BARE_METAL_ACCESS_RESULT_KIND",
+    "BARE_METAL_GRANT_DETAIL",
     "BARE_METAL_INVENTORY_GROUP",
     "BARE_METAL_RECLAIM_POLICIES",
     "BARE_METAL_RESULT_FACTS",

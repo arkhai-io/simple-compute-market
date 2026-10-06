@@ -16,7 +16,7 @@ from compute_provisioning.jobs.db import JobStatus
 from compute_provisioning.jobs.submission import JobSubmissionService, contract_operation_id
 from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
-    DELIVERY_EVIDENCE_RESULT_KIND,
+    CREATE_JOB_RESULT_KIND,
     AccessDelivery,
     CredentialEnvelope,
     JobCredentialsResponse,
@@ -37,10 +37,15 @@ from market_fulfillment import (
 _READY = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
 _EVIDENCE = ResultEnvelope(
     offering_mode="fake",
-    result_kind=DELIVERY_EVIDENCE_RESULT_KIND,
+    result_kind=CREATE_JOB_RESULT_KIND,
     value={
-        "endpoints": [{"protocol": "ssh", "host": "203.0.113.7", "port": 2201, "user": "t"}],
-        "ready_at": _READY.isoformat(),
+        "evidence": {
+            "endpoints": [
+                {"protocol": "ssh", "host": "203.0.113.7", "port": 2201, "user": "t"}
+            ],
+            "ready_at": _READY.isoformat(),
+        },
+        "detail": {"guest": "never-delivered"},
     },
 )
 
@@ -285,11 +290,16 @@ async def test_status_follows_the_job(status, state):
         ResultEnvelope(offering_mode="fake", result_kind="fake_fact", value={"host": "x"}),
         ResultEnvelope(
             offering_mode="fake",
-            result_kind=DELIVERY_EVIDENCE_RESULT_KIND,
-            value={"endpoints": [], "ready_at": _READY.isoformat()},
+            result_kind=CREATE_JOB_RESULT_KIND,
+            value={"evidence": {"endpoints": [], "ready_at": _READY.isoformat()}},
+        ),
+        ResultEnvelope(
+            offering_mode="fake",
+            result_kind=CREATE_JOB_RESULT_KIND,
+            value={"evidence": None, "detail": {"host": "203.0.113.7"}},
         ),
     ],
-    ids=["no-result", "another-kind", "no-endpoint"],
+    ids=["no-result", "another-kind", "no-endpoint", "no-evidence"],
 )
 @pytest.mark.asyncio
 async def test_a_create_that_succeeded_without_usable_evidence_has_failed(result):
@@ -393,6 +403,7 @@ async def test_the_delivery_carries_the_evidence_and_only_allowlisted_credential
     assert delivery.endpoints[0].port == 2201
     assert delivery.ready_at == _READY
     assert "ssh_key_path_host" not in str(envelope.payload)
+    assert "never-delivered" not in str(envelope.payload)
 
 
 @pytest.mark.asyncio

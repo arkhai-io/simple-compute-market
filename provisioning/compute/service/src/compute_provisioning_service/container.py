@@ -393,6 +393,7 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
         host_authority=host_authority,
         job_engine=job_engine,
+        job_submission=job_submission,
     )
 
     ansible_service = providers.Callable(

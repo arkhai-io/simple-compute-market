@@ -17,11 +17,15 @@ from compute_provisioning_client import (
     ComputeProvisioningTimeoutError,
 )
 from compute_provisioning_contracts import (
+    ACCESS_DELIVERY_KIND,
+    ACCESS_DELIVERY_SCHEMA_VERSION,
+    AccessDelivery,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     LeaseRegistration,
     LeaseTermination,
 )
+from arkhai_vms import VmConnectionDetails
 from core_storefront.stage_log import stage_event
 from market_core import VersionedEnvelope
 
@@ -185,7 +189,7 @@ async def _do_provision(
         capacity_reservation_id=capacity_reservation_id,
         site_id=site_id,
     )
-    return _fulfillment_result_to_legacy_shape(envelope)
+    return _fulfillment_result_to_connection(envelope)
 
 
 async def _poll_fulfillment_until_terminal(
@@ -221,47 +225,48 @@ async def _poll_fulfillment_until_terminal(
         await asyncio.sleep(poll_interval)
 
 
-def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str, Any]:
-    """Map a fulfillment result envelope into the shape callers of
-    ``provision_vm`` expect: a dict with an optional ``authentication`` key
-    (``{"root": {...}, "tenant": {...}}``, popped out by the caller) plus
-    other connection-detail fields serialized as ``connection_details``.
+def _fulfillment_result_to_connection(envelope: VersionedEnvelope) -> dict[str, Any]:
+    """An active fulfillment's delivery, as the deal's connection details.
+
+    The details are ``VmConnectionDetails``: the delivered SSH endpoint, when
+    access became ready, and the provisioned resources. The credentials the
+    delivery carries, by role and with only their delivered fields, ride along
+    under ``authentication`` for the caller to store; they are never part of
+    the connection details.
     """
     payload: dict[str, Any] = envelope.payload or {}
-    domain_result = payload.get("domain_result") or {}
-    domain_payload: dict[str, Any] = domain_result.get("payload") or {}
-    credentials = domain_payload.get("credentials") or []
-
-    authentication: dict[str, Any] = {}
-    for credential in credentials:
-        role = credential.get("role")
-        if role not in ("root", "tenant"):
-            continue
-        entry: dict[str, Any] = {
-            "password": credential.get("password"),
-            "ssh_commands": credential.get("ssh_commands"),
-        }
-        if role == "root":
-            entry["ssh_key_path_host"] = credential.get("ssh_key_path_host")
-        else:
-            entry["key_type"] = credential.get("key_type")
-        authentication[role] = entry
-
-    # `connection_info` is VmConnectionInfo's field set (vm_name, host,
-    # timestamp, tenant_user, vm_ip_internal, ssh_port), dumped as a plain
-    # dict on the wire -- spread directly rather than naming each field
-    # again here.
-    connection_info: dict[str, Any] = domain_payload.get("connection_info") or {}
-    result: dict[str, Any] = {
-        **connection_info,
-        "provisioned_resource_ids": [
-            resource.get("provisioned_resource_id")
+    domain = payload.get("domain_result") or {}
+    if (
+        domain.get("kind") != ACCESS_DELIVERY_KIND
+        or domain.get("schema_version") != ACCESS_DELIVERY_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            f"physical fulfillment returned an unsupported delivery {domain.get('kind')!r}"
+        )
+    delivery = AccessDelivery.model_validate(domain.get("payload") or {})
+    endpoint = next(
+        (endpoint for endpoint in delivery.endpoints if endpoint.protocol == "ssh"), None
+    )
+    if endpoint is None:
+        raise RuntimeError("physical fulfillment delivered no SSH endpoint")
+    details: dict[str, Any] = VmConnectionDetails(
+        host=endpoint.host,
+        port=endpoint.port,
+        user=endpoint.user,
+        ready_at=delivery.ready_at,
+        provisioned_resource_ids=tuple(
+            str(resource.get("provisioned_resource_id"))
             for resource in payload.get("provisioned_resources", [])
-        ],
+        ),
+    ).model_dump(mode="json", exclude_none=True)
+    authentication = {
+        credential.role: {"password": credential.password, "key_type": credential.key_type}
+        for credential in delivery.credentials
+        if credential.role in ("root", "tenant")
     }
     if authentication:
-        result["authentication"] = authentication
-    return result
+        details["authentication"] = authentication
+    return details
 
 
 async def _build_provisioning_job_spec(

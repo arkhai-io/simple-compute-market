@@ -24,9 +24,9 @@ from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_contracts import (
     ACCESS_DELIVERY_KIND,
-    DELIVERY_EVIDENCE_RESULT_KIND,
+    CREATE_JOB_RESULT_KIND,
     AccessDelivery,
-    DeliveryEvidence,
+    CreateJobResult,
     LeaseTermination,
 )
 
@@ -111,9 +111,9 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
 
     assert finished["status"] == "succeeded", finished
     # The grant's result is the family's delivery evidence for the host.
-    assert finished["result"]["result_kind"] == DELIVERY_EVIDENCE_RESULT_KIND
-    evidence = DeliveryEvidence.model_validate(finished["result"]["value"])
-    (endpoint,) = evidence.endpoints
+    assert finished["result"]["result_kind"] == CREATE_JOB_RESULT_KIND
+    created = CreateJobResult.model_validate(finished["result"]["value"])
+    (endpoint,) = created.evidence.endpoints
     assert (endpoint.protocol, endpoint.host, endpoint.port) == ("ssh", SSH_HOST, 2201)
     assert endpoint.user
     assert (await test_client.list_bare_metal_mock_rules())[0]["waiting"] == 0

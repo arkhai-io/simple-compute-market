@@ -474,6 +474,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261005_001_drop_job_contract_version",
         "20261005_002_reservation_release_requested_at",
         "20261006_001_drop_job_deal_correlation",
+        "20261006_002_vm_job_backed_fulfillment",
     }
 
 

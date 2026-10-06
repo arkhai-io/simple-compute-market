@@ -179,16 +179,19 @@ def test_the_previous_schema_is_migrated_on_every_surface():
     assert _json(engine, "SELECT claim_attributes FROM capacity_reservations") == {
         "host_id": "kvm1", "region": "eu",
     }
+    # The chain ends in the job-backed shapes, which keep the host the
+    # identity migration named.
     prepared = _json(engine, "SELECT prepared_create_operation FROM settlement_records")
-    assert prepared["schema_version"] == 2
-    assert prepared["payload"]["parameters"] == {
-        "host_id": "kvm1",
-        "vm_target": "t1",
-        "provider_extra_vars": {"machine_id": "operator-value"},
+    assert prepared["kind"] == "compute.job-fulfillment.operation"
+    assert (prepared["payload"]["host_id"], prepared["payload"]["executor_target"]) == (
+        "kvm1", "t1",
+    )
+    assert prepared["payload"]["parameters"]["host_id"] == "kvm1"
+    assert prepared["payload"]["parameters"]["provider_extra_vars"] == {
+        "machine_id": "operator-value"
     }
-    assert _json(engine, "SELECT provider_metadata FROM settlement_records") == {
-        "host_id": "kvm1", "vm_target": "t1",
-    }
+    metadata = _json(engine, "SELECT provider_metadata FROM settlement_records")
+    assert (metadata["host_id"], metadata["executor_target"]) == ("kvm1", "t1")
     with engine.begin() as connection:
         assert connection.execute(text(
             "SELECT resource_host_id, resource_attributes FROM settlement_records"

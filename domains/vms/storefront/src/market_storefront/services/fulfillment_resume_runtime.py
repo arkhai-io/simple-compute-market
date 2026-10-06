@@ -33,7 +33,7 @@ from market_storefront.services.capacity_client import (
     build_fulfillment_client,
 )
 from market_storefront.services.fulfillment_service import (
-    _fulfillment_result_to_legacy_shape,
+    _fulfillment_result_to_connection,
 )
 from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
@@ -120,15 +120,9 @@ async def _store_fulfillment_credentials(
                 role=role,
                 granted_to="self",
                 password=data.get("password"),
-                ssh_commands=(
-                    json.dumps(data.get("ssh_commands"))
-                    if data.get("ssh_commands")
-                    else None
-                ),
-                ssh_key_path_host=(
-                    data.get("ssh_key_path_host") if role == "root" else None
-                ),
-                key_type=(data.get("key_type") if role == "tenant" else None),
+                # A delivery carries each credential's allowlisted fields only:
+                # no key path on a provisioner host, and no commands.
+                key_type=data.get("key_type"),
             )
         except Exception:
             logger.exception(
@@ -528,20 +522,12 @@ async def _load_active_physical_result(
         raise RuntimeError(
             "physical fulfillment result disagrees with active lifecycle"
         )
-    domain_result = result_payload.domain_result
-    if (
-        domain_result is None
-        or domain_result.kind != "vm.fulfillment.result.v1"
-        or domain_result.schema_version != 1
-        or not isinstance(domain_result.payload, dict)
-    ):
-        raise RuntimeError("physical fulfillment returned an unsupported VM result")
-    legacy = _fulfillment_result_to_legacy_shape(result_envelope)
-    authentication = legacy.pop("authentication", None)
+    connection = _fulfillment_result_to_connection(result_envelope)
+    authentication = connection.pop("authentication", None)
     await persist_escrow_fields_with_retry(
         lambda: sqlite_client,
         escrow_uid=escrow_uid,
-        connection_details=json.dumps(legacy, sort_keys=True),
+        connection_details=json.dumps(connection, sort_keys=True),
         tenant_credentials=(
             json.dumps((authentication or {}).get("tenant") or {}, sort_keys=True)
             if authentication
@@ -549,7 +535,7 @@ async def _load_active_physical_result(
         ),
         fulfillment_phase="physical_result_recorded",
     )
-    return legacy, authentication
+    return connection, authentication
 
 
 async def converge_escrow_once(
