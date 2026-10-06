@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms"
-version = "0.6.0"
+version = "0.5.0"
 license = "MIT"
 description = "Shared VM-domain models and helpers used by Arkhai VM buyer and storefront packages."
 requires-python = ">=3.12,<3.14"

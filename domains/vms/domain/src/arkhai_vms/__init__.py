@@ -50,7 +50,6 @@ from arkhai_vms.schema import (
     VmMaterialization,
     VmMessage,
     VmReceipt,
-    VmConnectionDetails,
     VmResult,
     VmTerms,
 )
@@ -88,7 +87,6 @@ __all__ = [
     "VmMessage",
     "VmProvisionTerms",
     "VmReceipt",
-    "VmConnectionDetails",
     "VmResult",
     "VmTerms",
     "make_vm_provision_terms",

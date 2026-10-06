@@ -1,8 +1,8 @@
-"""VM fulfillment requirements and Ansible pool configuration models."""
+"""VM fulfillment request, prepared operation, and provider metadata models."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -67,3 +67,59 @@ class AnsiblePoolConfig(BaseModel):
     vm_port_range_start: int | None = None
     vm_port_range_count: int | None = None
     relay_token: str | None = None
+
+
+class AnsiblePreparedJobParameters(BaseModel):
+    """Validated, JSON-safe snapshot passed to the Ansible executor."""
+
+    host_id: str = Field(min_length=1)
+    vm_action: str = Field(min_length=1)
+    vm_target: str | None = None
+    offering_mode: str = Field(min_length=1)
+    executor_action: str | None = None
+    executor_target: str | None = None
+    executor_ref: dict[str, Any] | None = None
+    image_setup_type: str = "scratch"
+    vm_ram: int | None = None
+    vm_vcpus: int | None = None
+    vm_disk_size: str | None = None
+    vm_os_variant: str | None = None
+    ssh_pubkey: str | None = None
+    gpu_provisioned: bool | None = None
+    vm_gpu_count: int | None = None
+    vm_gpu_device: str | None = None
+    vm_gpu_devices: list[str] | None = None
+    vm_gpu_partition_size: str | None = None
+    # The accepted snapshot carries the relay reference and the leased port.
+    # The address and token are resolved at execution: this envelope is
+    # persisted and read back, and a token in it would be neither encrypted at
+    # rest nor withheld from a job status response.
+    relay_id: str | None = None
+    vm_remote_port: int | None = None
+    golden_image_name: str | None = None
+    gcs_bucket_url: str | None = None
+    gcs_image_path: str | None = None
+    escrow_uid: str | None = None
+    physical_host_id: str | None = None
+    ssh_user: str | None = None
+    ssh_public_key: str | None = None
+    access_ref: dict[str, Any] | None = None
+    bare_metal_reclaim_policy: str | None = None
+    max_retries: int | None = None
+    playbook_path: str | None = None
+    provider_extra_vars: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnsiblePreparedOperation(BaseModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    action: Literal["create", "teardown"]
+    parameters: AnsiblePreparedJobParameters
+
+
+class AnsibleFulfillmentMetadata(BaseModel):
+    create_job_id: str
+    host_id: str
+    vm_target: str
+    teardown_job_id: str | None = None
+    current_job_id: str
+    operation: Literal["create", "teardown"]

@@ -5,10 +5,10 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from importlib import resources
 from typing import Any
 
 import pytest
-from market_alkahest.dev_chain import anvil_address_book_path
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -44,7 +44,9 @@ pytestmark = [
 ]
 
 _CHAIN_NAME = "anvil"
-_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
+_ALKAHEST_ADDRESSES_PATH = str(
+    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
+)
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
 _MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _ANVIL_GOD_PRIVATE_KEY = (
@@ -295,9 +297,10 @@ def _assert_services_ready(storefront_admin_client, provisioning_client) -> None
     assert "anvil" in ((status.checks or {}).get("alkahest", ""))
 
     provisioning_health = provisioning_client.get_health()
-    assert provisioning_health.status == "ok"
+    assert provisioning_health.get("status") == "ok"
 
-    assert provisioning_client.get_system_status().execution.mocked
+    ansible = provisioning_client.get_ansible_readiness()
+    assert ansible.get("ansible_mode") == "mock"
 
 
 @pytest.mark.parametrize("case", _settlement_cases(), ids=lambda c: c.name)
@@ -344,14 +347,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     eval_result = storefront_admin_client.evaluate_negotiate(
         listing_id,
         proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
-        provision_terms={
-            "kind": "compute.v1",
-            "version": 1,
-            "payload": {
-                "duration_seconds": _DURATION_SECONDS,
-                "ssh_public_key": buyer_config["ssh_public_key"],
-            },
-        },
+        requested_duration_seconds=_DURATION_SECONDS,
         buyer_principal=_signer(
             "eip191",
             settings.BUYER.MARKETPLACE_CREDENTIAL,
@@ -417,17 +413,13 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         rule_id=case.rule_id,
         match={"vm_action": "create"},
         pause_before_result=True,
-        # The create fact the VM playbook prints, with the forwarded port and
-        # the time access became ready: a create reporting neither says
-        # nothing a buyer can use, and fails.
         result_stdout=(
-            'ok: [kvm1] => {\n    "vm_creation_data": '
-            '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
-            '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-            '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+            '{"vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+            '"tenant_ssh_key_path": "/tmp/e2e.key", '
+            '"frp": {"enabled": false}, '
             '"authentication": {"tenant": {"ssh_commands": '
             '{"external": "ssh vmuser@localhost", '
-            '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+            '"internal": "ssh vmuser@10.0.0.1"}}}}'
         ),
         fail_with=None,
     )
@@ -437,7 +429,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         ssh_public_key=buyer_config["ssh_public_key"],
         duration_seconds=_DURATION_SECONDS,
-        negotiation_id=negotiation_id,
     )
     assert evaluate.get("would_submit") is True, evaluate
     host_id = evaluate.get("host_id")
@@ -483,7 +474,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     # claim lease is still live, which is the case straight after a pending
     # poll. See test_full_deal.py's stage 09a.
     provisioning_client.advance_fulfillment_convergence_cycle()
-    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
+    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
     assert fulfillment_status.get("state") == "active", fulfillment_status
 
     wait = storefront_admin_client.wait_for_settlement(escrow_uid, timeout=60.0)

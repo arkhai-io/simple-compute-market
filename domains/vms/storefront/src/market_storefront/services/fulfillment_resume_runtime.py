@@ -17,27 +17,23 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from compute_provisioning_contracts import (
-    FulfillmentRequestBody,
-    FulfillmentScheduleRequest,
-)
+from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
+    VersionedEnvelope,
 )
-from market_core import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
 )
 from market_storefront.services.fulfillment_service import (
-    _fulfillment_result_to_connection,
+    _fulfillment_result_to_legacy_shape,
 )
 from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
-    committed_lease_window,
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -72,33 +68,22 @@ async def _refresh_capacity_lease(
     lease_end_utc: str,
     capacity_client: Any,
     site_id: str,
-) -> tuple[str | None, str] | None:
-    """Commit the deal's window and return the window the site recorded.
-
-    Once the lease is registered, the site keeps its recorded window whatever
-    this commit names, so the returned window, not the one computed here, is
-    what a registration must repeat. ``None`` only when there is nothing to
-    commit (no capacity client or no reservation). A commit that fails, or
-    that records no window, raises: the lease cannot be registered without
-    it, and the deal is not finished until it is, so the pass stops here and
-    the next one retries.
-    """
+) -> None:
     if capacity_client is None or not reservation_id or not resource_id:
-        return None
-    committed = await capacity_client.commit(
-        resource_id=resource_id,
-        capacity_reservation_id=reservation_id,
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-        idempotency_ref=escrow_uid,
-        site_id=site_id,
-    )
-    window = committed_lease_window(committed)
-    if window is None:
-        raise RuntimeError(
-            f"the commit of reservation {reservation_id!r} recorded no lease window"
+        return
+    try:
+        await capacity_client.commit(
+            resource_id=resource_id,
+            capacity_reservation_id=reservation_id,
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+            idempotency_ref=escrow_uid,
+            site_id=site_id,
         )
-    return window
+    except Exception:
+        logger.exception(
+            "[FULFILLMENT_RESUME] Lease refresh failed for escrow %s", escrow_uid
+        )
 
 
 async def _store_fulfillment_credentials(
@@ -120,9 +105,15 @@ async def _store_fulfillment_credentials(
                 role=role,
                 granted_to="self",
                 password=data.get("password"),
-                # A delivery carries each credential's allowlisted fields only:
-                # no key path on a provisioner host, and no commands.
-                key_type=data.get("key_type"),
+                ssh_commands=(
+                    json.dumps(data.get("ssh_commands"))
+                    if data.get("ssh_commands")
+                    else None
+                ),
+                ssh_key_path_host=(
+                    data.get("ssh_key_path_host") if role == "root" else None
+                ),
+                key_type=(data.get("key_type") if role == "tenant" else None),
             )
         except Exception:
             logger.exception(
@@ -140,24 +131,28 @@ async def _register_recovered_vm_lease(
     resource_id: str,
     vm_host: Any,
     vm_target: Any,
-    lease_start_utc: str | None,
+    lease_start_utc: str,
     lease_end_utc: str,
 ) -> None:
     if not (
         register_lease and reservation_id and resource_id and vm_host and vm_target
     ):
         return
-    # A failure propagates: the deal's lease must be registered before its
-    # evidence is published, so the pass stops and the next one retries.
-    await register_lease(
-        resource_id=resource_id,
-        capacity_reservation_id=reservation_id,
-        escrow_uid=escrow_uid,
-        vm_host=str(vm_host),
-        vm_target=str(vm_target),
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-    )
+    try:
+        await register_lease(
+            resource_id=resource_id,
+            capacity_reservation_id=reservation_id,
+            escrow_uid=escrow_uid,
+            vm_host=str(vm_host),
+            vm_target=str(vm_target),
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+        )
+    except Exception:
+        logger.exception(
+            "[FULFILLMENT_RESUME] Provisioning lease registration failed for escrow %s",
+            escrow_uid,
+        )
 
 
 async def _ensure_onchain_fulfillment(
@@ -292,7 +287,7 @@ async def converge_post_physical_delivery(
         start_utc=context.get("start_utc"),
         duration_seconds=int(context.get("duration_seconds") or 3600),
     )
-    committed_window = await _refresh_capacity_lease(
+    await _refresh_capacity_lease(
         escrow_uid=escrow_uid,
         reservation_id=reservation_id,
         resource_id=resource_id,
@@ -307,17 +302,16 @@ async def converge_post_physical_delivery(
         credential_listing_id=context.get("seller_order_id") or listing_id,
         authentication=authentication,
     )
-    if committed_window is not None:
-        await _register_recovered_vm_lease(
-            register_lease=register_lease,
-            escrow_uid=escrow_uid,
-            reservation_id=reservation_id,
-            resource_id=resource_id,
-            vm_host=connection_details.get("host"),
-            vm_target=request.get("vm_target"),
-            lease_start_utc=committed_window[0],
-            lease_end_utc=committed_window[1],
-        )
+    await _register_recovered_vm_lease(
+        register_lease=register_lease,
+        escrow_uid=escrow_uid,
+        reservation_id=reservation_id,
+        resource_id=resource_id,
+        vm_host=connection_details.get("host"),
+        vm_target=request.get("vm_target"),
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+    )
     connection_json = json.dumps(connection_details, sort_keys=True)
     if (
         register_lease is None
@@ -522,12 +516,20 @@ async def _load_active_physical_result(
         raise RuntimeError(
             "physical fulfillment result disagrees with active lifecycle"
         )
-    connection = _fulfillment_result_to_connection(result_envelope)
-    authentication = connection.pop("authentication", None)
+    domain_result = result_payload.domain_result
+    if (
+        domain_result is None
+        or domain_result.kind != "vm.fulfillment.result.v1"
+        or domain_result.schema_version != 1
+        or not isinstance(domain_result.payload, dict)
+    ):
+        raise RuntimeError("physical fulfillment returned an unsupported VM result")
+    legacy = _fulfillment_result_to_legacy_shape(result_envelope)
+    authentication = legacy.pop("authentication", None)
     await persist_escrow_fields_with_retry(
         lambda: sqlite_client,
         escrow_uid=escrow_uid,
-        connection_details=json.dumps(connection, sort_keys=True),
+        connection_details=json.dumps(legacy, sort_keys=True),
         tenant_credentials=(
             json.dumps((authentication or {}).get("tenant") or {}, sort_keys=True)
             if authentication
@@ -535,7 +537,7 @@ async def _load_active_physical_result(
         ),
         fulfillment_phase="physical_result_recorded",
     )
-    return connection, authentication
+    return legacy, authentication
 
 
 async def converge_escrow_once(

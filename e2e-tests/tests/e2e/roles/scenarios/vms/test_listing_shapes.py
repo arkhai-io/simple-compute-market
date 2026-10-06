@@ -152,8 +152,8 @@ class TestStage00_Setup:
         assert shape_state.paused
 
     def test_00b_pool_states_a_shape_and_its_declaration_every_dimension(
-        self, provisioning_client, resource_pool_client, site_capacity_admin_client,
-        storefront_admin_client, shape_state,
+        self, provisioning_client, site_capacity_admin_client, storefront_admin_client,
+        shape_state,
     ):
         require_state(shape_state, "paused")
         provision_e2e_executor(
@@ -172,7 +172,7 @@ class TestStage00_Setup:
             # The region the listing advertises; see the module docstring.
             region=REGION,
         )
-        pool_row = resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
+        pool_row = provisioning_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
         assert pool_row.policy_tags["listing_shapes"] == {"vm": [SHAPE]}
         assert pool_row.policy_tags["region"] == REGION
         sites = refresh_storefront_projections(storefront_admin_client)
@@ -245,17 +245,13 @@ class TestStage03_Provisioning:
             rule_id=CREATE_RULE_ID,
             match={"vm_action": "create", "host_id": E2E_LISTING_SHAPES_HOST},
             pause_before_result=False,
-            # The create fact the VM playbook prints, with the forwarded port and
-            # the time access became ready: a create reporting neither says
-            # nothing a buyer can use, and fails.
             result_stdout=(
-                'ok: [kvm1] => {\n    "vm_creation_data": '
-                '{"action": "create", "vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
-                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
+                '{"vm_name": "e2e-shapes-vm", "tenant_user": "vmuser", '
+                '"tenant_ssh_key_path": "/tmp/e2e-shapes.key", '
+                '"frp": {"enabled": false}, '
                 '"authentication": {"tenant": {"ssh_commands": '
                 '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
+                '"internal": "ssh vmuser@10.0.0.1"}}}}'
             ),
             fail_with=None,
         )
@@ -298,10 +294,12 @@ class TestStage04_Buy:
 
 class TestStage05_Commitment:
     def test_05a_the_reservation_holds_every_declared_quantity(
-        self, site_capacity, shape_state
+        self, provisioning_client, shape_state
     ):
         require_state(shape_state, "escrow_uid")
-        reservations = site_capacity.list_reservations(escrow_uid=shape_state.escrow_uid)
+        reservations = provisioning_client.list_capacity_reservations(
+            escrow_uid=shape_state.escrow_uid
+        ).get("reservations") or []
         assert reservations, f"no reservation for escrow {shape_state.escrow_uid}"
         # The claim requests exactly the shape's quantities: no more, and no
         # dimension the shape omits.
@@ -314,13 +312,12 @@ class TestStage05_Commitment:
         self, provisioning_client, shape_state
     ):
         require_state(shape_state, "reservation_ids")
-        # A fulfillment's jobs are listed by the capacity reservation they serve.
+        # A provisioning job records the capacity reservation it fulfils in its
+        # `escrow_uid` field, not the on-chain escrow.
         jobs = [
             job
             for reservation_id in shape_state.reservation_ids
-            for job in provisioning_client.list_jobs(
-                capacity_reservation_id=reservation_id
-            ).jobs
+            for job in provisioning_client.list_jobs(escrow_uid=reservation_id).jobs
         ]
         creates = [job for job in jobs if job.params.get("vm_action") == "create"]
         assert creates, (

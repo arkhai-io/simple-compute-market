@@ -4,21 +4,19 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from compute_provisioning import (
-    ComputeProvisioningBackgroundTask,
-    DefinitionDocumentContribution,
+from compute_provisioning_service import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
-    JobExecutor,
 )
 
-from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
-from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
+from vm_provisioning_adapter.release import VmReleaseExecutor
+from vm_provisioning_adapter.routers import vm_router_mounts
+from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+    AnsibleFulfillmentProvider,
+)
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
-)
-from vm_provisioning_adapter.services.relay_port_allocator import (
-    release_reservation_ports,
 )
 
 
@@ -30,51 +28,30 @@ ANSIBLE_PROVIDER = "ansible"
 #: to the site ledger, which is built before any provider instance exists;
 #: composition refuses to start if it disagrees with the registered instances.
 HOST_REQUIREMENT = MappingProxyType(
-    {ANSIBLE_PROVIDER: JobFulfillmentProvider.needs_host}
-)
-
-#: Every action a VM job runs, whether submitted through the operator VM and
-#: host routes or by fulfillment create and teardown.
-VM_JOB_ACTIONS = frozenset(
-    {
-        "create",
-        "list",
-        "start",
-        "shutdown",
-        "destroy",
-        "reboot",
-        "undefine",
-        "monitor",
-        "reset_password",
-        "vm_remove",
-        "check",
-    }
+    {ANSIBLE_PROVIDER: AnsibleFulfillmentProvider.needs_host}
 )
 
 
 def build_vm_adapter_bundle(
     *,
-    fulfillment_provider: JobFulfillmentProvider,
+    compute_adapter: VmComputeAdapter,
+    release_executor: VmReleaseExecutor,
+    fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
-    job_executor: JobExecutor,
-    definition_documents: tuple[DefinitionDocumentContribution, ...] = (),
-    background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = (),
+    readiness_check=None,
 ) -> ExecutorAdapterBundle:
-    """VM's contribution. Its relay ports are returned with a reservation's
-    capacity; the relay document and the port reconciliation are built by the
-    runtime from its configuration."""
+    checks = {"ansible": readiness_check} if readiness_check is not None else {}
     return ExecutorAdapterBundle(
         name="vm",
         executors=(
             ExecutorAdapterContribution(
-                offering_mode="vm",
-                job_executors={action: job_executor for action in VM_JOB_ACTIONS},
+                adapter=compute_adapter,
+                action_kinds=frozenset({"create"}),
+                release_executor=release_executor,
             ),
         ),
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},
         pool_config_handlers={ANSIBLE_PROVIDER: pool_config_handler},
-        inventory_views=(AnsiblePoolDefaultsViews(provider=ANSIBLE_PROVIDER),),
-        release_effects=(release_reservation_ports,),
-        definition_documents=definition_documents,
-        background_tasks=background_tasks,
+        router_mounts=vm_router_mounts(),
+        readiness_checks=checks,
     )

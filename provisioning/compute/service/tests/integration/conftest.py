@@ -29,7 +29,6 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
@@ -51,20 +50,11 @@ from market_identity import (
 )
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_adapter.services.relay_port_allocator import (
+from compute_provisioning_service.services.relay_port_allocator import (
     RelayPortAllocator,
 )
-from vm_provisioning_adapter.services.relay_service import RelayService
-from compute_provisioning.executor_leases import ExecutorLeaseService
-from compute_provisioning.leases import LeaseRouteService
-from compute_provisioning.release import (
-    FulfillmentReleaseExecutor,
-    FulfillmentReleaseGuard,
-    FulfillmentReleaseStatusPort,
-    FulfillmentServiceTeardownPort,
-)
-from market_fulfillment import SettlementRepository
-from vm_provisioning_operator import VmOperatorClient
+from compute_provisioning_service.services.relay_service import RelayService
+from vm_provisioning_operator import ProvisioningClient
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
@@ -72,11 +62,7 @@ from compute_provisioning_service.db.database import create_session_factory
 
 from compute_provisioning_service.db.models import Base
 
-from compute_provisioning_ansible.host_import import AnsibleHostImportClient
-from compute_provisioning_client import ComputeProvisioningClient
-from market_resource_pools_client import ResourcePoolClient
-from market_site_client import SiteCapacityAdminClient, SiteCapacityClient
-from compute_provisioning_contracts import (
+from compute_provisioning.client import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -84,8 +70,9 @@ from compute_provisioning_contracts import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
+    canonical_provisioning_request_body,
+    resolve_provisioning_route_contract,
 )
-from compute_provisioning_service.route_table import canonical_request_body
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
@@ -95,9 +82,6 @@ from compute_provisioning_service.services.principal_authority import (
 )
 
 
-# A deterministic development Fernet key (32 zero bytes) for this test suite
-# only; it protects nothing and must never be used on any real deployment.
-TEST_CONNECTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 SERVICE_SIGNER = Ed25519Signer(b"\x11" * 32)
 STOREFRONT_SIGNER = Ed25519Signer(b"\x12" * 32)
 ADMIN_SIGNER = Ed25519Signer(b"\x13" * 32)
@@ -105,47 +89,6 @@ SERVICE_AUTHORITIES = TrustedIdentitySet(
     identities=(SERVICE_SIGNER.identity,)
 )
 
-
-
-@dataclass(frozen=True)
-class ProvisioningClients:
-    """The canonical typed clients for every owner whose routes the service serves.
-
-    Each signs as the administrator and verifies the service's signed responses.
-    ``family`` is the compute family's client, and the domain, implementation,
-    and pool clients wrap its transport; the site clients sign the site's
-    capacity routes from the site's own contracts.
-    """
-
-    family: ComputeProvisioningClient
-    vm: VmOperatorClient
-    pools: ResourcePoolClient
-    host_import: AnsibleHostImportClient
-    site: SiteCapacityClient
-    site_admin: SiteCapacityAdminClient
-
-def provisioning_clients(transport) -> ProvisioningClients:
-    """Every canonical client over one in-process transport, signed as admin."""
-
-    family = ComputeProvisioningClient(
-        "http://test",
-        signer=ADMIN_SIGNER,
-        caller_role="admin",
-        expected_authorities=SERVICE_AUTHORITIES,
-        transport=transport,
-    )
-    return ProvisioningClients(
-        family=family,
-        vm=VmOperatorClient(family),
-        pools=ResourcePoolClient(family),
-        host_import=AnsibleHostImportClient(family),
-        site=SiteCapacityClient(
-            "http://test", ADMIN_SIGNER, SERVICE_AUTHORITIES, transport=transport, caller_role="admin"
-        ),
-        site_admin=SiteCapacityAdminClient(
-            "http://test", ADMIN_SIGNER, SERVICE_AUTHORITIES, transport=transport, caller_role="admin"
-        ),
-    )
 
 def _install_signed_asgi_transport(monkeypatch) -> None:
     original = ASGITransport.handle_async_request
@@ -172,14 +115,16 @@ def _install_signed_asgi_transport(monkeypatch) -> None:
         for key in sorted(set(request.url.params.keys())):
             values = request.url.params.get_list(key)
             query[key] = values[0] if len(values) == 1 else values
-        body = canonical_request_body(
+        body = canonical_provisioning_request_body(
             request.method,
             request.url.path,
             body,
             query=query,
         )
-        route, resource = provisioning_route_table.resolve(
-            request.method, request.url.path, body
+        route, resource = resolve_provisioning_route_contract(
+            request.method,
+            request.url.path,
+            body,
         )
         signer = ADMIN_SIGNER if route.required_role == "admin" else STOREFRONT_SIGNER
         authenticated = sign_request(
@@ -292,45 +237,6 @@ class AsyncProvisioningTestClient:
         """POST /test/mock-rules/{rule_id}/resume"""
         return await self._post(f"/test/mock-rules/{rule_id}/resume")
 
-    async def add_bare_metal_mock_rule(
-        self,
-        *,
-        rule_id: str = "",
-        match: dict | None = None,
-        pause_before_result: bool = False,
-        result_stdout: str | None = None,
-        fail_with: str | None = None,
-    ) -> dict:
-        """POST /test/bare-metal/mock-rules"""
-        body: dict = {
-            "rule_id": rule_id,
-            "match": match or {},
-            "pause_before_result": pause_before_result,
-        }
-        if result_stdout is not None:
-            body["result_stdout"] = result_stdout
-        if fail_with is not None:
-            body["fail_with"] = fail_with
-        return await self._post("/test/bare-metal/mock-rules", body)
-
-    async def list_bare_metal_mock_rules(self) -> list[dict]:
-        """GET /test/bare-metal/mock-rules"""
-        return await self._get("/test/bare-metal/mock-rules")  # type: ignore[return-value]
-
-    async def delete_bare_metal_mock_rule(self, rule_id: str) -> dict:
-        """DELETE /test/bare-metal/mock-rules/{rule_id}"""
-        return await self._delete(f"/test/bare-metal/mock-rules/{rule_id}")
-
-    async def resume_bare_metal_rule(self, rule_id: str) -> dict:
-        """POST /test/bare-metal/mock-rules/{rule_id}/resume"""
-        return await self._post(f"/test/bare-metal/mock-rules/{rule_id}/resume")
-
-    async def evaluate_bare_metal_job(self, host: str, *, action: str) -> dict:
-        """POST /test/bare-metal/evaluate-job"""
-        return await self._post(
-            "/test/bare-metal/evaluate-job", {"host": host, "action": action}
-        )
-
     async def job_summary(self) -> dict:
         """GET /test/jobs/summary"""
         return await self._get("/test/jobs/summary")
@@ -364,28 +270,21 @@ class AsyncProvisioningTestClient:
         if ssh_pubkey is not None:
             body["ssh_pubkey"] = ssh_pubkey
         return await self._post("/test/evaluate-job", body)
-from compute_provisioning_service.main import app, provisioning_route_table
-from compute_provisioning_ansible.runner import AnsibleRunner
-from compute_provisioning_ansible.runner import AnsibleResult, AnsibleRun
-from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning.hosts import ConnectionCodecs
-from compute_provisioning.hosts.service import HostAuthority
-from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_service.main import app
+from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
+from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from vm_provisioning_adapter.services.host_service import HostService
 from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
 )
-from vm_provisioning_adapter.codec import VmAnsibleCodec
-from compute_provisioning.jobs.engine import JobEngine
-from compute_provisioning_ansible import probe_connectivity
-from compute_provisioning_service.services.job_retry import retry_policy_from
-from compute_provisioning_ansible import MockAnsibleRunner
-from vm_provisioning_adapter.services.mock_output import vm_mock_output
-from compute_provisioning_service.services.system_status import SystemStatusService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
+from vm_provisioning_adapter.services.system_service import SystemService
 
 
 # ---------------------------------------------------------------------------
 # Representative playbook stdout for a successful vm_create job.
-# Contains a vm_creation_data JSON block that the VM codec
+# Contains a vm_creation_data JSON block that AnsibleService.parse_playbook_result
 # will extract into the job result.  Credentials are embedded so the credential
 # storage path is exercised.
 # ---------------------------------------------------------------------------
@@ -430,18 +329,9 @@ ok: [kvm1] => {
 
 
 def _initialize_test_database(engine):
-    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
+    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
-    # VM's relay and pool-configuration tables ride VM's own metadata.
-    from vm_provisioning_adapter.db import Base as VmBase
-    VmBase.metadata.create_all(bind=engine)
-    # The host registry rides the host authority's own metadata.
-    from compute_provisioning.hosts.db import Base as HostsBase
-    HostsBase.metadata.create_all(bind=engine)
-    # So do the job authority's tables.
-    from compute_provisioning.jobs.db import Base as JobsBase
-    JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
@@ -450,7 +340,7 @@ def _initialize_test_database(engine):
     # scheduling_cursors) ride market_fulfillment's own metadata.
     from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
-    # The host authority requires pool_id to reference an existing pool. The real
+    # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
     # fixture builds schema directly rather than through the migration.
@@ -495,64 +385,10 @@ def session_factory(db_engine):
 # ---------------------------------------------------------------------------
 
 
-
-@pytest.fixture
-def bare_metal_runner(fake_ansible):
-    """What runs bare-metal jobs; a module overrides it to use the real mock."""
-    return fake_ansible
-
-
-@pytest.fixture
-def job_executor_table_for():
-    """Build a frozen job executor table routing every action to one runner."""
-    return _job_executor_table
-
-
-def _ansible_executors(runner, settings, bare_metal_runner=None):
-    """VM's and bare metal's Ansible executors, each with its mode's playbook,
-    as their runtimes build them: VM's over ``runner``, bare metal's over
-    ``bare_metal_runner`` (``runner`` when absent)."""
-    from compute_provisioning_ansible import AnsibleJobExecutor
-    from vm_provisioning_adapter.codec import VmAnsibleCodec
-    from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-
-    vm = AnsibleJobExecutor(
-        runner,
-        VmAnsibleCodec(),
-        settings.resolved_playbook_path,
-        timeout_seconds=settings.ansible_timeout_seconds,
-        additional_non_retryable_errors=settings.additional_non_retryable_errors,
-    )
-    bare_metal = AnsibleJobExecutor(
-        bare_metal_runner if bare_metal_runner is not None else runner,
-        BareMetalAnsibleCodec(),
-        settings.resolved_bare_metal_playbook_path,
-        timeout_seconds=settings.ansible_timeout_seconds,
-        additional_non_retryable_errors=settings.additional_non_retryable_errors,
-    )
-    return vm, bare_metal
-
-
-def _job_executor_table(runner, settings, bare_metal_runner=None):
-    """A frozen table registering every VM and bare-metal job action, as
-    composition registers them in the service."""
-    from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
-    from compute_provisioning import JobExecutorTable
-    from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
-
-    vm, bare_metal = _ansible_executors(runner, settings, bare_metal_runner)
-    table = JobExecutorTable()
-    for action in VM_JOB_ACTIONS:
-        table.register("vm", action, vm)
-    for action in BARE_METAL_ACCESS_ACTIONS:
-        table.register("bare_metal", action, bare_metal)
-    table.freeze()
-    return table
-
 @pytest.fixture
 def fake_ansible() -> MagicMock:
-    """Ansible runner mock with a successful create playbook response."""
-    mock = MagicMock(spec=AnsibleRunner)
+    """AnsibleService mock with a successful create playbook response."""
+    mock = MagicMock(spec=AnsibleService)
 
     fake_run = AnsibleRun(
         process=MagicMock(),
@@ -565,20 +401,22 @@ def fake_ansible() -> MagicMock:
         process_id=99999,
     )
 
+    mock.build_vars_file.return_value = Path("/tmp/fake_vars.yml")
     mock.start_playbook.return_value = fake_run
-    # The codec interprets this output as it would a real run's.
     mock.wait_for_playbook = AsyncMock(return_value=fake_result)
 
-    # write_inventory — a materialized inventory the caller cleans up (content
-    # irrelevant; Ansible never runs)
+    # parse_playbook_result uses real logic — delegate to a real instance.
+    real_ansible_impl = AnsibleService(MagicMock())
+    mock.parse_playbook_result.side_effect = real_ansible_impl.parse_playbook_result
+
+    # write_inventory — return a temp path (content irrelevant; Ansible never runs)
     import tempfile
-    from compute_provisioning_ansible.runner import MaterializedInventory
     fake_inv_tmp = Path(tempfile.gettempdir()) / "test_inventory.ini"
     fake_inv_tmp.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
-    mock.write_inventory.return_value = MaterializedInventory(path=fake_inv_tmp)
+    mock.write_inventory.return_value = fake_inv_tmp
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
-    from compute_provisioning_contracts import ConnectivityResult
+    from vm_provisioning_adapter.models.ansible import ConnectivityResult
     from unittest.mock import AsyncMock as _AsyncMock
     mock.check_connectivity_with_inventory = _AsyncMock(
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="mock ping ok")
@@ -594,9 +432,8 @@ def fake_ansible() -> MagicMock:
 async def client_and_queue(
     session_factory,
     fake_ansible,
-    bare_metal_runner,
     monkeypatch,
-) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
+) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
 
     _install_signed_asgi_transport(monkeypatch)
@@ -607,7 +444,7 @@ async def client_and_queue(
         retry_backoff_multiplier=2.0,
         retry_backoff_max_seconds=3600,
         ansible_timeout_seconds=30,
-        additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
+        non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",
@@ -644,68 +481,38 @@ async def client_and_queue(
     # The providers' host requirement exactly as the production container
     # builds it, so admission and scheduling here refuse what they refuse there.
     host_requirement = _container_module.Container.host_requirement()
-    # The release-effect registry exactly as the production container builds
-    # it, filled and frozen by composing the bundles below and run by the
-    # ledger whenever it releases capacity.
-    release_effects = _container_module._make_release_effects()
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
-        # The release guard exactly as the production container composes it,
-        # so capacity is freed here only on the proof it needs there.
-        release_guard=FulfillmentReleaseGuard(SettlementRepository()),
-        release_effect=release_effects,
     )
 
-    host_authority = HostAuthority(
-        session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
+    host_service = HostService(
+        session_factory=session_factory,
+        settings=mock_settings,
         capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
-        # The pool-change hooks exactly as the production container merges them,
-        # so a move refused there is refused here, by every host route.
-        pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
     )
 
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
-    resource_pool_service_handlers = {
-        "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
-        "bare_metal.ansible": BareMetalPoolConfigHandler(),
-    }
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
         # Both adapter bundles' handlers, as a composition carrying both
         # registers them: the bare-metal provider takes no pool-local
         # configuration, which is what lets a pool name a provider without
         # fabricating execution settings.
-        handlers=resource_pool_service_handlers,
+        handlers={
+            "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
+            "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        },
     )
 
-    # The one job authority and host authority the composition root builds.
-    # The executor table starts empty, as there: composing the adapter bundles
-    # below fills and freezes it.
-    from compute_provisioning import JobExecutorTable
-    job_executor_table = JobExecutorTable()
-    job_engine = JobEngine(
-        session_factory,
-        executors=job_executor_table,
-        host_lookup=host_authority.lookup,
-        retry_policy=retry_policy_from(mock_settings),
+    job_service = AnsibleJobService(
+        settings=mock_settings,
+        session_factory=session_factory,
+        ansible_service=fake_ansible,
+        host_service=host_service,
     )
-    from compute_provisioning.jobs.submission import JobSubmissionService
-    # Every job's submission, as the container builds it; the queue is read
-    # when a job is submitted, after it is created below.
-    job_submission = JobSubmissionService(
-        engine=job_engine,
-        hosts=host_authority,
-        job_queue_provider=lambda: job_queue,
-    )
-
-    async def probe_ssh(host):
-        return await probe_connectivity(fake_ansible, host)
-
-    connectivity_probes = {"ssh": probe_ssh}
 
     from market_fulfillment import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
@@ -725,85 +532,75 @@ async def client_and_queue(
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
+    from bare_metal_provisioning_adapter.services.bare_metal_lease_service import BareMetalLeaseService
+    bare_metal_lease_service = BareMetalLeaseService(site_authority)
+
+    from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
+    bare_metal_operations_service = BareMetalOperationsService(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+        settings=mock_settings,
+        host_service=host_service,
+    )
 
     from market_fulfillment import (
         FulfillmentOrchestrator,
+        ProviderRegistry,
+        SettlementRepository,
         SqlAlchemyFulfillmentUnitOfWork,
     )
-    from compute_provisioning.job_fulfillment import JobFulfillmentProvider
-    from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
-    # VM's relay administration and its one port allocator, as VM's runtime
-    # builds them: the relay table is the thing under test in the relay suite,
-    # and the allocator is what fulfillment leases through and the terminal
-    # effect releases through.
-    relay_port_allocator = RelayPortAllocator(session_factory)
-    relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
-
-    ansible_fulfillment_provider = JobFulfillmentProvider(
-        plan=VmFulfillmentPlan(
-            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
-            # Without this a relay-backed pool cannot lease a port, so every
-            # relay-backed fulfillment is rejected as invalid provider
-            # configuration — which reads as a bad request rather than as a
-            # harness that cannot reach the path.
-            port_allocator=relay_port_allocator,
-        ),
-        submission=job_submission,
-        jobs=job_engine,
+    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+        # Without this a relay-backed pool cannot lease a port, so every
+        # relay-backed fulfillment is rejected as invalid provider
+        # configuration — which reads as a bad request rather than as a
+        # harness that cannot reach the path.
+        port_allocator=RelayPortAllocator(session_factory),
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
         pool_service=resource_pool_service,
-        # As production composes it: a dispatch records its create handle on
-        # the reservation, which the release guard reads as provenance.
-        capacity_ledger=capacity_ledger_service,
-    )
-    from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
-        BareMetalFulfillmentPlan,
-    )
-    from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
-    from compute_provisioning import compose_adapter_bundles
-    from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
-
-    # Both adapter bundles composed as the container composes them: their
-    # executors fill the job table, and their providers, pool handlers, and
-    # inventory views are what the routes and the status read.
-    vm_executor, bare_metal_executor = _ansible_executors(
-        fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
-    )
-    composed_adapters = compose_adapter_bundles(
-        [
-            build_vm_adapter_bundle(
-                fulfillment_provider=ansible_fulfillment_provider,
-                pool_config_handler=resource_pool_service_handlers["ansible"],
-                job_executor=vm_executor,
-            ),
-            build_bare_metal_adapter_bundle(
-                fulfillment_provider=JobFulfillmentProvider(
-                    plan=BareMetalFulfillmentPlan(
-                        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
-                    ),
-                    submission=job_submission,
-                    jobs=job_engine,
-                ),
-                pool_config_handler=resource_pool_service_handlers["bare_metal.ansible"],
-                job_executor=bare_metal_executor,
-            ),
-        ],
-        host_requirement=host_requirement,
-        job_executors=job_executor_table,
-        release_effects=release_effects,
     )
     fulfillment_service = FulfillmentOrchestrator(
-        provider_registry=composed_adapters.provider_registry,
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
         unit_of_work=fulfillment_unit_of_work,
     )
 
-    teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
+    from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+    from vm_provisioning_adapter.release import (
+        VM_OFFERING_MODE,
+        FulfillmentServiceTeardownPort,
+        VmFulfillmentReleaseJobPort,
+        VmReleaseExecutor,
+    )
+    from bare_metal_provisioning_adapter.release import (
+        BARE_METAL_OFFERING_MODE,
+        BareMetalReleaseExecutor,
+    )
+    release_dispatcher = ExecutorReleaseDispatcher({
+        BARE_METAL_OFFERING_MODE: BareMetalReleaseExecutor(
+            release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
+        ),
+        VM_OFFERING_MODE: VmReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+    })
+    release_job_dispatcher = ReleaseJobDispatcher({
+        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
+            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+        ),
+        BARE_METAL_OFFERING_MODE: job_service,
+    })
 
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
     from compute_provisioning_service.services.deal_event_sink import (
@@ -814,12 +611,8 @@ async def client_and_queue(
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_authority=site_authority,
-        release_executor=FulfillmentReleaseExecutor(
-            settlement_repository=SettlementRepository(),
-            session_factory=session_factory,
-            teardown_port=teardown_port,
-        ),
-        release_status=FulfillmentReleaseStatusPort(teardown_port),
+        release_jobs=release_job_dispatcher,
+        executor_release=release_dispatcher,
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
     )
@@ -835,50 +628,42 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
-        codec=VmAnsibleCodec(),
-        host_authority=host_authority,
+        host_service=host_service,
         pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
-        job_engine=job_engine,
-        job_submission=job_submission,
-        vm_operations_service=VmOperationsService(submission=job_submission),
-        host_operations_service=HostOperationsService(submission=job_submission),
-        relay_port_allocator=relay_port_allocator,
-        relay_service=relay_service,
+        job_service=job_service,
+        vm_operations_service=VmOperationsService(
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+        host_operations_service=HostOperationsService(
+            ansible_service=fake_ansible,
+            host_service=host_service,
+            job_service=job_service,
+            job_queue_provider=lambda: job_queue,
+        ),
+        settlement_repository=SettlementRepository(),
+        teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
     )
 
-    from compute_provisioning_service.services.fulfillment_convergence import (
-        FulfillmentConvergenceWatchdog,
-    )
-    fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
-        session_factory=session_factory,
-        repository=SettlementRepository(),
-        provider_registry=composed_adapters.provider_registry,
+    system_service = SystemService(
+        ansible_service=fake_ansible,
         settings=mock_settings,
-    )
-    # Status composed as production composes it: the composed executor table,
-    # the lease lifecycle, and the readiness components the container builds.
-    system_status_service = SystemStatusService(
-        settings=mock_settings,
+        host_service=host_service,
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
-        lease_lifecycle=lease_lifecycle_service,
-        job_executors=job_executor_table,
-        components=_container_module._make_status_components(
-            job_executor_table, host_authority
-        ),
-        identity_resolver=lambda: identity_context,
+        lease_lifecycle_service=lease_lifecycle_service,
     )
 
     # Override container providers
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
-    app.container.job_engine.override(job_engine)
-    app.container.system_status_service.override(system_status_service)
+    app.container.job_service.override(job_service)
+    app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
-    app.container.host_authority.override(host_authority)
-    app.container.connectivity_probes.override(connectivity_probes)
+    app.container.host_service.override(host_service)
     app.container.site_authority.override(site_authority)
-    app.container.job_submission.override(job_submission)
+    app.container.bare_metal_lease_service.override(bare_metal_lease_service)
+    app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
     app.container.resource_pool_service.override(resource_pool_service)
@@ -891,27 +676,25 @@ async def client_and_queue(
     app.container.provisioning_replay_store.override(replay_store)
     app.container.capacity_release_outbox.override(capacity_release_outbox)
     # Wire resolved module-level variables
-    _container_module.resolved_job_engine = job_engine
+    _container_module.resolved_job_service = job_service
     _container_module.resolved_session_factory = session_factory
     _container_module.resolved_ansible_service = fake_ansible
-    _container_module.resolved_system_status_service = system_status_service
-    _container_module.resolved_inventory_views = composed_adapters.inventory_views
-    _container_module.resolved_definition_documents = (
-        composed_adapters.definition_documents
-    )
-    _container_module.resolved_background_tasks = composed_adapters.background_tasks
-    _container_module.resolved_fulfillment_convergence_watchdog = (
-        fulfillment_convergence_watchdog
-    )
-    _container_module.resolved_host_authority = host_authority
-    _container_module.resolved_connectivity_probes = connectivity_probes
-    _container_module.resolved_bare_metal_mock_executor = (
-        bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
-    )
+    _container_module.resolved_system_service = system_service
+    _container_module.resolved_host_service = host_service
+    _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
+    _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
     _container_module.resolved_resource_pool_service = resource_pool_service
-    _container_module.resolved_relay_service = relay_service
+    # Relay administration and port accounting. Real services over the test
+    # session factory: the relay table is the thing under test in the relay
+    # suite, and the allocator is what the convergence path releases through.
+    _container_module.resolved_relay_service = RelayService(
+        session_factory=session_factory, settings=mock_settings
+    )
+    _container_module.resolved_relay_port_allocator = RelayPortAllocator(
+        session_factory
+    )
     _container_module.resolved_physical_settlement_scheduler = (
         physical_settlement_scheduler
     )
@@ -922,35 +705,60 @@ async def client_and_queue(
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
-    executor_lease_service = ExecutorLeaseService(site_authority)
-    _container_module.resolved_executor_lease_service = executor_lease_service
-    _container_module.resolved_lease_route_service = LeaseRouteService(
-        executor_lease_service, lease_lifecycle_service
+    from compute_provisioning import ExecutorAdapterRegistry
+    from compute_provisioning.executor_leases import ExecutorLeaseService
+    from compute_provisioning_service.services.compute_contract_service import ComputeContractService
+    from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
+    from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
+    _container_module.resolved_executor_lease_service = ExecutorLeaseService(
+        site_authority
+    )
+    _container_module.resolved_compute_contract_service = ComputeContractService(
+        site_authority=site_authority,
+        job_service=job_service,
+        adapters=ExecutorAdapterRegistry(
+            [
+                VmComputeAdapter(
+                    site_authority,
+                    _container_module.resolved_vm_operations_service,
+                ),
+                BareMetalComputeAdapter(
+                    site_authority,
+                    bare_metal_operations_service,
+                ),
+            ]
+        ),
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
-        job_queue.start(job_engine.process_job),
+        job_queue.start(job_service._process_job),
         name="test-job-processing-loop",
     )
 
     transport = ASGITransport(app=app)
 
-    # Mount each adapter's test routes unless ``main.py`` already did: it
-    # mounts them only when the mock profile is active at import, and the suite
-    # must behave the same however pytest is invoked.
-    from compute_provisioning_service.main import _bare_metal_mock_router, _vm_mock_router
+    # Mount the test controller if not already present.
+    from vm_provisioning_adapter.controllers.test_controller import (
+        make_router as _make_test_router,
+    )
+    _already_mounted = any(
+        getattr(route, "path", "").startswith("/test")
+        for route in app.routes
+    )
+    if not _already_mounted:
+        app.include_router(_make_test_router())
 
-    _mounted_paths = {getattr(route, "path", "") for route in app.routes}
-    for _test_router in (_vm_mock_router(), _bare_metal_mock_router()):
-        if not {route.path for route in _test_router.routes} <= _mounted_paths:
-            app.include_router(_test_router)
-
-    clients = provisioning_clients(transport)
+    client = ProvisioningClient(
+        "http://test",
+        signer=ADMIN_SIGNER,
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=transport,
+    )
     try:
-        yield clients, job_queue
+        yield client, job_queue
     finally:
-        await clients.family.close()
+        await client.close()
 
     processing_task.cancel()
     try:
@@ -965,13 +773,13 @@ async def client_and_queue(
     # Reset container overrides
     app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()
-    app.container.job_engine.reset_override()
-    app.container.system_status_service.reset_override()
+    app.container.job_service.reset_override()
+    app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
-    app.container.host_authority.reset_override()
-    app.container.connectivity_probes.reset_override()
+    app.container.host_service.reset_override()
     app.container.site_authority.reset_override()
-    app.container.job_submission.reset_override()
+    app.container.bare_metal_lease_service.reset_override()
+    app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
     app.container.fulfillment_service.reset_override()
@@ -984,7 +792,9 @@ async def test_client(client_and_queue) -> AsyncIterator[AsyncProvisioningTestCl
     Depends on client_and_queue to ensure the full service stack (including
     the test controller router) is mounted and the container is wired.
     """
-    programmable_mock = MockAnsibleRunner(default_output=vm_mock_output)
+    job_service = _container_module.resolved_job_service
+    mock_settings = getattr(job_service, "_settings", MagicMock())
+    programmable_mock = ProgrammableMockAnsibleService(mock_settings)
 
     original_ansible = _container_module.resolved_ansible_service
     _container_module.resolved_ansible_service = programmable_mock

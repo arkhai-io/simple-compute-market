@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from market_core.schemas import SettlementOption, SettlementSelection
 
 from .provision_terms import VM_PROVISION_KIND, VmProvisionTerms
@@ -149,32 +149,6 @@ class VmReceipt(BaseModel):
         ):
             raise ValueError("lease_start_utc must be before lease_end_utc")
         return self
-
-
-class VmConnectionDetails(BaseModel):
-    """How a buyer reaches a delivered VM, as its storefront records the deal.
-
-    The delivery's SSH endpoint (host, port, and tenant account), when access
-    became ready, and the provisioned resources' identities: nothing else, so no
-    guest name, host-internal address, or key path. A record from before
-    deliveries said where to connect may lack a field; it is omitted rather than
-    filled with an address that never granted access.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    host: str | None = Field(default=None, min_length=1)
-    port: int | None = Field(default=None, ge=1, le=65535)
-    user: str | None = Field(default=None, min_length=1)
-    ready_at: datetime | None = None
-    provisioned_resource_ids: tuple[str, ...] = ()
-
-    @property
-    def connect(self) -> str | None:
-        """The SSH command line, when the record names all three of its parts."""
-        if self.host and self.port and self.user:
-            return f"ssh -p {self.port} {self.user}@{self.host}"
-        return None
 
 
 class VmResult(BaseModel):
