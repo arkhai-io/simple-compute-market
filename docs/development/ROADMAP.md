@@ -220,6 +220,7 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 | Open gap | Owned by |
 |---|---|
 | Live Arkhai payment and domain delivery qualification | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Spot / interruptible deals on payment rate parts, with teardown on stop | [`spot-deals-through-arkhai-payments`](../../openspec/changes/spot-deals-through-arkhai-payments/) |
 | Isolate escrow carriers and the conditional-escrow port fully within Alkahest | Unowned follow-up; deferred scope in [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
