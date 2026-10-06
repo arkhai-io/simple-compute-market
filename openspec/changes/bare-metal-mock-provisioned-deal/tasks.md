@@ -2515,16 +2515,98 @@ re-verifies them by grep before each move.
       Status 2026-10-05: the suites, packaging, and hygiene are 5B.10's validation, on
       the tree this gate covers; the two lanes await a run on the 5B.10 checkpoint
       (9.B's run, 37342659408, preceded 5B.10's address-book move).
-- [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
-      provider shape — prepare a domain job from the settlement resource, submit, map job
-      status to fulfillment status, read the result and credential envelopes —
-      implementing `kit/fulfillment`'s provider protocol over the job authority.
-      `vm_provisioning_adapter/services/ansible_fulfillment_provider.py` and
-      `bare_metal_provisioning_adapter/services/bare_metal_fulfillment_provider.py` keep
-      only their job preparation and result mapping. Tests: the helper against fake
-      preparation and mapping in `provisioning/compute/tests/unit/`; both providers'
-      existing suites pass unchanged. Gate: the provisioning-family suites,
-      `make check-packaging`, the VM lane, and the bare-metal publication lane.
+- [ ] 5B.12 Job-backed fulfillment. Re-planned 2026-10-05 before implementation, after the
+      design review (`design.md`, "Job-backed fulfillment (5B.12)"): the family owns the
+      whole job-backed provider and one delivery envelope; domains contribute preparation
+      and their codec's output. Three slices, each keeping both end-to-end lanes green, so
+      a domain's producer and its storefront consumer move together.
+  - [ ] 5B.12.A The family provider and delivery envelope; bare metal end to end.
+        - Contracts (`provisioning/compute/contracts/src/compute_provisioning_contracts/`):
+          new `delivery.py`: the access delivery (provisioned resources, endpoints,
+          credentials by role, `ready_at`) under its own kind and schema version.
+        - Family kit (`provisioning/compute/src/compute_provisioning/`): new
+          `job_fulfillment.py`: the prepared job (offering mode, action, `host_id`,
+          `executor_target`, opaque parameters, escrow reference), the domain's plan
+          protocol (prepare create, prepare teardown), the fulfillment metadata
+          (`create_job_id`, `teardown_job_id`, `current_job_id`, `operation`, `host_id`,
+          `executor_target`), the status table on `JobStatus`, submission (one host check,
+          the operation id from the contract's idempotency key), and
+          `JobFulfillmentProvider`, implementing `kit/fulfillment`'s provider protocol
+          over the job authority: the prepared-operation envelope and its decoding,
+          dispatch, status, provisioned-resource resolution from `executor_target`,
+          `resolve_executor_job_id`, and the delivery assembled from the create job's
+          result and an allowlist of its credentials' fields.
+        - Bare metal: `services/bare_metal_fulfillment_provider.py` becomes the plan
+          (`services/bare_metal_fulfillment_plan.py`: publication and lease binding,
+          preparation), the provider file tombstoned; `services/bare_metal_operations_service.py`
+          tombstoned if nothing but the provider uses it; `codec.py` emits the delivery's
+          neutral fields; `runtime.py` and `bundle.py` build the family provider over the
+          plan; `arkhai_bare_metal.schema.BareMetalAccessResult` deleted.
+        - Bare-metal storefront: `hosted_lifecycle.py` reads the access delivery and
+          treats an active fulfillment naming an endpoint as access-ready; `models.py` and
+          `sqlite_client.py` follow.
+        - Tests: `provisioning/compute/tests/unit/test_job_fulfillment.py` (the provider
+          against a fake plan and a fake job authority: dispatch, the operation id, the host
+          check, status for every `JobStatus`, an undecodable envelope, credentials'
+          allowlist), the contracts test for the delivery; the service's bare-metal
+          fulfillment through the real orchestrator and convergence
+          (`integration/bare_metal_deal.py` and the suites using it); the bare-metal
+          adapter's tests rewritten to the plan; the bare-metal storefront's
+          `test_hosted_lifecycle.py`, `test_hosted_lifecycle_repository.py`,
+          `test_fulfillment_service.py`, `test_http_settlement.py`, `test_persistence.py`;
+          `domains/bare_metal/tests/test_schema.py`, `test_domain_runtime.py`.
+  - [ ] 5B.12.B VM end to end, with the migration.
+        - VM adapter: `services/ansible_fulfillment_provider.py` becomes the plan
+          (`services/vm_fulfillment_plan.py`: the relay-port lease, playbook override, and
+          extra-vars validation), the provider file tombstoned; `services/job_submitter.py`
+          tombstoned, `services/vm_operations_service.py`, `services/host_operations_service.py`,
+          `models/vm_request_model.py`, `legacy_backfill.py`, and `runtime.py` submitting
+          through the family; `fulfillment_results.py` tombstoned; `codec.py` emits the
+          delivery's neutral fields, keeping the guest's internal address in the stored
+          result only; `legacy_backfill.py` writes the family's shapes.
+        - Service: a migration in `db/migrations.py` rewriting VM's stored prepared
+          operations and fulfillment metadata, and the create-job results of active VM
+          fulfillments, into the family's shapes (bare metal is not live and is not
+          migrated).
+        - VM storefront: `services/fulfillment_resume_runtime.py` and
+          `services/fulfillment_service.py` read the access delivery (tenant credentials to
+          the buyer, root to the seller's own store; no key path, internal address, or
+          guest name).
+        - Tests: the migration (`provisioning/compute/service/tests/unit/test_job_fulfillment_migration.py`:
+          each stored shape rewritten, an inactive fulfillment's result left alone,
+          idempotent on a second run); `test_legacy_vm_fulfillment_backfill.py` and
+          `test_fulfillment_convergence_after_legacy_backfill.py` on the new shapes;
+          `unit/services/test_ansible_fulfillment_provider.py` rewritten to the plan;
+          `integration/test_fulfillment_api.py`; the VM storefront's
+          `tests/fulfillment_fixtures.py`, `unit/test_fulfillment_provisioning.py`,
+          `unit/test_fulfillment_resume_runtime.py`, `unit/test_fulfillment_service.py`,
+          `unit/test_loop_gate_wiring.py`, `integration/test_committed_window.py`;
+          `e2e-tests/tests/unit/test_domain_deal_helper.py` and the VM scenarios reading
+          delivered credentials.
+  - [ ] 5B.12.C Provisioning names the guest; lease registration takes its target from the
+        fulfillment.
+        - VM's plan derives `executor_target` from the capacity reservation, checked
+          against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
+          `vm_target`.
+        - Contracts: `LeaseRegistration` loses `executor_target`; the family lease service
+          (`provisioning/compute/src/compute_provisioning/leases.py`) takes it from the
+          reservation's fulfillment record.
+        - VM storefront: the three generators go (`services/vm_fulfillment_service.py`,
+          `services/admin_settle_service.py`, `services/vm_job_spec_service.py`); its
+          `vm_target` column is filled from the fulfillment; `models/capacity_admin_models.py`
+          and `controllers/admin_controller.py` drop the field; admin settle's evaluate
+          response stops returning it. Bare-metal storefront: `hosted_lifecycle.py` stops
+          passing a target.
+        - Tests: the derivation (stable per reservation, distinct across reservations,
+          valid libvirt names); lease registration without a target, for both domains,
+          through the real stack; the VM storefront's suites naming `vm_target`; e2e
+          stage 08a, `test_non_erc20_settlement.py`, and the VM scenarios' conftest row
+          reader.
+  - Each slice's gate: the provisioning-family suites, both adapters, both storefronts
+    (the VM storefront by frozen sync), the e2e unit suite and collection, the root
+    aggregate, `make check-packaging`, comment hygiene, documentation citations, OpenSpec
+    strict validation (1.14.0), and both end-to-end lanes. Versions per slice, recorded
+    in its completion note.
 
 ## 6. Bare metal on the kit negotiation runtime
 
@@ -2791,6 +2873,10 @@ service code.
       first recorded here, was routed on 2026-10-05 to
       `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
       maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in 5B.12's design review: every VM guest attaches to libvirt's `default` NAT
+      network, one bridge per host, with no isolation rule, so guests on one host,
+      including different buyers', share a layer-2 segment; route to VM's provisioning
+      owner.
       Found in 5B.10: this change's 19 delta requirements over 500 characters, which
       the validator release after the pinned one fails under `--strict`, are restructured
       here (moving examples and edge cases into scenarios, or splitting) before promotion.

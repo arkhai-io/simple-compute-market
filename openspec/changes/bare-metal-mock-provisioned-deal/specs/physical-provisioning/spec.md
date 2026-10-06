@@ -226,6 +226,42 @@ storefront calls them.
 - **WHEN** a request to a relay route is signed under the seller role
 - **THEN** it is refused before reaching relay administration
 
+### Requirement: Job-backed fulfillment is the compute family's
+
+A fulfillment provider that executes through the job authority MUST be the compute
+family's: it submits, reads status, resolves provisioned resources, and assembles the
+delivery. A domain MUST contribute only its preparation, which turns a settled resource
+into a job, and its codec. Every job MUST be submitted with one host check and an
+operation id derived from its contract's idempotency key.
+
+#### Scenario: A domain prepares a job
+
+- **WHEN** a domain's preparation returns a job for a settled resource
+- **THEN** the family submits it, tracks it, and delivers its result, with no further domain code
+
+### Requirement: Delivery says how to reach what was provisioned
+
+A fulfillment's delivery MUST carry only the provisioned resources, the endpoints to
+connect to, the credentials issued (each with its role and the resources it grants),
+and when access became ready. It MUST NOT carry a provisioner-side path, an address
+internal to a host, a deal reference, or a lease window.
+
+#### Scenario: A VM is delivered
+
+- **WHEN** a VM fulfillment becomes active
+- **THEN** its delivery carries the tenant's endpoint and credentials, and not the guest's internal address or a key path on its host
+
+### Requirement: Provisioning names what it provisions
+
+Provisioning MUST name the resource a job creates, deriving the name from the capacity
+reservation so a retry names the same resource. A storefront MUST NOT supply it, and
+lease registration MUST take the lease's target from the reservation's fulfillment.
+
+#### Scenario: A lease is registered
+
+- **WHEN** a storefront registers the lease for a fulfilled reservation
+- **THEN** the lease's target is the one its fulfillment recorded, without the storefront naming it
+
 ### Requirement: Every provisioning route admits the administrator
 
 Every route on the provisioning service's route table MUST admit the `admin` role, in
@@ -418,6 +454,50 @@ For every offering mode, lease release SHALL initiate teardown through a narrow 
 - **THEN** release begins the bare-metal fulfillment's teardown, the aggregate leaves `active`, and capacity stays held until it reaches `torn_down`
 
 ## MODIFIED Requirements
+
+### Requirement: Ansible fulfillment adapter
+
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+
+Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
+
+The fulfillment request's `connectivity` field MUST NOT carry relay configuration. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. Any remaining `connectivity` content is opaque metadata the adapter forwards unchanged and never interprets, and is not a sizing or feasibility requirement.
+
+#### Scenario: A request supplies relay configuration
+
+- **WHEN** a fulfillment request's `connectivity` field carries a relay address, domain, or dashboard credential
+- **THEN** the value does not select a relay, and the relay referenced by the pool is used instead
+
+#### Scenario: Pool configuration changes after create dispatch
+
+- **WHEN** an operator edits provider configuration after an Ansible create job is accepted
+- **THEN** the accepted job retains the resolved configuration snapshot captured at dispatch
+
+#### Scenario: Provider variables collide with job identity
+
+- **WHEN** pool-supplied extra variables attempt to override an authoritative host, target, action, sizing, or executor field
+- **THEN** validation rejects the operation before asynchronous dispatch
+
+#### Scenario: VM teardown is dispatched
+
+- **WHEN** teardown begins for an accepted VM fulfillment
+- **THEN** the adapter targets the recorded `host_id` and `executor_target` from fulfillment metadata
+
+#### Scenario: A committed dimension is present
+
+- **WHEN** the scheduled settlement resource carries a committed VM dimension
+- **THEN** the adapter translates that value through the pool-selected requirement delegate and ignores any conflicting caller-supplied sizing field
+
+#### Scenario: A committed dimension is absent and the pool has a default
+
+- **WHEN** the committed reservation omits a VM dimension and the resolved pool configures the corresponding default
+- **THEN** the adapter uses the pool default for that dimension
+
+#### Scenario: A committed dimension and pool default are both absent
+
+- **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
+- **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
+
 
 ### Requirement: Adapter-owned compute execution
 VM and bare-metal execution MUST consume the common compute-provisioning envelope. Domain adapter contributions MUST own action-specific validation, execution preparation, codec and playbook selection, domain result interpretation, credential meaning, and release behavior; reusable execution technology MAY own the mechanics of invoking a prepared execution.
