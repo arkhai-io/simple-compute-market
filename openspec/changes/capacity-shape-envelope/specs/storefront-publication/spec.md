@@ -4,11 +4,10 @@
 
 A storefront that publishes capability shapes SHALL resolve shape bounds for each
 offering mode it publishes from three tiers, highest first: its site-scoped pool
-override, the pool's `shape_bounds` hint, and its configured default. Tiers SHALL merge
-per leaf of the `bounds` section: for each field's `min` and `max`, the highest tier
-stating it wins, and a tier that does not state a leaf SHALL leave a lower tier's value
-in place. A higher tier MAY replace a lower tier's value, including with a wider one, and
-SHALL NOT remove it. A field no tier bounds SHALL NOT be constrained by admissibility.
+override, the pool's `shape_bounds` hint, and its configured default, parsing each with
+its domain's schema and resolving them through the admissibility kit, whose sections own
+the merge. Under the `bounds` merge a higher tier MAY replace a lower tier's value,
+including with a wider one, and SHALL NOT remove it. A field no tier bounds SHALL NOT be constrained by admissibility.
 The resolved bounds are the storefront's own policy; site admission is not changed by
 them. A malformed configured default SHALL prevent the storefront from starting.
 
@@ -33,14 +32,14 @@ them. A malformed configured default SHALL prevent the storefront from starting.
 - **WHEN** no tier states a bound for a field
 - **THEN** admissibility does not constrain that field
 
-### Requirement: Unusable or empty shape bounds close the pool's listings
+### Requirement: A pool whose shape bounds cannot be resolved closes its listings
 
-Where the resolved bounds for a pool and mode leave a field's range empty, or where any
-tier's declaration cannot be read or evaluated — malformed, naming a path the domain's
-schema does not define as a quantity, or carrying a section or key the storefront's kit
-does not define — the storefront SHALL close the pool's open listings for that mode,
-SHALL publish nothing from the pool for that mode, and SHALL refuse any revised shape
-for it, until the declaration is usable. A pool whose projection has not loaded SHALL
+Where resolution returns problems instead of a policy for a pool and mode — a field's
+range would be empty, or a tier's declaration cannot be parsed because it is malformed,
+names a path the domain's schema does not define as a quantity, or carries a section or
+key the storefront's kit does not define — the storefront cannot compute its own policy
+and SHALL fail closed: it SHALL close the pool's open listings for that mode and SHALL
+publish nothing from the pool for that mode until resolution succeeds. A pool whose projection has not loaded SHALL
 keep the existing hold rather than close. The storefront SHALL report the tier, the
 path, and the problem, or the conflicting values of an empty range, per site in its
 derivation report served by system status.
@@ -71,8 +70,9 @@ resolved bounds, choosing values from the admissibility kit's admissible values 
 than generating and filtering, and generated shapes SHALL NOT be reported. Bare-metal
 publication SHALL judge each Physical Resource's derived shape against the resolved
 bounds for its mode in the same way. A storefront pool override write SHALL be refused
-when its own listing shapes would be inadmissible under the resolution it produces, or
-when it would empty a field's range against the pool's current hint.
+when resolving it with the pool's current hint and the configured default returns
+problems, or when its own listing shapes would be inadmissible under the policy that
+resolution produces.
 
 #### Scenario: A stated shape exceeds a bound
 

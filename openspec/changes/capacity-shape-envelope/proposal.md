@@ -21,11 +21,13 @@ about it makes them new implementations.
 
 ## What Changes
 
-- A new foundation kit, `kit/capability-admissibility`, with a whole-shape check that
-  returns structured problems and a query for the values one dimension may take given a
-  partial shape, such that a counter-proposal can be built one dimension at a time
-  without search. A static per-field minimum/maximum is the only implementation. No
-  operation exposes readable bounds.
+- A new foundation kit, `kit/capability-admissibility`, the only reader of a bounds
+  declaration: it parses declarations (checking quantity paths against a domain's
+  schema), resolves tiers into an opaque policy with each section owning its merge rule,
+  and evaluates that policy with a whole-shape check returning structured problems and a
+  query for the values one dimension may take given a partial shape, such that a
+  counter-proposal can be built one dimension at a time without search. A static
+  per-field minimum/maximum is the only section. No operation exposes readable bounds.
 - A `shape_bounds` pool policy tag, keyed by offering mode, holding named constraint
   sections; this change defines `bounds`. Unknown sections and keys make a declaration
   unreadable, so later constraint forms fail closed on older readers.
@@ -69,8 +71,8 @@ Provisional; planning and review confirm the destinations (`design.md`, D11).
 - New distribution `kit/capability-admissibility` (`arkhai-kit-capability-admissibility`).
 - `kit/resource-pools`: the tag key, a raw reader, and the structural check on every
   pool-write surface.
-- VM: `arkhai_vms` binds the implementation and validates declarations against
-  `VM_CAPABILITY_SCHEMA`; the VM storefront's publication, default generator, pool
+- VM: `arkhai_vms` supplies `VM_CAPABILITY_SCHEMA` to the kit's parser; the VM
+  storefront's publication, default generator, pool
   override terms and contribution, configuration, and derivation report.
 - Bare metal: the storefront's publication, pool override terms, configuration, and
   derivation report.
@@ -93,8 +95,9 @@ Provisional; planning and review confirm the destinations (`design.md`, D11).
 
 Destinations are provisional (D11).
 
-- The admissibility contract: whole shape in, structured problems out, never readable
-  bounds; `admissible_values` and its one-dimension-at-a-time guarantee; the opaque
+- The admissibility contract: the kit is the only reader of a declaration; parsing,
+  resolution with per-section merge rules, and evaluation; whole shape in, structured
+  problems out, never readable bounds; `admissible_values` and its one-dimension-at-a-time guarantee; the opaque
   value set; omitted dimensions are free; sections intersect; unknown sections and keys
   are unreadable — `openspec/specs/market-composition/spec.md`.
 - Why the interface is shaped for coupled declared constraints and counter-proposals,

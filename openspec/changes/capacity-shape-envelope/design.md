@@ -87,13 +87,14 @@ admissibility, and is outside this change.
 ### D2. A new foundation kit owns admissibility
 
 `kit/capability-admissibility` (`market_capability_admissibility`) depends only on
-`kit/capability-shape` and the standard library. It owns the interface, the static
-implementation, the declaration's structure and its structural check, and the
-domain-neutral evaluation over `family.field` paths. `kit/resource-pools` keeps the tag
-key and a raw reader, and calls the kit's structural check at pool write, as
-`validate_listing_shapes` calls `shape_structure_problems`. The domain binds the
-implementation at composition and validates a declaration against its schema; operator
-configuration does not select it.
+`kit/capability-shape` and the standard library. It owns everything that reads a
+declaration: parsing and validation, the resolution of tiers with each section's merge
+rule, and evaluation over `family.field` paths (D3). `kit/resource-pools` keeps the tag
+key and a raw reader whose value it passes unread to the kit's parser at pool write, as
+`validate_listing_shapes` calls `shape_structure_problems`. The domain supplies its
+`CapabilitySchema` at composition; the kit knows no family or field name. A coupled
+form arrives as a new section inside the kit, with its own parsing, merge rule, and
+evaluation, so no caller changes.
 
 Rejected:
 
@@ -112,8 +113,23 @@ Rejected:
 
 ### D3. Whole shape in, problems out, never readable bounds
 
-The interface has two operations, both taking shapes and neither exposing unconditional
-bounds:
+The kit's surface has two groups. Callers hold a `Declaration` and a `ResolvedPolicy` as
+opaque values; only the kit reads their contents.
+
+**Declaration handling:**
+
+- **`parse_declaration(raw, schema=None)`** returns a `Declaration` or every problem
+  found. Without a schema it checks structure only — what the domain-neutral pool-write
+  surfaces can know. With the domain's schema it also checks that every bounded path is
+  a quantity field the schema defines.
+- **`resolve(declarations)`**, given declarations highest tier first, returns a
+  `ResolvedPolicy` or every problem found. Each section owns its merge rule; `bounds`
+  merges per leaf, a higher tier replacing and never removing (D9). An empty range is a
+  problem. Which tiers apply, and in what order, is the caller's choice; what merging
+  them means is the kit's.
+
+**Evaluation on a `ResolvedPolicy`**, both taking shapes and neither exposing
+unconditional bounds:
 
 - **`admissibility_problems(shape)`** returns a tuple of problems, empty when
   admissible. A problem carries `paths` (a tuple, so a constraint relating several
@@ -145,8 +161,13 @@ Rejected:
 - **A nearest-admissible-shape operation.** Which dimension to give up is negotiation
   policy; it can be built on `admissible_values` in the policy layer.
 - **A boolean predicate.** Publication and negotiation both need the reason.
+- **Merging or path checks outside the kit.** A storefront merging tiers, or a domain
+  walking a declaration's paths, is a reader of bounds; a merge written there would be
+  box-shaped, since a later section such as `ratios` has no leaves to merge.
+- **The kit enumerating paths for the domain to check.** Passing the schema in keeps
+  every read inside the kit and needs no further domain code.
 
-Both operations ship with the static implementation. `admissible_values` has a
+Both evaluation operations ship with the static implementation. `admissible_values` has a
 production caller in the VM default generator (D10) and is the primitive a dimension
 counter-proposal change will use.
 
@@ -187,8 +208,8 @@ shape_bounds:
   dimensions by `family.field` path, compared by integer cross-multiplication, or a
   `required` section — are added as sections, and a reader that predates them fails
   closed rather than enforcing a weaker policy.
-- **Quantity fields only.** The kit checks structure; the domain rejects a bound on an
-  attribute or on any field its schema does not define as a quantity.
+- **Quantity fields only.** Given the domain's schema, the kit rejects a bound on an
+  attribute or on any field the schema does not define as a quantity.
 - **The admissible region is the intersection of every section;** no section widens
   another.
 
@@ -230,25 +251,28 @@ field, admissibility does not constrain it, and site admission remains the backs
 This is not a permissive default awaiting a fail-closed alternative; it is what absence
 means, as an unrated family is in pricing.
 
-### D8. A known answer closes listings; nothing heard keeps the hold
+### D8. When the storefront cannot compute its policy, it fails closed
 
-The test is whether the storefront heard nothing or heard a commitment it cannot honour.
+The storefront's policy is defined as the merge of every tier (D9). When `resolve`
+returns problems instead of a policy, the storefront cannot compute its own policy for
+that pool and mode, and it fails closed:
 
-- **An empty merged range is a known answer.** The resolved policy admits nothing on that
-  dimension, so the pool's listings close under the publication rule (D10) and the
-  report names the conflicting tiers and values.
-- **A declaration the storefront cannot read or evaluate is a heard commitment it cannot
-  honour**: malformed, a path its schema does not define as a quantity, or a section or
-  key newer than its kit. The pool's listings close, nothing is published from the pool,
-  and revised shapes are refused until the declaration is usable. Selling despite it
-  would drop a stated site preference, which D9 forbids.
-- **A malformed configured default prevents the storefront from starting.**
-- **A pool whose projection has not loaded keeps the existing hold.** The site has said
-  nothing new.
+- **An empty merged range.** The resolved policy would admit nothing on that dimension.
+  The pool's listings close and the report names the conflicting tiers and values.
+- **A tier the storefront cannot read or evaluate**: malformed, a path its schema does
+  not define as a quantity, or a section or key newer than its kit — in the pool hint or
+  a stored override alike. The pool's listings close and nothing is published from the
+  pool until every tier is usable. Skipping the unusable tier is not available, because
+  a higher tier may not remove a lower one (D9).
+- **A malformed configured default prevents the storefront from starting**, the same
+  rule applied to the storefront's own input.
+- **A pool whose projection has not loaded keeps the existing hold.** Nothing new has
+  been declared; the last resolved policy still applies.
 
-The report names the tier, the path, and the problem. Pricing holds where this closes
-because a last-published price is still an offer the storefront itself made; a bound is
-the site's stated restriction on what is sold.
+The report names the tier, the path, and the problem. Closing also makes the
+disagreement visible to both administrators, who reconcile it. Pricing holds where this
+closes because a last-published price is still an offer the storefront itself made;
+here the storefront cannot say what it would sell.
 
 Rejected: holding listings open on last-known-good bounds (sells against a policy the
 seller may have tightened); holding listings and refusing only revised shapes (sells
@@ -274,8 +298,12 @@ A storefront may change a site's bound, including widening it — the hint is ad
 site admission still bounds physical capacity — but may not remove one: omitting a stated
 site preference is not available to a higher tier. A per-leaf merge can produce an empty
 range: an override write is refused when it would empty a range against the current
-hint, and an empty range found when a projection arrives is handled by D8. A future
-section's merge rule is set when that section is defined; `bounds` merges per leaf.
+hint, and an empty range found when a projection arrives is handled by D8.
+
+The merge belongs to the kit's `resolve`, and each section owns its rule: `bounds`
+merges per leaf, and a later section's rule is set inside the kit when that section is
+defined. The storefront only chooses the tiers and their order. The configured
+default's key is named in planning.
 
 Rejected: hint only (leaves the storefront no way to state policy where the pool is
 silent); whole-declaration replacement per tier (drops site bounds an override does not
@@ -286,9 +314,10 @@ restate); intersection across tiers (narrowing only, contradicting D1's advisory
 - **A stated listing shape** — from an override or the pool's `listing_shapes` — that is
   inadmissible under the resolved bounds is not published, an open listing for it
   closes, and it is reported with its source tier and problems.
-- **An override write** whose own `listing_shapes` would be inadmissible under the
-  resolution it produces is refused, beside the contribution's existing feasibility
-  check.
+- **An override write** is refused when `resolve`, given the override with the current
+  hint and default, returns problems, or when the override's own `listing_shapes` would
+  be inadmissible under the policy it produces; this sits beside the contribution's
+  existing feasibility check.
 - **A pool write is not refused** when its `listing_shapes` fall outside its own
   `shape_bounds`: a storefront tier may widen the bound, and the provisioning service
   cannot see those tiers.
@@ -308,8 +337,9 @@ restate); intersection across tiers (narrowing only, contradicting D1's advisory
 
 `site-capacity` is not a destination: nothing about the site changes. The proposal's
 `Knowledge to promote` names a provisional destination for each decision; planning and
-review confirm or move them. Two are fixed: the negotiation invariant and the
-omitted-dimension refusal belong to `negotiation-driven-capacity-resize`, because
+review confirm or move them. Two are fixed: every negotiation rule — the agreement
+invariant, the omitted-dimension refusal, and refusing revised shapes for a pool whose
+policy cannot be computed — belongs to `negotiation-driven-capacity-resize`, because
 nothing here enforces them, and `docs/development/ARCHITECTURE.md` gains the foundation
 kit and an authority-boundary row.
 
@@ -349,14 +379,18 @@ To `negotiation-driven-capacity-resize`, for its own design:
   refused: under shape pricing an unrated family contributes nothing, so accepting it
   would give the dimension away. How omitted dimensions are negotiated is a replaceable
   policy a storefront selects at composition.
+- A revised shape for a pool and mode whose policy cannot be computed (D8) is refused
+  for admissibility, distinctly from a shape outside the bounds.
 - An admissibility refusal carries the kit's problems (`paths`, `code`) and may carry
   `admissible_values` for each refused path given the rest, so a buyer can counter.
 
 ## Risks / Trade-offs
 
 - **A caller reads the declaration directly** → undoes D3. Only the kit interprets a
-  declaration; closeout verifies no other reader of `shape_bounds` beyond the raw reader
-  and the kit, including cached unconditional `admissible_values` answers.
+  declaration; closeout verifies that nothing outside the kit walks a `shape_bounds`
+  value or a `Declaration`'s or `ResolvedPolicy`'s contents, that the raw reader passes
+  its value unread to `parse_declaration`, and that no unconditional `admissible_values`
+  answer is cached as bounds.
 - **Closing on an unusable declaration churns listings** → accepted: closed listings
   republish as successors once the declaration is usable. Honouring the site's stated
   commitment is the better failure.
@@ -395,6 +429,17 @@ carrying the key are then ignored as unknown metadata.
   region and GPU model by equality and no quantitative dimension; the inventory guard
   also checks the published quantity against its source. Corrected at this change's
   roadmap currency step.
+- **Storefront term tiers are resolved four times over.** Family rates
+  (`pricing_resolution.resolve_family_rates`), listing shapes, asking rates
+  (`resolve_vm_asking_rates`), and now shape bounds each resolve override, hint, and
+  default separately, yet follow one rule: mappings combine key by key, and a scalar or
+  list is a leaf the highest tier stating it replaces whole, never removed by omission.
+  `market_config.config_loader._deep_merge` applies the same rule to configuration
+  files. A shared precedence merge with per-leaf provenance could serve all of them; its
+  home — likely a small standard-library foundation module rather than core, which
+  carries pydantic and market contracts — and the migration of the three VM resolvers
+  belong to a change of their own. Until then the mechanism lives inside this kit's
+  `bounds` section. No change owns it.
 - A pool default outside the resolved bounds (a dimension a shape omits being supplied
   above its maximum) is a site configuration fact under D1 and D6; publication could
   report it as a warning. No change owns it.

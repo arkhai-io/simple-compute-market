@@ -18,7 +18,10 @@
 - `settle-capacity-claim-vocabulary` may rename the flat dimension names; whether round 0
   adopts the family form is its question.
 
-## Decisions taken in `capacity-shape-envelope`'s design
+## Provisional inputs from `capacity-shape-envelope`'s design
+
+Taken while designing that change and carried here for this change's own design to
+confirm or revise; the representation question below may change them.
 
 - **What is disclosed:** the resolved declaration for the listing's pool and mode, not
   the raw tiers. A buyer evaluates it through the admissibility kit; a buyer whose kit
