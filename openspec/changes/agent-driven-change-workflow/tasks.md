@@ -185,8 +185,15 @@ to repair by hand.
       repository obligation as well as a decision or requirement.
       `change-triage`'s gate step now rewrites the index row's notes with its
       status.
-- [ ] 6.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its reviewed
-      design.
+- [x] 6.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its reviewed
+      design. Run continuing the design session, at the owner's preference.
+      The stale 24-task plan was replanned into seven sections and 45 tasks and
+      accepted. Planning stopped correctly on one design question the design
+      left open (local-table derivation) and the owner decided it; the skill
+      then lacked the return-to-design step added afterwards, so the owner's
+      waiver of a re-review was recorded after the fact. Section 4 is confined
+      to a ~2,100-line module and is the section most likely to outgrow one
+      session. `make check-doc-citations` now skips untracked `reviews/`.
 - [ ] 6.3 Pilot: plan `add-full-stack-ci-job` from nothing.
 
 ## 7. Implementation

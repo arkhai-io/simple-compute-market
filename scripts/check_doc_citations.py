@@ -16,7 +16,9 @@ Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
 archived, and their citations are allowed to have moved on. A change's own
 closeout runs this before it is archived, which is when its citations are
-still expected to hold.
+still expected to hold. A change's `reviews/` are excluded too: review
+records are untracked working notes, never part of the branch, so a citation
+in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -45,6 +47,13 @@ CITATION = re.compile(
 )
 
 
+def _change_documents(directory: Path) -> list[Path]:
+    return sorted(
+        path for path in directory.glob("**/*.md")
+        if "reviews" not in path.relative_to(directory).parts
+    )
+
+
 def documents(root: Path, change: str | None = None) -> list[Path]:
     """Documents to check.
 
@@ -65,7 +74,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
             raise SystemExit(
                 "no such unarchived change: %s" % directory.as_posix()
             )
-        return sorted(directory.glob("**/*.md"))
+        return _change_documents(directory)
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):
@@ -74,7 +83,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     for change in sorted(p for p in changes.iterdir() if p.is_dir()):
         if change.name == "archive":
             continue
-        found.extend(sorted(change.glob("**/*.md")))
+        found.extend(_change_documents(change))
     return found
 
 
