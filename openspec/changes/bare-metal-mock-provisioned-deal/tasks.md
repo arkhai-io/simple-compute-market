@@ -201,7 +201,7 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       covers them.
       Corrected 2026-10-02: the endpoint-coverage file was not changed; 5A.4 adds the
       coverage.
-- [ ] 4.8 **Gate.** Relock the changed projects (`make lock PROJECTS=...` for
+- [x] 4.8 **Gate.** Relock the changed projects (`make lock PROJECTS=...` for
       `provisioning/compute`, `provisioning/compute/service`, and both adapters); the
       provisioning, provisioning-service, and both adapters' suites pass; the VM lane
       passes unchanged.
@@ -209,6 +209,8 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       was implemented). Results: `provisioning/compute` 153 passed; provisioning
       service 674 unit and 286 integration passed; bare-metal adapter 7 passed;
       bare-metal storefront 220 passed; `make check-packaging` passes.
+      Closed 2026-10-07: every later VM lane run covers this gate; run 101918963768
+      passed the VM lane (135).
 - **Section 4 implementation notes (2026-10-01).**
   - Versions: `arkhai-compute-provisioning` 0.8.0, `arkhai-compute-provisioning-service`
     0.5.0, `arkhai-vms-provisioning-adapter` 0.5.0,
@@ -308,7 +310,7 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       `test_negotiations_api.py` covers force-accept through the route service.
 - [x] 5.10 VM's stage 05a in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`
       sends the opening request it later sends to `negotiate_new`.
-- [ ] 5.11 **Gate.** Bump and relock the changed kits, core packages, and consumers; the
+- [x] 5.11 **Gate.** Bump and relock the changed kits, core packages, and consumers; the
       kit, core, VM storefront, and API-credit storefront suites pass; the VM lane passes,
       including 05a on the new body and 06b with the runtime acceptance.
       Local part done 2026-10-02; the VM lane is unrun. Results: negotiation runtime 17,
@@ -319,6 +321,8 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       integration file passes except the pre-existing failures below and
       `test_alkahest.py`, which needs Node and Anvil; `make check-packaging` and
       `make check-comment-hygiene` pass.
+      Closed 2026-10-07: run 101918963768 passed the VM lane (135), including 05a on the
+      new body and 06b with the runtime acceptance.
 - **Section 5 implementation notes (2026-10-02).**
   - Versions: `arkhai-kit-negotiation-runtime` 0.3.0, `arkhai-kit-settlement-runtime`
     0.1.3, `arkhai-kit-storefront` 0.2.0 (now depends on the negotiation runtime),
@@ -3829,6 +3833,12 @@ bare-metal storefront's force-accept and continuation.
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
+**Replanned (2026-10-07).** "Section 7 design: one explicit settlement composition
+(2026-10-07)" and "Section 7 design: one fulfillment path for every domain (2026-10-07)"
+replace this section's premise: one kit fulfillment path for every domain, built in kit
+and bound by bare metal, VM, and API credits, in parts 7A to 7E. The plan rewrites the
+unchecked tasks below; implement none of them as written.
+
 Decisions: "Settlement starts fulfillment", "The lease lifecycle owns release for every
 offering mode", "The Alkahest path commits the lease window and registers the lease",
 "Bare-metal publication has a dry run", "Restart recovery is proven at integration level,
@@ -4103,12 +4113,10 @@ service code.
       (2026-10-06)", rows 6 and 9): the site ledger keys reservation idempotency and
       release-by-escrow on the escrow, a settlement identity hosted deals lack, while jobs
       now correlate on the capacity reservation; weigh the site's storefront-facing
-      correlation the same way. And what a storefront keeps of a delivery, and when it
-      stops serving it, differs by domain with no domain requiring it: the VM storefront
-      stores the endpoint in its escrow record and on its listing and submits it with an
-      Alkahest fulfillment, while bare metal serves it live through `/access`. Open a
-      change at closeout, under Goal 4 ("Make a domain a composition of kit"), to make it
-      one kit mechanism.
+      correlation the same way. What a storefront keeps of a delivery, and when it stops
+      serving it, is resolved in this change by Section 7's design ("Section 7 design: one
+      fulfillment path for every domain (2026-10-07)", decision 11); confirm at closeout
+      that no domain still stores access material an authority can serve again.
       Found in 5B.12.C's audit (rows 6 and 10): the VM storefront's admin usage-started
       event has no production sender and records nothing of its `host_id`; decide whether
       the route stays, and drop the field either way. VM's operator `create_vm` route checks
@@ -4144,6 +4152,15 @@ service code.
       as VM's inventory guard did, and could move onto the kit's listing-source verdict.
       The fulfillment convergence sweep's counts are logged as structured fields, which
       the end-to-end lanes' plain-text log format does not print.
+      Found in Section 7's design (`design.md`, "Section 7 design: one explicit
+      settlement composition (2026-10-07)"): an interrupted contact-exchange reveal is
+      finished only by the buyer retrying the start, though the servicing worker could
+      finish it from the persisted introduction record; the seller's EVM address and
+      wallet key are separate inputs nothing checks against each other, in VM's
+      `[Wallet]` as in bare metal; and the Alkahest address book is named both by the
+      settlement section's `address_config_path`, which the Alkahest runtime client
+      applies to every chain, and by each chain's `alkahest_address_config_path`, which
+      publication and the chain clients read.
       Found in slice C: the system worker controls' response bodies are untyped dicts
       (review point 3), and `openspec/specs/site-capacity/spec.md`'s evidence line for
       the pool-metadata provider gate should cite
@@ -4177,7 +4194,13 @@ service code.
 | Administrative acceptance and opening previews go through the negotiation runtime | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime" and "Storefront deal controls are kit-owned route services"; `docs/development/ARCHITECTURE.md` kit layers |
 | Bare metal composes the kit negotiation runtime | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime" |
 | Lease release delegates to durable fulfillment teardown for every offering mode; storefront teardown goes through lease termination | `openspec/specs/physical-provisioning/spec.md` — "Lease release delegates to durable fulfillment teardown", "Storefront teardown goes through lease termination"; `docs/development/ARCHITECTURE.md` "Release" |
-| Settlement starts bare-metal fulfillment through the kit servicing worker, composed for every mechanism; the Alkahest path commits and registers its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
+| Settlement starts bare-metal fulfillment through one mechanism-neutral servicing worker whose ready and terminal hooks dispatch by mechanism; the Alkahest path commits its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
+| One fulfillment start path, the servicing worker's ready step, composed in kit from mechanism and domain contributions; the coordinator and VM's resume pass retired | `openspec/specs/settlement-servicing/spec.md` (requirement added with the plan); `openspec/specs/vm-storefront-fulfillment/spec.md` — "Full settlement convergence ownership", "Foreground and restart convergence" (modified); `docs/development/ARCHITECTURE.md` — "Settlement servicing" |
+| Evidence publishing is mechanism-owned behind one kit port, and one kit evidence envelope carries no access material | `openspec/specs/settlement-servicing/spec.md` — "Secret-free fulfillment projection" (generalised); `docs/development/ARCHITECTURE.md` |
+| Buyer access material reaches only the authenticated buyer through a kit access route, live where an authority can serve it again | `openspec/specs/vm-storefront-fulfillment/spec.md` and `openspec/specs/storefront-publication/spec.md` (requirements added or modified with the plan); `docs/development/ARCHITECTURE.md` |
+| An ambiguous on-chain evidence submission is resubmitted | `openspec/specs/vm-storefront-fulfillment/spec.md` — "Ambiguous on-chain submission safety" (reversed; moves to `settlement-servicing` with the kit publisher) |
+| One kit verify step registers the plan committed at acceptance, for every domain | `openspec/specs/settlement-servicing/spec.md` — "Negotiation-to-plan handoff" |
+| The bare-metal storefront requires its settlement configuration, builds a configured mechanism's resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal hosted role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
 | A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
 | The job authority persists result and credential envelopes and an opaque execution handle, owns retry timing while executors classify retryability and redact, and never lets a late outcome undo cancellation | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities", "A cancelled job stays cancelled"; `docs/development/ARCHITECTURE.md` |

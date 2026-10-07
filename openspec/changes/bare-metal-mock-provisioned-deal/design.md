@@ -245,6 +245,11 @@ the negotiation, the buyer, and the EVM address only. With the worker composed o
 Alkahest path, the settlement-servicing step VM's stage 09bb advances has its bare-metal
 counterpart.
 
+*Refined by "Section 7 design: one explicit settlement composition (2026-10-07)": one
+mechanism-neutral worker over the configured settlement runtime, composed inside the
+runtime whenever it has a settlement composition, which is now required; its ready and
+terminal hooks dispatch by mechanism, contact exchange declining.*
+
 ### The lease lifecycle owns release for every offering mode
 
 Decided with the maintainer. The storefront's direct site release is a workaround for
@@ -2321,6 +2326,276 @@ What this changes beyond Section 6:
   VM's guard did, and could move onto the kit verdict; and the fulfillment convergence
   sweep's counts, which the lanes' plain-text log format does not print.
 
+### Section 7 design: one explicit settlement composition (2026-10-07)
+
+Re-read against the code before planning Section 7, then reviewed by the previous
+implementation agent and a review agent; decided with the maintainer. Section 7 makes
+settlement the only thing that starts bare-metal fulfillment, so every configuration that
+can adopt an obligation must also be able to service it. The code showed that it cannot.
+
+| Finding | Consequence |
+|---|---|
+| With `BARE_METAL_STOREFRONT_SETTLEMENT` absent, `build_runtime_from_environment` enables Alkahest and builds chain clients for escrow verification, while the settlement runtime is built with no clients. Verify adopts the obligation; once `begin` is retired, nothing can service it. The HTTP settlement tests build exactly this state, and the restart test asserts the empty client map | Decision 1 |
+| Alkahest resources are built only when Alkahest is in `priority`. The registry's `runtime_clients` builds a client for every configured section, disabled ones included, so a configured but disabled Alkahest section gets a client with no chains, and an obligation accepted before an operator disabled Alkahest cannot be checked or collected | Decision 2 |
+| The hosted callbacks, and with them the servicing worker, exist only when `fiat.stripe.v1` is enabled; a hosted obligation accepted before Stripe is disabled is stranded the same way. The worker is attached after construction, so the lifecycle step registration in `__post_init__` never sees it, even with Stripe | Decisions 2 and 3 |
+| `on_ready` calls the hosted `fulfill` for every record, and that callback refuses any other mechanism. Alkahest reaches it between verify and `begin` on a storefront with Stripe enabled, and contact exchange reaches it when a reveal is interrupted between materialize and bind | Decision 4 |
+| A ready hook that returns or raises before it reserves the obligation's `fulfill` operation leaves no operation row. The due query then lists the obligation on every pass and the worker's `_schedule` sets no backoff, which applies only to an existing pending row | Decision 4 |
+| `on_terminal` calls the hosted `cleanup` for every uncollected terminal state. On an Alkahest record it raises, and the worker's cleanup path retries it indefinitely | Decision 5 |
+| A runtime built with no composition is not settlement-free: acceptance falls back to `default_hosted_selection_dispatch()`, settle verify checks Alkahest escrows with whatever chain clients were injected, and health reports settlement as available whenever chain clients exist | Decision 6 |
+| The Helm chart's `alkahestEnabled` restates what the settlement Secret declares; the chart reads that Secret only through `secretKeyRef` and never its contents, so it cannot derive the flag. Neither the chart nor production `compose.bare-metal.yml` passes `BARE_METAL_STOREFRONT_CHAINS` or `BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY`; only the local lane does, so a production deployment with Alkahest enabled starts with an address and no chain clients | Decision 7 |
+
+Decisions:
+
+1. **The settlement composition is explicit and required.** The bare-metal executable
+   refuses to start without `BARE_METAL_STOREFRONT_SETTLEMENT`. Mechanism enablement,
+   verification resources, and servicing clients all come from that one composition;
+   absence no longer means Alkahest. An explicit configuration that enables no mechanism
+   stays valid, and leaves settlement and publication unavailable, as the permanent
+   requirement "Peer mechanism configuration hierarchy" in
+   `openspec/specs/settlement-configuration/spec.md` says. Options considered:
+   - **A.** Synthesize an Alkahest-only configuration when the root is absent. Rejected:
+     it is the implicit mechanism default that requirement forbids.
+   - **B.** Require the root, as Compose and Helm already do. Chosen.
+   - **C.** Leave the fallback. Rejected: a paid Alkahest escrow would never be fulfilled
+     once `begin` is retired.
+
+   This enforces existing permanent requirements ("Peer mechanism configuration
+   hierarchy"; `openspec/specs/settlement-servicing/spec.md`, "Configuration composes
+   one settlement runtime"); no delta requirement is added for it.
+2. **A configured mechanism stays serviceable.** A mechanism's resources are built
+   whenever its section is configured, not only while it is enabled, because
+   "Mechanism configuration cannot reinterpret durable plans" requires recovery after an
+   operator disables a mechanism for new deals.
+   - **Alkahest.** Enabled: the seller address, at least one chain, and the wallet key
+     are required, or startup refuses. Configured but disabled: they are built when
+     supplied; otherwise the runtime has no Alkahest client and startup logs that
+     obligations under it cannot be serviced, as VM's composition does.
+   - **Hosted.** The hosted lifecycle callbacks are built whenever the Stripe section is
+     configured.
+   - **Verify** follows the plan committed at acceptance whether or not Alkahest is still
+     enabled for new deals: the committed plan is the agreement (Section 6, decision 7).
+   - Rejected, from the review: deriving Alkahest resources from the enabled set alone.
+     It keeps the stranding described in the second finding.
+3. **One worker over the settlement runtime, composed inside the runtime.** Whenever the
+   runtime has a composition, it composes the one mechanism-neutral
+   `SettlementServicingWorker` during its own construction, so the lifecycle step
+   registration sees it and the settlement-servicing step exists on every path. This
+   replaces "a worker for every mechanism", which described one worker per mechanism.
+4. **The ready hook dispatches through an explicit table**, built in `runtime.py`, the
+   composition root, keyed on the record's mechanism. *Superseded by decision 8 of "Section
+   7 design: one fulfillment path for every domain (2026-10-07)": the kit composes the
+   hook, and the rows below become mechanism and domain contributions.*
+
+   | Mechanism | Ready hook |
+   |---|---|
+   | `fiat.stripe.v1` | The hosted lifecycle's `fulfill`, unchanged |
+   | `alkahest.v1` | Reserve the obligation's fulfillment, start fulfillment through the fulfillment service from the committed plan, then complete it or record a retry |
+   | `contact-exchange.v1` | Decline without reserving: the reveal registers, materializes, binds, checks, and collects the obligation itself, and every step is idempotent |
+   | Anything else | Raise |
+
+   A hook that starts anything reserves first, so its failures back off on the worker's
+   schedule. Declining contact exchange without reserving means an interrupted reveal is
+   re-examined on every pass, without backoff, until the buyer retries the start; VM's
+   ready hook behaves the same way. Having the worker finish an interrupted reveal from
+   the persisted introduction record would redesign contact exchange, and is routed to
+   closeout task 2.6. The final row is a guard: the registry admits only installed
+   mechanisms, and an obligation whose mechanism section was removed fails earlier, at
+   the status step, for want of a client.
+5. **The terminal hook dispatches by mechanism too.** *Superseded by decision 8 of
+   "Section 7 design: one fulfillment path for every domain (2026-10-07)": the kit
+   composes the hook, and bare metal's Alkahest row becomes its `end_service`.*
+   - **Hosted:** the hosted `cleanup`, unchanged.
+   - **Alkahest:** an obligation that ends uncollected with its fulfillment started has
+     its lease terminated through the selected site's lease terminate, the client 7.2
+     adds and 7.4's teardown uses; a repeated termination returns the same lease. This
+     follows VM, whose terminal hook ends the lease of every uncollected obligation. With
+     no fulfillment started there is nothing to release, since bare metal reserves only
+     when fulfillment starts (Section 6, decision 1). A collected obligation needs nothing.
+   - **Contact exchange:** nothing.
+   - **Anything else:** raise.
+6. **A runtime with no composition has no settlement.** Its acceptance dispatch is empty,
+   settle verify is unavailable, health reports commercial settlement unavailable, and no
+   worker is composed; publication already refuses. The escrow verifier takes its chain
+   clients from the composition's resources, so verification and servicing cannot
+   disagree about which chains exist. Tests that settle build the real composition, with
+   the Alkahest client's chain clients doubled at the chain boundary; tests that only
+   negotiate keep none.
+7. **Each deployment surface carries each input once.**
+   - **Helm.** `alkahestEnabled` is removed: enablement lives only in the settlement
+     Secret. The chart gains:
+     - `chains`, public values rendered as `BARE_METAL_STOREFRONT_CHAINS`;
+     - `walletKeySecret`, a reference to an existing Secret rendered as
+       `BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY` through `secretKeyRef`; the chart never
+       renders private material, as the VM chart does not;
+     - an optional existing ConfigMap holding the Alkahest address book, mounted
+       read-only, which a development chain needs.
+
+     `sellerEvmAddress`, `chains`, and `walletKeySecret` are one group: all set or all
+     empty, or rendering fails. The runtime checks the group against the Secret's
+     enabled set (decision 2).
+   - **Production Compose** forwards the chains and an optional wallet credential file,
+     kept apart from the identity file as API credits keeps it. The local overlay then
+     supplies the lane's values through those inputs instead of setting them itself.
+
+   The Helm end-to-end validation that comes later needs these inputs, so they are
+   supplied here rather than recorded as a limit.
+
+Design review of this section (2026-10-07), with the maintainer's dispositions:
+
+| Review point | Disposition |
+|---|---|
+| Choose B; A conflicts with "Peer mechanism configuration hierarchy" | Accepted (decision 1) |
+| Record the decision, alternatives, and the retired fallback in the design, proposal, and tasks | Accepted; Section 7's tasks are amended with the plan |
+| State the invariant architecturally: one composition supplies enablement, verification resources, and servicing clients; derive Alkahest enablement from the composition | Accepted, refined: resources follow a configured section, not an enabled one (decision 2) |
+| Keep the runtime's composition optional as a test seam | Accepted; no composition is a no-op (decision 6) |
+| One mechanism-neutral worker, not one per mechanism; unknown mechanisms fail rather than return | Accepted (decisions 3 and 4), with contact exchange named as declining rather than unknown, and the terminal hook dispatched as well (decision 5) |
+| Migrate the tests that normalize the fallback to the real composition | Accepted (decision 6) |
+| `DEPLOYMENT_AND_CONFIG.md` should say the root is required | Accepted; the quickstart's Alkahest inputs and the chart's values change with it (decision 7) |
+
+Routed to closeout task 2.6:
+
+- Contact exchange: an interrupted reveal is finished only by the buyer retrying the
+  start; the worker could finish it from the persisted introduction record.
+- The seller's EVM address and wallet key are separate inputs nothing checks against each
+  other. VM's `[Wallet]` has the same pair, so this is a repository-wide wallet-schema
+  question rather than a bare-metal one.
+- The Alkahest address book is named twice: by the settlement section's
+  `address_config_path`, which the Alkahest runtime client applies to every chain, and
+  by each chain's `alkahest_address_config_path`, which publication and the chain clients
+  read. Both are kit-level and VM carries both; the bare-metal surfaces carry them as
+  the runtime reads them today.
+
+What this changes beyond Section 7's plan: Section 7 is replanned in five parts (see
+"Section 7 design: one fulfillment path for every domain (2026-10-07)", Scope); these
+decisions are 7B's, and its tests migrate as decision 6 says. The lease client (7E) comes
+before bare metal's `end_service`. The `storefront-publication` delta gains the
+settlement-started fulfillment and its terminal handling as scenarios of "Complete
+bare-metal seller lifecycle", written with the plan.
+
+### Section 7 design: one fulfillment path for every domain (2026-10-07)
+
+Planning Section 7 found that nothing makes a bare-metal Alkahest escrow collectable. The
+worker collects only through a bound fulfillment reference, which for Alkahest must be an
+on-chain fulfillment attestation, and stage 09bb requires the claim. The maintainer asked
+why payment and delivery differ between VM and bare metal at all. The audit below answers
+that they differ only by history. Decided with the maintainer: unify the path in kit,
+adopt bare metal's delivery posture for every domain, and do it in this change (scope A),
+with VM and API credits rebound to it as 6A rebound them. The decisions continue the
+numbering of "Section 7 design: one explicit settlement composition (2026-10-07)".
+
+| Finding | Consequence |
+|---|---|
+| The kit has two ways to start fulfillment. `SettlementJobCoordinator` (`kit/settlement-runtime`, `jobs.py`) runs fulfillment in an in-process asyncio task that nothing makes durable; the servicing worker's ready hook is durable and retried. Every domain uses both | Decision 8 |
+| VM, Alkahest: the settle route starts the coordinator, whose task runs `fulfill_vm_settlement`. The domain's fulfillment hook provisions and then publishes `connection_details` on chain as a string obligation. Deferred or interrupted work is finished by VM's own resume pass (`services/fulfillment_resume_runtime.py`) | Decisions 8 and 12 |
+| VM, hosted: the worker's `on_ready` calls `ensure_hosted_fulfillment`, which runs the same `fulfill_vm_settlement` with the hosted evidence client | Decision 8 |
+| API credits: Alkahest through the coordinator (`fulfill_api_credit_settlement`); hosted through `on_ready` and its own `ensure_hosted_fulfillment`, which publishes signed, secret-free issuance evidence through the portable resolver | Decisions 8 and 10 |
+| Bare metal: hosted through `on_ready` and the hosted lifecycle's `fulfill`, which publishes lease-ready evidence through the portable resolver; Alkahest through the buyer's `begin`, which provisions but never publishes evidence, binds a fulfillment, or collects | Decision 8 |
+| The port `publish_fulfillment(condition_anchor, evidence)` is declared three times: in `kit/hosted-settlement`'s adapter, in `arkhai_vms_settlement.fulfillment`, and in API credits' `services/issuance_evidence.py` | Decision 9 |
+| VM's `prepare_vm_settlement` verifies the escrow and then rebuilds the obligations from current configuration (the seller wallet and chain paths), not from the plan committed at acceptance: the defect Section 6's decision 7 fixed for bare metal. Escrow verification is written twice, there and in bare metal's `settlement_service.py` | Decision 13 |
+| Delivery. VM puts host, port, and user on chain, and stores them on the escrow row and the listing's fulfillment resource; it stores the tenant password on the escrow row; settle status (`serialize_settlement_job`) returns both, and VM's buyer prints them. API credits publishes secret-free evidence and keeps the bearer secret in a private result store behind an authenticated route. Bare metal publishes credential-free evidence and serves coordinates live through the authenticated `/access`; its stored result holds none | Decisions 10 and 11 |
+| Provisioning serves an active fulfillment's credentials live and uncached (`docs/development/ARCHITECTURE.md`, "Fulfillment status and results"), so VM's stored copies are not needed. API credits' bearer secret has no authority that could serve it again | Decision 11 |
+| No condition reads evidence content: oracle gating is off in every configuration, no oracle implementation exists in this repository, and the Alkahest check decides by arbiter kind | Decision 10 |
+| Two permanent requirements describe the VM-owned path this replaces: `openspec/specs/vm-storefront-fulfillment/spec.md`'s "Full settlement convergence ownership" and "Foreground and restart convergence" (VM's resume worker) and its "Ambiguous on-chain submission safety" (no blind resubmission) | Decisions 8 and 12 |
+
+Decisions:
+
+8. **One start path: the worker's ready step, for every mechanism and domain.**
+   `kit/settlement-runtime` composes the worker's ready and terminal hooks from
+   contributions, so no domain writes either hook.
+   - **Mechanism contribution:** each registration declares how its fulfillment is
+     bound. *Domain-started* mechanisms (Alkahest and hosted) supply an evidence
+     publisher (decision 9); *self-binding* mechanisms (contact exchange, whose reveal
+     registers, materializes, binds, checks, and collects its obligation) supply none.
+   - **Domain contribution:** a delivery port. `deliver(record)` starts or resumes
+     delivery for one obligation, idempotently, and reports either pending or delivered
+     with its result (decision 10). `end_service(record, reason)` ends the service of an
+     obligation that ended uncollected after delivery started.
+   - **The ready step:** for a domain-started mechanism, reserve the obligation's
+     fulfillment, then `deliver`; pending defers the fulfillment; delivered builds the
+     evidence, publishes it through the mechanism, and completes the fulfillment with the
+     returned reference; a failure records a retry and raises, so the worker's backoff
+     governs it. A self-binding mechanism declines without reserving. Any other
+     mechanism raises.
+   - **The terminal step:** an uncollected terminal obligation whose delivery started
+     goes to `end_service`; a collected one, or a self-binding one, needs nothing.
+   - **Entry:** settle verify (decision 13) and the hosted start route adopt the
+     obligation and step it once through `service_obligation`; every retry is the
+     worker's.
+   - **Retired:** `SettlementJobCoordinator` and `FulfillmentOutcome`; VM's resume pass;
+     every domain's `ensure_hosted_fulfillment` and the bodies of their hosted `fulfill`
+     callbacks, since the kit hosted route service's fulfillment step becomes the ready
+     step; bare metal's `begin`.
+
+   This supersedes the per-domain dispatch tables of decisions 4 and 5. What they
+   decided becomes contributions: contact exchange is self-binding, and bare metal's
+   `end_service` terminates the lease through the selected site, as decision 5 says.
+   It also supersedes the VM-owned convergence the two `vm-storefront-fulfillment`
+   requirements describe: VM's physical resumption rules ("Physical fulfillment
+   resumption") stay, as properties of VM's `deliver`.
+9. **Publishing evidence belongs to the mechanism.** The one `FulfillmentPublisher` port
+   lives in `kit/settlement-runtime`. `kit/alkahest` gains a publisher that submits the
+   evidence as a string obligation referencing the escrow (the condition anchor is the
+   escrow UID), signed by the seller's wallet; `kit/hosted-settlement`'s publisher
+   implements the kit port unchanged. The VM and API-credit declarations are deleted.
+10. **One evidence envelope, carrying no access material.** A kit-owned envelope, signed
+    by the marketplace signer, names the agreement, the obligation, the condition anchor,
+    the fulfillment identity, and the domain's result kind and digest. The domain
+    contributes its typed result body, whose digest the envelope carries. No envelope
+    carries an endpoint, credential, secret, or provider payload. Bare metal's lease-ready
+    evidence and API credits' issuance evidence become instances of it, and VM gains one.
+    On Alkahest the envelope is the string obligation's data; on hosted it is served by
+    the configured resolver, as today. To be confirmed in planning: the hosted evidence
+    modes (`eas.v1`, `portable-remote.v1`) accept the envelope with no change to the
+    hosted contract. This generalises the existing "Secret-free fulfillment projection"
+    requirement from hosted VM evidence to every mechanism and domain.
+11. **One access rule.** Buyer access material reaches only the authenticated buyer,
+    through an access route. Where an authority can serve it again it is fetched live
+    and never stored (VM and bare metal, from provisioning's delivery); where none can,
+    it is persisted privately (API credits' bearer secret, as today). The access route
+    service is kit-owned and bound by VM and bare metal; bare metal's `/access` becomes
+    its binding. VM stops storing `connection_details` and `tenant_credentials` on the
+    escrow row and the listing's fulfillment resource, and settle status stops returning
+    them; a VM storefront migration clears stored values; VM's buyer reads coordinates
+    and credentials from the access route. What VM has already published on chain stays
+    public; nothing can remove it.
+12. **An ambiguous on-chain submission is resubmitted.** If a process stops after
+    submitting evidence on chain and before recording its UID, the next attempt submits
+    again. The duplicate carries only the envelope, which is public by construction, the
+    escrow is collected once, and the cost is one transaction in a rare window, where the
+    rule it replaces left a paid escrow waiting on an operator. This reverses the
+    permanent requirement "Ambiguous on-chain submission safety"; the reversal is
+    deliberate and is written as a delta with the plan. An alternative for review:
+    `kit/alkahest` discovers the attestation by scanning the seller's `Attested` events
+    and decoding their `refUID`, which keeps the requirement's property without an
+    operator, at the cost of log scanning against every supported chain.
+13. **One verify step.** Each domain's escrow verification becomes one kit step in
+    `kit/settlement-runtime`: load the accepted agreement through a domain hook (the
+    committed plan and the domain's check of its terms), verify the escrow through the
+    mechanism's verifier (the Alkahest registration's `settlement_verifier`), register
+    the committed plan, adopt the matched obligation, and step it once (decision 8). VM
+    therefore verifies the plan committed at acceptance, as bare metal does, and refuses
+    a thread with none, as bare metal does under the maintainer's ruling. The kit
+    settlement admin route service's verify, evaluate, and wait hooks bind to this step.
+
+Scope. Taking VM and API credits in this change was chosen deliberately over a follow-up
+change; see "Risks / Trade-offs". Section 7 is replanned in five parts, each ending with
+both lanes green:
+
+- **7A, kit:** decisions 8 to 10 and 13 in `kit/settlement-runtime` and `kit/alkahest`,
+  with `kit/hosted-settlement` on the kit port, and the access route service (decision
+  11).
+- **7B, bare metal:** decisions 1 to 7 of the composition design and both bare-metal
+  mechanisms on the kit path.
+- **7C, VM:** VM on the kit path and the access rule, its resume pass and stored access
+  material retired.
+- **7D, API credits:** API credits on the kit path.
+- **7E, the rest of the original Section 7:** the lease client and the committed plan
+  (7.2), teardown through lease termination and the deal controls (7.4), the
+  publication dry run (7.5), and the restart tests (7.7).
+
+Routed changes. Closeout task 2.6's item on what a storefront keeps of a delivery (from
+"5B.12 implementation audit (2026-10-06)", row 9) is resolved here by decision 11.
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,
@@ -2542,6 +2817,15 @@ Earlier:
   change index).
 - **Image artifact size** → one compressed artifact kept for a day; if transfer time
   rivals build time, a registry-backed cache is the fallback.
+- **Section 7 widened to every domain's fulfillment path** (Section 7 design, scope A):
+  the change takes on a kit mechanism and rebinds VM and API credits rather than leaving
+  that to a follow-up change, which the closeout guidance names as a signal to consider
+  splitting. Chosen deliberately: fixing bare metal alone would add a fourth copy of the
+  start-deliver-publish-bind step. Mitigation: 7A to 7E each end with both lanes green;
+  VM moves after bare metal has proved the kit path on both mechanisms.
+- **VM's delivery changes for its buyers** → VM's settle status stops returning
+  coordinates and the tenant password, and stored copies are cleared. VM's buyer moves to
+  the access route in the same part (7C), and VM's lane is the gate.
 - **Admin reserve's VM path** (`/api/v1/admin/portfolio/reservations`) carries VM
   vocabulary; it is kept for client compatibility. `remove-dead-storefront-physical-surfaces`
   does not retire it (checked 2026-10-01).

@@ -24,7 +24,16 @@ VM's. What stands in the way:
   the runtime's acceptance hooks and evaluate-negotiate skips the opening's own guards.
 - **Fulfillment never starts on the Alkahest path**; it waits for a buyer call no buyer
   makes, and the settlement-servicing worker that would retry it exists only with hosted
-  settlement.
+  settlement. A storefront started without its settlement configuration enables Alkahest
+  outside it, so escrow verification and settlement servicing disagree about which
+  mechanisms exist, and the Helm chart and production Compose supply no Alkahest chain or
+  wallet key at all.
+- **Every domain starts fulfillment two ways and publishes evidence its own way.** The
+  kit runs Alkahest fulfillment in an in-process task and hosted fulfillment through the
+  durable servicing worker; VM finishes interrupted Alkahest work with its own resume
+  pass, and bare metal has none. The evidence publisher is declared three times. VM
+  publishes a buyer's host, port, and user on chain and stores them and the tenant
+  password, which bare metal and API credits do not; no domain requires the difference.
 - **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
   a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
 - **No scenario exists**, and stage definitions are VM's alone.
@@ -58,8 +67,23 @@ API-credit deal runs inside the VM lane.
   recorded; evaluate-negotiate becomes a side-effect-free preview of the full opening,
   taking the opening request as its body.
 - Start bare-metal fulfillment when settlement verifies the escrow through the kit
-  settlement-servicing worker, composed for every mechanism rather than only hosted
-  settlement, and retire `POST /api/v1/fulfillments/begin`.
+  settlement-servicing worker, one mechanism-neutral worker over the configured
+  settlement runtime rather than one composed only for hosted settlement, and retire
+  `POST /api/v1/fulfillments/begin`. The storefront requires its explicit settlement
+  configuration (`BARE_METAL_STOREFRONT_SETTLEMENT`) and builds every configured
+  mechanism's resources from it; the implicit Alkahest fallback is retired. The Helm chart
+  and production Compose carry the chain and wallet inputs Alkahest needs, and the chart's
+  `alkahestEnabled` flag, which restated the settlement configuration, is removed.
+- Make the servicing worker's ready step the one way every domain starts fulfillment,
+  composed in kit from mechanism contributions (an evidence publisher, or none for
+  self-binding contact exchange) and domain contributions (deliver, end service). Retire
+  `SettlementJobCoordinator`, VM's resume pass, and every domain's hosted fulfillment
+  body. One kit verify step registers the plan committed at acceptance for every domain.
+- One kit evidence envelope, published through the mechanism (`kit/alkahest` gains a
+  string-obligation publisher), carries no endpoint, credential, or secret. Buyer access
+  material reaches only the authenticated buyer through a kit access route, fetched live
+  where an authority can serve it again: VM stops storing and returning coordinates and
+  the tenant password. An ambiguous on-chain evidence submission is resubmitted.
 - Make the lease lifecycle the only owner of release for every offering mode: lease
   release delegates to durable fulfillment teardown, buyer teardown goes through lease
   termination, and the storefront's direct site release is removed.
@@ -227,7 +251,21 @@ None.
 - `domains/bare_metal/storefront`: negotiation on the kit runtime with a configured
   seller chain and no hold, its durable pause removed, deal controls,
   settlement-started fulfillment, teardown through lease termination, the
-  capacity-released callback, the publication dry run, restart integration tests.
+  capacity-released callback, the publication dry run, restart integration tests. Startup
+  requires the settlement configuration; a deployment that relied on the implicit
+  Alkahest fallback must supply one.
+- `helm/charts/bare-metal-storefront` and `compose.bare-metal.yml`: chain and wallet-key
+  inputs; the chart's `alkahestEnabled` value removed.
+- `kit/settlement-runtime`: the composed ready and terminal steps, the verify step, the
+  evidence port and envelope, the access route service; `SettlementJobCoordinator`
+  removed. `kit/alkahest`: the evidence publisher. `kit/hosted-settlement`: its publisher
+  on the kit port.
+- `domains/vms/storefront`, `domains/vms/settlement`, `domains/vms/buyer`: VM on the kit
+  path; its resume pass, its evidence publisher, and stored access material removed;
+  settle status no longer returns coordinates or credentials, and the buyer reads them
+  from the access route.
+- `domains/apicredits/storefront`: API credits on the kit path; its evidence publisher
+  declaration removed.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
 - `e2e-tests`: shared compute deal stages, VM's scenario moved onto them, the bare-metal
   scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets; the
@@ -247,15 +285,21 @@ None.
       distributions), the deal-control route services in the kit layers, the five-piece
       route pattern, the compute-provisioning executor table and mock mechanism, release
       ownership (mode-agnostic), `VersionedEnvelope`'s home in core, and the bare-metal
-      fulfillment hook statement, which is stale today.
+      fulfillment hook statement, which is stale today; the one fulfillment start path,
+      the evidence envelope and publisher port, and the access rule.
 - [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
       open gap, and the findings recorded under "Controls and routes (5B.8)".
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` and
+      `docs/bare-metal-seller-quickstart.md` — the bare-metal storefront's required
+      settlement configuration and the chain and wallet-key inputs of its Helm chart and
+      Compose file.
 - [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
       `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`,
-      `compute-provisioning-contract`, `resource-pool-management`.
+      `compute-provisioning-contract`, `resource-pool-management`, `settlement-servicing`,
+      `vm-storefront-fulfillment`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -281,8 +325,19 @@ None.
 - Lease release delegates to durable fulfillment teardown for every offering mode, and
   storefront teardown goes through lease termination —
   `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
-- Bare-metal fulfillment starts at settlement verification —
+- Bare-metal fulfillment starts at settlement verification, through one servicing worker
+  whose ready and terminal hooks dispatch by mechanism —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
+- One fulfillment start path composed in kit; one evidence envelope without access
+  material; one access rule; resubmission after an ambiguous on-chain submission; one
+  verify step on the committed plan —
+  `openspec/specs/settlement-servicing/spec.md`,
+  `openspec/specs/vm-storefront-fulfillment/spec.md`,
+  `docs/development/ARCHITECTURE.md`.
+- The bare-metal storefront requires its settlement configuration and its deployment
+  surfaces carry the Alkahest chain and wallet inputs (enforcing the existing
+  "Peer mechanism configuration hierarchy" requirement, not adding one) —
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, `docs/bare-metal-seller-quickstart.md`.
 - The negotiation runtime rechecks a listing against its source before every seller
   decision and every acceptance, refuses a source it cannot confirm as retryable, and
   records a thread as successful only once its agreement and plan are recorded; the
