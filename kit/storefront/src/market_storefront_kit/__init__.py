@@ -29,6 +29,7 @@ from .deal_control_routes import (
     opening_proposal,
 )
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
+from .trading_pause import TradingPause, TradingPauseRouteService
 from .negotiation_watchdog import (
     NegotiationRepository,
     NegotiationWatchdogPolicy,
@@ -59,6 +60,8 @@ __all__ = [
     "StorefrontContainer",
     "StorefrontRouteHooks",
     "StorefrontServiceHooks",
+    "TradingPause",
+    "TradingPauseRouteService",
     "build_alkahest_clients",
     "build_composed_storefront_app",
     "build_storefront_lifespan",

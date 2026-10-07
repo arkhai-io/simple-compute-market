@@ -719,9 +719,9 @@ def build_api_credit_negotiation_runtime(
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     def storefront_is_paused() -> bool:
-        from apicredits_storefront.server import is_globally_paused
+        import apicredits_storefront.container as _container
 
-        return bool(is_globally_paused())
+        return _container.trading_pause.paused
 
     from core_storefront.stage_log import stage_event
 

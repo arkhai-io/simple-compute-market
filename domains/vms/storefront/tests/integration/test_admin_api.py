@@ -32,7 +32,7 @@ from market_storefront.middleware.service_peer_auth import (
     initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
-import market_storefront.server as _server
+import market_storefront.lifecycle as _lifecycle
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
@@ -75,10 +75,10 @@ async def db(tmp_path) -> SQLiteClient:
 
 @pytest_asyncio.fixture(autouse=True)
 def reset_pause_state():
-    """Ensure global pause flag is reset between tests."""
-    _server._GLOBALLY_PAUSED = False
+    """Ensure the process's trading pause is reset between tests."""
+    _lifecycle.trading_pause().resume()
     yield
-    _server._GLOBALLY_PAUSED = False
+    _lifecycle.trading_pause().resume()
 
 
 @pytest_asyncio.fixture
@@ -340,7 +340,7 @@ class TestAdminPause:
         c, _ = client
         result = await c.admin_pause()
         assert result.paused is True
-        assert _server._GLOBALLY_PAUSED is True
+        assert _lifecycle.trading_pause().paused is True
 
     async def test_pause_reflected_in_system_status(self, client, admin_client):
         c, _ = client
@@ -362,10 +362,10 @@ class TestAdminResume:
     async def test_resume_clears_flag(self, client):
         c, _ = client
         await c.admin_pause()
-        assert _server._GLOBALLY_PAUSED is True
+        assert _lifecycle.trading_pause().paused is True
         result = await c.admin_resume()
         assert result.paused is False
-        assert _server._GLOBALLY_PAUSED is False
+        assert _lifecycle.trading_pause().paused is False
 
     async def test_resume_reflected_in_system_status(self, client, admin_client):
         c, _ = client
@@ -1363,3 +1363,23 @@ class TestPatchResource:
         # gpu_model not in patch → should be preserved
         assert result["attributes"].get("gpu_model") == "RTX 5080"
         assert result["attributes"].get("lease_end_utc") is None
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/system/events: what the signature does not bind is refused
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["limit=100&since_id=0&stream=false&after=1", "stream=true", "stage=a&stage=b"],
+)
+async def test_an_event_read_the_signature_does_not_bind_is_refused(admin_app, query):
+    # Rejection path: the canonical client cannot send these, so the request is
+    # raw, and only its status is asserted. The refusal precedes authentication,
+    # since the signed resource cannot be built.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app), base_url="http://test"
+    ) as raw:
+        response = await raw.get(f"/api/v1/system/events?{query}")
+    assert response.status_code == 400

@@ -17,7 +17,7 @@ from core_storefront.models.system_models import (
     HealthResponse,
 )
 from market_storefront.models.system_status_models import VmSystemStatusResponse
-from market_storefront.server import is_globally_paused
+from market_storefront.lifecycle import trading_pause
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class SystemController:
     )
     async def system_status(self) -> VmSystemStatusResponse:
         body = await self._svc.get_health(include_registry=True)
-        body["paused"] = is_globally_paused()
+        body["paused"] = trading_pause().paused
         return VmSystemStatusResponse(**body)
 
     @router.get(

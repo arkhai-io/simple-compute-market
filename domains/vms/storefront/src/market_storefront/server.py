@@ -78,22 +78,6 @@ from market_storefront.services.site_projection_cache import refresh_site_resour
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Global pause flag
-# ---------------------------------------------------------------------------
-
-_GLOBALLY_PAUSED: bool = False
-
-
-def is_globally_paused() -> bool:
-    return _GLOBALLY_PAUSED
-
-
-def _set_globally_paused(value: bool) -> None:
-    global _GLOBALLY_PAUSED
-    _GLOBALLY_PAUSED = value
-
-
-# ---------------------------------------------------------------------------
 def run_serve(
     host: str = "0.0.0.0",
     port: int | None = None,

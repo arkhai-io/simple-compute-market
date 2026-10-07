@@ -6,7 +6,11 @@ import pytest
 from core_storefront.models.listing_models import EvaluateNegotiateRequest
 from core_storefront.models.negotiation_models import ForceAcceptRequest
 from market_identity import Ed25519Signer
-from market_negotiation_runtime import NegotiationStateError
+from market_negotiation_runtime import (
+    NegotiationStateError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+)
 from market_storefront_kit import (
     DealControlRouteError,
     NegotiationControlRouteService,
@@ -128,6 +132,65 @@ async def test_force_accept_maps_refusals(message: str, status: int) -> None:
             "listing-1", "neg-1", ForceAcceptRequest(amount="13"), actor_principal=ADMIN
         )
     assert refused.value.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "detail"),
+    [
+        (OfferUnfulfillableError("no_matching_declaration"), 409, "no_matching_declaration"),
+        (OfferUnfulfillableError("no_matching_inventory"), 409, "no_matching_inventory"),
+        (
+            NegotiationUnavailableError("listing_source_unverifiable"),
+            503,
+            "listing_source_unverifiable",
+        ),
+    ],
+)
+async def test_force_accept_maps_listing_source_refusals(error, status, detail) -> None:
+    runtime = FakeRuntime()
+    runtime.accept_error = error
+
+    with pytest.raises(DealControlRouteError) as refused:
+        await _service(runtime).force_accept(
+            "listing-1", "neg-1", ForceAcceptRequest(amount="13"), actor_principal=ADMIN
+        )
+    assert (refused.value.status_code, refused.value.detail) == (status, detail)
+
+
+def test_the_event_resource_is_the_one_the_canonical_client_signs() -> None:
+    resource = StageEventRouteService.signed_resource(
+        [
+            ("since_id", "4"),
+            ("limit", "100"),
+            ("stream", "false"),
+            ("stage", "negotiation"),
+            ("negotiation_id", "neg 1"),
+        ]
+    )
+    assert resource == (
+        "system-events?limit=100&negotiation_id=neg%201&since_id=4"
+        "&stage=negotiation&stream=false"
+    )
+
+
+def test_the_event_resource_makes_its_defaults_explicit() -> None:
+    assert StageEventRouteService.signed_resource([]) == (
+        "system-events?limit=100&since_id=0&stream=false"
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        [("after", "1")],
+        [("stage", "a"), ("stage", "b")],
+        [("stream", "true")],
+    ],
+)
+def test_the_event_resource_refuses_what_its_signature_does_not_bind(query) -> None:
+    with pytest.raises(DealControlRouteError) as refused:
+        StageEventRouteService.signed_resource(query)
+    assert refused.value.status_code == 400
 
 
 def test_opening_proposal_carries_an_exact_selection() -> None:

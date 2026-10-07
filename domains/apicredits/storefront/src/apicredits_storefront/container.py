@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from market_storefront_kit import TradingPause
+
 if TYPE_CHECKING:
     from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
@@ -52,6 +54,10 @@ resolved_negotiation_runtime: "NegotiationRuntime | None" = None
 resolved_system_service: "SystemService | None" = None
 resolved_marketplace_signer: "Signer | None" = None
 resolved_loop_controller: "StorefrontLoopController | None" = None
+
+#: Whether this process opens new negotiations. Process-local and kept across
+#: lifespans: a restarted process trades again, and a lifespan does not reset it.
+trading_pause = TradingPause()
 
 
 def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:

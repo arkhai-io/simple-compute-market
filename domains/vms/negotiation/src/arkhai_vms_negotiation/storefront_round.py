@@ -9,7 +9,6 @@ import os
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from collections.abc import Awaitable, Callable
 from typing import Any, Iterable, Mapping
 
 from arkhai_vms_listings import (
@@ -20,6 +19,7 @@ from arkhai_vms_negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.scalar_policies import selected_settlement_artifact
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -42,18 +42,6 @@ from market_policy.seller_round import (  # noqa: E402,F401
     SellerRoundHook,
     SellerRoundResult,
 )
-
-
-async def _default_seller_policy_inputs(
-    source_check: Callable[[], Awaitable[dict[str, Any]]],
-) -> dict[str, Any]:
-    """The listing's own-source check, for the inventory guard.
-
-    ``source_check`` is supplied by the storefront, which holds the listing's
-    durable binding and its site's projection; this concept module imports no
-    storefront code.
-    """
-    return {"available_resources": {"source_check": await source_check()}}
 
 
 _FILE_POLICIES_DISCOVERED = False
@@ -261,7 +249,7 @@ async def _run_default_seller_round_policy(
     history: list[NegotiationRound],
     requested_duration_seconds: int | None = None,
     strategy_label: str | None = None,
-    policy_inputs: dict[str, Any] | None = None,
+    listing_source: ListingSourceVerdict | None = None,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
@@ -311,10 +299,8 @@ async def _run_default_seller_round_policy(
         our_reference_amount=int(reference_amount),
         listing=listing_dict if isinstance(listing_dict, dict) else {},
         our_escrow_proposal=their_proposal,
-        available_resources=(
-            (policy_inputs or {}).get("available_resources")
-            or {"resources": []}
-        ),
+        available_resources={"resources": []},
+        listing_source=listing_source,
         intermediate={
             "requested_duration_seconds": requested_duration_seconds,
             "seller_reference_amount": int(reference_amount),
@@ -339,7 +325,6 @@ async def _run_default_seller_round_policy(
 
 @dataclass
 class _DefaultSellerRoundHook:
-    source_check: Callable[[], Awaitable[dict[str, Any]]]
     negotiation_config: Any = None
     chains: Mapping[str, Any] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
@@ -352,14 +337,14 @@ class _DefaultSellerRoundHook:
         history: list[NegotiationRound],
         requested_duration_seconds: int | None = None,
         strategy_label: str | None = None,
+        listing_source: ListingSourceVerdict | None = None,
     ) -> SellerRoundResult:
-        policy_inputs = await _default_seller_policy_inputs(self.source_check)
         return await _run_default_seller_round_policy(
             listing=listing,
             history=history,
             requested_duration_seconds=requested_duration_seconds,
             strategy_label=strategy_label,
-            policy_inputs=policy_inputs,
+            listing_source=listing_source,
             negotiation_config=self.negotiation_config,
             chains=self.chains,
             extra_policy_paths=self.extra_policy_paths,
@@ -369,20 +354,17 @@ class _DefaultSellerRoundHook:
 
 def default_seller_round_hook(
     *,
-    source_check: Callable[[], Awaitable[dict[str, Any]]],
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
-    """Build the default VM seller round hook for one listing's round.
+    """Build the default VM seller round hook.
 
-    ``source_check`` returns the listing's own-source check for the inventory
-    guard. The storefront builds it per round from the negotiation's durable
-    binding, so the guard never judges a listing against capacity elsewhere.
+    Each call takes the round's ``listing_source``, the negotiation runtime's
+    check of the listing against its own source, which the inventory guard reads.
     """
     return _DefaultSellerRoundHook(
-        source_check=source_check,
         negotiation_config=negotiation_config,
         chains=chains,
         extra_policy_paths=extra_policy_paths,

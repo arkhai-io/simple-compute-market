@@ -22,6 +22,7 @@ from core_storefront.models.negotiation_models import (
 )
 from market_negotiation_runtime import (
     NegotiationRuntime,
+    NegotiationUnavailableError,
     OfferUnfulfillableError,
     StorefrontPausedError,
 )
@@ -121,6 +122,18 @@ class NegotiateController:
                         "cover the requested quantity, or the key claim was "
                         "rejected. See `reason`."
                     ),
+                },
+            )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
                 },
             )
         except ValidationError as exc:
@@ -244,6 +257,29 @@ class NegotiateController:
                 actor_principal=auth.principal,
                 actor_role="buyer",
                 seller_principal=seller_principal,
+            )
+        except OfferUnfulfillableError as exc:
+            # A buyer's accept on a listing its source no longer supports, or
+            # whose capacity is taken.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "offer_unfulfillable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                },
+            )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
+                },
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

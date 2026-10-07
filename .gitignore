@@ -239,6 +239,3 @@ pi-session-*.html
 # Local-only mise overrides (machine-specific paths).
 mise.local.toml
 .claude/skills/implement-change/SKILL.md
-openspec/changes/capacity-shape-envelope/reviews/01-design.md
-openspec/changes/capacity-shape-envelope/reviews/03-design.md
-openspec/changes/capacity-shape-envelope/reviews/04-design-external.md

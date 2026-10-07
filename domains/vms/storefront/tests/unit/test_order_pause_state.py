@@ -27,7 +27,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_negotiation_runtime import (
-    OfferUnfulfillableError,
+    NegotiationUnavailableError,
     StorefrontPausedError,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
@@ -327,9 +327,9 @@ class TestNegotiationRuntimePauseGuard:
     """Pause checks fire before negotiation policy or persistence."""
 
     async def test_global_pause_raises(self, db, monkeypatch):
-        # Patch is_globally_paused to return True
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", True)
+        from market_storefront.lifecycle import trading_pause
+
+        monkeypatch.setattr(trading_pause(), "_paused", True)
 
         with pytest.raises(StorefrontPausedError) as exc_info:
             await _start(sqlite_client=db,
@@ -339,8 +339,9 @@ class TestNegotiationRuntimePauseGuard:
         assert exc_info.value.reason == "global"
 
     async def test_order_pause_raises(self, db, monkeypatch):
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        from market_storefront.lifecycle import trading_pause
+
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         await db.set_listing_paused(listing_id="order-001", paused=True)
 
@@ -354,8 +355,9 @@ class TestNegotiationRuntimePauseGuard:
     async def test_no_pause_proceeds_normally(self, db, monkeypatch):
         """When not paused, the function proceeds to normal validation
         (raises ValueError for missing strategy, not StorefrontPausedError)."""
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        from market_storefront.lifecycle import trading_pause
+
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         # order-001 has no strategy set, so we expect ValueError not paused
         with pytest.raises((ValueError, Exception)) as exc_info:
@@ -365,22 +367,22 @@ class TestNegotiationRuntimePauseGuard:
             their_agent_url="0xBuyer",)
         assert not isinstance(exc_info.value, StorefrontPausedError)
 
-    async def test_pre_negotiation_guard_rejection_raises_offer_unfulfillable(
+    async def test_an_unconfirmable_source_refuses_the_opening_as_retryable(
         self, db, monkeypatch, marketplace_signer
     ):
-        """Round-0 guard veto raises OfferUnfulfillableError.
+        """An opening whose listing's source cannot be confirmed is retryable.
 
         The fixture's listing offers ``gpu_model=H200, region=California, US``,
-        and no site projection declares its source, so the
-        ``has_matching_inventory_guard`` middleware vetoes with
-        ``no_matching_declaration``: the seller cannot confirm its source still
-        declares what the listing publishes. Every guard veto maps to 409.
+        and its site's projection has not loaded, so nothing confirms or denies
+        its source: the runtime refuses before any write with a retryable
+        refusal (503), not a declared mismatch (409).
         """
-        import market_storefront.server as server_mod
-        monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
+        from market_storefront.lifecycle import trading_pause
+
+        monkeypatch.setattr(trading_pause(), "_paused", False)
 
         from market_core.schemas import EscrowProposal, ProvisionTerms
-        with pytest.raises(OfferUnfulfillableError) as exc_info:
+        with pytest.raises(NegotiationUnavailableError) as exc_info:
             await _start(sqlite_client=db,
             our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
             provision_terms=ProvisionTerms(
@@ -394,5 +396,5 @@ class TestNegotiationRuntimePauseGuard:
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
 
-        assert exc_info.value.reason == "no_matching_declaration"
+        assert exc_info.value.reason == "listing_source_unverifiable"
         assert exc_info.value.listing_id == "order-001"

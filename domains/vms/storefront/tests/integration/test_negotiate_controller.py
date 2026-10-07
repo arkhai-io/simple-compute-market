@@ -793,3 +793,60 @@ class TestAdministrativeAcceptance:
         # The acceptance hold reserves at the listing's site, as it does after
         # a negotiated acceptance.
         assert any("reserv" in request for request in site_requests), site_requests
+
+
+class TestAcceptanceRechecksTheSource:
+    """A buyer's accept rechecks the listing against its source, as a round does.
+
+    The negotiation opens while the source matches, so the seller counters; the
+    source then changes, or becomes unreadable, before the buyer accepts.
+    """
+
+    async def _open_countered(self, c, db, listing_id: str) -> str:
+        await _upsert_bound_listing(db, listing_id)
+        opened = await c.negotiate_new(
+            listing_id=listing_id,
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+        )
+        assert opened["action"] == "counter"
+        return opened["negotiation_id"]
+
+    async def test_an_accept_after_the_source_changed_is_refused(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-changed")
+        (pool,) = [p for p in _SITE_POOLS if p["pool_id"] == "pool-neg-recheck-changed"]
+        pool["resources"][0]["attributes"]["gpu_model"] = "B300"
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 409
+        assert "no_matching_declaration" in str(refused.value)
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        assert thread["terminal_state"] is None
+        assert thread["agreed_at"] is None
+
+    async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+
+    async def test_a_buyer_exits_whatever_the_source(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        result = await c.negotiate_continue(negotiation_id, action="exit")
+
+        assert result["action"] == "exit"

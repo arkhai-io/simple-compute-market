@@ -68,8 +68,11 @@ from market_storefront.models.capacity_admin_models import (
 )
 from market_storefront import lifecycle as _lifecycle
 from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 - registers the steps
-from market_storefront.server import _set_globally_paused
-from market_storefront_kit import LifecycleRouteError, StorefrontLifecycleRouteService
+from market_storefront_kit import (
+    LifecycleRouteError,
+    StorefrontLifecycleRouteService,
+    TradingPauseRouteService,
+)
 from market_pool_overrides import (
     PoolOverrideDeleteResponse,
     PoolOverrideListResponse,
@@ -251,10 +254,7 @@ class AdminController:
         summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
-        _set_globally_paused(True)
-        return AdminPauseResponse(
-            paused=True, message="Storefront paused. New negotiations will receive 503."
-        )
+        return TradingPauseRouteService(_lifecycle.trading_pause()).pause()
 
     @router.post(
         "/resume",
@@ -262,8 +262,7 @@ class AdminController:
         summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
-        _set_globally_paused(False)
-        return AdminPauseResponse(paused=False, message="Storefront resumed.")
+        return TradingPauseRouteService(_lifecycle.trading_pause()).resume()
 
     @router.post(
         "/deals/{escrow_uid}/interrupt",

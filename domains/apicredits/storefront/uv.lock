@@ -130,7 +130,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-storefront"
-version = "0.6.3"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -176,11 +176,11 @@ requires-dist = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-hosted-settlement", specifier = ">=0.1.1" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
-    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.3.0" },
+    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.4.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-storefront", specifier = "==0.2.0" },
+    { name = "arkhai-kit-storefront", specifier = "==0.3.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "fastapi-utils", extras = ["all"], specifier = ">=0.8.0" },
@@ -341,19 +341,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -361,7 +361,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -392,7 +392,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-storefront"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -401,7 +401,7 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
-    { path = "arkhai_kit_storefront-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_storefront-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

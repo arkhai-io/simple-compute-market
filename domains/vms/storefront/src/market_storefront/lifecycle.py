@@ -24,6 +24,7 @@ from market_storefront_kit import (
     LoopStep,
     QUIESCENCE_TIMEOUT_SECONDS,
     StorefrontLoopController,
+    TradingPause,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,15 @@ _CONTROLLER = StorefrontLoopController(logger=logger)
 def controller() -> StorefrontLoopController:
     """The process's one loop controller."""
     return _CONTROLLER
+
+
+# Whether this process opens new negotiations; separate from the loops' pause.
+_TRADING_PAUSE = TradingPause()
+
+
+def trading_pause() -> TradingPause:
+    """The process's one trading pause."""
+    return _TRADING_PAUSE
 
 
 def start_registered_loop(

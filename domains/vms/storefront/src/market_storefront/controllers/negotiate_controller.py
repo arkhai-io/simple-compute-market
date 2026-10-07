@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
 from market_storefront_kit import opening_proposal
 from market_negotiation_runtime import (
+    NegotiationUnavailableError,
     NegotiationRuntime,
     OfferUnfulfillableError,
     StorefrontPausedError,
@@ -127,6 +128,18 @@ class NegotiateController:
                     ),
                 },
             )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
+                },
+            )
         except ValidationError as exc:
             raise HTTPException(
                 status_code=400,
@@ -208,6 +221,29 @@ class NegotiateController:
                 buyer_principal=body.buyer_principal,
                 actor_principal=auth.principal,
                 actor_role="buyer",
+            )
+        except OfferUnfulfillableError as exc:
+            # A buyer's accept on a listing its source no longer supports, or
+            # whose capacity is taken.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "offer_unfulfillable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                },
+            )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
+                },
             )
         except NegotiationAmountError as exc:
             # Before the generic ValueError below, which answers 404: a

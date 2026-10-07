@@ -29,6 +29,7 @@ from core_storefront.identity_lifecycle import (
 from fastapi import Request
 from market_contact_exchange import DELETE_INTRODUCTION_PAYLOADS_OPERATION
 from market_identity import EMPTY_BODY, Identity
+from market_storefront_kit import DealControlRouteError, StageEventRouteService
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
     PoolOverrideContractError,
@@ -121,38 +122,10 @@ def _resource_import_descriptor(request: Request, raw: bytes) -> dict[str, Any]:
 
 
 def _system_events_resource(request: Request) -> str:
-    query = request.query_params
-    allowed = {
-        "limit",
-        "since_id",
-        "stream",
-        "listing_id",
-        "negotiation_id",
-        "stage",
-    }
-    if not set(query.keys()).issubset(allowed) or any(
-        len(query.getlist(name)) != 1 for name in query.keys()
-    ):
-        raise AuthError(
-            "system event query contains an unauthenticated alias", status_code=400
-        )
-    if query.get("stream", "false").lower() != "false":
-        raise AuthError(
-            "signed event streaming is unsupported; use authenticated polling",
-            status_code=400,
-        )
-    values: dict[str, str] = {
-        "limit": query.get("limit", "100"),
-        "since_id": query.get("since_id", "0"),
-        "stream": query.get("stream", "false").lower(),
-    }
-    for name in ("listing_id", "negotiation_id", "stage"):
-        value = query.get(name)
-        if value is not None:
-            values[name] = value
-    return "system-events?" + urlencode(
-        sorted(values.items()), quote_via=quote, safe=""
-    )
+    try:
+        return StageEventRouteService.signed_resource(request.query_params.multi_items())
+    except DealControlRouteError as exc:
+        raise AuthError(str(exc.detail), status_code=exc.status_code) from exc
 
 
 def _negotiation_list_resource(request: Request, listing_id: str) -> str:

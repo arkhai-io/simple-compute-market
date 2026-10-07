@@ -26,9 +26,6 @@ from storefront_client.client import StorefrontClientError
 
 import apicredits_storefront.container as container
 
-# The system controller and the server module import each other; the server
-# must load first, as it does when the storefront starts.
-import apicredits_storefront.server  # noqa: F401
 from apicredits_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
 )

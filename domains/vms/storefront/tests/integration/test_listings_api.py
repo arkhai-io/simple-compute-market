@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime
+from market_policy.listing_source import ListingSourceVerdict
 from market_core.schemas import RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
 
@@ -472,12 +473,20 @@ async def admin_client(
     import market_storefront.negotiation_runtime as _negotiation_runtime
 
     registration = db.domain_registry.resolve_mode("vm")
+
+    async def source_matches(_repository, _resolved):
+        # The listings here have no declared source; these tests preview the
+        # seller's policy, and the source check is tested on its own
+        # (tests/unit/test_listing_source_check.py, test_negotiate_controller.py).
+        return ListingSourceVerdict("matches")
+
     _container.resolved_negotiation_runtime = (
         _negotiation_runtime.build_vm_negotiation_runtime(
             registration.contract,
             registry=db.domain_registry,
             binding=registration.binding,
             capacity_runtime=collaborators.capacity_runtime,
+            listing_source_check=source_matches,
         )
     )
 

@@ -3426,7 +3426,7 @@ The original tasks, kept for their history:
 Decisions 2, 3, 4, 8, and 12. Reviewable alone: the policy, negotiation-runtime, and
 storefront kits, and the VM and API-credit storefronts; bare metal changes only its pins.
 
-- [ ] 6A.1 Policy kit (`kit/policy`, 0.2.0 → 0.3.0):
+- [x] 6A.1 Policy kit (`kit/policy`, 0.2.0 → 0.3.0):
       - a new `src/market_policy/listing_source.py`: `ListingSourceVerdict` (frozen; an
         outcome of `matches`, `declared_mismatch`, `unavailable`, or `unverifiable`, a
         reason, and the differing fields for the log); `ListingSourceRefusal` (a reason
@@ -3448,7 +3448,7 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
         needs the PyTorch index), so the file runs under the negotiation runtime's
         environment, which installs the policy kit from its wheel; disclosed in the
         completion note.
-- [ ] 6A.2 Negotiation runtime (`kit/negotiation-runtime`, 0.3.0 → 0.4.0), in
+- [x] 6A.2 Negotiation runtime (`kit/negotiation-runtime`, 0.3.0 → 0.4.0), in
       `src/market_negotiation_runtime/runtime.py` and `__init__.py`:
       - `NegotiationUnavailableError(reason, listing_id=None)`, not a `ValueError`,
         added to the refusals an opening preview reports, and exported;
@@ -3486,7 +3486,7 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
         - `tests/unit/test_opening_preview.py`: a declared mismatch and an unverifiable
           source are reported as refusals, writing nothing;
         - `tests/unit/test_administrative_acceptance.py`: the recheck and success last.
-- [ ] 6A.3 Storefront kit (`kit/storefront`, 0.2.0 → 0.3.0):
+- [x] 6A.3 Storefront kit (`kit/storefront`, 0.2.0 → 0.3.0):
       - a new `src/market_storefront_kit/trading_pause.py`: `TradingPause`, one
         process-local flag a storefront's composition holds beside its loop controller,
         separate from the lifecycle pause; and `TradingPauseRouteService`, whose `pause`
@@ -3500,7 +3500,7 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
       - `__init__.py` exports;
       - tests: a new `tests/unit/test_trading_pause.py`; `tests/unit/test_deal_control_routes.py`
         for the signed resource, its refusals, and force-accept's two new refusals.
-- [ ] 6A.4 VM (`domains/vms/negotiation` 0.3.0 → 0.4.0; `domains/vms/storefront` 0.14.1 →
+- [x] 6A.4 VM (`domains/vms/negotiation` 0.3.0 → 0.4.0; `domains/vms/storefront` 0.14.1 →
       0.15.0):
       - negotiation: `policies.py` loses `has_matching_inventory_guard` and its export;
         `storefront_round.py` loses `_default_seller_policy_inputs` and the hook's
@@ -3539,7 +3539,7 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
           `tests/unit/test_config_loader.py`: the guard's name resolves from the policy kit;
         - `tests/integration/test_admin_api.py`: pause and resume through the kit
           service; the event read refuses an unknown parameter and a stream request.
-- [ ] 6A.5 API credits (`domains/apicredits/storefront`, 0.6.3 → 0.7.0):
+- [x] 6A.5 API credits (`domains/apicredits/storefront`, 0.6.3 → 0.7.0):
       - `server.py` loses `_GLOBALLY_PAUSED` and holds the process's `TradingPause`;
       - a new `controllers/trading_pause_controller.py` binds `POST /api/v1/admin/pause`
         and `/resume` through `TradingPauseRouteService`, authenticated as `admin_pause` and
@@ -3555,13 +3555,13 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
         `tests/integration/test_force_accept_api.py` (unchanged behaviour);
         `tests/integration/test_admin_api.py` or its nearest suite (the event read's
         refusals).
-- [ ] 6A.6 Deltas, written with this plan: `market-composition`'s "Kit-owned synchronous
+- [x] 6A.6 Deltas, written with this plan: `market-composition`'s "Kit-owned synchronous
       negotiation runtime" (the source check, the retryable refusal, success last, and the
       resumption rule), its "Storefront deal controls are kit-owned route services" (the
       event read's signed resource and force-accept's refusals), and a new "The trading
       pause is one process-local kit mechanism"; `storefront-publication`'s "The seller's
       inventory guard checks a listing against its own source".
-- [ ] 6A.7 Versions and locks: bump as above and cascade every pin through
+- [x] 6A.7 Versions and locks: bump as above and cascade every pin through
       `cascade_pins.py` (dependents whose pins move are bumped and recorded); rebuild the
       wheelhouse cleanly; relock, including `e2e-tests` for the VM storefront's wheel;
       hand-lock the VM storefront and buyer, and the bare-metal and API-credit storefronts
@@ -3572,6 +3572,46 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
       suite and collection, the root aggregate, `make check-packaging`, comment hygiene,
       documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
       modules, and both end-to-end lanes.
+  - Done 2026-10-07. Notes:
+    - Versions: arkhai-kit-policy 0.3.0, arkhai-kit-negotiation-runtime 0.4.0,
+      arkhai-kit-storefront 0.3.0, arkhai-vms-negotiation 0.4.0, arkhai-vms-storefront
+      0.15.0, arkhai-apicredits-storefront 0.7.0, and arkhai-bare-metal-storefront
+      0.10.1 (its exact pin of the storefront kit moved). Floors rose where the code now
+      needs the new interfaces: the storefront kit on the runtime (>=0.4.0), VM
+      negotiation on the policy kit (>=0.3.0), and the VM storefront on VM negotiation
+      (>=0.4.0). Twelve locks were regenerated; the policy kit, the VM storefront and
+      buyer, and the bare-metal and API-credit storefronts were hand-locked.
+    - VM's seller hook is still built for each round, as before, so it reads the
+      current negotiation settings; only the per-round binding it no longer needs is
+      gone. The plan said "once".
+    - VM's source check reports a capacity snapshot that cannot be read as
+      unverifiable; before, the failure escaped the round as an exception. The
+      system status's strategy probe hands the guard a matching verdict, since it
+      exercises the strategy and checks no listing.
+    - `build_vm_negotiation_runtime` takes an injected `listing_source_check`
+      (default: the real check). The VM tests that inject a seller policy, and the
+      evaluate-negotiate fixture whose listings declare no source, supply a matching
+      one; the source check has its own tests.
+    - Two planned VM integration cases are covered below the route instead: that a
+      listing without a `gpu_model` is rechecked (the policy kit's guard has no such
+      condition, and the runtime's enforcement tests are domain-free), and an
+      availability refusal at a buyer's accept (the integration fixture reads
+      availability from the fake site's snapshot, so the accept test changes the
+      declaration instead).
+    - API credits' system controller no longer imports the server module, so the
+      import-order workaround in `test_force_accept_api.py` is gone.
+    - The policy kit's suite (60) ran in the negotiation runtime's environment at
+      0.3.0, since its own environment cannot be built here.
+    - Suites: the negotiation runtime 53, the storefront kit 67, VM by frozen sync
+      (unit 1103; integration 360, with the known `test_alkahest` pair failing), the
+      VM buyer by frozen sync 206, the API-credit storefront 105, the e2e unit suite
+      (236, with the known `test_hosted_public_boundary` failure) and collection
+      (162). The root aggregate passed 44 suites; its failures are the expected ones
+      (the policy kit's, VM storefront's, and VM buyer's reinits, and the API-credit
+      middleware toolchain). `make check-packaging`, comment hygiene, documentation
+      citations for the change, and OpenSpec strict validation (1.14.0) pass;
+      pyflakes reports nothing new on any edited module.
+    - Not yet run end to end; 6A.8 stays open until both lanes pass.
 
 ### 6B. Bare metal on the runtime
 

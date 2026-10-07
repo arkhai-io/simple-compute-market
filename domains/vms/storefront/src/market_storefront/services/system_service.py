@@ -422,6 +422,7 @@ class SystemService:
           'error: <msg>'                 — load or run failed
         """
         try:
+            from market_policy.listing_source import ListingSourceVerdict
             from market_policy.negotiation_middleware import (
                 NegotiationContext,
                 NegotiationRound,
@@ -452,6 +453,9 @@ class SystemService:
             context = NegotiationContext(
                 direction="maximize",
                 our_reference_amount=10_000,
+                # The probe exercises the strategy, not a listing: no source is
+                # checked, so the inventory guard is given a matching verdict.
+                listing_source=ListingSourceVerdict("matches"),
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

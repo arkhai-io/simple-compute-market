@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from typing import Any
+from urllib.parse import quote, urlencode
 
 from core_storefront.models.listing_models import (
     EvaluateNegotiateRequest,
@@ -24,7 +25,11 @@ from core_storefront.models.negotiation_models import (
 )
 from core_storefront.models.system_models import StageEventResponse
 from market_identity import Identity
-from market_negotiation_runtime import NegotiationStateError
+from market_negotiation_runtime import (
+    NegotiationStateError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+)
 
 from .lifecycle_routes import LifecycleRouteError
 
@@ -48,8 +53,44 @@ def opening_proposal(proposal: Any, settlement_selection: Any) -> Any:
     return payload
 
 
+#: The query parameters an event read may carry, each bound into what is signed.
+_EVENT_QUERY = frozenset(
+    {"limit", "since_id", "stream", "listing_id", "negotiation_id", "stage"}
+)
+
+
 class StageEventRouteService:
     """Read one storefront's stage-event log as a page or a server-sent stream."""
+
+    @staticmethod
+    def signed_resource(query: Iterable[tuple[str, str]]) -> str:
+        """The resource the canonical client signs for an event read with ``query``.
+
+        Every parameter the client may send is bound, with its defaults made
+        explicit, so a signed read cannot be replayed with another filter. A
+        parameter the resource does not bind, or one given twice, could change
+        what is read without changing what was signed, and is refused; so is a
+        stream, which a signed response cannot carry.
+        """
+
+        values: dict[str, str] = {}
+        for name, value in query:
+            if name not in _EVENT_QUERY or name in values:
+                raise DealControlRouteError(
+                    400, "system event query contains an unauthenticated alias"
+                )
+            values[name] = value
+        stream = values.get("stream", "false").lower()
+        if stream != "false":
+            raise DealControlRouteError(
+                400, "signed event streaming is unsupported; use authenticated polling"
+            )
+        values.setdefault("limit", "100")
+        values.setdefault("since_id", "0")
+        values["stream"] = stream
+        return "system-events?" + urlencode(
+            sorted(values.items()), quote_via=quote, safe=""
+        )
 
     def __init__(self, repository: Any, *, poll_seconds: float = 0.2) -> None:
         self._db = repository
@@ -195,6 +236,12 @@ class NegotiationControlRouteService:
                 else 409
             )
             raise DealControlRouteError(status, message) from exc
+        except OfferUnfulfillableError as exc:
+            # The listing's source no longer supports it, or its capacity is taken.
+            raise DealControlRouteError(409, exc.reason) from exc
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; a retry may succeed.
+            raise DealControlRouteError(503, exc.reason) from exc
         return ForceAcceptResponse(
             action=result["action"],
             amount=result["amount"],

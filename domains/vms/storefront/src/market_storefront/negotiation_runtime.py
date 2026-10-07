@@ -36,6 +36,7 @@ from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
     AgreementTerms,
+    ListingSourceCheckHook,
     NegotiationDomainHooks,
     NegotiationRuntime,
     NegotiationStateError,
@@ -47,6 +48,8 @@ from market_negotiation_runtime import (
     RoundRequest,
 )
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
+from market_policy.listing_source import ListingSourceVerdict
+from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import (
     CapacityBinding,
@@ -109,35 +112,19 @@ def seller_reference_amount(
     )
 
 
-def _default_seller_round_hook(
-    domain: MarketDomainContract,
-    capacity_runtime: CapacityRuntime,
-    *,
-    repository: Any,
-    listing_record: Mapping[str, Any],
-    binding: PublicationBinding,
-) -> SellerRoundHook:
-    """Build the default policy for one round of one listing.
+def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
+    """Build the default seller policy for a round.
 
-    Built per round rather than once, because the inventory guard judges the
-    listing against its own source, and only this round's durable binding says
-    which source that is.
+    Built for each round so it reads the current negotiation settings. The
+    listing's check against its own source is the negotiation runtime's, and
+    reaches the policy with each round.
     """
     policy = domain.storefront
     if policy is None:
         raise RuntimeError(
             f"domain {domain.identity!s} has no storefront negotiation capability"
         )
-    async def source_check() -> dict[str, Any]:
-        return await check_listing_source(
-            repository=repository,
-            listing_record=listing_record,
-            binding=binding,
-            capacity_runtime=capacity_runtime,
-        )
-
     return policy.run_negotiation_policy(
-        source_check=source_check,
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         extra_policy_paths=_extra_policy_paths(),
@@ -735,8 +722,13 @@ def build_vm_negotiation_runtime(
     capacity_runtime: CapacityRuntime,
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
+    listing_source_check: ListingSourceCheckHook | None = None,
 ) -> NegotiationRuntime:
-    """Compose the shared lifecycle with the exact registered VM contract."""
+    """Compose the shared lifecycle with the exact registered VM contract.
+
+    ``listing_source_check`` replaces the check of each listing against its own
+    source; by default it reads the site projections this storefront holds.
+    """
 
     dispatch = (
         accepted_obligation_dispatch
@@ -876,17 +868,12 @@ def build_vm_negotiation_runtime(
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        policy = seller_round_hook or _default_seller_round_hook(
-            domain,
-            capacity_runtime,
-            repository=request.repository,
-            listing_record=request.listing_record,
-            binding=request.binding,
-        )
+        policy = seller_round_hook or _default_seller_round_hook(domain)
         result = await policy(
             listing=request.listing,
             history=list(request.history),
             requested_duration_seconds=request.terms.requested_duration_seconds,
+            listing_source=request.listing_source,
             **(
                 {"strategy_label": request.strategy_label}
                 if request.strategy_label is not None
@@ -940,9 +927,17 @@ def build_vm_negotiation_runtime(
         )
 
     def storefront_is_paused() -> bool:
-        from market_storefront.server import is_globally_paused
+        return trading_pause().paused
 
-        return bool(is_globally_paused())
+    async def check_source(
+        repository: Any, resolved: ResolvedNegotiation
+    ) -> ListingSourceVerdict:
+        return await check_listing_source(
+            repository=repository,
+            listing_record=resolved.listing_record,
+            binding=resolved.binding,
+            capacity_runtime=capacity_runtime,
+        )
 
     async def place_hold(
         repository: Any,
@@ -987,6 +982,7 @@ def build_vm_negotiation_runtime(
         place_hold=place_hold,
         persist_artifacts=_persist_artifacts,
         persist_opening=persist_opening,
+        check_listing_source=listing_source_check or check_source,
     )
     return NegotiationRuntime(
         resolve_opening=resolve_opening,
