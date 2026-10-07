@@ -7,7 +7,10 @@ order. The design phase MUST end with a design review, the implementation phase
 with a pre-closeout review, and the closeout phase with a closeout review; a phase
 ending in a review MUST NOT be treated as finished until that review has been
 triaged and the repository owner has recorded, in triage, that its gate is passed.
-Planning MUST NOT begin before the design review's gate is passed. Every review —
+Planning MUST NOT begin before the design review's gate is passed. A design
+decision made after that gate, such as one planning exposes, MUST return the change
+to design; the owner MAY waive another design review for it, and a waiver MUST be
+recorded in the intervention ledger. Every review —
 design, implementation, pre-closeout, and closeout — MUST stop for the owner's
 disposition of each finding before any finding is acted on. An agent MUST NOT treat
 its own or another agent's agreement with a finding as a disposition.
@@ -16,6 +19,13 @@ its own or another agent's agreement with a finding as a disposition.
 
 - **WHEN** a reviewer raises a finding and the implementing agent agrees with it
 - **THEN** nothing is changed until the owner has recorded a disposition for it
+
+#### Scenario: Planning exposes an unanswered design question
+
+- **WHEN** planning finds a question the reviewed design did not answer
+- **THEN** planning stops, the change returns to design, the owner's decision is
+  recorded in the design, and planning resumes only after another design review's
+  gate passes or the owner's waiver of that review is recorded
 
 #### Scenario: A design review accepts a blocking finding
 

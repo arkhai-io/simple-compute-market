@@ -74,6 +74,12 @@ would overwrite the links, and is decided when that is tested.
 
 ### Planning is its own skill
 
+Planning makes no design decisions. A question it exposes that the reviewed design
+did not answer returns the change to design: the decision is settled there and
+planning resumes after another design review, or after the owner waives that review
+— the owner's call, recorded in the ledger. Planning therefore has three outcomes:
+an accepted plan, a redirected plan, or a return to design.
+
 Design settles what a change does; planning settles how it is delivered: the
 ordered tasks, the files each accepted decision touches, the validation each
 section owes, the permanent destination of every decision, and the closeout task

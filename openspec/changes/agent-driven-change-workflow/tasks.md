@@ -175,7 +175,16 @@ to repair by hand.
       relies on that only the discussion holds, and stops for design on any
       question the design did not answer. It settles the provisional
       documentation destinations the design delegated to planning, and logs
-      plan redirections to the ledger as `"review": "plan"`.
+      plan redirections to the ledger as `"review": "plan"`. Amended after
+      implementation review 2 (browser): a design question planning exposes
+      returns the change to design, and planning resumes after another design
+      review or the owner's recorded waiver of it (also in the `change-workflow`
+      delta); the gate evidence — index row and latest design triage — is read
+      from files before planning starts; completed tasks may be amended or
+      corrected, never deleted or rewritten; tasks may trace to a cited
+      repository obligation as well as a decision or requirement.
+      `change-triage`'s gate step now rewrites the index row's notes with its
+      status.
 - [ ] 6.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its reviewed
       design.
 - [ ] 6.3 Pilot: plan `add-full-stack-ci-job` from nothing.

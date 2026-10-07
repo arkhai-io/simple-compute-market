@@ -171,7 +171,9 @@ a decision it raised is still open, the change stays in its phase, and the owner
 decides whether the fix needs another review round.
 
 When the owner passes a phase-closing gate, set the change's `Status` in
-`openspec/changes/README.md`:
+`openspec/changes/README.md`, and rewrite the row's `Notes` in the same edit so
+nothing in it still describes the phase being left — a row whose notes contradict
+its status misleads every agent that reads the index:
 
 | Review | Status when its gate passes |
 |---|---|

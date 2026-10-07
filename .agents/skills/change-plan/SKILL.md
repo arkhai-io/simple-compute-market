@@ -15,10 +15,20 @@ that context makes a better plan. But the plan is read by implementation session
 that start fresh and see only the files. Everything the plan relies on must be in
 the change's files before a task depends on it.
 
+Planning has three outcomes: the owner accepts the plan, the owner redirects it, or
+planning returns the change to design.
+
 ## 1. Check that planning may start
 
+Read the evidence from the files, even if this session held the design discussion:
+the session's memory of a gate can be out of date, and reviews and triage may have
+happened elsewhere. Read the change's row in `openspec/changes/README.md` — status,
+`Depends on`, notes — and the change's latest design review and its triage in
+`reviews/`. Then confirm:
+
 - The change's status is `ready for planning` or `in planning`.
-- The latest design review's triage records its gate as passed.
+- The latest design review's triage records its gate as passed, or the owner's
+  waiver of that review is recorded (section 3).
 - No dependency in the row's `Depends on` gates `design` or `planning` and is
   unlanded. A dependency gating implementation does not stop planning; the plan
   notes it.
@@ -49,15 +59,30 @@ the discussion settled but the file does not say — a rationale, an example, a
 rejected alternative, a constraint the owner stated — write it into `design.md`
 first, as part of the decision it belongs to. This is recording, not deciding.
 
-If planning exposes a question the design did not answer, it is a design decision:
-stop, present it as `change-design` presents a decision, and record the owner's
-answer in `design.md` before planning on it. Never settle it inside a task.
+If planning exposes a question the design did not answer, it is a design decision,
+and no review has seen it. Planning stops: never settle it inside a task, and never
+plan on an answer the design review did not cover.
+
+1. Tell the owner what planning found and why it stopped, and set the change's
+   status back to `in design`.
+2. Settle the question as `change-design` settles a decision, and record it in
+   `design.md`.
+3. Ask the owner whether the change needs another design review for it, or whether
+   they waive the review. A waiver is the owner's call. Record it in the latest
+   design triage's gate and as a ledger entry with `"review": "plan"`, the decision
+   as `finding`, lens `readiness`, basis `judgement`, and a null severity, stating
+   what was waived and why.
+4. With the review passed or waived, set the status to `ready for planning` and
+   resume planning.
 
 ## 4. Write the plan
 
-**Preserve history.** A checked task stays exactly as written, notes included. An
-unchecked task the reviewed design superseded may be replaced; say at the top of
-the replaced section that it was replanned against the reviewed design.
+**Preserve history.** Never delete a checked task, rewrite what it says was done,
+or change its completion state. When the reviewed design changes what follows from
+a completed task, amend it with a correction note, or append a task that carries
+the correction. An unchecked task the reviewed design superseded may be replaced;
+say at the top of the replaced section that it was replanned against the reviewed
+design.
 
 **Sections are slices.** Each section:
 
@@ -78,8 +103,10 @@ foundation kit before kit before domain before composition root — and focused
 behavioral verification before documentation work, per the task rules in
 `openspec/config.yaml`.
 
-**Every task is traceable.** Each names the decision or delta requirement it
-implements and the evidence that proves it. A task with nothing to trace to is
+**Every task is traceable.** Each names what it answers to — a design decision, a
+delta requirement, or a repository obligation such as the verification, packaging,
+promotion, and closeout work `openspec/README.md` and `openspec/config.yaml` require,
+cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
 **Name the permanent destinations.** For every entry under the proposal's
@@ -100,7 +127,8 @@ and the design-promotion record.
 Before presenting it:
 
 - every decision in `design.md` and every delta requirement maps to at least one
-  task, and every task maps back;
+  task, and every task maps back to a decision, a requirement, or a cited
+  repository obligation;
 - no open question has its answer prescribed by a task
   (`openspec/README.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point and a size one session can hold;
