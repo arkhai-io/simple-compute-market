@@ -183,7 +183,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.11.0"
+version = "0.11.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -213,7 +213,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.11.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -582,14 +582,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -820,7 +820,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.15.1"
+version = "0.15.2"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -870,7 +870,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.15.1-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.15.2-py3-none-any.whl" },
 ]
 
 [[package]]

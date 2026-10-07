@@ -2228,6 +2228,16 @@ Decisions:
      (`agreed_at`, `settlement_plan`); a buyer may still exit it. With that rule the
      order of the acceptance writes does not matter for safety, and no acceptance
      effect is ever retried, so none needs to be idempotent.
+   - Widened after the implementation review (2026-10-07): a crash between a buyer's
+     message and the seller's decision, at the opening or in a later round, also
+     leaves a thread that must not resume, or a buyer's accept would take an offer
+     the seller never made (with no seller counter recorded, the runtime falls back to
+     the reference amount). The rule is therefore that a non-terminal thread can be
+     countered, accepted, or force-accepted only when its transcript ends with the
+     seller's counter, and its agreed terms and plan are unrecorded; this subsumes the
+     recorded-acceptance marker. A buyer whose request was interrupted exits or waits
+     for the watchdog rather than retrying. Bare metal's continuation also requires the
+     opening message it recorded, whose absence means the opening was not completed.
    - Rejected (design review): writing the accepted message after the agreement and
      plan. A crash between them leaves a thread with a recorded, immutable plan and no
      acceptance in its transcript, which another round could reopen, and whose later
@@ -2277,6 +2287,15 @@ Design review of this section (2026-10-07), with the maintainer's dispositions:
 | Force-accept can now raise a source refusal the kit route service does not map | Accepted and widened to every negotiation route (decision 3) |
 | Section 6 tasks still the old plan; deltas not yet matching | Planned as 6A and 6B; the `storefront-publication` and `market-composition` deltas are written with the plan |
 | The proposal still describes lease registration | Corrected with the plan |
+
+Implementation review of 6A and 6B (2026-10-07), with the maintainer's dispositions:
+
+| Review point | Disposition |
+|---|---|
+| Bare-metal force-accept answers a domain refusal (a plan the builder cannot make, an unreadable listing) with 500 | Fixed in the bare-metal binding, which answers it as `negotiate/{id}` does; the kit's force-accept service stays domain-free |
+| The deltas say every unconfirmable source is retryable, but a seller's independent rejection or exit keeps its reason, as designed and tested | The deltas are corrected to the implemented precedence |
+| A crash between a buyer's message and the seller's decision leaves a resumable thread | Closed in the runtime (decision 8, widened) |
+| 6B.6 says existing status codes are kept | Corrected: the domain's refusal statuses are kept; seller-policy outcomes follow the configured chain |
 
 Found while planning:
 

@@ -3566,7 +3566,7 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
       wheelhouse cleanly; relock, including `e2e-tests` for the VM storefront's wheel;
       hand-lock the VM storefront and buyer, and the bare-metal and API-credit storefronts
       from their snapshot locks after the last suite run.
-- [ ] 6A.8 **Gate.** The policy kit's new tests (in the runtime's environment), the
+- [x] 6A.8 **Gate.** The policy kit's new tests (in the runtime's environment), the
       negotiation-runtime and storefront kits, VM negotiation, the VM storefront by frozen
       sync, the API-credit storefront, the bare-metal storefront (pins only), the e2e unit
       suite and collection, the root aggregate, `make check-packaging`, comment hygiene,
@@ -3611,7 +3611,14 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
       middleware toolchain). `make check-packaging`, comment hygiene, documentation
       citations for the change, and OpenSpec strict validation (1.14.0) pass;
       pyflakes reports nothing new on any edited module.
-    - Not yet run end to end; 6A.8 stays open until both lanes pass.
+    - End-to-end: run 101918963768, on the 6B checkpoint, installed arkhai-kit-policy
+      0.3.0, arkhai-kit-negotiation-runtime 0.4.0, arkhai-kit-storefront 0.3.0, arkhai-
+      vms-negotiation 0.4.0, arkhai-vms-storefront 0.15.1, arkhai-apicredits-storefront
+      0.7.0, arkhai-bare-metal 0.9.0, and arkhai-bare-metal-storefront 0.11.0. The VM lane
+      passed 135 and the bare-metal lane 16, so 6A's shared behaviour holds under both
+      domains. Neither lane's logs show a traceback, a 5xx, a source refusal, or an
+      interrupted acceptance; the 4xx responses are the VM lane's 402s and 404s and the
+      bare-metal introduction scenario's 410s, as before.
 
 ### 6B. Bare metal on the runtime
 
@@ -3689,8 +3696,10 @@ storefront.
         demand field; a terms mismatch on continuation; a source mismatch, a taken
         Physical Resource (409), and an unreadable site (503) at opening, counter, buyer
         accept, and force-accept; exit while the site is unreadable; the response's plan,
-        the committed plan, and settle verify's rebuild are equal; existing status codes
-        kept;
+        the committed plan, and settle verify's rebuild are equal; the domain's own
+        refusal statuses kept, while seller-policy outcomes follow the configured chain
+        (an opening below the listed rate under the default chain is an `exit`, 200;
+        amended 2026-10-07 after the implementation review);
       - `test_migrations.py`: an open legacy thread becomes `abandoned`, can be neither
         continued nor force-accepted, and starts no settlement or release; terminal
         threads untouched; the pause table gone;
@@ -3703,7 +3712,7 @@ storefront.
 - [x] 6B.7 Versions and locks: `arkhai-bare-metal-storefront` 0.11.0 and the domain's
       bump, cascaded through `cascade_pins.py`; the bare-metal storefront relocked and
       hand-locked from its snapshot form.
-- [ ] 6B.8 **Gate.** The bare-metal domain and storefront suites, the e2e unit suite and
+- [x] 6B.8 **Gate.** The bare-metal domain and storefront suites, the e2e unit suite and
       collection, the root aggregate, `make check-packaging`, comment hygiene,
       documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
       modules, and both end-to-end lanes (the bare-metal lane's publication scenario
@@ -3760,7 +3769,63 @@ storefront.
       `make check-packaging`, comment hygiene, documentation citations for the change,
       and OpenSpec strict validation (1.14.0) pass; pyflakes reports nothing new on any
       edited module.
-    - Not yet run end to end; 6B.8 stays open until both lanes pass.
+    - End-to-end: run 101918963768, on the 6B checkpoint, installed arkhai-kit-policy
+      0.3.0, arkhai-kit-negotiation-runtime 0.4.0, arkhai-kit-storefront 0.3.0, arkhai-
+      vms-negotiation 0.4.0, arkhai-vms-storefront 0.15.1, arkhai-apicredits-storefront
+      0.7.0, arkhai-bare-metal 0.9.0, and arkhai-bare-metal-storefront 0.11.0 (6A and 6B
+      together). The VM lane passed 135 and the bare-metal lane 16; the bare-metal
+      publication scenario ran unchanged over the runtime. Neither lane's logs show a
+      traceback, a 5xx, a source refusal, or an interrupted acceptance; the 4xx responses
+      are as in 6A's record.
+
+### 6C. Fixes from the implementation review of 6A and 6B
+
+Decided with the maintainer (`design.md`, "Implementation review of 6A and 6B
+(2026-10-07)"). Reviewable alone: the negotiation runtime's resumption rule and the
+bare-metal storefront's force-accept and continuation.
+
+- [x] 6C.1 Runtime (`kit/negotiation-runtime`, 0.4.0 → 0.4.1): `runtime.py`'s
+      `_refuse_incomplete_thread` (formerly `_refuse_interrupted_acceptance`) refuses a
+      counter, accept, or force-accept on a non-terminal thread unless its transcript
+      ends with the seller's counter, as well as one whose agreed terms or plan are
+      recorded; exit is still served. `tests/unit/test_runtime.py` adds an opening with
+      no seller decision and a buyer counter with no seller answer to the interruption
+      cases, for each of the three actions and for exit.
+- [x] 6C.2 Bare metal (`domains/bare_metal/storefront`, 0.11.0 → 0.11.1): `api.py`'s
+      force-accept route answers a `BareMetalNegotiationRefusal` as `negotiate/{id}` does;
+      `negotiation_runtime.py`'s continuation refuses a thread with no recorded opening
+      message. `tests/test_http_negotiation.py` adds force-accept under a plan builder
+      that fails (409, thread still open) and a continuation whose opening message is
+      missing (409).
+- [x] 6C.3 Documents: the `market-composition` and `storefront-publication` deltas state
+      the implemented precedence (a seller decision that would counter or accept, and
+      every acceptance, is refused as retryable for an unconfirmable source; an
+      independent rejection or exit keeps its reason), with a scenario for it; the
+      runtime requirement's resumption rule and a scenario for a round interrupted before
+      the seller answers; 6B.6's status-code wording; the promotion record's row.
+- [ ] 6C.4 **Gate.** The negotiation-runtime and storefront kits, the VM storefront by
+      frozen sync, the API-credit and bare-metal storefronts, the e2e unit suite and
+      collection, the root aggregate, `make check-packaging`, comment hygiene,
+      documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
+      modules, and both end-to-end lanes.
+  - Done 2026-10-07. Notes:
+    - Versions: arkhai-kit-negotiation-runtime 0.4.1 and arkhai-bare-metal-storefront
+      0.11.1, with arkhai-vms-storefront 0.15.2 and arkhai-apicredits-storefront 0.7.1
+      (their exact pins of the runtime moved). The VM, API-credit, and bare-metal
+      storefronts were hand-locked; the storefront and negotiation-runtime kits and the
+      e2e tests were relocked.
+    - The second bare-metal refusal reachable from force-accept, a listing whose stored
+      payload no longer decodes when the thread is resumed, is covered by the same
+      mapping as the plan builder's.
+    - Suites: the negotiation runtime 61, the storefront kit 67, the bare-metal storefront
+      257, the API-credit storefront 105, VM by frozen sync (unit 1103; integration 360,
+      with the known `test_alkahest` pair failing), the e2e unit suite (236, with the
+      known `test_hosted_public_boundary` failure) and collection (162). The root
+      aggregate passed 44 suites; its failures are the expected ones.
+      `make check-packaging`, comment hygiene, documentation citations for the change,
+      and OpenSpec strict validation (1.14.0) pass; pyflakes reports nothing new on any
+      edited module.
+    - Not yet run end to end; 6C.4 stays open until both lanes pass.
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
@@ -4136,7 +4201,7 @@ service code.
 | Provisioning names the VM guest from the capacity reservation, a name the playbooks can use as hostname, tenant login (at most 32 characters), and `/tmp` match; the lease's target is the one the fulfillment recorded | `openspec/specs/physical-provisioning/spec.md` — "Provisioning names what it provisions", "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/physical-provisioning/architecture.md` — the guest-name constraints and why they bind (at promotion); `openspec/specs/vm-storefront-fulfillment/spec.md` — "The fulfillment context records the exact request, naming no guest"; `domains/vms/provisioning/iac/README.md` (with 5B.12.C) |
 | The runtime rechecks a listing against its source before every seller decision and every acceptance, never on exit, through a check each domain contributes; one classifier in `kit/policy` maps the verdict, used by the runtime and by `has_matching_inventory_guard` | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "The seller's inventory guard checks a listing against its own source"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation"; `docs/configuration.md` |
 | A source the seller cannot confirm is refused as retryable (503); every negotiation route maps both source refusals | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime", "Storefront deal controls are kit-owned route services" |
-| A thread is successful only once its agreed terms, any hold, and its plan are recorded; a partially accepted thread is never resumed | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation" |
+| A thread is successful only once its agreed terms, any hold, and its plan are recorded; a thread is resumed only when it ends with the seller's counter and records no agreement or plan | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation" |
 | The trading pause is one process-local kit mechanism, separate from the loop pause; bare metal's durable pause is reversed | `openspec/specs/market-composition/spec.md` — "The trading pause is one process-local kit mechanism"; `docs/development/ARCHITECTURE.md` "Operator lifecycle controls" |
 | Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |

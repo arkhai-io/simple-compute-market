@@ -632,6 +632,10 @@ async def force_accept_negotiation(
         )
     except DealControlRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except BareMetalNegotiationRefusal as exc:
+        # Acceptance builds the domain's artifacts, so it can refuse for a
+        # reason the domain owns; it answers as negotiate/{id} would.
+        raise _negotiation_error(exc) from exc
 
 
 @router.get("/api/v1/system/events")

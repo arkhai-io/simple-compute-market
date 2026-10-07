@@ -101,12 +101,14 @@ The runtime MUST obtain its verdict before every seller decision and before a bu
 an administrator's acceptance, never on a buyer's exit, and MUST enforce it itself, whatever
 the domain's policy chain contains: a declared mismatch or taken capacity refuses the
 round or acceptance, and a source that cannot be confirmed is a retryable refusal raised
-before any write.
+before any write. A seller decision that would counter or accept is subject to the
+verdict; one that independently rejects or exits keeps its own reason, so a malformed
+request is refused for what is wrong with it rather than as retryable.
 
 A thread MUST be recorded as successful only after its agreed terms, any hold, and its
 accepted artifacts are recorded. The runtime MUST NOT counter, accept, or force-accept a
-non-terminal thread whose transcript records an acceptance or whose agreement or plan is
-recorded; a buyer MAY still exit it.
+non-terminal thread unless its transcript ends with the seller's counter, nor one whose
+agreement or plan is recorded; a buyer MAY still exit it.
 
 #### Scenario: A domain runs a negotiation round
 
@@ -157,8 +159,15 @@ recorded; a buyer MAY still exit it.
 #### Scenario: A listing's source cannot be confirmed
 
 - **WHEN** a domain's source check reports that the listing's source cannot be confirmed
-- **THEN** an opening, round, or acceptance is refused as retryable before any write, an
-  opening preview reports the refusal, and a buyer's exit still succeeds
+- **THEN** a seller decision that would counter or accept, and a buyer's or an
+  administrator's acceptance, are refused as retryable before any write, an opening
+  preview reports the refusal, and a buyer's exit still succeeds
+
+#### Scenario: A seller's own rejection keeps its reason
+
+- **WHEN** seller policy rejects or exits a round for its own reason while the listing's
+  source cannot be confirmed
+- **THEN** the round ends with the policy's reason, not a retryable refusal
 
 #### Scenario: An acceptance is interrupted
 
@@ -166,3 +175,11 @@ recorded; a buyer MAY still exit it.
   before the thread was recorded as successful
 - **THEN** the thread is not successful, settlement never reads it, and a later counter,
   accept, or force-accept on it is refused
+
+#### Scenario: A round is interrupted before the seller answers
+
+- **WHEN** the process stops after recording a buyer's opening or counter but before the
+  seller's decision
+- **THEN** a later counter, accept, or force-accept on the thread is refused, so no
+  buyer accepts an offer the seller never made; the buyer may exit it, and the
+  negotiation watchdog abandons it

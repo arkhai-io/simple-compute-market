@@ -358,7 +358,13 @@ def build_bare_metal_negotiation_runtime(
         recorded = await repository.load_bare_metal_message(
             negotiation_id=str(thread["negotiation_id"])
         )
-        if recorded is not None and recorded != terms.decoded:
+        # Every opening records its message before the seller decides, so a
+        # thread without one was not opened completely.
+        if recorded is None:
+            raise NegotiationStateError(
+                "negotiation has no recorded opening message and cannot be resumed"
+            )
+        if recorded != terms.decoded:
             raise NegotiationStateError(
                 "negotiation terms differ from the terms it opened with"
             )

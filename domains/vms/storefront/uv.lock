@@ -195,7 +195,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.11.0"
+version = "0.11.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -225,7 +225,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.11.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -506,14 +506,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -721,7 +721,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -801,7 +801,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.11.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.11.1" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
@@ -817,7 +817,7 @@ requires-dist = [
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.7" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
-    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.4.0" },
+    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.4.1" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides", specifier = "==0.2.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.5.0" },

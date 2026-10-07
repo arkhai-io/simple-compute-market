@@ -224,14 +224,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]

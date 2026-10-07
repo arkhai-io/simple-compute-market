@@ -58,7 +58,9 @@ consult availability or contact a site authority.
 A declared-match failure MUST be reported with a reason distinct from an availability
 failure, so a buyer and an operator can tell a shape the seller no longer declares
 from capacity that is temporarily taken. A source the storefront cannot confirm MUST be
-refused as retryable, distinct from both.
+refused as retryable, distinct from both, for a seller decision that would counter or
+accept and for any acceptance; a seller decision that independently rejects or exits
+keeps its own reason.
 
 #### Scenario: An unbacked listing matches its declaration
 
@@ -98,7 +100,7 @@ refused as retryable, distinct from both.
 #### Scenario: The source cannot be confirmed
 
 - **WHEN** the listing's site cannot be reached, does not verify, or has not supplied the projection the storefront reads
-- **THEN** the opening, round, or acceptance is refused as retryable and nothing is recorded
+- **THEN** an opening or round the seller would counter or accept, and any acceptance, is refused as retryable and nothing is recorded
 
 #### Scenario: A buyer exits while the source cannot be confirmed
 

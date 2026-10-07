@@ -919,3 +919,64 @@ async def test_a_buyer_exits_whatever_the_source(tmp_path) -> None:
 
     assert exited["action"] == "exit"
     assert site.calls == calls
+
+
+async def test_force_accept_answers_a_domain_refusal_with_its_status(tmp_path) -> None:
+    """A refusal the domain owns answers force-accept as it answers negotiate/{id}."""
+    from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
+
+    def failing_builder(**_kwargs):
+        raise BareMetalSettlementPlanError("accepted escrow could not be materialized")
+
+    site = SourceSite()
+    runtime = replace(
+        _countering_runtime(str(tmp_path / "storefront.db"), site),
+        plan_builder=failing_builder,
+    )
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            # A counter builds no plan, so the opening succeeds.
+            opened = await _open_countered(buyer)
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.force_accept_negotiation(
+                    "listing-1", opened["negotiation_id"], amount=95
+                )
+
+    assert refused.value.status_code == 409
+    assert "could not be materialized" in str(refused.value)
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=opened["negotiation_id"]
+    )
+    assert thread["terminal_state"] is None
+
+
+async def test_a_thread_without_its_opening_message_is_not_resumed(tmp_path) -> None:
+    import sqlite3
+
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            conn = sqlite3.connect(runtime.db.db_path)
+            try:
+                conn.execute(
+                    "DELETE FROM storefront_domain_artifacts "
+                    "WHERE negotiation_id = ? AND artifact_slot = 'message'",
+                    (opened["negotiation_id"],),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_continue(opened["negotiation_id"], action="accept")
+
+    assert refused.value.status_code == 409
+    assert "opening message" in str(refused.value)

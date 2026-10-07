@@ -637,7 +637,7 @@ class NegotiationRuntime:
             )
         resumed = await self._resume_thread(repository, thread, negotiation_id)
         hooks = resumed.resolved.hooks
-        self._refuse_interrupted_acceptance(thread, resumed.messages, negotiation_id)
+        self._refuse_incomplete_thread(thread, resumed.messages, negotiation_id)
         await self._enforce_on_acceptance(
             repository, hooks, resumed.resolved, listing_id
         )
@@ -807,9 +807,9 @@ class NegotiationRuntime:
         reference_amount = resumed.reference_amount
         agreement = resumed.agreement
         if buyer_action != "exit":
-            # A buyer may always leave, including a thread whose acceptance was
-            # interrupted or whose listing's source cannot be reached.
-            self._refuse_interrupted_acceptance(thread, messages, negotiation_id)
+            # A buyer may always leave, including a thread an interrupted request
+            # left incomplete or whose listing's source cannot be reached.
+            self._refuse_incomplete_thread(thread, messages, negotiation_id)
 
         if buyer_action == "accept":
             await self._enforce_on_acceptance(repository, hooks, resolved, listing_id)
@@ -1177,24 +1177,33 @@ class NegotiationRuntime:
         raise OfferUnfulfillableError(refusal.reason, listing_id=listing_id)
 
     @staticmethod
-    def _refuse_interrupted_acceptance(
+    def _refuse_incomplete_thread(
         thread: Mapping[str, Any],
         messages: list[Mapping[str, Any]],
         negotiation_id: str,
     ) -> None:
-        """Refuse to resume a thread an earlier acceptance left unfinished.
+        """Refuse to resume a thread an interrupted request left incomplete.
 
-        A thread is recorded as successful only after its acceptance is; one that
-        is not terminal but already records an acceptance, agreed terms, or a
-        plan was interrupted mid-acceptance and is not resumed as another round.
+        A thread open for another round ends with the seller's counter, the offer
+        a buyer's accept takes. One that ends otherwise was interrupted after the
+        buyer's message and before the seller's decision (at the opening or in a
+        later round), or while an acceptance was being recorded; so was one whose
+        agreed terms or plan are already recorded. None is resumed: the buyer may
+        exit, and the negotiation watchdog abandons it.
         """
+        last = messages[-1] if messages else None
+        ends_with_seller_counter = (
+            last is not None
+            and last.get("sender_role") == "seller"
+            and last.get("action_taken") == "counter_offer"
+        )
         if (
-            thread.get("agreed_at")
+            not ends_with_seller_counter
+            or thread.get("agreed_at")
             or thread.get("settlement_plan")
-            or any(message.get("action_taken") == "accept_offer" for message in messages)
         ):
             raise NegotiationStateError(
-                f"Negotiation {negotiation_id} was interrupted while being accepted "
+                f"Negotiation {negotiation_id} was interrupted before it was complete "
                 "and cannot be resumed"
             )
 

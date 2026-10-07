@@ -648,17 +648,40 @@ def _interrupt_with_accepted_message(repository: RecordingRepository) -> None:
     )
 
 
+def _interrupt_before_the_seller_opened(repository: RecordingRepository) -> None:
+    # The opening recorded the buyer's offer; the seller's decision never landed.
+    repository.messages["neg-fixed"].pop()
+
+
+def _interrupt_before_the_seller_answered(repository: RecordingRepository) -> None:
+    # A counter round recorded the buyer's counter; the seller's answer never landed.
+    rows = repository.messages["neg-fixed"]
+    rows.append(
+        {
+            **rows[-1],
+            "round": len(rows),
+            "sender_role": "buyer",
+            "sender_principal": _BUYER.model_dump(mode="json"),
+            "proposed_amount": 14,
+            "action_taken": "counter_offer",
+            "message_type": "counter_proposal",
+        }
+    )
+
+
 _INTERRUPTIONS = [
     _interrupt_with_agreement,
     _interrupt_with_plan,
     _interrupt_with_accepted_message,
+    _interrupt_before_the_seller_opened,
+    _interrupt_before_the_seller_answered,
 ]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("interrupt", _INTERRUPTIONS)
 @pytest.mark.parametrize("action", ["counter", "accept", "force-accept"])
-async def test_an_interrupted_acceptance_is_not_resumed(interrupt, action) -> None:
+async def test_an_interrupted_thread_is_not_resumed(interrupt, action) -> None:
     repository = RecordingRepository()
     harness = HookHarness()
     runtime = runtime_for(repository, harness)
@@ -686,7 +709,7 @@ async def test_an_interrupted_acceptance_is_not_resumed(interrupt, action) -> No
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("interrupt", _INTERRUPTIONS)
-async def test_a_buyer_may_exit_an_interrupted_acceptance(interrupt) -> None:
+async def test_a_buyer_may_exit_an_interrupted_thread(interrupt) -> None:
     repository = RecordingRepository()
     runtime = runtime_for(repository, HookHarness())
     await _open(runtime, repository)
