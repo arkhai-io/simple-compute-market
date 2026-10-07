@@ -151,10 +151,14 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 ### Requirement: One implementation section per fresh session
 
 Each `tasks.md` section MUST be planned to be implementable within one agent session
-without compaction, and MUST end at a verification point. Each section MUST be
-implemented in a session that begins with no prior conversation, by reading the
-repository guidance documents, the change, and that section. Anything a later
-session needs MUST be recorded in the change's files before the session ends. Before
+without compaction, and MUST end at a verification point. A session implementing a
+section MUST begin with no prior conversation and read the repository guidance
+documents, the change, and that section; by default it implements that one section.
+The repository owner MAY direct the session to continue into later sections, each
+still checked, handed off, and committed on its own, and decides when the sections
+committed since the last implementation review are reviewed together. Anything a
+later session needs MUST be recorded in the change's files before each section is
+committed. Before
 a section is committed, its diff MUST be checked against the repository guidance by
 an agent whose context contains no part of the implementing session. When discovered
 code invalidates the plan, the session MUST record why and stop without committing

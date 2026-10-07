@@ -133,7 +133,15 @@ later session needs may live only in the conversation:
   implementation` or returning it to design. A session that cannot ask the owner
   mid-task needs a clean exit rather than a guess.
 
-Sessions are started by the owner, one per section, until the orchestrator exists;
+A fresh session per section is the default, not a rule. The owner may direct a
+session to carry on into later sections — naming a range when it starts, or saying
+to continue after a section is committed — when its context is still small enough
+to trust, and decides when the sections committed since the last implementation
+review are reviewed together, which `git diff` over that range and the resumed
+reviewer already support. Each section is still checked, handed off, and committed
+on its own, so a session that continues loses nothing a fresh one would have kept.
+
+Sessions are started by the owner until the orchestrator exists;
 a driver that runs sections in sequence is the orchestrator's job. Within a session,
 a Claude Code hook that runs when a session resumes after compaction sends the
 session back to the required documents, with the branch and the changes in

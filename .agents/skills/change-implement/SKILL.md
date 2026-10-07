@@ -5,11 +5,14 @@ description: Implement one section of an OpenSpec change's tasks.md in a fresh s
 
 # Implementing one section of an OpenSpec change
 
-One session implements one `tasks.md` section, then stops. Compliance with the
-repository's guidance degrades as a session grows and collapses after it compacts,
-so the fresh session is the unit of work: everything this session needs is in the
-change's files, and everything the next session needs goes back into them before
-this one ends.
+The section is the unit of work: each is implemented, checked, handed off, and
+committed on its own. By default a session implements one section and stops,
+because compliance with the repository's guidance degrades as a session grows and
+collapses after it compacts. The owner may direct a session to carry on into later
+sections — by naming several when the session starts, or by saying to continue
+after one is committed — and decides when the accumulated sections are reviewed.
+Either way, everything the next session needs goes back into the change's files
+before a section is committed.
 
 ## 1. Check that this section may start
 
@@ -24,7 +27,8 @@ this one ends.
   section's.
 - **Section.** The owner names it, or it is the first section with unchecked tasks.
   An earlier section with unchecked tasks is unfinished: that is the section, unless
-  the owner says otherwise.
+  the owner says otherwise. When the owner names a range ("sections 1-3"), work them
+  in order, one at a time, through every step below.
 
 If any check fails, stop and say why.
 
@@ -120,13 +124,26 @@ Commit the section's work, `tasks.md` included, as one commit, unreviewed: revie
 findings land as later commits. The message names the change and the section and
 says what it delivers. Do not push; pushing belongs to validation.
 
-## 8. Report
+## 8. Continue or stop
 
-Tell the owner:
+When the owner named a range and sections remain in it, go on to the next one, from
+step 1, without waiting — unless this section stopped for a plan or design problem,
+or its checks could not be made to pass, which ends the range. Before starting the
+next section, re-read the section and its earlier sections' notes; and if the
+session has compacted, re-read every document in step 2.
+
+Otherwise report, and ask whether to continue into the next section in this session
+or stop here for validation and review. Say how large the session has grown if you
+can tell, and recommend a fresh session when it is large: the owner decides.
+
+## 9. Report
+
+When the session stops, tell the owner, for each section implemented:
 
 - what the section delivered, and the tasks checked;
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — the pre-review validation of this commit, then an
-  implementation review, and the next section in a new session.
+- what comes next — the pre-review validation of the commits since the last
+  review, then one implementation review covering every section they contain, and
+  the next section.

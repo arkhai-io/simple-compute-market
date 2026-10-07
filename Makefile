@@ -1040,10 +1040,10 @@ design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<cha
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-design $(CHANGE)"
 
-implement: ## Open a fresh Claude Code session implementing one section of an OpenSpec change (CHANGE=<change> [SECTION=<n>])
+implement: ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
-	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTION)), section $(SECTION))"
+	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))"
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design

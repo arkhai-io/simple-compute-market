@@ -219,7 +219,12 @@ to repair by hand.
       any edit to it; it stays available for changes worked outside this
       workflow. The skill also refuses to start on a branch that does not carry
       the change, since several changes are often in flight in one checkout,
-      and stops at a verified point when a section proves larger than planned.
+      and stops at a verified point when a section proves larger than planned. Amended at the owner's direction during
+      pilot 7.3: a session may continue into later sections, by a range named at
+      the start (`make implement SECTIONS=1-3`) or on the owner's word after a
+      section is committed, and one implementation review may cover every
+      section committed since the last; each section is still checked, handed
+      off, and committed on its own.
 - [x] 7.2 Add a committed Claude Code project hook that, when a session resumes
       after compaction, re-reads the required guidance documents and restates the
       change and section being worked.
