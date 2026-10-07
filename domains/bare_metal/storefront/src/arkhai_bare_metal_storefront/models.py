@@ -106,14 +106,6 @@ class BareMetalSettleRequest(BaseModel):
     buyer_evm_address: str | None = None
 
 
-class BareMetalSettlePendingResponse(BaseModel):
-    negotiation_id: str
-    escrow_uid: str
-    buyer_principal: Identity
-    seller_principal: Identity
-    status: Literal["settlement_pending"] = "settlement_pending"
-
-
 class BareMetalSettleResponse(BaseModel):
     escrow_uid: str
     negotiation_id: str

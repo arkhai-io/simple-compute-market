@@ -137,7 +137,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.1.1"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -145,7 +145,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -753,6 +753,67 @@ class SettleResponse:
 
 
 @dataclass
+class AgreementSettleResponse:
+    """Response from agreement settlement, POST /api/v1/settle/{negotiation_id}.
+
+    ``pending`` with ``retryable`` set means no payment evidence exists yet;
+    other statuses and ``extra`` fields are the domain's delivery state.
+    """
+
+    negotiation_id: str = ""
+    escrow_uid: str = ""
+    settlement_ref: str = ""
+    status: str = ""
+    retryable: bool = False
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def pending(self) -> bool:
+        return self.status == "pending"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AgreementSettleResponse":
+        known = {
+            "negotiation_id",
+            "escrow_uid",
+            "settlement_ref",
+            "status",
+            "retryable",
+            "buyer_principal",
+            "seller_principal",
+        }
+        return cls(
+            negotiation_id=d.get("negotiation_id", ""),
+            escrow_uid=d.get("escrow_uid", ""),
+            settlement_ref=d.get("settlement_ref", ""),
+            status=d.get("status", ""),
+            retryable=bool(d.get("retryable", False)),
+            buyer_principal=_identity(d.get("buyer_principal")),
+            seller_principal=_identity(d.get("seller_principal")),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class RefundSettlementResponse:
+    """Response from POST /api/v1/settlements/{negotiation_id}/refund."""
+
+    negotiation_id: str = ""
+    settlement_ref: str = ""
+    status: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RefundSettlementResponse":
+        return cls(
+            negotiation_id=d.get("negotiation_id", ""),
+            settlement_ref=d.get("settlement_ref", ""),
+            status=d.get("status", ""),
+        )
+
+
+@dataclass
 class SettleStatusResponse:
     """Response from GET /api/v1/settle/{escrow_uid}/status."""
 

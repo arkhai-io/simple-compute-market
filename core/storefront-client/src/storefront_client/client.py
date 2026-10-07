@@ -64,6 +64,8 @@ from storefront_client.auth import (
     verify_authenticated_response,
 )
 from storefront_client.models import (
+    AgreementSettleResponse,
+    RefundSettlementResponse,
     EvaluateNegotiateResponse,
     IdentitySubjectStatusResponse,
     StorefrontListingClaimResponse,
@@ -690,7 +692,7 @@ class StorefrontClient(_StorefrontClientBase):
         limit: int = 50,
         offset: int = 0,
         request_id: str | None = None,
-    ) -> "NegotiationListResponse":
+    ) -> NegotiationListResponse:
         """GET /api/v1/listings/{listing_id}/negotiations through admin v2 auth."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
@@ -718,7 +720,7 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         request_id: str | None = None,
-    ) -> "NegotiationDetail":
+    ) -> NegotiationDetail:
         """GET one negotiation through admin v2 authentication."""
         resource = f"{listing_id}/negotiations/{neg_id}"
         return NegotiationDetail.from_dict(
@@ -740,7 +742,7 @@ class StorefrontClient(_StorefrontClientBase):
         proposal: dict[str, Any] | None = None,
         reason: str | None = None,
         request_id: str | None = None,
-    ) -> "NegotiationActionResponse":
+    ) -> NegotiationActionResponse:
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
         body: dict[str, Any] = {"action": action}
         if proposal is not None:
@@ -765,7 +767,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         amount: int,
         request_id: str | None = None,
-    ) -> "NegotiationActionResponse":
+    ) -> NegotiationActionResponse:
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
             await self._authenticated_post(
@@ -1010,7 +1012,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         request_id: str | None = None,
-    ) -> "ReleaseReservationsResponse":
+    ) -> ReleaseReservationsResponse:
         """POST /api/v1/admin/portfolio/release-reservations."""
         return ReleaseReservationsResponse.from_dict(
             await self._authenticated_post(
@@ -1043,9 +1045,9 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        resource_id: "str | None" = None,
-        provider_lease_id: "str | None" = None,
-        released_at: "str | None" = None,
+        resource_id: str | None = None,
+        provider_lease_id: str | None = None,
+        released_at: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated capacity release callback.
@@ -1083,14 +1085,14 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        escrow_uid: "str | None" = None,
-        provider_id: "str | None" = None,
-        provider_lease_id: "str | None" = None,
-        resource_id: "str | None" = None,
-        vm_host: "str | None" = None,
-        vm_target: "str | None" = None,
-        gpu_count: "int | None" = None,
-        lease_end_utc: "str | None" = None,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_lease_id: str | None = None,
+        resource_id: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        gpu_count: int | None = None,
+        lease_end_utc: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated usage-started callback.
@@ -1134,13 +1136,13 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        escrow_uid: "str | None" = None,
-        provider_id: "str | None" = None,
-        provider_job_id: "str | None" = None,
-        resource_id: "str | None" = None,
-        reason: "str | None" = None,
-        message: "str | None" = None,
-        logs_ref: "str | None" = None,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        resource_id: str | None = None,
+        reason: str | None = None,
+        message: str | None = None,
+        logs_ref: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated fulfillment-failed callback.
@@ -1180,7 +1182,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         resource_id: str,
         *,
-        state: "str | None" = None,
+        state: str | None = None,
         attributes: "dict | None" = None,
         request_id: str | None = None,
     ) -> dict:
@@ -1451,7 +1453,7 @@ class StorefrontClient(_StorefrontClientBase):
             request_id=request_id,
         )
 
-    async def settle(
+    async def settle_evm(
         self,
         escrow_uid: str,
         *,
@@ -1461,10 +1463,11 @@ class StorefrontClient(_StorefrontClientBase):
         chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
+        """POST /api/v1/settle/{escrow_uid} for an EVM settlement mechanism.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        Agreement-settled mechanisms use ``settle_agreement`` instead.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
@@ -1480,6 +1483,55 @@ class StorefrontClient(_StorefrontClientBase):
                 role="buyer",
                 operation="settle_escrow",
                 resource=escrow_uid,
+                request_id=request_id,
+            )
+        )
+
+    async def settle_agreement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> AgreementSettleResponse:
+        """POST /api/v1/settle/{negotiation_id} for a mechanism that settles from the Agreement.
+
+        The request carries only the negotiation and the buyer principal; the
+        storefront reads every term from the accepted Agreement. A ``pending``
+        status with ``retryable`` set means no payment evidence exists yet.
+        """
+        body: dict[str, Any] = {
+            "negotiation_id": negotiation_id,
+            "buyer_principal": self._principal_body(),
+        }
+        return AgreementSettleResponse.from_dict(
+            await self._authenticated_post(
+                f"/api/v1/settle/{negotiation_id}",
+                body,
+                role="buyer",
+                operation="settle_escrow",
+                resource=negotiation_id,
+                request_id=request_id,
+            )
+        )
+
+    async def refund_settlement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> RefundSettlementResponse:
+        """POST /api/v1/settlements/{negotiation_id}/refund as the seller.
+
+        Reverses the deal's still-held payment and records it refunded so
+        delivery cannot start. Only the seller may refund.
+        """
+        return RefundSettlementResponse.from_dict(
+            await self._authenticated_post(
+                f"/api/v1/settlements/{negotiation_id}/refund",
+                EMPTY_BODY,
+                role="seller",
+                operation="refund_settlement",
+                resource=negotiation_id,
                 request_id=request_id,
             )
         )
@@ -2272,7 +2324,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         request_id: str | None = None,
-    ) -> "ReleaseReservationsResponse":
+    ) -> ReleaseReservationsResponse:
         """POST /api/v1/admin/portfolio/release-reservations."""
         return ReleaseReservationsResponse.from_dict(
             self._authenticated_post(
@@ -2420,7 +2472,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         resource_id: str,
         *,
-        state: "str | None" = None,
+        state: str | None = None,
         attributes: "dict | None" = None,
         request_id: str | None = None,
     ) -> dict:
@@ -2695,7 +2747,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             request_id=request_id,
         )
 
-    def settle(
+    def settle_evm(
         self,
         escrow_uid: str,
         *,
@@ -2705,10 +2757,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
         chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
+        """POST /api/v1/settle/{escrow_uid} for an EVM settlement mechanism.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        Agreement-settled mechanisms use ``settle_agreement`` instead.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
@@ -2724,6 +2777,55 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 role="buyer",
                 operation="settle_escrow",
                 resource=escrow_uid,
+                request_id=request_id,
+            )
+        )
+
+    def settle_agreement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> AgreementSettleResponse:
+        """POST /api/v1/settle/{negotiation_id} for a mechanism that settles from the Agreement.
+
+        The request carries only the negotiation and the buyer principal; the
+        storefront reads every term from the accepted Agreement. A ``pending``
+        status with ``retryable`` set means no payment evidence exists yet.
+        """
+        body: dict[str, Any] = {
+            "negotiation_id": negotiation_id,
+            "buyer_principal": self._principal_body(),
+        }
+        return AgreementSettleResponse.from_dict(
+            self._authenticated_post(
+                f"/api/v1/settle/{negotiation_id}",
+                body,
+                role="buyer",
+                operation="settle_escrow",
+                resource=negotiation_id,
+                request_id=request_id,
+            )
+        )
+
+    def refund_settlement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> RefundSettlementResponse:
+        """POST /api/v1/settlements/{negotiation_id}/refund as the seller.
+
+        Reverses the deal's still-held payment and records it refunded so
+        delivery cannot start. Only the seller may refund.
+        """
+        return RefundSettlementResponse.from_dict(
+            self._authenticated_post(
+                f"/api/v1/settlements/{negotiation_id}/refund",
+                EMPTY_BODY,
+                role="seller",
+                operation="refund_settlement",
+                resource=negotiation_id,
                 request_id=request_id,
             )
         )

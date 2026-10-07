@@ -134,8 +134,8 @@ COPY .dist/ /.dist/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps --no-index \
         --find-links /.dist \
-        arkhai-vms-storefront==0.3.5 \
-        arkhai-bare-metal-storefront==0.2.5
+        arkhai-vms-storefront==0.3.6 \
+        arkhai-bare-metal-storefront==0.2.6
 
 # Runtime distributions must not be editable source installations.
 RUN python -c 'import importlib.metadata as m, json; import domains.vms.listings, domains.vms.negotiation, domains.vms.settlement, market_storefront.cli; assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'

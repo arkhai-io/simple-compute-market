@@ -25,7 +25,7 @@ dependencies = [
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-core-storefront-client>=0.17.0",
+    "arkhai-core-storefront-client>=0.18.0",
     "arkhai-core-registry-client>=0.11.0",
     "arkhai-kit-alkahest>=0.1.0",
     "arkhai-kit-site-client>=0.1.0",
@@ -40,7 +40,8 @@ dependencies = [
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.2.0",
+    "arkhai-apicredits-buyer>=0.3.2",
+    "arkhai-kit-arkhai-payments>=0.2.0",
     "arkhai-kit-policy>=0.1.0",
 ]
 
@@ -87,6 +88,7 @@ markers = [
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
+    "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; blocked without a reachable payments target",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",

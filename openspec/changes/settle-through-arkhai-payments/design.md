@@ -339,9 +339,9 @@ Found while naming files for the review-round plan. Each refines how a decision 
 
 Exposing framing publicly is new API on `arkhai-kit-identity`, which needs a version bump. About fifteen packages here and twenty-five on the development branch pin it exactly (`==0.3.0`), so bumping now means repinning and relocking every one of them, then repeating that in the merge. Until the merge, `receipt_message` in the payments kit remains the single framing implementation that both the verifier and the receipt fixture call, still importing `_frame`; R3's test rule holds without the identity change. After the merge, `frame_fields` becomes public, the identity kit is bumped once, and every pin moves in one step.
 
-### P2. `make check-packaging` exists only on the development branch
+### P2. Packaging is gated on "no new failures" until the merge
 
-This tree has no `check-packaging` target. There, it runs uv-setup, lock-currency, Python-version and project-layout checks. Before the merge the gate is `make dist`, a lock-currency check in every changed project against `.dist` (`uv lock --check --find-links .dist`), and typing for changed packages. `make check-packaging` runs on the merged tree.
+`make check-packaging` and its four checks were copied unchanged from the development branch. On this tree they report 191 failures before any change of this one (1 Python-version, 23 layout, 131 uv-setup, 36 lock), because they encode the development branch's packaging convergence, which this branch predates. Resolving them here would duplicate that work and conflict at the merge. The accepted gate before the merge is that the checks report nothing beyond a baseline captured from the unmodified tree and that every lock this change touches is current; §6.3 requires a clean `make check-packaging` on the merged tree.
 
 ### P3. Bare-metal settlement records gain `refunded` in place
 
@@ -364,6 +364,14 @@ The same mapping serves the `refund` failure action.
 ### P6. `refunded` is never overwritten
 
 The R8 failure action can record `refunded` while a domain's own failure path is about to record `failed` (VM's payment coordinator after a not-fulfilled result; API credits' issuance failure). Those writes become conditional on the current status not being `refunded`, and `settle` checks `refunded` before checking the receipt.
+
+## Implementation findings
+
+Found while implementing §5; each is a correction within an accepted decision.
+
+- **API credits refunded automatically on issuance failure.** Its payment path called `reverse` whenever issuance definitely failed, an automatic refund in the normal flow that R7 and R8 exclude. That call is removed; refunding a failed issuance happens only through the opt-in `refund` failure action.
+- **API-credit seller authentication failed on empty-body requests.** It parsed every POST body as JSON, so the refund route and the existing `close_listing` route returned 500 through the typed client, which sends no bytes for an empty body. An empty body now authenticates as the empty-body hash.
+- **Version bumps reach exact pins outside `pyproject.toml`.** The storefront Dockerfiles install their own wheel by exact version, and the VM storefront pins the bare-metal storefront exactly, so the bumps cascaded into Dockerfiles, two READMEs, and the bare-metal storefront version.
 
 ## Merge with the development branch
 

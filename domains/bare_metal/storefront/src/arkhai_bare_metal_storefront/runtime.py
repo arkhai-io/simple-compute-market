@@ -146,6 +146,11 @@ class BareMetalStorefrontRuntime:
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
             arkhai_payments_stage=arkhai_payments_stage,
+            begin_fulfillment=(
+                self.fulfillment_service().begin
+                if self.capacity_client is not None and self.fulfillment_client is not None
+                else None
+            ),
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:

@@ -65,12 +65,27 @@ async def _durable_buyer(*, listing_id: str, escrow_uid: str | None = None) -> I
         ) from exc
 
 
+def _settlement_refund(method: str, path: str) -> str | None:
+    prefix, suffix = "/api/v1/settlements/", "/refund"
+    if method != "POST" or not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    negotiation_id = path[len(prefix) : -len(suffix)]
+    return negotiation_id if negotiation_id and "/" not in negotiation_id else None
+
+
 async def resolve_listing_mutation(
     request: Request, body: Any
 ) -> ListingMutation | None:
     """Map one protected listing mutation to its exact v2 authorization binding."""
 
     path = request.url.path.rstrip("/")
+    settlement = _settlement_refund(request.method, path)
+    if settlement is not None:
+        # A refund reverses the buyer's payment, so only the storefront's own
+        # seller principal may request it; the resource is the deal, not a listing.
+        return ListingMutation(
+            "refund_settlement", settlement, "seller", _seller_signer().identity, body
+        )
     prefix = "/api/v1/listings/"
     if request.method != "POST" or not path.startswith(prefix):
         return None

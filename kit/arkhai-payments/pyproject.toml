@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-arkhai-payments"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Stateless client for the Arkhai payments HTTP API"
 requires-python = ">=3.10,<3.14"

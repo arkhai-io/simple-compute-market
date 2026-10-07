@@ -27,6 +27,17 @@ def transaction_id(mandate: Mandate | Mapping[str, Any]) -> str:
     return jcs_sha256(parsed)
 
 
+def receipt_message(receipt: Mapping[str, Any] | BaseModel) -> bytes:
+    """Return the exact bytes the payments service signs for one receipt."""
+
+    receipt_json = (
+        receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if isinstance(receipt, BaseModel)
+        else dict(receipt)
+    )
+    return _frame((RECEIPT_PROTOCOL, jcs_sha256(receipt_json)))
+
+
 def verify_receipt_signature(
     signed_receipt: SignedReceipt | Mapping[str, Any],
     trusted_service_identity: MarketplaceIdentity | Mapping[str, Any] | BaseModel,
@@ -46,11 +57,7 @@ def verify_receipt_signature(
         issuer = signed.receipt.issuer
         if issuer.scheme != trusted.scheme.value or issuer.identifier != trusted.identifier:
             return False
-        receipt_json = signed.receipt.model_dump(
-            mode="json", by_alias=True, exclude_none=True
-        )
-        digest = jcs_sha256(receipt_json)
-        message = _frame((RECEIPT_PROTOCOL, digest))
+        message = receipt_message(signed.receipt)
         proof = MarketplaceSignatureProof.model_validate(
             signed.proof.model_dump(mode="json", by_alias=True, exclude_none=True)
         )

@@ -19,7 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
-from market_arkhai_payments import Mandate, SignedReceipt, transaction_id
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_MECHANISM,
+    MandatePolicyError,
+    SignedReceipt,
+)
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
@@ -281,7 +285,7 @@ async def converge_post_physical_delivery(
 ) -> bool:
     """Converge the durable storefront effects after physical success."""
     escrow_uid = str(escrow["escrow_uid"])
-    payments = context.get("settlement_mechanism") == "arkhai.payments.v1"
+    payments = context.get("settlement_mechanism") == ARKHAI_PAYMENTS_MECHANISM
     reservation_id = str(escrow.get("capacity_reservation_id") or "")
     resource_id = str(escrow.get("settlement_resource_id") or "")
     listing_id = context.get("listing_id")
@@ -566,7 +570,7 @@ async def converge_escrow_once(
             escrow.get("escrow_uid"),
         )
         return False
-    payments = context.get("settlement_mechanism") == "arkhai.payments.v1"
+    payments = context.get("settlement_mechanism") == ARKHAI_PAYMENTS_MECHANISM
     if payments:
         record = await sqlite_client.load_vm_payment_record(
             negotiation_id=str(escrow.get("negotiation_id") or "")
@@ -581,19 +585,17 @@ async def converge_escrow_once(
         stage = composition.arkhai_payments_stage if composition else None
         if not isinstance(raw, bytes) or stage is None:
             raise RuntimeError("accepted payment Agreement or verifier is unavailable")
-        agreement = json.loads(raw)
-        data = thread.get("settlement_data") if thread else None
-        if not isinstance(data, dict):
-            raise RuntimeError("accepted payment mandate is unavailable")
-        mandate_wire = data.get("mandate")
-        mandate = Mandate.model_validate(mandate_wire)
+        try:
+            agreement, data = stage.accepted(raw, thread.get("settlement_data"))
+        except MandatePolicyError as exc:
+            raise RuntimeError("accepted payment mandate is unavailable") from exc
+        # Recovery re-proves the stored receipt against the exact Agreement before
+        # any physical effect, so a restart cannot provision on stale evidence.
         if (
             record["agreement_sha256"] != hashlib.sha256(raw).hexdigest()
-            or record["transaction_id"] != transaction_id(mandate)
-            or mandate_wire != stage.mandate_for_agreement(agreement)
+            or record["transaction_id"] != data.transaction_id
             or not stage.receipt_matches(
-                SignedReceipt.model_validate(record["receipt"]),
-                agreement=agreement, mandate=mandate,
+                SignedReceipt.model_validate(record["receipt"]), agreement, data
             )
         ):
             raise RuntimeError("payment evidence does not match accepted Agreement")

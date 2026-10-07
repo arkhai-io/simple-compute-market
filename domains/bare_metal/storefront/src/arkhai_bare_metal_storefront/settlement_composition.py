@@ -22,10 +22,10 @@ from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
+    ClientForOwner,
+    PaymentSellerStage,
     create_arkhai_payments_registration,
 )
-
-from .arkhai_payments import BareMetalArkhaiPaymentsStage
 
 ALKAHEST_MECHANISM = "alkahest.v1"
 
@@ -49,10 +49,22 @@ class BareMetalStorefrontSettlementComposition:
     registry: SettlementConfigurationRegistry
     config: SettlementConfig
     resources: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
+    payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.registry.validate(self.config, role="seller")
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
+        section = self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY)
+        config = ArkhaiPaymentsConfig.model_validate(section) if section is not None else None
+        # An enabled payments mechanism with incomplete trusted policy fails here,
+        # at startup, rather than on every settlement request.
+        stage = (
+            PaymentSellerStage(config, client_for_owner=self.payments_client_for_owner)
+            if config is not None and config.enabled
+            else None
+        )
+        object.__setattr__(self, "payments_stage", stage)
 
     @classmethod
     def from_raw_config(
@@ -60,34 +72,30 @@ class BareMetalStorefrontSettlementComposition:
         raw_settlement: Mapping[str, Any],
         *,
         resources: Mapping[str, Any] | None = None,
+        payments_client_for_owner: ClientForOwner | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
         return cls(
             registry=registry,
             config=registry.resolve(raw_settlement, role="seller"),
             resources=resources or {},
+            payments_client_for_owner=payments_client_for_owner,
         )
 
     @property
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
 
-    def arkhai_payments_stage(self) -> BareMetalArkhaiPaymentsStage | None:
-        section = self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY)
-        if section is None:
-            return None
-        config = ArkhaiPaymentsConfig.model_validate(section)
-        if not config.enabled:
-            return None
-        return BareMetalArkhaiPaymentsStage(config=config)
+    def arkhai_payments_stage(self) -> PaymentSellerStage | None:
+        return self.payments_stage
 
     def settlement_data_dispatch(
         self,
     ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]]:
-        stage = self.arkhai_payments_stage()
+        stage = self.payments_stage
         if stage is None:
             return {}
-        return {ARKHAI_PAYMENTS_MECHANISM: stage.mandate_for_agreement}
+        return {ARKHAI_PAYMENTS_MECHANISM: lambda agreement: stage.settlement_data(agreement).to_wire()}
 
     async def readiness(
         self,

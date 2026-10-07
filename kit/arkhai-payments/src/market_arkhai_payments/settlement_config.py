@@ -58,6 +58,10 @@ class ArkhaiPaymentsConfig(BaseModel):
     dispute_authority: str | None = None
     api_key_env: str | None = None
     development_auth: bool = False
+    # Buyer role only: deposit the exact Agreement with the approval. Off by
+    # default because the Agreement discloses both parties and provision terms
+    # to the payments service, and a deposit cannot be withdrawn.
+    attach_agreement: bool = False
 
     @field_validator("service_url")
     @classmethod
@@ -197,6 +201,14 @@ async def arkhai_payments_preflight(
         )
 
     blockers: list[ReadinessBlocker] = []
+    if role == "seller" and config.attach_agreement:
+        blockers.append(
+            _blocker(
+                "arkhai_payments.attach_agreement_buyer_only",
+                "attach_agreement is a buyer setting; sellers deposit through "
+                "the option's deposit_agreement",
+            )
+        )
     if config.service_url is None:
         blockers.append(
             _blocker(

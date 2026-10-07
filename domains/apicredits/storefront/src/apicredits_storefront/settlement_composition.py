@@ -14,9 +14,10 @@ from market_alkahest import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
+    ArkhaiPaymentsConfig,
+    ClientForOwner,
+    PaymentSellerStage,
     create_arkhai_payments_registration,
-    derive_mandate,
-    transaction_id,
 )
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer, TrustedIdentitySet
@@ -36,10 +37,7 @@ from apicredits_storefront.services.issuance_evidence import (
     IssuanceEvidenceRepository,
 )
 from apicredits_storefront.utils import config as storefront_config
-from domains.apicredits.settlement import (
-    CreditsServiceClient,
-    mandate_policy_from_agreement,
-)
+from domains.apicredits.settlement import CreditsServiceClient
 from domains.apicredits.settlement.payments import validate_payment_publication_clause
 
 logger = logging.getLogger(__name__)
@@ -73,25 +71,26 @@ class ApiCreditsSettlementComposition:
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
+    arkhai_payments_stage: PaymentSellerStage | None = None
 
     def payment_settlement_artifacts(
         self, agreement: Mapping[str, Any]
     ) -> dict[str, Any]:
-        config = self.settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
-        if config is None or not getattr(config, "enabled", False):
+        if self.arkhai_payments_stage is None:
             raise ValueError("Arkhai payments is not enabled for API credits")
-        policy = mandate_policy_from_agreement(
-            agreement,
-            fee_bps=config.fee_bps,
-            dispute_authority=config.dispute_authority,
+        return self.arkhai_payments_stage.settlement_data(agreement).to_wire()
+
+    def payment_service(self, db: Any) -> Any:
+        """The deal-scoped payment settlement service, or None when payments is off."""
+        from apicredits_storefront.services.payment_settlement_service import (
+            ApiCreditPaymentSettlementService,
         )
-        mandate = derive_mandate(dict(agreement), policy)
-        return {
-            "mandate": mandate.model_dump(
-                mode="json", by_alias=True, exclude_none=True
-            ),
-            "transaction_id": transaction_id(mandate),
-        }
+
+        if self.arkhai_payments_stage is None:
+            return None
+        return ApiCreditPaymentSettlementService(
+            db=db, composition=self, stage=self.arkhai_payments_stage
+        )
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -240,6 +239,7 @@ def build_api_credit_settlement_composition(
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
     failure_policy: Any,
+    payments_client_for_owner: ClientForOwner | None = None,
 ) -> ApiCreditsSettlementComposition:
     """Build lazy mechanism clients and the shared servicing worker."""
     repository = SettlementSQLiteRepository(
@@ -309,5 +309,18 @@ def build_api_credit_settlement_composition(
         evidence_service=evidence_service,
         private_results=private_results,
         failure_policy=failure_policy,
+        arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
     )
     return composition
+
+
+def _payments_stage(
+    settlement_config: Any, client_for_owner: ClientForOwner | None
+) -> PaymentSellerStage | None:
+    section = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
+    if section is None or not getattr(section, "enabled", False):
+        return None
+    # Incomplete trusted policy for an enabled mechanism fails at startup.
+    return PaymentSellerStage(
+        ArkhaiPaymentsConfig.model_validate(section), client_for_owner=client_for_owner
+    )

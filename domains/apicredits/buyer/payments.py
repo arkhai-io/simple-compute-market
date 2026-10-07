@@ -17,13 +17,8 @@ from core_buyer.orchestrator import BuyConfig, BuyResult, NegotiationResult
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
-    ArkhaiPaymentsConfig,
-    MandatePolicy,
-    PaymentsOptionParams,
-    check,
-    payments_client_for_owner,
-    transaction_id,
-    verify_receipt,
+    PaymentApproval,
+    PaymentApprovalDeclined,
 )
 from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement, SettlementOption, SettlementSelection
@@ -40,10 +35,6 @@ def configured_payer_account() -> str:
     if not isinstance(settings, Mapping):
         raise ValueError("[apicredits] must be a table")
     return validate_payer_account(settings.get("payer_account"))
-
-
-class _PaymentApprovalDeclined(RuntimeError):
-    """The buyer declined the validated payment mandate."""
 
 
 def payment_selection_for_listing(
@@ -87,39 +78,6 @@ def payment_selection_for_listing(
         option_id=option_id,
         expiration_unix=expiration_unix,
         params={"payer_account": validate_payer_account(payer_account)},
-    )
-
-
-def _mandate_policy(
-    agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig, payer_account: str
-) -> MandatePolicy:
-    selected = agreement.get("settlement")
-    if (
-        not isinstance(selected, Mapping)
-        or selected.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
-    ):
-        raise ValueError("accepted Agreement does not select arkhai.payments.v1")
-    account_id = validate_payer_account(payer_account)
-    settlement_params = agreement.get("settlement_params")
-    payer_account = (
-        settlement_params.get("payer_account")
-        if isinstance(settlement_params, Mapping)
-        else None
-    )
-    if payer_account != account_id:
-        raise ValueError("accepted Agreement does not name this buyer's Arkhai account")
-    if config.fee_bps is None or config.dispute_authority is None:
-        raise ValueError("buyer Arkhai payments policy is incomplete")
-    return MandatePolicy(
-        buyer_account=account_id,
-        option=PaymentsOptionParams.model_validate(selected.get("params")),
-        accepted_at=agreement["accepted_at"],
-        start_utc=agreement["start_utc"],
-        duration_seconds=agreement["duration_seconds"],
-        amount=agreement["amount"],
-        asset=agreement["asset"],
-        fee_bps=config.fee_bps,
-        dispute_authority=config.dispute_authority,
     )
 
 
@@ -202,59 +160,17 @@ def settle_api_credit_payment(
     config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         raise ValueError("buyer Arkhai payments is not enabled")
-    policy = _mandate_policy(agreement_json, config, payer_account)
-    if not isinstance(settlement_data, Mapping):
-        raise ValueError("seller did not return payment settlement artifacts")
-    mandate_value = settlement_data.get("mandate")
-    if not isinstance(mandate_value, Mapping):
-        raise ValueError("seller did not return a mandate")
-    mandate = check(dict(mandate_value), agreement_json, policy)
-    expected_transaction = transaction_id(mandate)
-    if settlement_data.get("transaction_id") != expected_transaction:
-        raise ValueError(
-            "seller returned a transaction ID that does not match its mandate"
-        )
-    if confirm_payment is not None and not confirm_payment(
-        mandate, expected_transaction
-    ):
-        raise _PaymentApprovalDeclined("buyer declined payment approval")
-
-    client = payments_client_for_owner(config, policy.buyer_account)
-    try:
-        signed_receipt = client.approve(
-            mandate,
-            agreement=agreement_json if policy.option.deposit_agreement else None,
-        )
-        if not verify_receipt(
-            signed_receipt,
-            config.service_identity,
-            mandate=mandate,
-            agreement_json=agreement_json,
-        ):
-            raise ValueError(
-                "payments approval receipt does not match the accepted Agreement"
-            )
-        snapshot = client.poll(
-            expected_transaction,
-            timeout=total_timeout,
-            interval=poll_interval,
-        )
-        if not verify_receipt(
-            snapshot.snapshot.receipt,
-            config.service_identity,
-            mandate=mandate,
-            agreement_json=agreement_json,
-        ):
-            raise ValueError(
-                "payments snapshot receipt does not match the accepted Agreement"
-            )
-        client.ensure_agreement_attached(
-            expected_transaction,
-            agreement_json,
-            policy.option,
-        )
-    finally:
-        client.close()
+    # The kit re-derives the mandate under this buyer's policy, checks the
+    # seller's transaction ID and the advertised option, attaches only under
+    # the buyer's own attach_agreement, and verifies every receipt.
+    expected_transaction = PaymentApproval(config, payer_account).approve(
+        raw_agreement,
+        settlement_data,
+        advertised_option=advertised,
+        confirm=confirm_payment,
+        timeout=total_timeout,
+        interval=poll_interval,
+    )
 
     on_event(
         "payment_approved",
@@ -347,7 +263,7 @@ def settle_api_credit_negotiation(
             on_event=on_event,
             confirm_payment=confirm_payment,
         )
-    except _PaymentApprovalDeclined as exc:
+    except PaymentApprovalDeclined as exc:
         on_event("payment_approval_declined", {"error": str(exc)})
         return BuyResult(
             status="exited",

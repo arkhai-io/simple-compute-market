@@ -1,7 +1,7 @@
 # storefront-client
 
 Async and synchronous HTTP clients for the Arkhai storefront REST API.
-The immutable public package is `arkhai-core-storefront-client==0.17.0`.
+The immutable public package is `arkhai-core-storefront-client==0.18.0`.
 
 ## Identity configuration
 

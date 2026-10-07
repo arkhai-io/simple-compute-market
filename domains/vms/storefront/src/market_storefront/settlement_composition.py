@@ -24,6 +24,7 @@ from core_storefront.stage_log import stage_event
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
+    PaymentSellerStage,
     create_arkhai_payments_registration,
 )
 from market_core import MarketDomainContract
@@ -46,7 +47,6 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
-from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
@@ -82,7 +82,7 @@ class VmSettlementComposition:
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
     mechanism_resources: Mapping[str, Any]
-    arkhai_payments_stage: VmArkhaiPaymentsStage | None = None
+    arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
@@ -839,8 +839,10 @@ def build_vm_settlement_composition(
         wake_servicing=wake_servicing,
     )
     payments_config = settlement_config.mechanism_config("arkhai_payments")
+    # An enabled payments mechanism with incomplete trusted policy fails here, at
+    # startup, rather than on every settlement request.
     payments_stage = (
-        VmArkhaiPaymentsStage(ArkhaiPaymentsConfig.model_validate(payments_config))
+        PaymentSellerStage(ArkhaiPaymentsConfig.model_validate(payments_config))
         if payments_config is not None and getattr(payments_config, "enabled", False)
         else None
     )

@@ -47,7 +47,9 @@ from .config import (
     registry_client,
 )
 from .fulfillment import BareMetalFulfillmentTransport
-from .arkhai_payments import BareMetalArkhaiPaymentsBuyer, BareMetalSettlementTransport
+from market_arkhai_payments import PaymentApproval
+
+from .arkhai_payments import BareMetalSettlementTransport
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
@@ -348,7 +350,6 @@ def buy_bare_metal(
             "accepted payment negotiation omitted its Agreement or mandate"
         )
     agreement_bytes = base64.b64decode(outcome.agreement_bytes, validate=True)
-    agreement = json.loads(agreement_bytes)
     run_log.event(
         "agreement_accepted",
         negotiation_id=outcome.negotiation_id,
@@ -361,13 +362,11 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-    payment_buyer = BareMetalArkhaiPaymentsBuyer(
-        config=buyer_config.arkhai_payments,
-        payer_account=buyer_config.payer_account,
-    )
-    transaction = payment_buyer.approve(
-        agreement=agreement,
-        settlement_data=outcome.settlement_data,
+    transaction = PaymentApproval(
+        buyer_config.arkhai_payments, buyer_config.payer_account
+    ).approve(
+        agreement_bytes,
+        outcome.settlement_data,
         timeout=payment_timeout_seconds,
     )
     run_log.event("payment_approved", transaction_id=transaction)
@@ -378,26 +377,19 @@ def buy_bare_metal(
         resolve_seller_principals=lambda: listing.publisher_principals,
         timeout=buyer_config.timeout_seconds,
     )
+    # Settlement starts delivery once the seller verifies the receipt; the buyer
+    # retries while the seller reports no payment evidence yet.
     deadline = time.monotonic() + payment_timeout_seconds
     while True:
-        settled = settlement.settle(outcome.negotiation_id)
-        if settled.get("status") == "settlement_verified":
-            if settled.get("escrow_uid") != transaction:
-                raise RuntimeError("seller verified a different payment transaction")
+        fulfillment = settlement.settle(outcome.negotiation_id)
+        if fulfillment.get("status") != "pending":
             break
-        if settled.get("status") != "settlement_pending":
-            raise RuntimeError("seller returned an unexpected settlement status")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("seller has not observed the verified payment receipt")
         time.sleep(min(1.0, remaining))
-    fulfillment = BareMetalFulfillmentTransport(
-        seller_url=listing.storefront_url,
-        principal=identity.principal,
-        signer=identity.signer,
-        resolve_seller_principals=lambda: listing.publisher_principals,
-        timeout=buyer_config.timeout_seconds,
-    ).begin(outcome.negotiation_id)
+    if fulfillment.get("settlement_ref") != transaction:
+        raise RuntimeError("seller settled a different payment transaction")
     run_log.end(
         "agreed",
         negotiation_id=outcome.negotiation_id,

@@ -16,6 +16,36 @@ class SettleRequest(BaseModel):
     buyer_principal: Identity
 
 
+class AgreementSettleResponse(BaseModel):
+    """Response for agreement settlement through ``POST /api/v1/settle/{negotiation_id}``.
+
+    Every mechanism that settles from the accepted Agreement alone returns these
+    fields. ``escrow_uid`` equals ``negotiation_id`` because the route is keyed by
+    deal; ``settlement_ref`` is the mechanism's own evidence identity. ``pending``
+    is the one status every domain reserves: no payment evidence exists yet and
+    the buyer should retry. Other statuses and extra fields are domain delivery
+    state.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    negotiation_id: str
+    escrow_uid: str
+    settlement_ref: str
+    status: str
+    retryable: bool = False
+    buyer_principal: Identity
+    seller_principal: Identity
+
+
+class RefundSettlementResponse(BaseModel):
+    """Response for ``POST /api/v1/settlements/{negotiation_id}/refund``."""
+
+    negotiation_id: str
+    settlement_ref: str
+    status: str
+
+
 class SettleResponse(BaseModel):
     """Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning).
 

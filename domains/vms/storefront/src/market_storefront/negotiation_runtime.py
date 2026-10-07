@@ -25,7 +25,7 @@ from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.policies import _amount_from_proposal
 from domains.vms.negotiation.storefront_round import SellerRoundHook, SellerRoundResult
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSellerStage
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -51,7 +51,6 @@ from market_negotiation_runtime import (
 )
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
 
-from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
@@ -575,7 +574,7 @@ def _build_response_artifacts(
     acceptance: Acceptance,
     accepted: bool,
     dispatch: AcceptedObligationDispatch,
-    payments_stage: VmArkhaiPaymentsStage | None = None,
+    payments_stage: PaymentSellerStage | None = None,
 ) -> Mapping[str, Any]:
     if not isinstance(acceptance.binding, CapacityBinding):
         raise RuntimeError("VM negotiation has no frozen capacity binding")
@@ -602,9 +601,9 @@ def _build_response_artifacts(
         if agreement.settlement is not None and agreement.settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM:
             if payments_stage is None:
                 raise OfferUnfulfillableError("payments_settlement_unavailable")
-            artifacts["settlement_data"] = {"mandate": payments_stage.mandate_for_agreement(
+            artifacts["settlement_data"] = payments_stage.settlement_data(
                 agreement.model_dump(mode="json", exclude_none=True)
-            )}
+            ).to_wire()
         return artifacts
     state = acceptance.policy_state
     if not isinstance(state, Mapping):
@@ -786,7 +785,7 @@ def build_vm_negotiation_runtime(
     capacity_runtime: CapacityRuntime,
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
-    arkhai_payments_stage: VmArkhaiPaymentsStage | None = None,
+    arkhai_payments_stage: PaymentSellerStage | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract."""
 

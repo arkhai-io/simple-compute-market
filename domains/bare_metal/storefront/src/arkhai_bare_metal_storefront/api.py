@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import ListingListResponse, ListingResponse
+from core_storefront.models.settle_models import RefundSettlementResponse
 from core_storefront.models.negotiation_models import (
     NegotiateContinueRequest,
     NegotiateContinueResponse,
@@ -18,6 +19,7 @@ from core_storefront.models.negotiation_models import (
 )
 from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
@@ -38,13 +40,12 @@ from .models import (
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
-    BareMetalSettlePendingResponse,
     BareMetalSettleStatusResponse,
 )
 from .negotiation_service import NegotiationRequestError
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
-from .settlement_service import SettlementRequestError
+from .settlement_service import PaymentSettleResult, SettlementRequestError
 
 router = APIRouter()
 
@@ -116,6 +117,23 @@ async def _buyer(
         body=body,
         expected_role="buyer",
         expected_principal=expected_principal,
+    )
+
+
+async def _seller(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    operation: str,
+    resource: str,
+) -> Identity:
+    return await _principal(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=resource,
+        expected_role="seller",
+        expected_principal=runtime.seller_principal,
     )
 
 
@@ -385,13 +403,13 @@ async def get_negotiation(
 
 @router.post(
     "/api/v1/settle/{escrow_uid}",
-    response_model=BareMetalSettleResponse | BareMetalSettlePendingResponse,
+    response_model=None,
 )
 async def settle(
     escrow_uid: str,
     body: BareMetalSettleRequest,
     request: Request,
-) -> BareMetalSettleResponse | BareMetalSettlePendingResponse:
+) -> BareMetalSettleResponse | JSONResponse:
     runtime = _runtime(request)
     try:
         identity = await _buyer(
@@ -402,13 +420,38 @@ async def settle(
             body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
             expected_principal=body.buyer_principal,
         )
-        return await runtime.settlement_service().verify(
+        result = await runtime.settlement_service().verify(
             escrow_uid=escrow_uid,
             request=body,
             buyer_principal=identity,
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if isinstance(result, PaymentSettleResult):
+        return JSONResponse(content=result.payload, status_code=result.status_code)
+    return result
+
+
+@router.post(
+    "/api/v1/settlements/{negotiation_id}/refund",
+    response_model=RefundSettlementResponse,
+)
+async def refund_settlement(negotiation_id: str, request: Request) -> JSONResponse:
+    """Reverse an accepted payment deal's held funds; only the seller may ask."""
+    runtime = _runtime(request)
+    await _seller(
+        request=request,
+        runtime=runtime,
+        operation="refund_settlement",
+        resource=negotiation_id,
+    )
+    try:
+        result = await runtime.settlement_service().refund_payment(
+            negotiation_id=negotiation_id
+        )
+    except SettlementRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return JSONResponse(content=result.payload, status_code=result.status_code)
 
 
 @router.get(
@@ -424,7 +467,7 @@ async def settle_status(
         escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
         record = await runtime.db.load_bare_metal_settlement_record_by_ref(
             settlement_ref=escrow_uid
-        )
+        ) or await runtime.db.load_bare_metal_settlement_record(negotiation_id=escrow_uid)
         if escrow is None and record is None:
             raise SettlementRequestError("settlement not found", status_code=404)
         negotiation_id = str(

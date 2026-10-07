@@ -10,7 +10,7 @@ DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
 .PHONY:   review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits   dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
 .PHONY:
-.PHONY: test-release-tooling test-deployment-packaging
+.PHONY: test-release-tooling test-deployment-packaging lock check-packaging check-uv-setup check-locks check-python-version check-project-layout
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
@@ -431,6 +431,24 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	python3 scripts/uv_project.py lock $(PROJECTS)
+
+check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout
+
+check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
+	@python3 scripts/check_uv_setup.py
+
+check-locks: ## Fail if a lock is not current with its project, the wheels in .dist, or the repository (run make dist first)
+	@python3 scripts/check_locks.py
+
+check-python-version: ## Fail if anything selects a Python version other than .python-version
+	@python3 scripts/check_python_version.py
+
+check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
+	@python3 scripts/check_project_layout.py
+
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@echo "Scanning for change-ID and task-number references outside openspec/..."
 	@matches=$$(grep -rnE \

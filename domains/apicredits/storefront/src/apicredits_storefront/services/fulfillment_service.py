@@ -18,6 +18,7 @@ from market_identity import Identity
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
+from apicredits_storefront.services.payment_selection import selects_payments
 from apicredits_storefront.utils.config import settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -111,6 +112,29 @@ async def _failure_webhook_handler(
     return {"status": "sent", "status_code": response.status_code}
 
 
+async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
+    """Refund the buyer when this storefront's own issuance failed; opt-in.
+
+    Payment deals reverse their held payment only when nothing was issued. API
+    credits has no refund path for other mechanisms.
+    """
+    negotiation_id = str(context.get("negotiation_id") or context.get("escrow_uid") or "")
+    thread = (
+        await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        if negotiation_id
+        else None
+    )
+    if not selects_payments(thread):
+        return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
+    import apicredits_storefront.container as _container
+
+    composition = _container.resolved_settlement_composition
+    service = composition.payment_service(db) if composition is not None else None
+    if service is None:
+        return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}
+    return await service.refund_before_delivery(negotiation_id)
+
+
 def build_api_credit_failure_policy() -> FailurePolicy:
     """Compose shared ordered dispatch with API-credit-owned effects."""
     return FailurePolicy(
@@ -119,6 +143,7 @@ def build_api_credit_failure_policy() -> FailurePolicy:
             "release_capacity": _release_capacity_handler,
             "emit_event": _emit_failure_event_handler,
             "webhook": _failure_webhook_handler,
+            "refund": _refund_handler,
         },
     )
 

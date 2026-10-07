@@ -279,6 +279,9 @@ from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
 from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
     router as settle_router,
 )
+from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
+    settlements_router,
+)
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
@@ -346,6 +349,7 @@ def build_api_credits_storefront_app(
                     negotiate_router,
                     negotiations_router,
                     settle_router,
+                    settlements_router,
                     admin_settle_router,
                 ),
                 middleware=(authenticate_response,),

@@ -61,7 +61,7 @@ Dependencies:
 
 No compatibility shims: the settlement-data shape, settle response fields, and client method names change directly on this unmerged branch.
 
-- [ ] 5.1 **Payments kit: one mechanism implementation** (R2, R4, R5, R7, P4, P5).
+- [x] 5.1 **Payments kit: one mechanism implementation** (R2, R4, R5, R7, P4, P5).
   - `kit/arkhai-payments/src/market_arkhai_payments/agreement.py` (new): `mandate_policy_for_agreement(agreement, config, *, expected_payer=None)`, replacing the four copies, and `PaymentSettlementData` `{mandate, transaction_id}` with construction from an Agreement and validation of stored data against exact Agreement bytes.
   - `.../seller.py` (new): receipt outcomes `ReceiptPending`, `ReceiptVerified`, `ReceiptInvalid`, `ReceiptUnavailable`; refund outcomes `Refunded`, `NotPaid`, `NothingToReverse`, `RefundUnavailable`; `PaymentSellerStage(config, client_for_owner=...)`. The stage provides:
     - settlement data at acceptance;
@@ -87,7 +87,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
   - Bump `kit/arkhai-payments/pyproject.toml` to 0.2.0.
   - Validation: kit `make test` (typing, vectors, generated models, unit).
 
-- [ ] 5.2 **Core carriers and the typed client** (R1, R4, R7).
+- [x] 5.2 **Core carriers and the typed client** (R1, R4, R7).
   - `core/storefront/src/core_storefront/models/settle_models.py`: `AgreementSettleResponse` (`negotiation_id`, `escrow_uid` equal to the negotiation ID, `settlement_ref`, `status`, `retryable`, domain fields allowed), `RefundSettlementResponse` (`negotiation_id`, `settlement_ref`, `status`). Bump `core/storefront/pyproject.toml` to 0.4.0.
   - `core/storefront-client/src/storefront_client/client.py`, async and sync:
     - rename `settle` to `settle_evm`;
@@ -102,7 +102,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
     - `core/storefront-client/tests/test_settlement_requests.py` (new): bodies, routes, roles, and operations for all three methods, async and sync.
     - `domains/vms/storefront/tests/unit/test_storefront_client_parity.py` (new): public method names and signatures match across `StorefrontClient` and `SyncStorefrontClient`. It sits in the owning service's suite, per `TESTING.md`.
 
-- [ ] 5.3 **VM** (R2, R4, R5, R7, R8, P4, P6).
+- [x] 5.3 **VM** (R2, R4, R5, R7, R8, P4, P6).
   - Storefront `domains/vms/storefront/src/market_storefront/`:
     - `arkhai_payments.py`: tombstone; replaced by the kit stage.
     - `settlement_composition.py`: build `PaymentSellerStage` only from ready configuration; a not-ready payments registration composes no stage.
@@ -138,7 +138,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
     - Update `domains/vms/storefront/tests/unit/test_settlement_composition.py` and `test_server_app_composition.py`, and VM buyer tests under `domains/vms/buyer/tests/`.
   - Validation: VM storefront `make test` (unit and integration), VM buyer `make test`.
 
-- [ ] 5.4 **Bare metal** (R2, R4, R5, R6, R7, P3).
+- [x] 5.4 **Bare metal** (R2, R4, R5, R6, R7, P3).
   - Storefront `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`:
     - `arkhai_payments.py`: tombstone.
     - `settlement_composition.py`: kit stage and `settlement_data_dispatch` through `PaymentSettlementData`.
@@ -164,7 +164,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
     - Update `domains/bare_metal/storefront/tests/test_http_settlement.py`, `test_persistence.py`, `test_fulfillment_service.py`, and the buyer tests.
   - Validation: bare-metal storefront and buyer `make test`.
 
-- [ ] 5.5 **API credits** (R2, R4, R5, R7, R8, P5, P6).
+- [x] 5.5 **API credits** (R2, R4, R5, R7, R8, P5, P6).
   - `domains/apicredits/settlement/payments.py`: remove `mandate_policy_from_agreement`; keep payer and publication-clause validation. Update `domains/apicredits/settlement/__init__.py`.
   - Storefront `domains/apicredits/storefront/src/apicredits_storefront/`:
     - `settlement_composition.py`: kit stage; `payment_settlement_artifacts` delegates to `PaymentSettlementData`.
@@ -180,13 +180,13 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
     - Update `tests/unit/test_settlement_fulfillment.py` and `test_sync_negotiation.py`, and `domains/apicredits/buyer/tests/test_settlement_composition.py`.
   - Validation: API-credit domain, storefront, buyer, and service `make test`.
 
-- [ ] 5.6 **API-credit payment system scenario** (R3, R7).
+- [x] 5.6 **API-credit payment system scenario** (R3, R7).
   - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py` (new), on `DomainDealState` and the profiled buyer CLI. Stages: publication, discovery, negotiation selecting `arkhai.payments.v1`, approval, receipt-gated issuance, consumption, status, restart recovery, then a seller refund through `StorefrontClient.refund_settlement` with the transaction observed reversed.
   - `e2e-tests/src/settings.py` and `e2e-tests/config/config.yml`: optional payments target settings (service URL, receipt identity, buyer and payee accounts, credential environment names). `require_state` reports the scenario blocked when they are absent or the target is not ready.
   - Register marker `e2e_credits_payment_deal` in `e2e-tests/pyproject.toml` and the API-credit lane expression in `e2e-tests/Makefile`.
   - Validation: e2e unit suite; the scenario runs here only if a payments target is reachable, otherwise its blocked result is disclosed.
 
-- [ ] 5.7 **Diagnostics, comments, and the gate** (R3, R10, P2).
+- [x] 5.7 **Diagnostics, comments, and the gate** (R3, R10, P2).
   - `docs/attachments/settle-through-arkhai-payments/{vm_smoke,bare_metal_smoke,api_credit_smoke,smoke_common}.py`: move to the kit stage, approval, and fixture APIs; `index.md` records that they were updated, not rerun.
   - `core/src/market_core/schemas.py`: current-state docstrings for `SettlementPlan` and `SettlementObligation` (R10); a neutral example in the `SettlementSelection.params` comment.
   - Gate:
@@ -198,13 +198,39 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
 
     Disclose that `make check-packaging` is not available on this tree (P2).
 
+### §5 evidence
+
+Every suite below ran in a fresh environment against a wheelhouse rebuilt from the final tree.
+
+| Suite | Result |
+|---|---|
+| `kit/arkhai-payments` (`make test`: mypy, vectors, generated models, unit) | 63 passed |
+| `core/storefront-client` | 34 passed |
+| `core/storefront` | 149 passed, 2 skipped |
+| `kit/capacity-publication` | 8 passed |
+| VM storefront (unit and integration) | 1,058 passed; 3 deselected, which fail identically on the unmodified tree (`test_alkahest` ×2 need the local chain runtime; one Alkahest amountless-escrow negotiation) |
+| VM buyer | 180 passed |
+| Bare-metal storefront | 95 passed |
+| Bare-metal buyer | 9 passed |
+| API-credit domain / storefront / buyer / credits service | 35 / 75 / 17 / 32 passed |
+| e2e unit, and the payment scenario without a target | 19 passed; the scenario's 3 stages report blocked |
+
+Packaging (P2): measured against the unmodified-tree baseline, `check-python-version`, `check-project-layout` and `check-uv-setup` report nothing new. `check-locks` falls from 36 problems to 16; the 6 beyond the baseline are the VM storefront and VM buyer locks. Lint (pyflakes over every changed source file, plus the VM storefront and e2e projects' own ruff configuration) adds no finding beyond the unmodified tree. `make check-comment-hygiene` finds nothing in source.
+
+Deviations from the task text:
+
+- **Two locks not refreshed.** The VM storefront and VM buyer locks resolve optional torch metadata from `download-r2.pytorch.org`, which this environment could not reach, and the VM storefront lock resolves third-party packages from `mirrors.aliyun.com`, also unreachable. Their suites ran in environments built from the declared dependencies and the rebuilt wheelhouse. Relocking both is carried into §6.3.
+- **Test environments.** Every suite ran in an environment built from PyPI and the rebuilt wheelhouse rather than from the project lock, for the reason above and for consistency. Each project's tests import its own `src/`.
+- **`examples/local_e2e.py` kept as a client smoke.** It exercises the `PaymentsClient` primitives against a live service with a minimal deal object; the README states that scope.
+- **Smaller additions.** `services/payment_selection.py` in the API-credit storefront breaks an import cycle. API-credit seller authentication now accepts empty bodies. A sync/async parity test removed redundant annotation quoting from seven async client methods. The VM refund route uses the existing `settlements_router`. `e2e-tests` declares its direct payments-kit dependency.
+
 ## 6. Merge with the development branch
 
 Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; the decisions are taken with the reviewer.
 
 - [ ] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`.
 - [ ] 6.2 Make `kit/identity`'s field framing public as `frame_fields`, use it in `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, bump `arkhai-kit-identity` once, and move every pin to it in one step (P1).
-- [ ] 6.3 Re-run every suite from §5 on the merged tree, then `make check-packaging` (P2), and resolve every failure.
+- [ ] 6.3 Relock `domains/vms/storefront` and `domains/vms/buyer` where `download-r2.pytorch.org` is reachable, re-run every suite from §5 on the merged tree, then `make check-packaging` (P2), and resolve every failure.
 
 ## 7. Closeout
 

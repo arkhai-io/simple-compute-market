@@ -3,24 +3,14 @@
 from __future__ import annotations
 
 import base64
-import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
 from core_buyer import DEFAULT_HTTP_TIMEOUT, BuyResult, signed_storefront_json
 from core_buyer.orchestration import make_publisher_trust_resolver, wait_for_settlement
-from market_arkhai_payments import (
-    ArkhaiPaymentsConfig,
-    Mandate,
-    MandatePolicy,
-    PaymentsOptionParams,
-    check,
-    payments_client_for_owner,
-    transaction_id,
-    verify_receipt,
-)
+from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentApproval
 from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
@@ -28,99 +18,6 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 
 from .buy_orchestrator import AgreedTerms
 from .run_log import read_run
-
-
-@dataclass(frozen=True, slots=True)
-class VmArkhaiPaymentsBuyer:
-    """Validate and approve the seller mandate using the buyer's account authority."""
-
-    config: ArkhaiPaymentsConfig
-    payer_account: str
-
-    def approve(
-        self,
-        *,
-        agreement: Any,
-        settlement_data: Mapping[str, Any],
-        timeout: float = 300.0,
-        interval: float = 1.0,
-    ) -> str:
-        agreement_wire = (
-            agreement.model_dump(mode="json", exclude_none=True)
-            if hasattr(agreement, "model_dump")
-            else dict(agreement)
-            if isinstance(agreement, Mapping)
-            else None
-        )
-        if isinstance(agreement, bytes):
-            agreement_wire = json.loads(agreement)
-        if agreement_wire is None:
-            raise ValueError("accepted Agreement is unavailable")
-        selected = agreement_wire.get("settlement")
-        if (
-            not isinstance(selected, Mapping)
-            or selected.get("mechanism") != "arkhai.payments.v1"
-        ):
-            raise ValueError("accepted Agreement does not select Arkhai payments")
-        option = PaymentsOptionParams.model_validate(selected.get("params"))
-        settlement_params = agreement_wire.get("settlement_params")
-        payer = (
-            settlement_params.get("payer_account")
-            if isinstance(settlement_params, Mapping)
-            else None
-        )
-        payer_account = AccountId.model_validate(self.payer_account).root
-        if payer != payer_account:
-            raise ValueError("accepted Agreement names a different payer account")
-
-        if self.config.fee_bps is None or self.config.dispute_authority is None:
-            raise ValueError("buyer payment policy is incomplete")
-        policy = MandatePolicy(
-            buyer_account=payer_account,
-            option=option,
-            accepted_at=agreement_wire["accepted_at"],
-            start_utc=agreement_wire["start_utc"],
-            duration_seconds=agreement_wire["duration_seconds"],
-            amount=agreement_wire["amount"],
-            asset=agreement_wire["asset"],
-            fee_bps=self.config.fee_bps,
-            dispute_authority=self.config.dispute_authority,
-        )
-        raw_mandate = Mandate.model_validate(
-            settlement_data.get("mandate", settlement_data)
-        )
-        mandate = check(raw_mandate, agreement_wire, policy)
-        transaction = transaction_id(mandate)
-        service_identity = self.config.service_identity
-        if service_identity is None:
-            raise ValueError("payments service identity is not configured")
-
-        with payments_client_for_owner(self.config, payer_account) as client:
-            approved = client.approve(mandate, agreement=agreement_wire)
-            if not verify_receipt(
-                approved,
-                service_identity,
-                mandate=mandate,
-                agreement_json=agreement_wire,
-            ):
-                raise ValueError(
-                    "payments approval receipt does not match the accepted Agreement"
-                )
-            snapshot = client.poll(
-                transaction,
-                timeout=timeout,
-                interval=interval,
-            )
-        if snapshot.snapshot.transaction.root != transaction or not verify_receipt(
-            snapshot.snapshot.receipt,
-            service_identity,
-            mandate=mandate,
-            agreement_json=agreement_wire,
-        ):
-            raise ValueError(
-                "payments transaction snapshot does not match the accepted Agreement"
-            )
-        return transaction
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,13 +64,13 @@ def payer_selection(selected):
     )
 
 
-def payment_buyer(policy) -> VmArkhaiPaymentsBuyer:
+def payment_buyer(policy) -> PaymentApproval:
     section = load_user_config().get("vms", {})
-    return VmArkhaiPaymentsBuyer(
-        config=ArkhaiPaymentsConfig.model_validate(
+    return PaymentApproval(
+        ArkhaiPaymentsConfig.model_validate(
             policy.config.mechanism_config("arkhai_payments")
         ),
-        payer_account=AccountId.model_validate(section.get("payer_account")).root,
+        AccountId.model_validate(section.get("payer_account")).root,
     )
 
 
@@ -224,12 +121,9 @@ def settle_payment(
         or agreement.buyer != principal.model_dump(mode="json")
     ):
         raise ValueError("accepted payment Agreement has another owner")
-    mandate = settlement_data.get("mandate")
-    if not isinstance(mandate, dict):
-        raise ValueError("seller did not supply a payment mandate")
     transaction = buyer.approve(
-        agreement=raw,
-        settlement_data=mandate,
+        raw,
+        settlement_data,
         timeout=timeout,
         interval=interval,
     )
@@ -316,4 +210,4 @@ def make_payment_settle_hook(
     return settle
 
 
-__all__ = ["VmArkhaiPaymentsBuyer", "VmSettlementTransport"]
+__all__ = ["VmSettlementTransport", "payment_buyer", "settle_payment"]

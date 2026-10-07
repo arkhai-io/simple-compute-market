@@ -10,20 +10,15 @@ from types import SimpleNamespace
 
 import httpx
 from apicredits_storefront import container
-from apicredits_storefront.controllers.settle_controller import SettleController
 from apicredits_storefront.domain_runtime import get_market_domain_contract
+from apicredits_storefront.services.payment_settlement_service import (
+    ApiCreditPaymentSettlementService,
+)
 from apicredits_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
-from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
-from market_arkhai_payments import (
-    check,
-    derive_mandate,
-    payments_client_for_owner,
-    transaction_id,
-    verify_receipt,
-)
+from market_arkhai_payments import PaymentApproval, PaymentSellerStage
 from market_core import ImmutableFulfillmentCapability
 from market_settlement_runtime import compile_settlement_publication_clause
 from smoke_common import (
@@ -39,9 +34,6 @@ from smoke_common import (
 )
 
 from domains.apicredits.listings.models import coerce_resource_dict
-from domains.apicredits.settlement import (
-    mandate_policy_from_agreement,
-)
 from domains.apicredits.settlement.credits_client import CreditsServiceClient
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from domains.apicredits.settlement.payments import validate_payment_publication_clause
@@ -135,10 +127,15 @@ async def main(directory, phase, authority):
         get_market_domain_contract(),
         fulfillment=ImmutableFulfillmentCapability(fulfill=deliver),
     )
-    container.resolved_settlement_composition = SimpleNamespace(
-        domain=domain,
-        settlement_config=SimpleNamespace(mechanism_config=lambda key: settings),
-    )
+    composition = SimpleNamespace(domain=domain)
+    container.resolved_settlement_composition = composition
+    stage = PaymentSellerStage(settings)
+    service = ApiCreditPaymentSettlementService(db=db, composition=composition, stage=stage)
+
+    async def settle():
+        return await service.settle(
+            identifier, buyer_principal=BUYER.identity, seller_principal=SELLER.identity
+        )
     if phase == "crash":
         provision = {
             "kind": "api_credits.v1",
@@ -147,11 +144,7 @@ async def main(directory, phase, authority):
         }
         accepted = agreement(identifier, provision, duration=0)
         raw = accepted.model_dump_json(exclude_none=True).encode()
-        wire = json.loads(raw)
-        policy = mandate_policy_from_agreement(
-            wire, fee_bps=settings.fee_bps, dispute_authority=settings.dispute_authority
-        )
-        mandate = derive_mandate(wire, policy)
+        settlement_data = stage.settlement_data(json.loads(raw)).to_wire()
         await db.upsert_listing(
             listing_id="listing-smoke",
             status="open",
@@ -185,12 +178,7 @@ async def main(directory, phase, authority):
             agreement_bytes=raw,
             accepted_at=accepted.accepted_at,
             agreed_start_utc=accepted.start_utc,
-            settlement_data={
-                "mandate": mandate.model_dump(
-                    mode="json", by_alias=True, exclude_none=True
-                ),
-                "transaction_id": transaction_id(mandate),
-            },
+            settlement_data=settlement_data,
         )
         await db.save_credit_terms(
             negotiation_id=identifier, quantity=10, key_mode="new"
@@ -198,11 +186,7 @@ async def main(directory, phase, authority):
         await db.update_negotiation_thread_terminal(
             negotiation_id=identifier, terminal_state="success"
         )
-        controller = SettleController(db=db, settlement_coordinator=None)
-        request = ApiCreditsSettleRequest(
-            negotiation_id=identifier, buyer_principal=BUYER.identity
-        )
-        pending = await controller._settle_payment(identifier, request, SELLER)
+        pending = await settle()
         assert pending.status_code == 202
         with sqlite3.connect(Path(authority) / "authority.db") as connection:
             assert (
@@ -213,26 +197,15 @@ async def main(directory, phase, authority):
                 == 0
             )
         print("API credits: before approval -> retryable pending; grants=0", flush=True)
-        checked = check(mandate, wire, policy)
-        with payments_client_for_owner(settings, PAYER) as buyer:
-            receipt = buyer.approve(checked, agreement=wire)
-            snapshot = buyer.poll(transaction_id(checked), timeout=10, interval=0.01)
-            assert verify_receipt(
-                receipt, settings.service_identity, mandate=checked, agreement_json=wire
-            )
-            assert snapshot.snapshot.receipt is not None
-    controller = SettleController(db=db, settlement_coordinator=None)
-    request = ApiCreditsSettleRequest(
-        negotiation_id=identifier, buyer_principal=BUYER.identity
-    )
-    response = await controller._settle_payment(identifier, request, SELLER)
-    final = json.loads(response.body)
+        PaymentApproval(settings, PAYER).approve(
+            raw, settlement_data, timeout=10, interval=0.01
+        )
+    response = await settle()
+    final = response.payload
     assert final["status"] == "ready", final.get("reason")
     credentials = final["tenant_credentials"]
     assert credentials["balance"] == 10 and credentials["secret"]
-    repeated = json.loads(
-        (await controller._settle_payment(identifier, request, SELLER)).body
-    )
+    repeated = (await settle()).payload
     assert repeated == final
     with sqlite3.connect(Path(authority) / "authority.db") as connection:
         grants = connection.execute(

@@ -863,6 +863,42 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
+    async def mark_bare_metal_settlement_refunded(
+        self,
+        *,
+        negotiation_id: str,
+        settlement_ref: str,
+    ) -> dict[str, Any]:
+        """Record a seller refund; terminal, so delivery can no longer begin."""
+
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE bare_metal_settlement_records SET settlement_ref = ?, "
+                        "status = 'refunded', "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ? "
+                        "AND status IN ('accepted', 'settlement_verified', 'refunded')",
+                        (settlement_ref, negotiation_id),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("accepted settlement record is missing")
+                record = self._decode_bare_metal_settlement_record(row)
+                if record["status"] != "refunded" or record["settlement_ref"] != settlement_ref:
+                    raise RuntimeError("refund conflicts with accepted settlement state")
+                return record
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
     async def mark_bare_metal_settlement_verified(
         self,
         *,

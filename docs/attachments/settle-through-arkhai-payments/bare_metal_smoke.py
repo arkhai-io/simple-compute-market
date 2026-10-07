@@ -1,14 +1,13 @@
 """Real-ledger receipt gate, controlled hardware, persisted process restart."""
 
 import asyncio
+from dataclasses import replace
 import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 from arkhai_bare_metal import BareMetalListing, BareMetalMessage, BareMetalTerms
-from arkhai_bare_metal_buyer.arkhai_payments import BareMetalArkhaiPaymentsBuyer
-from arkhai_bare_metal_storefront.arkhai_payments import BareMetalArkhaiPaymentsStage
 from arkhai_bare_metal_storefront.fulfillment_service import (
     BareMetalFulfillmentService,
     BareMetalFulfillmentError,
@@ -16,6 +15,7 @@ from arkhai_bare_metal_storefront.fulfillment_service import (
 from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
 from arkhai_bare_metal_storefront.settlement_service import BareMetalSettlementService
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from market_arkhai_payments import PaymentApproval, PaymentSellerStage
 from market_fulfillment import VersionedEnvelope
 from smoke_common import BUYER, SELLER, PAYER, agreement, config, crash, effect
 
@@ -97,7 +97,7 @@ class Provider:
 async def main(directory, phase):
     settings = config()
     db = SQLiteClient(str(Path(directory) / "storefront.db"))
-    stage = BareMetalArkhaiPaymentsStage(settings)
+    stage = PaymentSellerStage(settings)
     identifier = "bm-smoke-" + Path(directory).name
     if phase == "crash":
         terms = BareMetalTerms(
@@ -109,7 +109,7 @@ async def main(directory, phase):
         )
         accepted = agreement(identifier, terms.model_dump(mode="json"))
         raw = accepted.model_dump_json(exclude_none=True).encode()
-        mandate = stage.mandate_for_agreement(json.loads(raw))
+        settlement_data = stage.settlement_data(json.loads(raw)).to_wire()
         await db.upsert_bare_metal_listing(
             listing_id="listing-smoke",
             status="open",
@@ -147,7 +147,7 @@ async def main(directory, phase):
             agreed_amount=100,
             agreement_bytes=raw,
             accepted_at=accepted.accepted_at,
-            settlement_data=mandate,
+            settlement_data=settlement_data,
             settlement_mechanism="arkhai.payments.v1",
         )
     settlement = BareMetalSettlementService(
@@ -166,11 +166,12 @@ async def main(directory, phase):
     fulfillment = BareMetalFulfillmentService(
         db, Capacity(), Provider(directory, phase)
     )
+    settlement = replace(settlement, begin_fulfillment=fulfillment.begin)
     if phase == "crash":
         pending = await settlement.verify(
             escrow_uid=identifier, request=request, buyer_principal=BUYER.identity
         )
-        assert pending.status == "settlement_pending"
+        assert pending.payload["status"] == "pending"
         try:
             await fulfillment.begin(
                 negotiation_id=identifier, buyer_principal=BUYER.identity
@@ -180,17 +181,17 @@ async def main(directory, phase):
         else:
             raise AssertionError("delivery bypassed receipt gate")
         thread = await db.load_negotiation_thread_row(negotiation_id=identifier)
-        BareMetalArkhaiPaymentsBuyer(settings, PAYER).approve(
-            agreement=json.loads(thread["agreement_bytes"]),
-            settlement_data=thread["settlement_data"],
+        PaymentApproval(settings, PAYER).approve(
+            thread["agreement_bytes"],
+            thread["settlement_data"],
             timeout=10,
             interval=0.01,
         )
+    # Settlement starts fulfillment once the receipt verifies.
     verified = await settlement.verify(
         escrow_uid=identifier, request=request, buyer_principal=BUYER.identity
     )
-    assert verified.escrow_uid != identifier
-    await fulfillment.begin(negotiation_id=identifier, buyer_principal=BUYER.identity)
+    assert verified.payload["escrow_uid"] == identifier
     ready = await fulfillment.status(
         negotiation_id=identifier, buyer_principal=BUYER.identity
     )
@@ -198,8 +199,7 @@ async def main(directory, phase):
     repeated = await settlement.verify(
         escrow_uid=identifier, request=request, buyer_principal=BUYER.identity
     )
-    assert repeated == verified
-    await fulfillment.begin(negotiation_id=identifier, buyer_principal=BUYER.identity)
+    assert repeated.payload["settlement_ref"] == verified.payload["settlement_ref"]
     assert effect(directory, "bare-metal-delivery") == 1
     assert (
         await db.load_bare_metal_receipt(negotiation_id=identifier)

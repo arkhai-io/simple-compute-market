@@ -1,4 +1,9 @@
-"""Receipt-gated VM provisioning and negotiation-scoped retry."""
+"""Receipt-gated VM provisioning, negotiation-scoped retry, and seller refunds.
+
+Settlement, refund, and the final provisioning write for one deal serialize on a
+per-negotiation lock, so a recorded ``refunded`` state is never overwritten and
+delivery never starts after a refund.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -15,10 +21,22 @@ from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentPorts,
     fulfill_domain,
 )
-from market_arkhai_payments import Mandate, SignedReceipt, transaction_id
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_MECHANISM,
+    MandatePolicyError,
+    NothingToReverse,
+    NotPaid,
+    PaymentSellerStage,
+    PaymentSettlementData,
+    PaymentsUnavailable,
+    ReceiptInvalid,
+    ReceiptPending,
+    ReceiptUnavailable,
+    Refunded,
+    SignedReceipt,
+)
 from market_identity import Identity
 
-from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
 from market_storefront.services.fulfillment_resume_runtime import (
     resume_incomplete_fulfillments_once,
 )
@@ -26,14 +44,36 @@ from market_storefront.utils import config
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL = ("ready", "failed", "refunded")
+
+
+class PaymentSettlementError(RuntimeError):
+    """A settlement or refund refusal carrying the HTTP status the route returns."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class PaymentSettleResult:
+    """A settle or refund outcome: its status code and neutral payload fields."""
+
+    status_code: int
+    payload: dict[str, Any] = field(default_factory=dict)
+
 
 class VmPaymentsCoordinator:
-    def __init__(self, *, domain: Any, db: Any, stage: VmArkhaiPaymentsStage) -> None:
+    def __init__(self, *, domain: Any, db: Any, stage: PaymentSellerStage) -> None:
         self.domain = domain
         self.db = db
         self.stage = stage
         self.tasks: dict[str, asyncio.Task] = {}
         self.locks: dict[str, asyncio.Lock] = {}
+
+    def _lock(self, negotiation_id: str) -> asyncio.Lock:
+        return self.locks.setdefault(negotiation_id, asyncio.Lock())
 
     async def stop(self) -> None:
         tasks = list(self.tasks.values())
@@ -41,72 +81,101 @@ class VmPaymentsCoordinator:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def start(
+    def _accepted(
         self, negotiation_id: str, thread: dict[str, Any]
-    ) -> dict[str, Any]:
-        async with self.locks.setdefault(negotiation_id, asyncio.Lock()):
-            raw = thread.get("agreement_bytes")
-            if not isinstance(raw, bytes):
-                raise ValueError("accepted Agreement bytes are unavailable")
-            agreement = json.loads(raw)
+    ) -> tuple[bytes, dict[str, Any], PaymentSettlementData]:
+        raw = thread.get("agreement_bytes")
+        if not isinstance(raw, bytes):
+            raise PaymentSettlementError(409, "accepted Agreement bytes are unavailable")
+        try:
+            agreement, data = self.stage.accepted(raw, thread.get("settlement_data"))
             buyer = Identity.model_validate(thread["buyer_principal"])
             seller = Identity.model_validate(thread["seller_principal"])
             provision = normalize_vm_provision_terms(agreement.get("provision_terms"))
-            if (
-                agreement["negotiation_id"] != negotiation_id
-                or agreement["listing_id"] != thread["our_listing_id"]
-                or agreement["buyer"] != buyer.model_dump(mode="json")
-                or agreement["seller"] != seller.model_dump(mode="json")
-                or str(agreement["amount"]) != str(thread["agreed_price"])
-                or agreement["duration_seconds"] != thread["agreed_duration_seconds"]
-                or not provision.ssh_public_key.strip()
-            ):
-                raise ValueError("accepted Agreement does not match negotiation")
-            record = await self.db.load_vm_payment_record(negotiation_id=negotiation_id)
-            mandate_wire = self.stage.mandate_for_agreement(agreement)
+        except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
+            raise PaymentSettlementError(409, "accepted payment state is invalid") from exc
+        if (
+            agreement["negotiation_id"] != negotiation_id
+            or agreement["listing_id"] != thread["our_listing_id"]
+            or agreement["buyer"] != buyer.model_dump(mode="json")
+            or agreement["seller"] != seller.model_dump(mode="json")
+            or str(agreement["amount"]) != str(thread["agreed_price"])
+            or agreement["duration_seconds"] != thread["agreed_duration_seconds"]
+            or not provision.ssh_public_key.strip()
+        ):
+            raise PaymentSettlementError(409, "accepted Agreement does not match negotiation")
+        return raw, agreement, data
+
+    @staticmethod
+    def _neutral(
+        negotiation_id: str,
+        data: PaymentSettlementData,
+        status: str,
+        *,
+        retryable: bool = False,
+        row: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(row or {})
+        payload.update(
+            negotiation_id=negotiation_id,
+            escrow_uid=negotiation_id,
+            settlement_ref=data.transaction_id,
+            status=status,
+            retryable=retryable,
+        )
+        return payload
+
+    async def start(self, negotiation_id: str, thread: dict[str, Any]) -> PaymentSettleResult:
+        async with self._lock(negotiation_id):
+            raw, agreement, data = self._accepted(negotiation_id, thread)
+            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
+            if existing and existing["negotiation_id"] != negotiation_id:
+                raise PaymentSettlementError(409, "settlement coordinate belongs to another negotiation")
+            if existing and existing["status"] == "refunded":
+                return PaymentSettleResult(
+                    200, self._neutral(negotiation_id, data, "refunded", row=existing)
+                )
             digest = hashlib.sha256(raw).hexdigest()
-            data = thread.get("settlement_data")
-            if not isinstance(data, dict) or data.get("mandate") != mandate_wire:
-                raise ValueError("stored mandate does not match accepted Agreement")
-            mandate = Mandate.model_validate(mandate_wire)
-            transaction = transaction_id(mandate)
+            record = await self.db.load_vm_payment_record(negotiation_id=negotiation_id)
             if record is not None and record["receipt"] is not None:
                 receipt = SignedReceipt.model_validate(record["receipt"])
                 if (
                     record["agreement_sha256"] != digest
-                    or record["transaction_id"] != transaction
-                    or not self.stage.receipt_matches(
-                        receipt, agreement=agreement, mandate=mandate
-                    )
+                    or record["transaction_id"] != data.transaction_id
+                    or not self.stage.receipt_matches(receipt, agreement, data)
                 ):
-                    raise ValueError("stored receipt does not match accepted mandate")
+                    logger.error("stored payment receipt for %s no longer verifies", negotiation_id)
+                    raise PaymentSettlementError(409, "stored payment receipt does not prove this Agreement")
             else:
-                receipt = await self.stage.verify_receipt(
-                    transaction=transaction, agreement=agreement
-                )
-                if receipt is None:
-                    return {
-                        "escrow_uid": negotiation_id,
-                        "negotiation_id": negotiation_id,
-                        "status": "pending",
-                        "retryable": True,
-                    }
+                outcome = await self.stage.check_receipt(agreement, data)
+                if isinstance(outcome, ReceiptPending):
+                    return PaymentSettleResult(
+                        202, self._neutral(negotiation_id, data, "pending", retryable=True)
+                    )
+                if isinstance(outcome, ReceiptUnavailable):
+                    raise PaymentSettlementError(503, "payments service is unavailable")
+                if isinstance(outcome, ReceiptInvalid):
+                    logger.error(
+                        "payment receipt for %s does not verify: %s", negotiation_id, outcome.reason
+                    )
+                    raise PaymentSettlementError(409, "payments receipt does not prove this Agreement")
                 await self.db.verify_vm_payment_record(
                     negotiation_id=negotiation_id,
                     agreement_sha256=digest,
-                    transaction_id=transaction,
-                    receipt=receipt.model_dump(
-                        mode="json", by_alias=True, exclude_none=True
-                    ),
+                    transaction_id=data.transaction_id,
+                    receipt=outcome.receipt.model_dump(mode="json", by_alias=True, exclude_none=True),
                 )
+            try:
+                await self.stage.deposit_if_advertised(agreement, data)
+            except PaymentsUnavailable as exc:
+                raise PaymentSettlementError(503, "payments Agreement deposit is unavailable") from exc
             binding = await self.db.load_thread_binding(negotiation_id=negotiation_id)
             if self.db.domain_registry.resolve(binding.binding) is not self.domain:
-                raise ValueError("accepted domain binding disagrees with provisioning")
-            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
-            if existing and existing["negotiation_id"] != negotiation_id:
-                raise ValueError("settlement coordinate belongs to another negotiation")
-            if existing and existing["status"] in ("ready", "failed", "refunded"):
-                return existing
+                raise PaymentSettlementError(409, "accepted domain binding disagrees with provisioning")
+            if existing and existing["status"] in _TERMINAL:
+                return PaymentSettleResult(
+                    200, self._neutral(negotiation_id, data, existing["status"], row=existing)
+                )
             await self.db.insert_escrow(
                 escrow_uid=negotiation_id,
                 negotiation_id=negotiation_id,
@@ -117,10 +186,76 @@ class VmPaymentsCoordinator:
             )
             task = self.tasks.get(negotiation_id)
             if task is None or task.done():
+                provision = normalize_vm_provision_terms(agreement.get("provision_terms"))
                 self.tasks[negotiation_id] = asyncio.create_task(
                     self._provision(negotiation_id, agreement, binding, provision)
                 )
-            return await self.db.load_escrow(escrow_uid=negotiation_id)
+            row = await self.db.load_escrow(escrow_uid=negotiation_id)
+            return PaymentSettleResult(
+                202, self._neutral(negotiation_id, data, row["status"], row=row)
+            )
+
+    async def refund(self, negotiation_id: str, thread: dict[str, Any]) -> PaymentSettleResult:
+        """Reverse the deal's held payment at the seller operator's request."""
+
+        async with self._lock(negotiation_id):
+            return await self._refund_locked(negotiation_id, thread, require_undelivered=False)
+
+    async def refund_before_delivery(self, negotiation_id: str) -> dict[str, Any]:
+        """Reverse a payment deal that failed before any delivery, for the refund failure action."""
+
+        thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        if not isinstance(thread, dict):
+            return {"action": "refund", "status": "skipped", "reason": "negotiation_unknown"}
+        try:
+            async with self._lock(negotiation_id):
+                result = await self._refund_locked(negotiation_id, thread, require_undelivered=True)
+        except PaymentSettlementError as exc:
+            return {"action": "refund", "status": "failed", "reason": exc.detail}
+        status = result.payload.get("status")
+        return {
+            "action": "refund",
+            "status": "refunded" if status == "refunded" else "skipped",
+            "escrow_kind": ARKHAI_PAYMENTS_MECHANISM,
+            "settlement_ref": result.payload.get("settlement_ref"),
+        }
+
+    async def _refund_locked(
+        self, negotiation_id: str, thread: dict[str, Any], *, require_undelivered: bool
+    ) -> PaymentSettleResult:
+        _, agreement, data = self._accepted(negotiation_id, thread)
+        existing = await self.db.load_escrow(escrow_uid=negotiation_id)
+        if existing and existing["status"] == "refunded":
+            return PaymentSettleResult(200, self._refund_payload(negotiation_id, data))
+        if require_undelivered and existing and existing["status"] == "ready":
+            return PaymentSettleResult(200, self._neutral(negotiation_id, data, "ready"))
+        outcome = await self.stage.reverse(agreement, data)
+        if isinstance(outcome, NotPaid):
+            raise PaymentSettlementError(409, "no verified payment exists to refund")
+        if isinstance(outcome, NothingToReverse):
+            raise PaymentSettlementError(409, "nothing left to reverse")
+        if not isinstance(outcome, Refunded):
+            raise PaymentSettlementError(503, "payments service is unavailable")
+        if existing is None:
+            await self.db.insert_escrow(
+                escrow_uid=negotiation_id,
+                negotiation_id=negotiation_id,
+                chain_name=None,
+                escrow_address=None,
+                is_primary=True,
+                status="refunded",
+            )
+        else:
+            await self.db.update_escrow(escrow_uid=negotiation_id, status="refunded")
+        return PaymentSettleResult(200, self._refund_payload(negotiation_id, data))
+
+    @staticmethod
+    def _refund_payload(negotiation_id: str, data: PaymentSettlementData) -> dict[str, Any]:
+        return {
+            "negotiation_id": negotiation_id,
+            "settlement_ref": data.transaction_id,
+            "status": "refunded",
+        }
 
     async def _provision(
         self, negotiation_id: str, agreement: dict, binding: Any, provision: Any
@@ -164,21 +299,26 @@ class VmPaymentsCoordinator:
                         "duration_seconds": agreement["duration_seconds"],
                         "start_utc": agreement["start_utc"],
                         "listing_id": agreement["listing_id"],
-                        "settlement_mechanism": "arkhai.payments.v1",
+                        "settlement_mechanism": ARKHAI_PAYMENTS_MECHANISM,
                     },
                 ),
             )
             private = dict(result.domain_result or {})
-            await self.db.update_escrow(
-                escrow_uid=negotiation_id,
-                status="ready" if result.state == "fulfilled" else "failed",
-                fulfillment_uid=result.fulfillment_id,
-                connection_details=private.get("connection_details"),
-                tenant_credentials=json.dumps(private["tenant_credentials"])
-                if private.get("tenant_credentials") is not None
-                else None,
-                reason=result.failure_reason,
-            )
+            async with self._lock(negotiation_id):
+                current = await self.db.load_escrow(escrow_uid=negotiation_id)
+                # A refund recorded while provisioning ran is terminal and stays.
+                if current is not None and current["status"] == "refunded":
+                    return
+                await self.db.update_escrow(
+                    escrow_uid=negotiation_id,
+                    status="ready" if result.state == "fulfilled" else "failed",
+                    fulfillment_uid=result.fulfillment_id,
+                    connection_details=private.get("connection_details"),
+                    tenant_credentials=json.dumps(private["tenant_credentials"])
+                    if private.get("tenant_credentials") is not None
+                    else None,
+                    reason=result.failure_reason,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

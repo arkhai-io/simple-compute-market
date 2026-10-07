@@ -219,3 +219,16 @@ def test_registration_has_no_client_factory_or_settlement_lifecycle() -> None:
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
+
+
+def test_attach_agreement_is_a_buyer_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(API_KEY_ENV, "present")
+    config = _config(attach_agreement=True)
+
+    seller = asyncio.run(arkhai_payments_preflight(config, {}, "seller"))
+    assert [blocker.code for blocker in seller.blockers] == [
+        "arkhai_payments.attach_agreement_buyer_only"
+    ]
+    buyer = asyncio.run(arkhai_payments_preflight(config, {}, "buyer"))
+    assert buyer.ready
+    assert not _config().attach_agreement

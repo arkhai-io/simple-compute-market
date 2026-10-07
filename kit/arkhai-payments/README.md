@@ -38,18 +38,21 @@ plus the service duration and the option window. The fixed nonce is
 `arkhai.payments.v1`; repeated derivation for the same inputs gives the same
 transaction ID. Mandate approval expires at `accepted_at + window`.
 
-The buyer constructs the same `MandatePolicy` from its accepted Agreement and
-selected option, calls `check(mandate, agreement_json, policy)`, then approves:
+Domains do not assemble mandates themselves. The seller returns
+`PaymentSellerStage.settlement_data(agreement)`, one `{mandate, transaction_id}`
+shape, and the buyer approves through `PaymentApproval`, which re-derives the
+mandate from the exact Agreement bytes under the buyer's own trusted policy,
+checks the seller's transaction ID and the advertised option, and attaches the
+Agreement only when the buyer's `attach_agreement` setting is on:
 
 ```python
-from market_arkhai_payments import PaymentsClient, check
+from market_arkhai_payments import PaymentApproval
 
-check(mandate, agreement_json, buyer_policy)
-with PaymentsClient(service_url, api_key=workos_user_api_key) as client:
-    receipt = client.approve(
-        mandate,
-        agreement=agreement_json if attach_agreement else None,
-    )
+transaction = PaymentApproval(config, payer_account).approve(
+    agreement_bytes,
+    settlement_data,
+    advertised_option=listing_option,
+)
 ```
 
 Approval retries send the identical mandate and therefore retain the same
@@ -61,13 +64,16 @@ not available outside the service's development authenticator.
 
 `create_arkhai_payments_registration()` provides a typed mechanism registration for
 publication input, public option construction, and buyer-side option filtering.
-It intentionally has no conditional-escrow client, accepted-obligation builder, or
-settlement verifier: payment approval and receipt servicing remain in the domain
-stage that owns the accepted Agreement.
+It has no conditional-escrow client, accepted-obligation builder, or settlement
+verifier: Arkhai payments settles from the accepted Agreement alone. The kit's
+`PaymentSellerStage` and `PaymentApproval` carry the mechanism; each domain
+keeps its HTTP binding, delivery, and recovery.
 
 `ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
-fee policy, dispute authority, API-key environment-variable name, and local
-development-auth switch in trusted role configuration. The API key value is read
+fee policy, dispute authority, API-key environment-variable name, local
+development-auth switch, and the buyer-only `attach_agreement` setting (off by
+default; a seller configuration that sets it fails preflight) in trusted role
+configuration. The API key value is read
 only when a client is created. `payments_client_for_owner(config, owner_account)`
 validates the owner account and uses it for loopback development authentication;
 normal service calls use the configured environment variable:
@@ -83,33 +89,53 @@ with payments_client_for_owner(config, owner_account) as client:
 
 ## Seller servicing
 
-```python
-from market_arkhai_payments import PaymentsClient, verify_receipt
+`PaymentSellerStage` requires the full trusted policy at construction, so an
+enabled but incomplete configuration fails at startup. Each receipt check is
+one read of the transaction; the buyer's settlement retries are the polling
+loop. Domains map the typed outcomes to their responses:
 
-with PaymentsClient(service_url, api_key=workos_user_api_key) as client:
-    snapshot = client.poll(transaction_id(mandate), timeout=60)
-    signed_receipt = snapshot.snapshot.receipt
-    if not verify_receipt(
-        signed_receipt,
-        trusted_service_identity,
-        mandate=mandate,
-        agreement_json=agreement_json,
-    ):
-        raise ValueError("payments receipt does not prove this Agreement")
-    client.ensure_agreement_attached(
-        transaction_id(mandate), agreement_json, option
-    )
-    # Provision only after the verified receipt above.
-    client.reverse(transaction_id(mandate))
+```python
+from market_arkhai_payments import (
+    PaymentSellerStage,
+    ReceiptInvalid,
+    ReceiptPending,
+    ReceiptUnavailable,
+)
+
+stage = PaymentSellerStage(config)
+agreement, data = stage.accepted(agreement_bytes, stored_settlement_data)
+outcome = await stage.check_receipt(agreement, data)
+if isinstance(outcome, ReceiptPending):
+    ...  # retryable: no payment yet
+elif isinstance(outcome, ReceiptUnavailable):
+    ...  # retryable: service unreachable or outside its contract
+elif isinstance(outcome, ReceiptInvalid):
+    ...  # refuse without recording state: the receipt does not prove the Agreement
+else:
+    await stage.deposit_if_advertised(agreement, data)  # before any delivery
+    ...  # deliver
 ```
 
-`get_transaction` reads the signed current snapshot. `poll` retries only the
-not-yet-created transaction response; it stores no cursor or state. The
-receipt verifier checks the pinned Ed25519 service identity, the
+The verifier checks the pinned Ed25519 service identity, the
 `arkhai.payments.receipt.v1` framing via `market_identity`, and the mandate's
-transaction ID and Agreement deal hash. `reverse` uses a deterministic
-transaction-scoped idempotency key, so an exact retry cannot create a second
-reverse event.
+transaction ID and Agreement deal hash. `get_transaction` reads the signed
+current snapshot; sellers trust only the independently signed receipt inside
+it, not the snapshot's own proof.
+
+The normal deal flow never refunds. `stage.reverse(agreement, data)` serves
+seller-initiated refunds only: it re-checks the receipt first and reports
+`Refunded`, `NotPaid`, `NothingToReverse`, or `RefundUnavailable`. `reverse`
+uses a deterministic transaction-scoped idempotency key, so an exact retry
+cannot create a second reverse event.
+
+## Testing with the kit
+
+`market_arkhai_payments.fixtures` provides `build_signed_receipt`, which signs a
+receipt for a given mandate with an injected signer using the verifier's own
+framing, and `FakePaymentsClient`, an in-memory stand-in for `PaymentsClient`
+that tests inject through a stage's or approval's `client_for_owner`. The
+kit's unit suite proves the receipt fixture reproduces the published vector
+byte for byte, which is why tests never sign receipts any other way.
 
 ## Checks
 
@@ -120,15 +146,18 @@ make test
 make build
 ```
 
-`make test` checks static typing, unit tests for settlement configuration and
-registration, and the upstream mandate, receipt, attachment, and approval vectors.
+`make test` checks static typing; unit tests for mandate derivation, receipt
+verification, client response handling, the seller stage, buyer approval,
+settlement configuration, and the receipt fixture; and the upstream mandate,
+receipt, attachment, and approval vectors.
 The vector runner is also available as `python scripts/check_vectors.py`.
 
 ## Local first use
 
-The committed `examples/local_e2e.py` runs approval, buyer and seller polling,
-seller-side Agreement deposit, receipt verification, and reverse against the
-service's local development authenticator. Start the payments repo's checkout-
+The committed `examples/local_e2e.py` exercises the `PaymentsClient` primitives
+(approval, buyer and seller polling, Agreement deposit, receipt verification,
+and reverse) against the service's local development authenticator, using a
+minimal deal object rather than a market Agreement. Start the payments repo's checkout-
 owned ledger with `FORMANCE_PORT=3168 bun run ledger:local`, then start its HTTP
 service from that repository in another shell with `bun run service` and
 `NODE_ENV=development`, `FORMANCE_PORT=3168`, `PAYMENTS_PORT=3180`,
