@@ -149,10 +149,74 @@ def resume_command(session: str, prompt: str, output: Path, model: str | None,
             *_options(output, model, effort), prompt]
 
 
+class Progress:
+    """Condense Codex's plain session output into a readable progress stream.
+
+    The transcript keeps everything; the terminal gets the session header, each
+    command as one line, failed commands, errors, and the agent's messages, with
+    long messages — the final review among them — cut short. Command output, which
+    is mostly the files the reviewer reads, is never shown.
+    """
+
+    HEADER_KEYS = ("model:", "reasoning effort:", "sandbox:", "session id:")
+    MESSAGE_LINES = 4
+
+    def __init__(self) -> None:
+        self._block = "header"
+        self._message: list[str] = []
+
+    def feed(self, line: str) -> list[str]:
+        line = line.rstrip("\n")
+        if line.startswith("ERROR:"):
+            return [line]
+        label = line.strip()
+        if label in ("codex", "exec", "user", "thinking", "tokens used") and line == label:
+            shown = self._flush()
+            self._block = label
+            return shown
+        if line.startswith(" succeeded in ") or line.startswith(" exited "):
+            self._block = "output"
+            return [f"  ✗{line}"] if line.startswith(" exited ") else []
+        if self._block == "header":
+            return [line] if line.startswith(self.HEADER_KEYS) else []
+        if self._block == "exec" and line.startswith("/bin/bash -lc "):
+            command = line[len("/bin/bash -lc "):].rsplit(" in /", 1)[0].strip("'\"")
+            return [f"$ {command[:150]}"]
+        if self._block == "codex":
+            self._message.append(line)
+        elif self._block == "tokens used" and label:
+            self._block = "done"
+            return [f"tokens used: {label}"]
+        return []
+
+    def close(self) -> list[str]:
+        return self._flush()
+
+    def _flush(self) -> list[str]:
+        lines = [line for line in self._message if line.strip()]
+        self._message = []
+        if not lines:
+            return []
+        shown = [f"» {line}" for line in lines[:self.MESSAGE_LINES]]
+        if len(lines) > self.MESSAGE_LINES:
+            shown.append(f"» … ({len(lines) - self.MESSAGE_LINES} more lines in the transcript)")
+        return shown
+
+
 def _run_codex(command: Sequence[str], log: Path) -> int:
+    progress = Progress()
     with log.open("w", encoding="utf-8") as stream:
-        return subprocess.run(list(command), cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
-                              stderr=subprocess.STDOUT, check=False).returncode
+        process = subprocess.Popen(list(command), cwd=ROOT, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, encoding="utf-8", errors="replace")
+        assert process.stdout is not None
+        for line in process.stdout:
+            stream.write(line)
+            for shown in progress.feed(line):
+                print(shown, flush=True)
+        for shown in progress.close():
+            print(shown, flush=True)
+        return process.wait()
 
 
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,

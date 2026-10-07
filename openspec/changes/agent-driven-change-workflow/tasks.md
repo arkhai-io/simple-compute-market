@@ -123,7 +123,10 @@ to repair by hand.
       held from the first pass, review findings are always logged under their
       own review, revised dispositions name what they revise, the count of
       ledger entries written is reported, and a re-review is recommended when
-      dispositions changed a central decision.
+      dispositions changed a central decision. `make review` also streams a
+      condensed progress view to the terminal — session header, each command,
+      failures, errors, and the agent's messages cut to four lines — while the
+      transcript keeps everything.
 - [ ] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.
