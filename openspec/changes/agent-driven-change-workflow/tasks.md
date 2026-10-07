@@ -161,7 +161,7 @@ to repair by hand.
 
 ## 6. Planning
 
-- [ ] 6.1 Write the `change-plan` skill on top of `openspec-update-change`: tasks
+- [x] 6.1 Write the `change-plan` skill on top of `openspec-update-change`: tasks
       from the design that passed review, completed tasks preserved and amended
       rather than replaced, the files each accepted decision touches, the
       validation each section owes, each decision's permanent destination, and the
@@ -169,6 +169,13 @@ to repair by hand.
       implemented in one fresh session. It moves the index row to `in planning`
       when planning starts and to `ready for implementation` when the owner
       accepts the plan.
+      Written at `.agents/skills/change-plan/`. Built to continue the design
+      session, at the owner's preference, for its context; to keep the plan
+      standing on the record, it first writes into `design.md` anything a task
+      relies on that only the discussion holds, and stops for design on any
+      question the design did not answer. It settles the provisional
+      documentation destinations the design delegated to planning, and logs
+      plan redirections to the ledger as `"review": "plan"`.
 - [ ] 6.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its reviewed
       design.
 - [ ] 6.3 Pilot: plan `add-full-stack-ci-job` from nothing.

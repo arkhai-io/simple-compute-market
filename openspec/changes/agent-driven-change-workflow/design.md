@@ -291,6 +291,11 @@ entry share one shape:
 | `owner_disposition` | what the owner decided | what the owner decided instead, and why |
 | `summary` | one line | one line |
 
+A plan redirection — the owner changing a planning recommendation, such as a
+section's split, order, or a documentation destination — uses the design
+redirection's shape with `review` set to `plan` and the section as `finding`
+(`§3`).
+
 A design discussion logs only decisions where the owner changed or reversed the
 agent's recommendation; accepted recommendations are not interventions. The section lets the owner see
 whether findings still cluster in particular slices, which would mean those slices
