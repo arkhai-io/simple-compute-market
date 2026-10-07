@@ -5,7 +5,16 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
-- **THEN** the thread persists the canonical buyer and seller principals, exact listing/site/domain binding, agreement payloads, and settlement plan atomically
+- **THEN** the thread records the canonical buyer and seller principals and the exact listing/site/domain binding, and it is recorded as successful only after its agreement payloads and settlement plan are recorded
+- **AND** no capacity is reserved or held until settlement starts fulfillment
+
+#### Scenario: Acceptance is interrupted
+- **WHEN** the storefront stops after an acceptance began but before the thread was recorded as successful
+- **THEN** the thread is never settled, and it cannot be countered, accepted, or force-accepted again; the negotiation watchdog abandons it
+
+#### Scenario: Settlement verifies the accepted plan
+- **WHEN** a buyer settles an accepted bare-metal agreement
+- **THEN** the storefront verifies and registers the settlement plan committed at acceptance, which the buyer funded, never a plan rebuilt from current configuration
 
 #### Scenario: Accepted bare-metal agreement is fulfilled
 - **WHEN** settlement verifies the escrow
@@ -32,3 +41,93 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Bare-metal lease is torn down
 - **WHEN** the buyer requests teardown for the completed fulfillment
 - **THEN** the storefront terminates the lease at the recorded site, the site's lease lifecycle converges teardown through the recorded fulfillment and releases the capacity reservation exactly once after authoritative teardown success, and the storefront records the release only on the site's capacity-released callback
+
+### Requirement: The seller's inventory guard checks a listing against its own source
+
+Before every seller decision in a negotiation round, and before a buyer's or an
+administrator's acceptance, the storefront MUST recheck every published field of the
+listing that is sourced from its declaration or pool against that source: the listing's
+own site and pool or Physical Resource, never a resource elsewhere. A categorical field
+MUST equal its source and a quantity MUST fit the declared capacity. Fields whose
+authority is the storefront are not rechecked. A buyer's exit MUST NOT be rechecked.
+
+The storefront MUST additionally check that the listing's published quantity is
+available only for a capacity-backed listing. For an unbacked listing it MUST NOT
+consult availability or contact a site authority.
+
+A declared-match failure MUST be reported with a reason distinct from an availability
+failure, so a buyer and an operator can tell a shape the seller no longer declares
+from capacity that is temporarily taken. A source the storefront cannot confirm MUST be
+refused as retryable, distinct from both.
+
+#### Scenario: An unbacked listing matches its declaration
+
+- **WHEN** a buyer negotiates against an unbacked listing whose published fields match its enabled source declaration
+- **THEN** the declared match passes without any availability read or site call
+
+#### Scenario: A declaration no longer supports its listing
+
+- **WHEN** a buyer negotiates against a listing whose source declaration has shrunk below, or been disabled beneath, its published shape
+- **THEN** seller policy rejects with a declared-match reason rather than an availability reason
+
+#### Scenario: Matching capacity exists only elsewhere
+
+- **WHEN** a listing's own source no longer supports it but another pool or site holds matching available capacity
+- **THEN** seller policy rejects the listing
+
+#### Scenario: A backed listing matches but capacity is taken
+
+- **WHEN** a capacity-backed listing matches its declaration but its published quantity is not available
+- **THEN** seller policy rejects with the availability reason
+
+#### Scenario: A fungible listing matches one member
+
+- **WHEN** a buyer negotiates against a listing derived from a fungible pool whose enabled members declare different counts
+- **THEN** the declared match passes only if some single enabled member has equal categorical attributes and declares at least the published quantity
+
+#### Scenario: A dry-run evaluation applies the same checks
+
+- **WHEN** a seller evaluates a proposal against a listing without opening a negotiation
+- **THEN** the evaluation applies the same declared match and, for a capacity-backed listing only, the same availability check as a negotiation round
+
+#### Scenario: An acceptance follows a change at the source
+
+- **WHEN** a buyer accepts a seller's counter, or an administrator force-accepts, after the listing's source stopped supporting it or its capacity was taken
+- **THEN** the acceptance is refused with the declared-match or availability reason and nothing is recorded
+
+#### Scenario: The source cannot be confirmed
+
+- **WHEN** the listing's site cannot be reached, does not verify, or has not supplied the projection the storefront reads
+- **THEN** the opening, round, or acceptance is refused as retryable and nothing is recorded
+
+#### Scenario: A buyer exits while the source cannot be confirmed
+
+- **WHEN** a buyer exits a negotiation whose listing's site cannot be reached
+- **THEN** the exit is recorded without a site call
+
+### Requirement: Bare-metal opening rechecks its listing against its source
+
+Whenever a bare-metal storefront rechecks a listing against its source, it MUST
+re-derive the listing's shape and region from its own site's live resource-pool
+projection, at its bound pool and Physical Resource. It MUST refuse with a declared-match
+reason when any of these hold:
+
+- the shape digest differs from the binding's;
+- the region differs from the published region;
+- the Physical Resource is absent or disabled.
+
+It MUST refuse with the availability reason when the site's capacity snapshot shows the
+Physical Resource taken, and as retryable when the site cannot be reached or does not
+verify, or no site authority is configured.
+
+#### Scenario: A declaration shrinks beneath its listing
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource now
+  declares fewer GPUs than it published
+- **THEN** the opening is refused with a declared-match reason
+
+#### Scenario: The Physical Resource is taken
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource is
+  reserved by another deal
+- **THEN** the opening is refused with the availability reason

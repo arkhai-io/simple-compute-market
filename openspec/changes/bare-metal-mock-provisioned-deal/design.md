@@ -2114,19 +2114,27 @@ Decisions:
    - `NegotiationDomainHooks` gains an optional async `check_listing_source`, returning a
      verdict whose outcome is one of matches, declared mismatch, unavailable, or
      unverifiable, with a reason and the differing fields for the log. The verdict
-     type lives in `kit/policy`, below the runtime, so the guard that reads it needs no
-     runtime import.
-   - The runtime calls it before every seller round, opening and counter (so the preview
-     reports it), and before the first write of a buyer's accept and of administrative
-     acceptance. It is never called on exit, so a buyer can always leave.
+     type, and one pure classifier mapping a verdict to nothing, a refusal with its
+     reason, or a retryable refusal, live in `kit/policy`, below the runtime, so the
+     guard that uses them needs no runtime import.
+   - The runtime obtains the verdict before every seller round, opening and counter (so
+     the preview reports it), and before the first write of a buyer's accept and of
+     administrative acceptance. It is never obtained on exit, so a buyer can always
+     leave.
+   - The runtime enforces it, through the classifier, on every one of those paths: after
+     a seller round whose decision is neither reject nor exit (a refusal becomes a
+     reject with the classifier's reason; a retryable refusal raises before any write),
+     and before any write of an acceptance. The source check is therefore a runtime
+     invariant whatever a domain's chain contains.
    - `has_matching_inventory_guard` migrates from VM's negotiation package to
-     `kit/policy`, under the same name, so its chain position, the reason precedence of
-     the guards before it, `accept_unpriced_selection`'s placement after it, and every
-     configuration naming it keep working. It becomes domain-neutral: it reads the
-     runtime's verdict, drops VM's `gpu_model` condition, rejects a declared mismatch as
-     `no_matching_declaration` and an unavailable listing as `no_matching_inventory`, and
-     refuses when it is in a chain and no verdict was supplied. On the paths no chain
-     runs, the runtime refuses through the same kit function, so the two cannot disagree.
+     `kit/policy`, under the same name, and uses the same classifier at its chain
+     position, so a malformed request is still refused for its own reason by the guards
+     ahead of it (`round_zero_opening_guard`, `buyer_counter_guard`), the reasons stay
+     `no_matching_declaration` and `no_matching_inventory`,
+     `accept_unpriced_selection` still runs after it, and every configuration naming it
+     keeps working. It drops VM's `gpu_model` condition, leaves a retryable verdict to
+     the runtime (a chain can only reject), and reads the verdict from the round's
+     policy context, where each domain's round hook places what the runtime passed it.
    - VM contributes its existing `check_listing_source` (its cached projections and live
      capacity snapshot) and drops the per-round closure that fed the guard. Bare metal
      contributes its existing recheck, which also reports unavailable when its Physical
@@ -2140,33 +2148,51 @@ Decisions:
      `validate_continuation`, each of which also runs on exit (a site outage would stop a
      buyer leaving) and, for openings, runs before term decoding and the pause check;
      deleting the guard outright, which would break its chain-order dependents and every
-     configuration naming it.
+     configuration naming it; the guard as the only enforcement in rounds, which a chain
+     missing it would silently disable; enforcing before the chain, which would answer a
+     malformed request on a stale listing with a source refusal, and on an unreachable
+     site with a 503 no retry can cure.
    - Each domain keeps reading the source its own publication reads. Bare metal reading
      cached projections, as VM does, belongs with unifying publication and is recorded as
      an open gap (closeout task 2.6).
 3. **One retryable refusal.** The kit runtime gains `NegotiationUnavailableError`, not a
    `ValueError` (VM's route answers any `ValueError` with 404), included in the
    refusals an opening preview reports. An unverifiable verdict and an absent site
-   authority raise it. Every storefront route that calls `start` or
-   `continue_negotiation` maps it to 503, whether or not its domain raises it yet.
+   authority raise it. Acceptance now rechecks, so every route that starts, continues,
+   or force-accepts a negotiation maps both source refusals:
+   `OfferUnfulfillableError` to 409 and `NegotiationUnavailableError` to 503. That is
+   each storefront's `negotiate/new` and `negotiate/{id}` routes (VM's continue route
+   answers any exception that is not a `ValueError` with 500 today) and the kit's
+   force-accept route service, which today translates only `NegotiationStateError`.
    Evaluate-negotiate keeps answering 200 with `refused: true` and the refusal named in
    `decision_reason`; no retryability field is added, since nothing reads one.
-4. **One process-local trading pause, owned by kit.** The durable pause was carried from
-   `market-platform-bare-metal-10-storefront-composition`, whose design stated it without
-   a reason; the permanent requirement ("Storefront is globally paused") already
-   describes a process-scoped pause. A pause is used in end-to-end runs and by an operator
-   actively correcting an issue, who would notice and handle a restart. So:
+4. **One process-local trading pause, owned by kit: a deliberate reversal.** The
+   bare-metal storefront's durable pause, and its scenario "Storefront is paused and
+   restarted", were deliberately transferred to this change when
+   `market-platform-bare-metal-10-storefront-composition` was archived; that design
+   stored the pause in the database "so it survives process restart" and gave no use
+   for that. The maintainer reverses it: a trading pause is used in end-to-end runs and
+   by an operator actively correcting an issue, who would notice and handle a restart.
+   VM's and API credits' trading pauses have always been process-local, and the
+   permanent requirement ("Storefront is globally paused") refuses negotiations until an
+   operator "resumes the process". The design review's objection, that a restart
+   silently undoes an authenticated operator's pause, is recorded as an accepted risk.
+   So:
    - `kit/storefront` owns one process-local trading pause, beside and separate from the
      loop controller's lifecycle pause, held by each storefront's composition and read by
-     the runtime's synchronous `storefront_is_paused` hook and by system status; each
-     storefront's existing pause and resume routes set it, with unchanged paths and
-     responses.
+     the runtime's synchronous `storefront_is_paused` hook and by system status, and set
+     through one framework-free route service each storefront binds at
+     `POST /api/v1/admin/pause` and `/resume`, with unchanged paths and responses. API
+     credits reads a pause flag today that nothing sets, since it binds no pause route;
+     it gains the two routes, which the canonical client's `admin_pause` and
+     `admin_resume` already call.
    - VM's and API credits' `_GLOBALLY_PAUSED` flags and bare metal's database pause are
      removed; a bare-metal migration drops `bare_metal_operator_state`.
    - The test-compatibility delta's "Storefront is paused and restarted" scenario is
      dropped and task 3.6 withdrawn.
-   - Rejected: making the runtime's pause hook async to read a durable flag, which only
-     the dropped requirement needed.
+   - Rejected: making the runtime's pause hook async to read a durable flag, and a kit
+     pause persisted through a repository port, both of which keep the reversed
+     requirement.
 5. **Legacy open threads are abandoned.** A bare-metal migration marks every
    non-terminal thread `abandoned`, the state the negotiation watchdog gives stale open
    threads; terminal threads are untouched. Continue was never served on them, and
@@ -2195,10 +2221,22 @@ Decisions:
    `_record_seller_decision` splits its message write from its terminal write. A crash
    mid-acceptance leaves a non-terminal thread, which the negotiation watchdog abandons,
    and settlement reads only successful threads, so it never sees a partial agreement.
-   On VM and API credits, a hold placed before such a crash lives out its TTL. The
-   lifecycle scenario's "atomically" is replaced by this, since the runtime does not
-   provide strict atomicity. An orphaned thread blocks nothing: the only uniqueness on
-   threads is `(negotiation_id, round)`.
+   - Such a thread must also never be resumed, or a crash after the accepted message
+     would leave a transcript that says accepted open to another round. The runtime
+     therefore refuses to counter, accept, or force-accept a non-terminal thread whose
+     transcript holds an acceptance or whose agreed terms or plan are recorded
+     (`agreed_at`, `settlement_plan`); a buyer may still exit it. With that rule the
+     order of the acceptance writes does not matter for safety, and no acceptance
+     effect is ever retried, so none needs to be idempotent.
+   - Rejected (design review): writing the accepted message after the agreement and
+     plan. A crash between them leaves a thread with a recorded, immutable plan and no
+     acceptance in its transcript, which another round could reopen, and whose later
+     acceptance at another amount `commit_settlement_plan` would refuse.
+   - On VM and API credits, a hold placed before such a crash lives out its TTL. An
+     orphaned thread blocks nothing: the only uniqueness on threads is
+     `(negotiation_id, round)`.
+   - The lifecycle scenario's "atomically" is replaced by these rules, since the runtime
+     does not provide strict atomicity.
    - Rejected: a transactional repository contract across all three storefronts, too
      large for this section; amending the scenario alone, which would leave a successful
      thread with no agreement for settlement to refuse forever.
@@ -2224,9 +2262,31 @@ Decisions:
 13. **Section 6 splits in two**, each keeping both lanes green:
     - **6A, kit and rebinding:** decisions 2, 3, 4, 8, and 12 in the kit, with VM and API
       credits rebound and VM's guard migrated; its gate is the kit, VM, and API-credit
-      suites and the VM lane.
+      suites and both lanes.
     - **6B, bare metal on the runtime:** decisions 1, 5, 6, 7, 9, 10, and 11; its gate
-      is the bare-metal suite and the bare-metal lane's publication scenario.
+      is the bare-metal suites and both lanes, the bare-metal lane's publication scenario
+      unchanged.
+
+Design review of this section (2026-10-07), with the maintainer's dispositions:
+
+| Review point | Disposition |
+|---|---|
+| Keep the durable pause | Declined; decision 4 records the reversal and the objection as an accepted risk |
+| A crash after the accepted message leaves a resumable thread whose transcript says accepted; move the message after the agreement | Gap accepted; the resumption rule in decision 8 closes it, and the proposed reordering is rejected there |
+| Make the source check a runtime invariant, enforced before the policy chain | Invariant accepted; enforced after the seller's decision instead (decision 2), since the guards ahead of the inventory guard must still refuse malformed requests first |
+| Force-accept can now raise a source refusal the kit route service does not map | Accepted and widened to every negotiation route (decision 3) |
+| Section 6 tasks still the old plan; deltas not yet matching | Planned as 6A and 6B; the `storefront-publication` and `market-composition` deltas are written with the plan |
+| The proposal still describes lease registration | Corrected with the plan |
+
+Found while planning:
+
+- `kit/policy`'s own environment cannot be built here (its development group needs the
+  PyTorch index); its runtime dependencies are light, so its new tests run in the
+  negotiation runtime's environment, which installs it from its wheel, and are disclosed
+  as such.
+- The domain conformance suite the old 6.4 named already runs under the bare-metal
+  contract (`domains/bare_metal/tests/test_domain_runtime.py`); it covers contract
+  capabilities, not negotiation, so nothing is added there.
 
 What this changes beyond Section 6:
 

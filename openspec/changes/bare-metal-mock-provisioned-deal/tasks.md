@@ -3402,36 +3402,272 @@ re-verifies them by grep before each move.
 
 ## 6. Bare metal on the kit negotiation runtime
 
-Decision: "Bare metal negotiates through the kit runtime" (migrated
-`bare-metal-and-credits-domain-stacks` 4a.1, 4a.2, runtime half of 4a.3). Reviewable
-alone: the bare-metal storefront's negotiation surface.
+Decisions: "Bare metal negotiates through the kit runtime", refined by "Section 6 design:
+bare metal on the negotiation runtime (2026-10-07)" (decisions 1–13 below are that
+section's). Replanned 2026-10-07 after the design and its review. 6A builds in kit what
+the compute storefronts share and rebinds VM and API credits to it; 6B then moves bare
+metal onto it. Each keeps both lanes green.
 
-- [ ] 6.1 Re-verify (former 4a.1) that `negotiation_service.py`, `negotiation.py`, the
-      negotiate routes in `api.py`, and thread persistence in `sqlite_client.py` are
-      domain-local and no bare-metal module imports `market_negotiation_runtime`.
-- [ ] 6.2 Add `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/negotiation_runtime.py`
-      implementing `NegotiationDomainHooks` (former 4a.2): `validate_opening` decoding
-      the closed `bare_metal.v1` demand and calling `opening_guard.py`'s domain function;
-      physical selection and exact settlement-option validation as `evaluate_round`
-      inputs; `agreement_terms`; `build_artifacts` producing the accepted obligation the
-      settlement runtime consumes; `persist_artifacts` saving `BareMetalTerms` and the
-      settlement plan; `place_hold` as today, idempotent per negotiation. The seller
-      policy in `negotiation.py` stays as the domain's policy, now evaluated by the
-      runtime for every round.
-- [ ] 6.3 Serve the existing negotiate and listing-negotiation routes in `api.py` over the
-      runtime, compose it in `runtime.py`, and bind the Section 5 storefront-kit route
-      services (events, evaluate-negotiate, force-accept). Tombstone
-      `negotiation_service.py`; remove the hook class from `negotiation.py` and thread
-      persistence from `sqlite_client.py`, with a migration in `migrations.py` if the
-      runtime's tables differ.
-- [ ] 6.4 Tests (with former 4a.6's focused cases): rewrite `test_negotiation.py` and
-      `test_http_negotiation.py` for multi-round negotiation; force-accept recording
-      `BareMetalTerms` and the hold; evaluate-negotiate refusing what `negotiate/new`
-      refuses; opening refusal for each forbidden demand field; terms-mismatch refusal;
-      the conformance matrix `multi-domain-storefront-composition` added, run under the
-      bare-metal contract.
-- [ ] 6.5 **Gate.** The bare-metal storefront suite passes; the bare-metal lane's
-      publication scenario passes unchanged.
+The original tasks, kept for their history:
+
+- [x] 6.1 **Superseded.** The re-verification was done in the 2026-10-07 audit
+      (`negotiation_service.py`, `negotiation.py`, the negotiate routes, and
+      `persist_bare_metal_opening` are domain-local; nothing imports the runtime).
+- [x] 6.2 **Superseded** by 6B.2 and 6B.3: bare metal places no hold (decision 1), and
+      the listing recheck is the runtime's (decision 2), not `validate_opening`'s.
+- [x] 6.3 **Superseded** by 6B.4 and 6B.5.
+- [x] 6.4 **Superseded** by 6B.6. Its conformance-matrix item needs nothing: the domain
+      conformance suite already runs under the bare-metal contract and does not cover
+      negotiation.
+- [x] 6.5 **Superseded** by 6A.8 and 6B.8.
+
+### 6A. Shared negotiation behaviour, with VM and API credits rebound
+
+Decisions 2, 3, 4, 8, and 12. Reviewable alone: the policy, negotiation-runtime, and
+storefront kits, and the VM and API-credit storefronts; bare metal changes only its pins.
+
+- [ ] 6A.1 Policy kit (`kit/policy`, 0.2.0 → 0.3.0):
+      - a new `src/market_policy/listing_source.py`: `ListingSourceVerdict` (frozen; an
+        outcome of `matches`, `declared_mismatch`, `unavailable`, or `unverifiable`, a
+        reason, and the differing fields for the log); `ListingSourceRefusal` (a reason
+        and whether it is retryable); and `classify_listing_source`, the one pure
+        classifier: no refusal for a match, `no_matching_declaration` for a declared
+        mismatch, `no_matching_inventory` for an unavailable listing, and a retryable
+        `listing_source_unverifiable` refusal for an unverifiable one;
+      - `has_matching_inventory_guard`, registered there under its existing name: it
+        classifies `context.listing_source`, rejects with the refusal's reason, passes a
+        retryable refusal to the runtime, rejects with `no_matching_declaration` when no
+        verdict was supplied, and has no `gpu_model` condition;
+      - `negotiation_middleware.py`: `NegotiationContext` gains `listing_source`
+        (default `None`); `seller_round.py`: `SellerRoundHook` takes a keyword
+        `listing_source`; `__init__.py` imports the new module, so importing the policy
+        kit registers the guard, and exports its names;
+      - tests: `tests/unit/test_listing_source.py`, the classifier for each outcome and
+        the guard for each outcome, for a missing verdict, and for a retryable one. This
+        environment cannot build the policy kit's own environment (its development group
+        needs the PyTorch index), so the file runs under the negotiation runtime's
+        environment, which installs the policy kit from its wheel; disclosed in the
+        completion note.
+- [ ] 6A.2 Negotiation runtime (`kit/negotiation-runtime`, 0.3.0 → 0.4.0), in
+      `src/market_negotiation_runtime/runtime.py` and `__init__.py`:
+      - `NegotiationUnavailableError(reason, listing_id=None)`, not a `ValueError`,
+        added to the refusals an opening preview reports, and exported;
+      - `NegotiationDomainHooks.check_listing_source`, optional and async, taking the
+        repository and the `ResolvedNegotiation` and returning a `ListingSourceVerdict`;
+        `RoundRequest` gains `listing_source`, the verdict for that round;
+      - the verdict is obtained after the pause and liveness checks of an opening (so the
+        preview reports it), before a counter round's evaluation, and after
+        `_resume_thread` in a buyer's accept and in `accept_administratively`, before any
+        write; never on exit. It is enforced through `classify_listing_source`: after a
+        seller round whose decision is neither reject nor exit, a refusal replaces the
+        decision with a reject carrying its reason (an opening then raises
+        `OfferUnfulfillableError`, as for any rejected opening; a counter records it), and
+        a retryable refusal raises `NegotiationUnavailableError` before any write; on
+        both acceptances, a refusal raises `OfferUnfulfillableError` and a retryable one
+        `NegotiationUnavailableError`, before any write;
+      - success last (decision 8): `_record_seller_decision` writes the seller's message
+        without the terminal state; on every acceptance path (`start`, a counter round's
+        acceptance, a buyer's accept, `accept_administratively`) the terminal `success`
+        is written after `_commit_acceptance`; exit and reject keep writing their terminal
+        state with their message;
+      - the resumption rule: a counter, a buyer's accept, and `accept_administratively`
+        refuse with `NegotiationStateError` a non-terminal thread whose transcript holds
+        an `accept_offer`, or whose `agreed_at` or `settlement_plan` is recorded; a
+        buyer's exit is still served;
+      - tests:
+        - `tests/unit/test_runtime.py`: on each acceptance path the terminal write follows
+          the agreed terms, the hold, and the artifacts, observed through the recording
+          repository's write order; each of the three markers makes a counter, an accept,
+          and a force-accept refuse, and an exit succeed;
+        - a new `tests/unit/test_listing_source.py`: for each path and each outcome, the
+          refusal and its status type, and no write before a refusal; exit never asks for
+          a verdict; a domain whose chain lacks the guard is still refused; a composition
+          with no `check_listing_source` behaves as today;
+        - `tests/unit/test_opening_preview.py`: a declared mismatch and an unverifiable
+          source are reported as refusals, writing nothing;
+        - `tests/unit/test_administrative_acceptance.py`: the recheck and success last.
+- [ ] 6A.3 Storefront kit (`kit/storefront`, 0.2.0 → 0.3.0):
+      - a new `src/market_storefront_kit/trading_pause.py`: `TradingPause`, one
+        process-local flag a storefront's composition holds beside its loop controller,
+        separate from the lifecycle pause; and `TradingPauseRouteService`, whose `pause`
+        and `resume` set it and answer `AdminPauseResponse`, the same for every storefront;
+      - `deal_control_routes.py`: `StageEventRouteService.signed_resource(query)` builds
+        the resource the canonical client signs (`limit`, `since_id`, and `stream`
+        defaulted, then the filters, sorted and percent-encoded) and refuses an unknown or
+        repeated parameter, or a stream request, with a `DealControlRouteError` 400;
+        `NegotiationControlRouteService.force_accept` maps `OfferUnfulfillableError` to
+        409 and `NegotiationUnavailableError` to 503;
+      - `__init__.py` exports;
+      - tests: a new `tests/unit/test_trading_pause.py`; `tests/unit/test_deal_control_routes.py`
+        for the signed resource, its refusals, and force-accept's two new refusals.
+- [ ] 6A.4 VM (`domains/vms/negotiation` 0.3.0 → 0.4.0; `domains/vms/storefront` 0.14.1 →
+      0.15.0):
+      - negotiation: `policies.py` loses `has_matching_inventory_guard` and its export;
+        `storefront_round.py` loses `_default_seller_policy_inputs` and the hook's
+        `source_check`, takes the round's `listing_source`, and sets it on the policy
+        context; `_DEFAULT_GUARDS` keeps the guard's name, now registered by the policy kit;
+      - storefront:
+        - `services/listing_source_check.py` returns a `ListingSourceVerdict`; an unloaded
+          projection is `unverifiable`;
+        - `negotiation_runtime.py` composes `check_listing_source`, builds the seller
+          round hook once rather than per round, passes it the round's verdict, and its
+          pause hook reads the process's `TradingPause`;
+        - `server.py` loses `_GLOBALLY_PAUSED`; `lifecycle.py` holds the process's
+          `TradingPause` beside `_CONTROLLER`;
+        - `controllers/admin_controller.py` serves pause and resume through
+          `TradingPauseRouteService`; `controllers/system_controller.py` reports the pause
+          from it; `middleware/admin_identity.py`'s `_system_events_resource` is replaced
+          by the kit's `signed_resource`;
+        - `controllers/negotiate_controller.py` maps `OfferUnfulfillableError` to 409 and
+          `NegotiationUnavailableError` to 503 on `negotiate/new` and `negotiate/{id}`;
+      - `docs/configuration.md`: the guard's row and the seller-guard paragraph say the
+        recheck applies to every listing derived from a declaration, also runs at a
+        buyer's and an administrator's acceptance, and refuses a source it cannot confirm
+        as retryable;
+      - tests (storefront):
+        - `tests/unit/test_listing_source_check.py`: each verdict, and an unloaded
+          projection as unverifiable;
+        - `tests/unit/test_sync_negotiation_seller_round_hook.py`: the verdict reaches the
+          policy context;
+        - `tests/unit/test_order_pause_state.py`: an unloaded projection refuses an
+          opening as retryable (it asserted `no_matching_declaration`); the pause read
+          from the kit;
+        - `tests/integration/test_negotiate_controller.py`: a buyer's accept after the
+          source changed answers 409 and after it became unreadable 503; a listing
+          without a `gpu_model` is rechecked; existing reason assertions unchanged;
+        - `tests/integration/test_publication_loop.py`, `tests/unit/test_file_policy_discovery.py`,
+          `tests/unit/test_config_loader.py`: the guard's name resolves from the policy kit;
+        - `tests/integration/test_admin_api.py`: pause and resume through the kit
+          service; the event read refuses an unknown parameter and a stream request.
+- [ ] 6A.5 API credits (`domains/apicredits/storefront`, 0.6.3 → 0.7.0):
+      - `server.py` loses `_GLOBALLY_PAUSED` and holds the process's `TradingPause`;
+      - a new `controllers/trading_pause_controller.py` binds `POST /api/v1/admin/pause`
+        and `/resume` through `TradingPauseRouteService`, authenticated as `admin_pause` and
+        `admin_resume` on the empty resource, the canonical client's contract; mounted in
+        `server.py`;
+      - `negotiation_runtime.py`'s pause hook reads the `TradingPause`;
+        `controllers/system_controller.py` reports it and loses `_stage_events_resource`
+        for the kit's `signed_resource`;
+      - `controllers/negotiate_controller.py` maps `OfferUnfulfillableError` to 409 and
+        `NegotiationUnavailableError` to 503 on `negotiate/new` and `negotiate/{id}`;
+      - tests: `tests/integration/test_sync_negotiation.py` (a paused storefront refuses an
+        opening with 503 until resumed, through the canonical client);
+        `tests/integration/test_force_accept_api.py` (unchanged behaviour);
+        `tests/integration/test_admin_api.py` or its nearest suite (the event read's
+        refusals).
+- [ ] 6A.6 Deltas, written with this plan: `market-composition`'s "Kit-owned synchronous
+      negotiation runtime" (the source check, the retryable refusal, success last, and the
+      resumption rule), its "Storefront deal controls are kit-owned route services" (the
+      event read's signed resource and force-accept's refusals), and a new "The trading
+      pause is one process-local kit mechanism"; `storefront-publication`'s "The seller's
+      inventory guard checks a listing against its own source".
+- [ ] 6A.7 Versions and locks: bump as above and cascade every pin through
+      `cascade_pins.py` (dependents whose pins move are bumped and recorded); rebuild the
+      wheelhouse cleanly; relock, including `e2e-tests` for the VM storefront's wheel;
+      hand-lock the VM storefront and buyer, and the bare-metal and API-credit storefronts
+      from their snapshot locks after the last suite run.
+- [ ] 6A.8 **Gate.** The policy kit's new tests (in the runtime's environment), the
+      negotiation-runtime and storefront kits, VM negotiation, the VM storefront by frozen
+      sync, the API-credit storefront, the bare-metal storefront (pins only), the e2e unit
+      suite and collection, the root aggregate, `make check-packaging`, comment hygiene,
+      documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
+      modules, and both end-to-end lanes.
+
+### 6B. Bare metal on the runtime
+
+Decisions 1, 5, 6, 7, 9, 10, and 11. Reviewable alone: the bare-metal domain and
+storefront.
+
+- [ ] 6B.1 Domain (`domains/bare_metal`, 0.8.0 → 0.9.0): `inventory_guard.py`'s
+      `recheck_bare_metal_listing_source` takes the site's capacity snapshot and reports
+      the Physical Resource taken (no available unit) as its own outcome, distinct from a
+      declared mismatch or an absent source; `tests/test_inventory_guard.py` covers it.
+- [ ] 6B.2 Runtime hooks: a new
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/negotiation_runtime.py`
+      building the `NegotiationRuntime`:
+      - resolvers: opening loads the listing and requires its bare-metal binding;
+        continuation loads the thread's binding and requires the listing's current
+        binding to equal it (decision 9);
+      - `decode_terms`: the closed `bare_metal.v1` message, its duration as the requested
+        duration, no requested start; `validate_opening`: nothing beyond decoding, since
+        the demand checks are seller policy and run before any write, as today;
+        `validate_continuation`: the decoded terms equal the thread's message artifact;
+      - `check_listing_source`: `opening_guard.py`'s recheck, fed the same site's
+        projection and snapshot, mapped to a `ListingSourceVerdict`; an absent site
+        authority, or a site that cannot answer, is `unverifiable`;
+      - `evaluate_round`: an exact-option opening is accepted at the trusted option's
+        amount after the physical-selection checks, without price policy (decision 6);
+        an escrow proposal runs the domain's checks then the configured chain (6B.3),
+        with the round's verdict on the context;
+      - `reference_amount`, `amount_from_proposal`, `proposal_from_amount`: the selected
+        accepted escrow's rate over the duration, as `negotiation_service.py` computes it;
+      - `agreement_terms`: the message's duration and no start, so the lease begins at
+        commit;
+      - `build_artifacts`: the exact-option plan through the registry dispatch, and the
+        escrow path's plan through `build_bare_metal_settlement_plan` with the seller
+        wallet and the chain configuration paths verify uses (decision 7);
+      - `persist_opening`: copy the listing binding to the thread and save the message
+        artifact; `persist_artifacts`: save `BareMetalTerms` (for an option that
+        provisions a machine) and commit the plan; `place_hold`: none (decision 1);
+      - `storefront_is_paused`: the process's `TradingPause`; `listing_is_paused` and
+        `listing_is_live` as the other domains; `stage_event`;
+      - `BareMetalNegotiationRefusal`, a `ValueError` carrying its status, for the
+        domain's 400, 404, and 409 cases (decision 10).
+- [ ] 6B.3 Seller policy: `negotiation.py` keeps the domain's checks (duration bounds,
+      access method, SSH key, no buyer `access_ref`) and runs them ahead of a chain read
+      from `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES` (a JSON list, normalized by the
+      policy kit), defaulting to `escrow_shape_guard` and `listed_price`, with
+      `has_matching_inventory_guard` prepended (decision 11); its hook takes the round's
+      `listing_source`. `domain_runtime.py` binds the policy as the contract's
+      negotiation capability. `docs/configuration.md` documents the variable.
+- [ ] 6B.4 Composition and routes:
+      - `runtime.py` composes the negotiation runtime, the `TradingPause`, and the chain
+        setting; `negotiation_service()` is removed; system status reads the pause;
+      - `api.py`: `negotiate/new` and `negotiate/{id}` served over the runtime, mapping
+        `BareMetalNegotiationRefusal` to its status, `StorefrontPausedError` and
+        `NegotiationUnavailableError` to 503, `OfferUnfulfillableError` to 409, and
+        `NegotiationStateError` to 404 for an unknown negotiation and 409 otherwise;
+        binds `GET /api/v1/system/events` (`admin_system_events`, the kit's signed
+        resource), `POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate`
+        (`admin_evaluate_negotiation`), and
+        `POST /api/v1/listings/{listing_id}/negotiations/{negotiation_id}/force-accept`
+        (`admin_force_accept_negotiation`) over the kit route services; pause and resume
+        through `TradingPauseRouteService`.
+- [ ] 6B.5 Removal and migration: tombstone `negotiation_service.py`;
+      `sqlite_client.py` loses `persist_bare_metal_opening`, `is_global_paused`, and
+      `set_global_paused`; `migrations.py` gains one migration that marks every
+      non-terminal thread `abandoned` (decision 5) and drops `bare_metal_operator_state`.
+- [ ] 6B.6 Tests (`domains/bare_metal/storefront/tests`):
+      - a new `test_negotiation_runtime.py`: each hook, the exact-option short-circuit
+        after the recheck, the plan built from verify's inputs, no hold placed;
+      - `test_negotiation.py`: the domain checks ahead of a configured chain, the default
+        chain, `bisection` countering below the listed rate;
+      - `test_http_negotiation.py` through the canonical client: a multi-round negotiation
+        under an injected countering chain; force-accept records `BareMetalTerms` and the
+        plan, and reserves or holds nothing; evaluate-negotiate refuses what
+        `negotiate/new` refuses and writes nothing; opening refusal for each forbidden
+        demand field; a terms mismatch on continuation; a source mismatch, a taken
+        Physical Resource (409), and an unreadable site (503) at opening, counter, buyer
+        accept, and force-accept; exit while the site is unreadable; the response's plan,
+        the committed plan, and settle verify's rebuild are equal; existing status codes
+        kept;
+      - `test_migrations.py`: an open legacy thread becomes `abandoned`, can be neither
+        continued nor force-accepted, and starts no settlement or release; terminal
+        threads untouched; the pause table gone;
+      - `test_http_system.py`: pause and resume refuse and admit openings; a rebuilt
+        application starts unpaused;
+      - `test_persistence.py`, `test_http_settlement.py`: seeded through the runtime
+        rather than `persist_bare_metal_opening`; `test_selection_dispatch.py`: the
+        dispatch through the runtime hooks and `BareMetalNegotiationRefusal`;
+      - `test_app_composition.py`: the runtime and chain composed from the environment.
+- [ ] 6B.7 Versions and locks: `arkhai-bare-metal-storefront` 0.11.0 and the domain's
+      bump, cascaded through `cascade_pins.py`; the bare-metal storefront relocked and
+      hand-locked from its snapshot form.
+- [ ] 6B.8 **Gate.** The bare-metal domain and storefront suites, the e2e unit suite and
+      collection, the root aggregate, `make check-packaging`, comment hygiene,
+      documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
+      modules, and both end-to-end lanes (the bare-metal lane's publication scenario
+      unchanged).
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
@@ -3451,16 +3687,18 @@ paths and provider-neutral release in provisioning.
       no-fulfillment assertion. Remove `POST /api/v1/fulfillments/begin` from `api.py`
       and `BareMetalFulfillRequest` from `models.py`; remove `begin()` from
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
-- [ ] 7.2 Commit and register: `fulfillment_service.py` commits the reservation with the
-      materialized lease window before scheduling, as `hosted_lifecycle.py` does, and
-      registers the lease once fulfillment is active, as `hosted_lifecycle.py` does since
-      5B.8.B.8 (the machine as executor target; the site keeps the committed window, so
-      the registration need name none); `site_clients.py`'s
-      `SelectedSiteFulfillmentClient`, which gained `register_lease` in 5B.8.B.8, gains
-      `terminate_lease` and `get_lease` over `compute_provisioning_client`, routed by the
-      reservation's recorded site. Once both settlement paths register, the family lease
-      reads should count only registered leases (an executor target recorded), not every
-      reservation with a lease end (implementation review of slice B, finding 2).
+- [ ] 7.2 Lease client and the committed plan. Amended 2026-10-07 (`design.md`, "Section 6
+      design: bare metal on the negotiation runtime (2026-10-07)"): the commit this task
+      planned is done, since 5B.12.D made the Alkahest path commit before fulfillment,
+      and the registration it planned no longer exists; its finding that the family's
+      lease reads should count only registered leases is superseded, because a lease
+      begins at commit for every domain, which is what those reads count. What remains:
+      - `site_clients.py`'s `SelectedSiteFulfillmentClient` gains `get_lease` and
+        `terminate_lease` over `compute_provisioning_client`, routed by the reservation's
+        recorded site;
+      - `settlement_service.py`'s `verify` reads the plan committed at acceptance
+        (decision 7) instead of rebuilding it, and refuses a thread with none; 6B's
+        equality test becomes a test that verify registers exactly the committed plan.
 - [x] 7.3 **Migrated** to 5B.8.B.3 (`design.md`, "Controls and routes (5B.8)", decision
       1): provider-neutral release lands with the mode-agnostic lease lifecycle.
 - [ ] 7.4 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
@@ -3478,14 +3716,14 @@ paths and provider-neutral release in provisioning.
 - [ ] 7.6 Tests: `test_settlement.py` and `test_http_settlement.py` (verify wakes and
       steps the worker; a failed first attempt is retried by the worker's schedule and
       by nothing else; an Alkahest-only storefront has a settlement-servicing step;
-      `begin` is gone); `test_fulfillment_service.py` (commit with window, lease
-      registration, teardown through terminate, repeated teardown returns the same
-      lease, release only on callback); `test_hosted_lifecycle.py` (hosted dispatch
-      unchanged); `test_site_clients.py`; `test_publication_cycle.py` (preview applies
-      nothing); `test_app_composition.py`;
+      `begin` is gone; verify registers the committed plan and refuses a thread with
+      none); `test_fulfillment_service.py` (commit with window, teardown through
+      terminate, repeated teardown returns the same lease, release only on callback);
+      `test_hosted_lifecycle.py` (hosted dispatch unchanged); `test_site_clients.py`;
+      `test_publication_cycle.py` (preview applies nothing); `test_app_composition.py`;
       `domains/bare_metal/buyer/tests/test_buyer_composition.py`. The bare-metal expiry
       through the aggregate is proven in 5B.8.B.3's `test_lease_release_api.py`.
-- [ ] 7.7 Restart integration tests (tasks 3.5, 3.6):
+- [ ] 7.7 Restart integration tests (task 3.5; 3.6 is withdrawn):
       `domains/bare_metal/storefront/tests/test_restart_recovery.py` rebuilds the
       production application over one database file with a loopback site
       (`tests/loopback.py`).
@@ -3548,7 +3786,12 @@ lane configuration; depends on Sections 4–8.
       needs in `e2e-tests/config/config-docker.yml`'s bare-metal section and
       `dev-env/bare-metal/`; the bare-metal storefront's service-peer trust for the
       site's capacity-released callback in the lane's environment
-      (`make e2e-bare-metal-dev-env` in the root `Makefile`).
+      (`make e2e-bare-metal-dev-env` in the root `Makefile`); and a seller chain that
+      counters below the listed rate, `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES` set
+      to `["escrow_shape_guard", "bisection"]` in `compose.bare-metal-local.yml`
+      (decision 11 of "Section 6 design: bare metal on the negotiation runtime
+      (2026-10-07)"), so stage 05b's round zero counters and 06b force-accepts an open
+      thread.
 - [ ] 9.6 **Gate.** The bare-metal lane passes with publication and the mock deal.
 
 ## 10. Pipeline: images built once and an API-credit lane
@@ -3601,6 +3844,11 @@ service code.
       fulfillment kit's carrier list; "Release" says release follows the fulfillment
       aggregate's state, and that capacity is freed only behind the release guard the
       provisioning composition supplies to the site authority. The route-contract section was promoted during design.
+      From Section 6: "Discovery and negotiation" states that the runtime rechecks a
+      listing against its source before every seller decision and every acceptance,
+      through a check each domain contributes, and that a thread is successful only once
+      its agreement and plan are recorded; "Operator lifecycle controls" names the kit's
+      process-local trading pause beside the loop pause.
 - [ ] 11.2 `docs/development/TESTING.md`: three lanes on images built once; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
@@ -3728,6 +3976,14 @@ service code.
       during a bare-metal `begin`, and passed on the rerun.
       Production uses a file database with a connection per session. The harness needs
       the same, or an equivalent that gives each session its own connection.
+      Found in Section 6's design (`design.md`, "Section 6 design: bare metal on the
+      negotiation runtime (2026-10-07)"): bare metal's listing recheck and publication
+      fetch each site's projection live, where VM reads the projections its storefront
+      holds; reading cached projections belongs with unifying publication. API credits'
+      `credit_quota_guard` reads availability its storefront computes ahead of the round,
+      as VM's inventory guard did, and could move onto the kit's listing-source verdict.
+      The fulfillment convergence sweep's counts are logged as structured fields, which
+      the end-to-end lanes' plain-text log format does not print.
       Found in slice C: the system worker controls' response bodies are untyped dicts
       (review point 3), and `openspec/specs/site-capacity/spec.md`'s evidence line for
       the pool-metadata provider gate should cite
@@ -3783,5 +4039,10 @@ service code.
 | Host import belongs to the implementation that reads its format | `openspec/specs/physical-provisioning/spec.md` — "Host import belongs to the execution implementation that reads its format" |
 | Resource pools and capacity definitions keep thin surfaces of their own | `openspec/specs/resource-pool-management/spec.md` — "The pool wire contract and client are thin distributions"; `openspec/specs/site-capacity/spec.md` — "Capacity-definition import has a thin typed client"; `docs/development/ARCHITECTURE.md` kit layers |
 | Provisioning names the VM guest from the capacity reservation, a name the playbooks can use as hostname, tenant login (at most 32 characters), and `/tmp` match; the lease's target is the one the fulfillment recorded | `openspec/specs/physical-provisioning/spec.md` — "Provisioning names what it provisions", "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/physical-provisioning/architecture.md` — the guest-name constraints and why they bind (at promotion); `openspec/specs/vm-storefront-fulfillment/spec.md` — "The fulfillment context records the exact request, naming no guest"; `domains/vms/provisioning/iac/README.md` (with 5B.12.C) |
+| The runtime rechecks a listing against its source before every seller decision and every acceptance, never on exit, through a check each domain contributes; one classifier in `kit/policy` maps the verdict, used by the runtime and by `has_matching_inventory_guard` | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "The seller's inventory guard checks a listing against its own source"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation"; `docs/configuration.md` |
+| A source the seller cannot confirm is refused as retryable (503); every negotiation route maps both source refusals | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime", "Storefront deal controls are kit-owned route services" |
+| A thread is successful only once its agreed terms, any hold, and its plan are recorded; a partially accepted thread is never resumed | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation" |
+| The trading pause is one process-local kit mechanism, separate from the loop pause; bare metal's durable pause is reversed | `openspec/specs/market-composition/spec.md` — "The trading pause is one process-local kit mechanism"; `docs/development/ARCHITECTURE.md` "Operator lifecycle controls" |
+| Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

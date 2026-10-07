@@ -78,7 +78,8 @@ API-credit deal runs inside the VM lane.
   create succeeds; the delivery says only how to reach what was provisioned; teardown is
   prepared from the create job's own parameters; jobs correlate on the capacity
   reservation rather than a deal reference; provisioning names the guests it creates; and
-  lease registration by the storefront is removed, once when a lease begins is decided.
+  no caller writes a lease: commit begins it, once, for every domain, and provisioning
+  records its executor target when the fulfillment becomes active.
   Job results and credentials are stored and served as envelopes, executors classify
   retryability and redact, a cancelled job stays cancelled, and hosts carry a connection
   envelope whose codec belongs to its implementation (only `ssh` today); connection
@@ -96,9 +97,9 @@ API-credit deal runs inside the VM lane.
   Ansible host import moves to the Ansible distribution.
 - Consolidate leases on one family surface that records and releases and never delivers:
   VM's lease routes are absorbed into it, bare metal's lease routes (and the access grant
-  they made outside fulfillment) are deleted, there is no lease update, a registered lease's
-  end moves only through the site's truncation, lease registration writes the lease tail
-  once, `commit` neither resurrects a lease nor moves a registered lease's window, and the
+  they made outside fulfillment) are deleted, there is no lease update, a lease's end moves
+  only through the site's truncation, the lease tail is written once, `commit` begins a
+  lease once and neither resurrects a lease nor moves a committed lease's window, and the
   lease lifecycle and release are mode-agnostic. A lease that was never delivered is
   released by what its fulfillment proves, and an uncommitted hold is released rather than
   truncated. The site authority frees capacity only behind a release guard the
@@ -151,8 +152,8 @@ None.
   happens only through fulfillment; an undelivered lease is released by what its
   fulfillment proves; host import belongs to the implementation that reads its format;
   executor registration is the job executor table's.
-- `site-capacity`: a reservation's lease tail is written once; `commit` neither resurrects
-  a lease nor moves a registered lease's window; lease truncation neither resurrects nor
+- `site-capacity`: a reservation's lease tail is written once; `commit` begins a lease
+  once and neither resurrects a lease nor moves a committed lease's window; lease truncation neither resurrects nor
   extends a lease, and refuses an uncommitted hold; every capacity reclaim consults a
   composition-supplied release guard, which replaces the settlement-abandonment hook;
   capacity-definition import has a thin typed client.
@@ -282,6 +283,13 @@ None.
   `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
 - Bare-metal fulfillment starts at settlement verification —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
+- The negotiation runtime rechecks a listing against its source before every seller
+  decision and every acceptance, refuses a source it cannot confirm as retryable, and
+  records a thread as successful only once its agreement and plan are recorded; the
+  trading pause is one process-local kit mechanism —
+  `openspec/specs/market-composition/spec.md`,
+  `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`,
+  `docs/configuration.md`.
 - A capability's HTTP surface is five pieces, the binding owned by whatever composes the
   process — `docs/development/ARCHITECTURE.md` ("Route contracts and their HTTP binding",
   promoted during design at the maintainer's request).
@@ -292,8 +300,8 @@ None.
   connectivity is probed by connection kind; the family's wire contract and client are
   thin distributions — `openspec/specs/physical-provisioning/spec.md`,
   `docs/development/ARCHITECTURE.md`.
-- A lease tail is written once; `commit` neither resurrects a lease nor moves a registered
-  lease's window; truncation neither resurrects nor extends a lease, nor ends an
+- A lease tail is written once; `commit` begins a lease once and neither resurrects a
+  lease nor moves a committed lease's window; truncation neither resurrects nor extends a lease, nor ends an
   uncommitted hold; capacity reclaims consult a release guard; capacity-definition import
   has a thin client —
   `openspec/specs/site-capacity/spec.md`.
