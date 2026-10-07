@@ -1025,6 +1025,7 @@ def _projected_pool_rows(
     resolution = resolve_vm_listing_shapes(
         policy_tags,
         [members_by_id[usage.resource_id] for usage in usages],
+        configured_default=None,
         override_shapes=override.get("listing_shapes") if override else None,
     )
     if resolution.unreadable:
@@ -1463,7 +1464,7 @@ def declared_shape_feasibility(
     if override.get("listing_shapes") is None:
         return {}
     resolution = resolve_vm_listing_shapes(
-        {}, (), override_shapes=override["listing_shapes"]
+        {}, (), configured_default=None, override_shapes=override["listing_shapes"]
     )
     feasible: dict[str, bool] = {shape.digest: False for shape in resolution.shapes}
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)

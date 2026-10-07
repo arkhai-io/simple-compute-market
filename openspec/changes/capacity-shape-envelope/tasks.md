@@ -175,16 +175,22 @@ the default alone), and D10's generator and identity bullets. Touches `domains/v
 (`shape_generation.py`, `__init__.py`, its dependency on the kit) and `domains/vms/listings`
 (`listing_shapes.py`, `asking_rates.py`, its dependency). No Helm checks owed.
 
-- [ ] 3.1 Add the kit dependency to `domains/vms/domain` and `domains/vms/listings`, and
+- [x] 3.1 Add the kit dependency to `domains/vms/domain` and `domains/vms/listings`, and
       `make lock`. (D2)
-- [ ] 3.2 Change the `ListingShapeGenerator` protocol to take the default-only
+      Done. `make lock` added only the kit and its edges (seven locks).
+- [x] 3.2 Change the `ListingShapeGenerator` protocol to take the default-only
       `ResolvedPolicy` beside the members; `gpu_count_shapes` chooses, per model, the counts
       from one to the largest declared that
       `admissible_values("gpu.count", {"gpu": {"model": m}})` contains. With no
       configured default the output is unchanged. Extend
       `domains/vms/domain/tests/test_shape_generation.py`: bounded, unbounded, minimum
       above every member, two models. (D10)
-- [ ] 3.3 `listing_shapes.py`: stated lists (override, else hint) are split through
+      Done. `policy` is a required argument: with no configured default the caller passes
+      the policy resolved from no tiers. The generator steps through the answer with
+      `at_least`, so it assumes no interval. Added cases: a configured minimum, and a
+      constraint on another dimension not bounding the count. Nothing injects a custom
+      generator anywhere in the tree.
+- [x] 3.3 `listing_shapes.py`: stated lists (override, else hint) are split through
       `split_listing_shapes` with the VM schema and the source as the tier label. An
       unreadable base shape anywhere makes the list unreadable (the existing hold). Each
       listing becomes an entry carrying its base `ResolvedShape` and either its
@@ -193,15 +199,52 @@ the default alone), and D10's generator and identity bullets. Touches `domains/v
       duplicate). A generated shape's policy is the default alone. The digest stays
       `vm_shape_digest` of the base shape. No code outside the kit reads a constraint.
       (D3, D8, D9, D10)
-- [ ] 3.4 Asking rates match the base shape's digest (`asking_rates.py`); a rate entry's
+      Done. `ShapeResolution.listings` holds `ListingShape(shape, policy, policy_problems)`;
+      `shapes` remains as every listing's base shape, so derivation is unchanged until
+      section 4. `default_only_policy(configured_default)` is exported for 4.4. Tiers are
+      `storefront_override`/`pool_hint` and `configured_default`
+      (`CONFIGURED_DEFAULT_TIER`). The kit collapses identical entries, so stated lists
+      no longer go through `_deduplicated`; generated ones still do. Unreadable problems
+      read `[<entries>] <path>: <message>`, as before.
+      `resolve_vm_listing_shapes` takes `configured_default` as a required keyword; both
+      reconciler call sites pass `None` until 4.1 supplies the parsed default.
+- [x] 3.4 Asking rates match the base shape's digest (`asking_rates.py`); a rate entry's
       shape stays a plain shape, as `vm_shape_problems` already requires. (D10)
-- [ ] 3.5 Unit tests in a new `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py`
+      Done with no code change: listing digests are already base-shape digests. The
+      module docstring now says so; a 3.5 test prices a constrained listing from a
+      plain-shape rate.
+- [x] 3.5 Unit tests in a new `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py`
       (the listings package has no suite of its own; the storefront's unit suite covers
       it): shorthand scalars, a constrained offer, a constraint-only field, an override
       not inheriting the hint's constraints, each uncomputable case, an unreadable base
       shape, and identity unchanged when only constraints change.
-- [ ] 3.6 Verify: the VM domain suite, the VM storefront unit suite, and
+      Done, 20 tests, plus narrowing, widening, and filling by the configured default, and
+      tier labels on problems. The compute schema has no optional attribute, so an
+      attribute constraint always leaves the base unreadable (`gpu.model` is required);
+      the readable uncomputable cases are an unknown key, an undefined field, an empty
+      range, and a conflicting duplicate.
+- [x] 3.6 Verify: the VM domain suite, the VM storefront unit suite, and
       `make check-packaging`.
+      Done. VM domain `make test`: 48 passed. VM storefront `tests/unit`: 1122 passed,
+      1 skipped; `tests/integration`: 349 passed. VM buyer `make test`: 206 passed.
+      `make check-packaging`, `make check-comment-hygiene`, and
+      `make check-doc-citations CHANGE=capacity-shape-envelope`: OK.
+      mypy (storefront config, run ad hoc with `uv run --with mypy`; no target runs it)
+      over `listing_shapes.py` and `shape_generation.py`: no issues.
+
+Handoff from section 3:
+
+- Derivation still publishes every listing's base shape, including those whose policy is
+  `None`: `_projected_pool_rows` reads `resolution.shapes`. Section 4 filters on
+  `resolution.listings`; both `resolve_vm_listing_shapes` call sites in `reconciler.py`
+  pass `configured_default=None` until 4.1.
+- `declared_shape_feasibility` already sees base shapes, because resolution yields them,
+  so 4.5 may need only a test.
+- 4.4 can call `gpu_count_shapes` with one synthetic member carrying the row's model and
+  range, so local tables choose counts exactly as the generator does.
+- The fresh-context check's two plan gaps (the architecture generator sentence, and the
+  spec's Evidence list) were appended to 7.10.
+
 
 ## 4. VM derivation and publication
 
@@ -353,6 +396,12 @@ pre-closeout review, as `AGENTS.md` asks.
         overrides": the inline `{offer, min, max}` form, `[admissibility.defaults.vm]`,
         what pool and override writes refuse, local-table derivation, and the rollback
         procedure from design.md's Migration Plan.
+      - `openspec/specs/storefront-publication/architecture.md`, "Listing shapes and the
+        storefront's authority": the generator sentence says it yields only the counts
+        the configured default admits.
+      - `openspec/specs/storefront-publication/spec.md`, `## Evidence`: cite
+        `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py` and the
+        section 4 derivation tests.
       - `openspec/specs/README.md`: unchanged, since every companion already exists;
         record that disposition.
       - Not promoted here: the negotiation invariant and omitted-dimension policy, which

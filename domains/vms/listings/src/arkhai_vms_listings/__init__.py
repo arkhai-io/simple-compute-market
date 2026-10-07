@@ -50,6 +50,7 @@ from arkhai_vms_listings.reconciler import (
 from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
 from arkhai_vms_listings.listing_shapes import (
     SHAPE_SOURCE_OVERRIDE,
+    ListingShape,
     ResolvedShape,
     ShapeResolution,
     resolve_shape,
@@ -82,6 +83,7 @@ __all__ = [
     "SHAPE_SOURCE_OVERRIDE",
     "declared_shape_feasibility",
     "vm_override_view",
+    "ListingShape",
     "ResolvedShape",
     "ShapeFeasibility",
     "ShapeResolution",

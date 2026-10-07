@@ -1,7 +1,9 @@
 """The VM market's binding of the shared asking-rate resolution.
 
 A rate is keyed by the digest VM listing identity uses, so an entry prices
-exactly the listing whose shape it names. The override's write-time judgement
+exactly the listing whose shape it names. That digest is taken over a listing's
+base shape, so an entry names a plain shape, and changing a listing's
+constraints never moves its rate to another listing. The override's write-time judgement
 and publication both resolve through this one function, so a write the
 storefront accepts is one publication can read.
 """
