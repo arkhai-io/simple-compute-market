@@ -55,7 +55,7 @@ None.
 
 ### Modified Capabilities
 
-Provisional; planning and review confirm the destinations (`design.md`, D11).
+Confirmed in planning (`tasks.md`, 7.10).
 
 - `market-composition`: the admissibility kit's contract and the inline constraint form.
 - `resource-pool-management`: listing-shape hint validation accepting constraints and
@@ -113,7 +113,7 @@ Provisional; planning and review confirm the destinations (`design.md`, D11).
 
 ### Knowledge to promote
 
-Destinations are provisional (D11).
+Confirmed in planning; `tasks.md` 7.10 names each file and heading.
 
 - The admissibility contract: the kit is the only reader of a constraint; splitting,
   parsing, labelled resolution with per-form merge rules, and evaluation; whole shape

@@ -382,6 +382,14 @@ default (drops the default's values the listing does not restate); intersection
   `admissible_values("gpu.count", {"gpu": {"model": m}})` contains, rather than
   generating and filtering. With no configured default it generates what it does
   today. Generated shapes are nobody's statement, so none is reported.
+- **Listings derived from local tables** (`capacity.use_site_projection_for_listings =
+  false`) take the same default-only policy: their GPU-only counts are chosen from
+  `admissible_values` exactly as the generator chooses them. Local tables hold no hint
+  and no override applies there, so the configured default is the only tier, but it is
+  the storefront operator's own policy and governs everything the storefront publishes;
+  leaving the path unconstrained would make "publication never advertises an
+  inadmissible offer" carry an exception until local derivation is retired. Rejected:
+  leaving local-table derivation unconstrained and documenting the limitation.
 - **An override write is refused** when one of its shapes' base shapes or constraints
   cannot be read with the domain's schema, two of its shapes state one base shape with
   different constraints, or a shape resolves to an empty range against the configured
@@ -545,5 +553,3 @@ Each is checked at closeout against `openspec/changes/` for a change that owns i
   already call the site.
 - The compute schema requires `gpu.count` and `gpu.model`, so a VM or bare-metal listing
   without GPUs cannot be stated.
-- This change's `tasks.md` predates these decisions and is replanned after design
-  review.

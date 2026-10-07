@@ -1,104 +1,291 @@
 # Implementation Tasks
 
-## 1. Admissibility capability in kit
+Replanned on 2026-10-07 against the design that passed review (`reviews/06-design.triage.md`).
+The earlier plan had no completed task; it described a superseded design (a pool-level
+bounds tag, a range query ignoring the rest of the shape, negotiation wiring, and promotion
+to `site-capacity`) and is replaced whole.
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that
-      `has_matching_inventory_guard` remains categorical-only and that `policy_tags`
-      readers still validate only universal-meaning content.
-- [ ] 1.2 Define the capability with exactly two operations — whole-shape admissibility,
-      and admissible range for one dimension given the remainder. Both take the whole
-      proposed shape.
-- [ ] 1.3 Do **not** expose a readable per-dimension bounds accessor. `design.md`
-      records this as the central decision; an accessor would let callers encode the
-      static-box assumption locally.
-- [ ] 1.4 Implement static per-dimension minimum/maximum as the only implementation.
-- [ ] 1.5 Keep kit free of dimension names: the vocabulary comes from the composition
-      root, and validation covers well-formedness only.
-- [ ] 1.6 Focused tests: shape inside bounds; shape outside on one dimension; range
-      query returns configured bounds and ignores the remainder; unbounded pool admits
-      everything; a domain-specific dimension name is validated without kit knowing it.
+Each section is one implementation session. Sections run in order: each depends on the
+packages the one before it builds.
 
-## 2. Bounds as pool policy
+## 1. The admissibility foundation kit
 
-- [ ] 2.1 Add bounds to `kit/resource-pools`' hint vocabulary with a typed reader,
-      following the existing tags' validation posture.
-- [ ] 2.2 Confirm bounds inherit projection and precedence from the existing hint
-      mechanism without a new configuration channel.
-- [ ] 2.3 Focused tests: declared bounds project and resolve; malformed bounds are
-      rejected at the reader; absent bounds resolve to unbounded.
+Delivers `kit/capability-admissibility` (`market_capability_admissibility`): splitting,
+parsing, labelled resolution, and evaluation. Implements D2, D3, D4, D5, D6, D7, and D9's
+merge rule; `market-composition` delta requirements "Capability shape admissibility is
+owned by one kit" and "Shape constraints are stated inline and strictly". Touches only the
+new package and `kit/Makefile`. No Helm checks owed.
 
-## 3. Domain wiring
+- [ ] 1.1 Create the distribution `arkhai-kit-capability-admissibility` beside
+      `kit/capability-pricing`, copying its layout: `pyproject.toml` depending only on
+      `arkhai-kit-capability-shape`, `Makefile`, `src/market_capability_admissibility/`
+      with `py.typed`, `tests/unit/`, and a lock built through `scripts/uv_project.py`.
+      Register `test-capability-admissibility` and `dist-capability-admissibility` in
+      `kit/Makefile` (including `test`, `dist`, and `dist-ci`). (D2)
+- [ ] 1.2 Define the public types: opaque `Declaration` and `ResolvedPolicy` (the policy
+      keeps the schema it was resolved with); `AdmissibilityProblem` carrying `paths`
+      (tuple), `code`, `message`, and `tier`; the opaque `AdmissibleValues`; and a typed
+      request error carrying every problem. Nothing exposes a declaration's or policy's
+      contents. (D3, D4)
+- [ ] 1.3 `split_listing_shape(raw, *, tier, schema=None)`: base shape (scalars kept,
+      constrained fields reduced to `offer`, constraint-only fields omitted) and either a
+      `Declaration` or constraint problems. Structure only without a schema; with one,
+      constrained paths must be quantities the schema defines. Read the base shape first:
+      a constraint-only mapping on a required field is a base-shape problem with no
+      declaration. Constraint rules: positive integers, `min` ≤ `max`, `offer` within its
+      own range, at least one key, strict keys. (D3, D5)
+- [ ] 1.4 `split_listing_shapes(raw_list, *, tier, schema=None)`: per-entry split; entries
+      identical in base shape and constraints collapse; a base shape (by the shape kit's
+      `shape_digest`) stated with different constraints is reported naming each
+      conflicting entry, with or without a schema. (D3, D8's duplicate rule)
+- [ ] 1.5 `parse_declaration(raw, *, tier, schema=None)` for the constraint-only form: the
+      same field syntax, `offer` refused. (D3, D9)
+- [ ] 1.6 `resolve(declarations, schema)`, highest tier first: per-leaf `min`/`max` merge
+      (the higher tier stating a leaf wins; an unstated leaf keeps the lower value); an
+      empty range is a problem naming each tier and its conflicting value; no policy on
+      any problem. (D3, D9)
+- [ ] 1.7 `admissibility_problems(shape)` under completion semantics: an omitted field
+      never violates; a malformed shape under the schema is reported as problems; required
+      fields are not checked; each problem names the tier that set the violated leaf.
+      (D3, D6, D7)
+- [ ] 1.8 `admissible_values(dimension, partial_shape)` and `AdmissibleValues`
+      (`is_empty`, `contains`, `at_most`, `at_least`, `minimum`, `maximum`; `maximum` is
+      `None` when unbounded; every value accessor answers `None` on an empty set). `{}` is
+      valid; a dimension that is not a schema quantity, or a malformed partial shape,
+      raises the request error. (D3, D4)
+- [ ] 1.9 Unit tests in `tests/unit/` against a synthetic schema with no compute
+      vocabulary, covering every scenario of both `market-composition` delta
+      requirements, plus a property test of the one-dimension-at-a-time guarantee (fixing
+      dimensions in every order never empties a later answer and ends admissible).
+      `test_import_boundary.py` asserts the kit imports only the shape kit and the
+      standard library, at any depth, under `TYPE_CHECKING`, or behind `try`. (D2, D12's
+      neutrality proof)
+- [ ] 1.10 Verify: `make -C kit test-capability-admissibility`, `make dist`, and
+      `make check-packaging`.
 
-- [ ] 3.1 Supply the VM domain's dimension vocabulary from its composition root,
-      taking it from `VM_CAPABILITY_SCHEMA` rather than restating the dimension
-      names, and call the predicate from the VM publication path (a stated shape a
-      pool does not admit publishes no listing, reported) and from the VM
-      `evaluate_round` composition in `negotiation_runtime.py` once a round can
-      carry a shape.
-- [ ] 3.2 Prove by test that kit contains no VM dimension name after wiring — the
-      property that makes this capability reusable by a pod, inference-token, or
-      model-training domain.
+## 2. Pool-write validation of constrained listing shapes
 
-## 4. Validation
+Delivers the structural split at every pool-write surface. Implements D10's pool-write
+bullet and the `resource-pool-management` delta "Listing-shape hint validation". Touches
+`kit/resource-pools` (its dependency on the new kit, `hints.py`) and the lock of every
+project that locks `kit/resource-pools`. No Helm checks owed: no chart, image input, or
+configuration surface changes.
 
-- [ ] 4.1 Run `kit/site` and `kit/resource-pools` suites plus the VM composition tests.
-      Disclose any suite not run.
-- [ ] 4.2 Verify package boundaries per `physical-provisioning`'s dependency isolation:
-      kit acquires no domain or service dependency.
-- [ ] 4.3 Run `openspec validate --all --strict` against the baseline current at
-      implementation time.
+- [ ] 2.1 Add the dependency on `arkhai-kit-capability-admissibility` to
+      `kit/resource-pools`, then `make lock` so every dependent lock gains the new wheel.
+      A foundation kit below an authority kit is a permitted edge (`ARCHITECTURE.md`, kit
+      layers). (D2)
+- [ ] 2.2 `validate_listing_shapes` calls `split_listing_shapes(..., schema=None)` per mode
+      in place of `shape_structure_problems`: malformed constraints and conflicting
+      duplicates are refused naming each entry; identical entries are accepted; an empty
+      list is refused as today. `raw_listing_shapes` keeps passing the value unread. No
+      comparison with any storefront's configured default. (D10)
+- [ ] 2.3 Unit tests in `kit/resource-pools/tests/unit/test_hints.py` for every scenario of
+      the delta requirement. Library integration in
+      `tests/integration/test_resource_pool_service.py`: the individual create, replace,
+      and update surfaces and bulk import refuse alike without changing stored metadata.
+- [ ] 2.4 Provisioning integration in
+      `provisioning/compute/service/tests/integration/test_pools_api.py`: a conflicting
+      duplicate and a malformed constraint are refused through the typed client, asserting
+      status and stored state only (`TESTING.md` rejection-path rule).
+- [ ] 2.5 Verify: `make -C kit test-resource-pools`, the compute provisioning service's
+      integration suite, and `make check-packaging`. Confirm the bare-metal storefront,
+      which reads `listing_shapes` only for its presence (`site_reading.py`), is unaffected
+      by running its unit suite.
 
-## 5. Closeout
+## 3. VM domain: stated-shape resolution and the bounded generator
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Delivers per-listing resolution of stated shapes and the generator bounded by the
+configured default, without yet changing derivation. Implements D3 (every reader splits
+through the kit), D5, D9 (tiers, override replacing the hint whole, generated shapes under
+the default alone), and D10's generator and identity bullets. Touches `domains/vms/domain`
+(`shape_generation.py`, `__init__.py`, its dependency on the kit) and `domains/vms/listings`
+(`listing_shapes.py`, `asking_rates.py`, its dependency). No Helm checks owed.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`.
-- [ ] 5.2 **Import placement.** Review imports this change adds or touches.
-- [ ] 5.3 **Documentation compliance.** Confirm the predicate-and-range rule landed in
-      `openspec/specs/site-capacity/spec.md` and the coupled-region rationale in
-      `openspec/specs/site-capacity/architecture.md`.
-- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 5.5 **Roadmap currency.** Update Goal 2's gap mapping in
-      `docs/development/ROADMAP.md`.
-- [ ] 5.6 **Promotion.** Complete the design-promotion record below. Include an explicit
-      check that no caller reads bounds directly from `policy_tags`, bypassing the
-      capability — `design.md` names this as the failure mode that would undo the design,
-      and `policy_tags` is readable, so it needs verifying rather than assuming.
-- [ ] 5.7 **Campaign index currency** (part seven, added when
-      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
-      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
+- [ ] 3.1 Add the kit dependency to `domains/vms/domain` and `domains/vms/listings`, and
+      `make lock`. (D2)
+- [ ] 3.2 Change the `ListingShapeGenerator` protocol to take the default-only
+      `ResolvedPolicy` beside the members; `gpu_count_shapes` chooses, per model, the counts
+      from one to the largest declared that
+      `admissible_values("gpu.count", {"gpu": {"model": m}})` contains. With no
+      configured default the output is unchanged. Extend
+      `domains/vms/domain/tests/test_shape_generation.py`: bounded, unbounded, minimum
+      above every member, two models. (D10)
+- [ ] 3.3 `listing_shapes.py`: stated lists (override, else hint) are split through
+      `split_listing_shapes` with the VM schema and the source as the tier label. An
+      unreadable base shape anywhere makes the list unreadable (the existing hold). Each
+      listing becomes an entry carrying its base `ResolvedShape` and either its
+      `ResolvedPolicy` (resolved with the configured default as the lower tier) or the
+      problems that make it uncomputable (unreadable constraints, empty range, conflicting
+      duplicate). A generated shape's policy is the default alone. The digest stays
+      `vm_shape_digest` of the base shape. No code outside the kit reads a constraint.
+      (D3, D8, D9, D10)
+- [ ] 3.4 Asking rates match the base shape's digest (`asking_rates.py`); a rate entry's
+      shape stays a plain shape, as `vm_shape_problems` already requires. (D10)
+- [ ] 3.5 Unit tests in a new `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py`
+      (the listings package has no suite of its own; the storefront's unit suite covers
+      it): shorthand scalars, a constrained offer, a constraint-only field, an override
+      not inheriting the hint's constraints, each uncomputable case, an unreadable base
+      shape, and identity unchanged when only constraints change.
+- [ ] 3.6 Verify: the VM domain suite, the VM storefront unit suite, and
+      `make check-packaging`.
 
-- [ ] 5.8 **Documentation citations.** Run
+## 4. VM derivation and publication
+
+Delivers the publication behavior: per-listing close, inadmissible offers withheld,
+reports, and local-table derivation under the configured default. Implements D8, D10
+(publication, identity, reports, local tables), and the `storefront-publication` delta
+requirements "A VM listing's admissibility resolves per listing", "A VM listing whose
+admissibility cannot be computed closes", "VM publication never advertises an inadmissible
+offer", and the modified "Every VM listing is a listing shape". Touches
+`domains/vms/listings/src/arkhai_vms_listings/reconciler.py` only. No Helm checks owed.
+
+- [ ] 4.1 `PoolHintResolutionSettings` gains the parsed configured default (a
+      `Declaration`, or none); derivation passes it to listing-shape resolution and the
+      generator. (D9)
+- [ ] 4.2 `_projected_pool_rows`: a listing whose policy cannot be computed is not
+      derived, so reconciliation closes an open listing for it, while the pool's other
+      listings publish; a stated listing whose base shape is inadmissible under its policy
+      is withheld the same way; an unreadable base shape keeps the existing pool hold.
+      Generated shapes are never reported. (D8, D10)
+- [ ] 4.3 `_SiteDerivationReport` gains `inadmissible_listing_shapes` (tier, shape,
+      problems) and `unusable_shape_constraints` (tier, path, problem, each tier's
+      conflicting value, or each conflicting entry), logged once per change through
+      `_record_site_report` like the existing keys; system status serves them unchanged.
+      (D10)
+- [ ] 4.4 `_local_table_shapes` chooses counts from `admissible_values` under the
+      default-only policy, as the generator does. (D10, local-table bullet)
+- [ ] 4.5 `declared_shape_feasibility` judges the override's base shapes. (D10)
+- [ ] 4.6 Integration tests in `domains/vms/storefront/tests/integration/test_reconciler_derivation.py`
+      (cases in `tests/_reconciler_cases.py`): every scenario of the three added
+      requirements and the modified one, including identity kept across a
+      constraint-only change, the next reconciliation closing a listing whose offer
+      became inadmissible, and local-table derivation under a configured default. Extend
+      `test_reconciler_projection.py` so a stored listing's key and the inventory guard's
+      re-derivation agree for a constrained shape.
+- [ ] 4.7 Verify: the VM storefront unit and integration suites.
+
+## 5. VM storefront composition: the configured default and the override write check
+
+Delivers `[admissibility.defaults.vm]` and the override contribution's write check.
+Implements D9 (the carrier, parsed once, a malformed default stopping startup) and D10's
+override-write bullet. Touches `domains/vms/storefront`: `services/publication_terms.py`,
+`startup.py`, `settings.toml` (ships none), the configuration template in
+`groups/config.py`, `services/vm_pool_override_contribution.py`, and the composition that
+constructs the publication loop and the contribution. Owes the Helm check because it
+changes the storefront's configuration surface.
+
+- [ ] 5.1 Parse `[admissibility.defaults.vm]` once at startup with
+      `parse_declaration(tier="configured_default", schema=VM_CAPABILITY_SCHEMA)`; absent and
+      empty both mean no default; a malformed table stops startup naming each problem,
+      as `_require_readable_family_rates` does. Hand the same `Declaration` to publication,
+      the generator's composition, and the contribution. Add a commented example to the
+      configuration template; `settings.toml` states none. (D9)
+- [ ] 5.2 `VmPoolOverrideContribution.vocabulary_problems` splits the record's shapes
+      through the kit with the VM schema and resolves each against the configured default,
+      refusing unreadable base shapes or constraints, conflicting duplicates, an empty
+      range, and an inadmissible offer, all before any site call. `judge_shapes` reports
+      feasibility for base shapes. (D10)
+- [ ] 5.3 Unit tests: a new `tests/unit/test_startup_admissibility_default.py` beside
+      `test_startup_family_rates.py`; extend `tests/unit/test_vm_pool_override_contribution.py`.
+      Integration: `tests/integration/test_pool_overrides_api.py` covers each of the three
+      override-write scenarios through the typed client, asserting the site was not called
+      and the stored override is unchanged; `tests/integration/test_publication_loop.py`
+      covers a configured default reaching a publication cycle and the new report keys in
+      system status.
+- [ ] 5.4 Helm: run `make helm-values-schema` and confirm the generated schema is
+      unchanged (`[admissibility]` is an untyped section, as `[pricing]` is), or run the
+      chart render tests if it changed.
+- [ ] 5.5 Verify: the VM storefront unit and integration suites, and `make check-packaging`.
+
+## 6. End-to-end scenario
+
+Delivers system-level evidence that a constrained stated shape crosses the site,
+storefront, and registry boundary as its base shape. Implements D5 and D10 at the system
+level. Touches `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`. No Helm
+checks owed unless the lane's configuration changes.
+
+- [ ] 6.1 Extend the listing-shapes scenario: the pool states a shape with
+      `gpu.count {offer: 1, max: 4}` and `memory.gib {max: 512}` through the site's
+      operator client; one publication cycle publishes a listing with a GPU count of 1 and
+      no `ram_gb`, and the registry listing carries no constraint. Use typed clients only.
+- [ ] 6.2 Verify: run the VM lane with `make run-e2e` and
+      `make fetch-e2e-logs E2E_RUN_ID=<run>`; the evidence is recorded in 7.9.
+
+## 7. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`. Promotion (7.10) follows the
+pre-closeout review, as `AGENTS.md` asks.
+
+- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match;
+      read the new kit and every touched module for references to reviews or migrations.
+- [ ] 7.2 **Import placement.** Review the imports sections 1–5 added or touched. The
+      local import of `market_resource_pools` in `listing_shapes.py` stays local for its
+      recorded reason (buyers install the listings package without the pool kit).
+- [ ] 7.3 **Documentation compliance.** Check every decision's destination against
+      `openspec/README.md#documentation-placement`. Verify the design's risk controls
+      directly: nothing outside the kit walks a constraint mapping, a `Declaration`, or a
+      `ResolvedPolicy`; every `listing_shapes` reader (`grep raw_listing_shapes`,
+      `resolve_vm_listing_shapes`, the override contribution) splits through the kit
+      before using a shape; no unconditional `admissible_values` answer is cached.
+- [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      validation evidence, deferrals, and destinations.
+- [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md` Goal 2, remove the gap row
+      "Nothing expresses which shapes a seller will consider…" (now closed), add stated
+      constraints and the configured default to the current-state description, and
+      correct the sentence saying the seller's feasibility check compares no quantitative
+      dimension (the inventory guard checks the published quantity against its source).
+- [ ] 7.6 **Campaign index currency.** In `openspec/changes/README.md`: update this
+      change's row; remove it from `publish-shape-bounds`'s `Depends on` (its status
+      `ready for design` stays); update `negotiation-driven-capacity-resize`'s Notes, whose
+      task 2.4 depends on this change (it has begun implementing, so its status stays);
+      update the Goal 2 dependency graph. Check each item under design.md's "Findings
+      outside this change" against `openspec/changes/` and list the unowned ones in the
+      index's unowned-work table for this goal.
+- [ ] 7.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=capacity-shape-envelope` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+- [ ] 7.8 **Packaging.** Run `make check-packaging` and resolve every failure.
+- [ ] 7.9 **End-to-end pipeline.** Confirm the pipeline passes and record the run, its
+      result, and that `test_listing_shapes.py` (6.1) exercises this change. If it cannot
+      run for an unrelated reason, record the blocker and its owning change, and treat the
+      gated validations as unrun.
+- [ ] 7.10 **Promotion.** Write the permanent documentation below, then complete the
+      design-promotion record:
+      - `openspec/specs/market-composition/spec.md`: the two added requirements, synced
+        from the delta.
+      - `openspec/specs/market-composition/architecture.md`: a new section
+        "Capability shape admissibility", after "The compute family vocabulary": why the
+        interface takes whole shapes and returns no unconditional bounds (coupled
+        constraints, counter-proposals), why occupancy is excluded, why constraints sit
+        inline on the listing, and why a requirement that a dimension be stated is not a
+        constraint.
+      - `openspec/specs/resource-pool-management/spec.md`: the modified "Listing-shape hint
+        validation".
+      - `openspec/specs/storefront-publication/spec.md`: the modified "Every VM listing is
+        a listing shape" and the three added requirements.
+      - `openspec/specs/storefront-publication/architecture.md`: a new subsection
+        "Shape constraints" under "Listing shapes and the storefront's authority":
+        admissibility is the storefront's policy and a site's constraint an advisory
+        input; why an uncomputable policy closes one listing where pricing and an
+        unreadable shape list hold.
+      - `docs/development/ARCHITECTURE.md`: the kit-layers foundation list gains
+        `kit/capability-admissibility`; "Omission states no commitment" gains that an offer
+        without a range commits nothing about negotiability; a new subsection under
+        "Authority boundaries", "Holding or closing a listing the storefront cannot fully
+        derive", states the test as a framework with brief examples (pricing and an
+        unreadable shape list hold, uncomputable admissibility closes); the "VM listing
+        shapes a storefront publishes" authority row adds the constraints and the
+        configured default.
+      - `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Storefront listing shapes and pool
+        overrides": the inline `{offer, min, max}` form, `[admissibility.defaults.vm]`,
+        what pool and override writes refuse, local-table derivation, and the rollback
+        procedure from design.md's Migration Plan.
+      - `openspec/specs/README.md`: unchanged, since every companion already exists;
+        record that disposition.
+      - Not promoted here: the negotiation invariant and omitted-dimension policy, which
+        `negotiation-driven-capacity-resize` owns.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| Admissibility is a whole-shape predicate plus a per-dimension range query, never readable bounds | `openspec/specs/site-capacity/spec.md` — "Capacity shape admissibility" |
-| Admissibility is answered from declared pool policy and is independent of current availability | Same requirement |
-| An unbounded pool admits every shape | Same requirement |
-| Why the interface is shaped for a coupled, occupancy-dependent feasible region despite a static first implementation | `openspec/specs/site-capacity/architecture.md` |
-| Bounds reuse the pool hint mechanism rather than a new configuration channel | This change's `design.md` |

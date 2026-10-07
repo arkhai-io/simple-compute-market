@@ -107,7 +107,9 @@ schema, labelling each tier, and SHALL NOT read a constraint itself. Under the `
 merge a listing MAY replace a configured default's value, including with a wider one, and
 SHALL NOT remove it. A generated shape's policy SHALL be the configured default alone. A
 field no tier constrains SHALL NOT be constrained by admissibility. An override's shapes
-SHALL NOT merge with the hint's constraints. The resolved policy is the storefront's own;
+SHALL NOT merge with the hint's constraints. A listing derived from the storefront's local
+tables SHALL take the configured default alone as its policy, and SHALL be derived only for
+GPU counts that policy admits, chosen from the admissibility kit's admissible values. The resolved policy is the storefront's own;
 site admission is not changed by it. A malformed configured default SHALL prevent the
 storefront from starting. The storefront SHALL parse the configured default once and
 supply the same declaration to publication, the default generator, and the override
@@ -134,6 +136,12 @@ write check.
 - **WHEN** the pool's hint constrains `gpu.count` on its shapes and the storefront's
   override states a shape that constrains nothing
 - **THEN** the override's listing is constrained only by the configured default
+
+#### Scenario: Local-table derivation meets a configured default
+
+- **WHEN** the storefront derives listings from its local tables, a pool's members hold 8
+  GPUs, and the configured default bounds `gpu.count` to at most 4
+- **THEN** listings are derived for 1 to 4 GPUs only, and nothing is reported
 
 #### Scenario: No tier constrains a field
 
