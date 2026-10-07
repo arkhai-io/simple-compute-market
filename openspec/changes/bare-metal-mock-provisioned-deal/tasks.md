@@ -3164,7 +3164,8 @@ re-verifies them by grep before each move.
             environment cannot run a suite; the three locks its reinit rewrote were restored;
           - `make check-locks`, `make check-packaging`, comment hygiene, the change's
             documentation citations, and OpenSpec strict validation (1.14.0) pass.
-        - Not yet run end to end.
+        - End-to-end: run 37581956819, on the 5B.12.D checkpoint that carries this slice;
+          see 5B.12.D's note.
   - [x] 5B.12.D Lease registration removed. The gate was decided on 2026-10-06
         (`design.md`, "5B.12.D decision gate (2026-10-06)"): a lease with no negotiated
         start begins at commit, for every domain; the storefront owns the rule as policy,
@@ -3175,8 +3176,9 @@ re-verifies them by grep before each move.
             unchanged, whatever window it names) and takes the deal's correlation,
             recording an escrow the reservation lacks; `attach_lease` and the registration
             refusal set give way to an in-session write of the executor target, like
-            `record_create_handle_in_session`, refused on a releasing, release-failed, or
-            unmanaged reservation and on a different recorded target;
+            `record_create_handle_in_session`, which records a target where none is,
+            skips a terminal reservation, and keeps a different recorded target (as built;
+            the activation's handling of a failed write is amended by 5B.12.D.D);
           - `authority.py`: the registration port goes; `router.py` and `http_models.py`:
             commit's request carries the deal's correlation.
         - Commit's other layers carry the correlation: `kit/site-client`,
@@ -3290,8 +3292,76 @@ re-verifies them by grep before each move.
             re-hand-locked from their snapshot form;
           - `make check-locks`, `make check-packaging`, comment hygiene, the change's
             documentation citations, and OpenSpec strict validation (1.14.0) pass.
-        - Not yet run end to end. The wire break is accepted: both storefronts and
-          provisioning move in this slice, and the end-to-end run is the evidence.
+        - End-to-end: run 37581956819, on this checkpoint (5B.12.C and 5B.12.D together),
+          installed compute-provisioning-service 0.17.0, compute-provisioning 0.19.0,
+          contracts 0.9.0, compute client 0.6.0, vms-provisioning-adapter 0.13.0,
+          bare-metal-provisioning-adapter 0.9.1, vms-storefront 0.14.0,
+          bare-metal-storefront 0.10.0, kit-site 0.10.0, kit-site-client 0.9.0, core
+          storefront 0.10.0, and e2e-tests 0.1.8. The VM lane passed 135 and the bare-metal
+          lane 16; nothing failed or was skipped. Neither lane's logs show a traceback, a
+          5xx, a 401, or a 403, and no request reached the removed registration route; the
+          4xx responses are the API-credit lane's 402s on an exhausted grant, scenarios'
+          404 checks for pools and listings before creating them, and the bare-metal
+          introduction scenario's 410s once an operator deleted the payloads. Stage 09c
+          found both full deals' leases by their escrow, active, which an acceptance hold
+          learns only at commit now. Expired leases were released. Both storefronts and
+          provisioning moved together, as the accepted wire break requires. The bare-metal
+          lane is the only exercise of the hosted path's commit-then-materialize.
+  - [ ] 5B.12.D.D Fixes from the implementation review of 5B.12.C and 5B.12.D (2026-10-07;
+        `design.md`, "Implementation review of 5B.12.C and 5B.12.D").
+        - Lease targets (finding 1), in the provisioning service's
+          `services/fulfillment_convergence.py`:
+          - `_record_executor_target` catches only `ProviderConfigInvalidError` and
+            `CapacityConflictError`, which keep the activation and are logged; any other
+            failure escapes, the activation rolls back, and `_converge_create_record`'s
+            retry leaves the record `dispatching` for the next cycle;
+          - `run_cycle` ends with a sweep (`reconcile_lease_targets`): in one write
+            transaction, the active fulfillments on non-terminal reservations, joined to
+            their reservations; each whose reservation records no target is recorded
+            through `record_executor_target_in_session` where it now succeeds; the cycle's
+            diagnostics log event gains counts of targets repaired, of those it could not
+            record by reason, and of reservations recording a different target, never
+            overwritten. A composition with no ledger sweeps nothing.
+        - Guest name (finding 2): `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`
+          pins `fulfillment_guest_name("alloc-1") == "tenant-ea780533c5915a9b85ba26b9"`.
+        - Deltas (finding 3), written with this plan: `physical-provisioning`'s "Leases have one family surface
+          that records and releases" lists get, list, terminate, and the release controls,
+          its bare-metal scenario has the target recorded at activation, and the admin-route
+          scenario's example becomes lease termination; "A lease's executor identity and
+          evidence are fixed once recorded" states finding 1's rule (a data failure keeps
+          the activation, any other failure retries it, and convergence keeps recording
+          a missing target and reports what it cannot); `site-capacity` says "once
+          committed". 5B.12.D's task text states the write as built.
+        - Escrow (finding 4): the VM storefront's
+          `controllers/admin_controller.py` fulfillment-failed handler takes the request's
+          escrow, else the reservation's `escrow_uid`, else its `deal_ref`'s.
+        - Closeout task 2.6 gains: the fulfillment-failed callback has no production
+          sender; a deliberate operation to resolve a reservation whose recorded target
+          differs from its fulfillment's is needed once anything acts on the site's
+          target.
+        - Tests:
+          - service integration (`tests/integration/test_fulfillment_convergence.py`,
+            over the settlement database and a ledger stand-in, as 5B.12.D's activation
+            tests):
+            - a ledger failure other than a data error leaves the record `dispatching`
+              and records nothing; the next cycle activates it and records the target;
+            - a data error keeps the activation;
+          - service integration against the real site ledger (a new
+            `tests/integration/test_lease_target_reconciliation.py`, both kits' tables in
+            one SQLite database): an active fulfillment whose reservation records no
+            target is repaired by the sweep; a second sweep changes nothing; a different
+            recorded target is never overwritten and is counted; a fulfillment whose
+            target cannot be recorded is counted by reason; a terminal reservation and a
+            fulfillment that is not active are left alone;
+          - VM adapter: the fixed vector;
+          - VM storefront (`tests/integration/test_admin_api.py`): a fulfillment-failed
+            callback naming no escrow, on a hold whose commit recorded one, reaches the
+            failure policy with that escrow.
+        - Versions: compute-provisioning-service 0.17.1 and vms-storefront 0.14.1; no
+          other package changes behaviour.
+        - Validation: the provisioning service, the VM adapter, the VM storefront by
+          frozen sync, the root aggregate, `make check-packaging`, comment hygiene,
+          citations, OpenSpec, and both end-to-end lanes.
   - Each slice's gate: the provisioning-family suites, both adapters, both storefronts (the
     VM storefront by frozen sync), the e2e unit suite and collection, the root aggregate,
     `make check-packaging`, comment hygiene, documentation citations, OpenSpec strict
@@ -3569,6 +3639,12 @@ service code.
       provisioning service's authentication middleware raises on an authenticated
       request whose method and path match no route contract, so such a request answers
       500 rather than 404 or 405.
+      Found in the review of 5B.12.C and 5B.12.D: the VM storefront's fulfillment-failed
+      callback has no production sender, as usage-started has none; decide whether the
+      route stays. Nothing acts on a reservation's recorded executor target today; should
+      something come to (reclaiming by target, or `find_active_lease_by_vm_target`), a
+      deliberate operation to resolve a reservation whose recorded target differs from
+      its fulfillment's is needed with it, since convergence only reports that case.
       Found at 5B.12.D's gate: a storefront's rule for when a lease with no negotiated
       start begins, set as storefront policy like its service agreements, with an optional
       pool listing hint taking second place; only "at commit" exists, and "on activation"

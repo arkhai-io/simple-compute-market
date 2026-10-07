@@ -338,7 +338,7 @@ admit `admin` MUST be refused when the table is assembled.
 #### Scenario: An operator calls a storefront route
 
 - **WHEN** a request signed by the provisioning administrator calls a route that also
-  admits the seller, such as lease registration or fulfillment begin
+  admits the seller, such as lease termination or fulfillment begin
 - **THEN** it is authorized as it would be for the seller
 
 #### Scenario: A domain contributes a seller-only route
@@ -349,10 +349,10 @@ admit `admin` MUST be refused when the table is assembled.
 ### Requirement: Leases have one family surface that records and releases
 
 Compute provisioning MUST serve every offering mode's leases through one route surface
-returning the neutral lease view: register, get, list, terminate, release-oversight,
-retry-release, and force-release. Register, get, and terminate MUST admit the seller and
-the administrator; list, release-oversight, retry-release, and force-release MUST admit
-the administrator only. A lease MUST be addressed by its capacity reservation identifier;
+returning the neutral lease view: get, list, terminate, release-oversight, retry-release,
+and force-release. Get and terminate MUST admit the seller and the administrator; list,
+release-oversight, retry-release, and force-release MUST admit the administrator only. No
+lease route writes a lease. A lease MUST be addressed by its capacity reservation identifier;
 the list MAY filter by lease status and offering mode and MUST NOT filter by a deal's
 commercial identity or by host. A lease route MUST NOT deliver: no lease route grants
 access, creates a workload, or submits provider work, and a domain MUST NOT add or
@@ -372,16 +372,20 @@ versioned projection.
 #### Scenario: Bare-metal access is granted
 
 - **WHEN** a bare-metal deal is delivered
-- **THEN** access is granted only through the fulfillment aggregate, and the lease is
-  registered on the reservation afterwards, recording only
+- **THEN** access is granted only through the fulfillment aggregate, and provisioning
+  records the machine as the lease's target when the fulfillment becomes active
 
 ### Requirement: A lease's executor identity and evidence are fixed once recorded
 
 No caller writes a lease. Commit MUST record a lease's window; provisioning MUST record its
 executor target when the reservation's fulfillment becomes active, in the transaction that
 makes it active, as the target that fulfillment recorded; and the lease lifecycle records
-release. A recorded target MUST NOT be replaced, and a failure to record one MUST NOT fail
-the activation. No route MAY change a lease's executor identity, its start, or its create or
+release. A recorded target MUST NOT be replaced. A target the data prevents recording
+(metadata naming no job-backed target, or a reservation the site refuses) MUST NOT fail
+the activation; any other failure to record it MUST leave the fulfillment unactivated, for
+convergence to retry. Convergence MUST keep recording the target of every active
+job-backed fulfillment whose reservation records none, and MUST report each it cannot
+record and each reservation that records a different target. No route MAY change a lease's executor identity, its start, or its create or
 release handles once recorded, and its end MAY move only through the site authority's lease
 truncation.
 
@@ -394,7 +398,21 @@ truncation.
 #### Scenario: A target is already recorded
 
 - **WHEN** a fulfillment becomes active on a reservation that already records another target
-- **THEN** the recorded target is kept, and the fulfillment still becomes active
+- **THEN** the recorded target is kept, the fulfillment still becomes active, and each
+  convergence cycle reports the difference
+
+#### Scenario: Recording the target fails for a reason other than the data
+
+- **WHEN** recording the target fails while a fulfillment becomes active, other than for
+  its data
+- **THEN** the fulfillment stays unactivated, and a later convergence cycle activates it
+  and records the target
+
+#### Scenario: An active fulfillment's lease records no target
+
+- **WHEN** a convergence cycle finds an active job-backed fulfillment whose reservation
+  records no target
+- **THEN** it records the target where it now can, and reports it where it cannot
 
 #### Scenario: A lease body is posted
 

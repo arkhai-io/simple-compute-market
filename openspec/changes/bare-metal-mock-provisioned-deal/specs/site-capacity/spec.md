@@ -93,7 +93,7 @@ Ending a lease early MUST only move its lease end earlier. A truncation naming a
 than the current one MUST be refused. A truncation of a `reserved`, `provisioning`,
 `releasing`, `release_failed`, or `unmanaged` reservation MUST be refused and MUST NOT change
 its state: an uncommitted hold is ended by releasing it, not by truncation. Once a lease is
-registered, truncation is the only operation that moves its end.
+committed, truncation is the only operation that moves its end.
 
 #### Scenario: A storefront ends an uncommitted hold
 
