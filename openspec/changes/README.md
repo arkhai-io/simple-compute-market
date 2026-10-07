@@ -108,7 +108,7 @@ and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchang
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; review-round design accepted, planning next; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
+| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; review-round §5 planned, §6 merge and §7 closeout follow; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
 | [`spot-deals-through-arkhai-payments`](spot-deals-through-arkhai-payments/) | design phase; depends on payments `rate-parts` and `route-settlement-by-mechanism` | VM interruptible deals settle through an `arkhai.payments.v1` rate part with `until: stop`. The VM payment seller stage tears down by the signed funded-through time or on a stop event, and seller preemption and buyer cancellation issue stops |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation

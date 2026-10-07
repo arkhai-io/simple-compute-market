@@ -116,7 +116,7 @@ Rejected: 400 for an invalid receipt (blames the buyer), 502 (commonly retried b
 - **Storefront integration:** VM through `StorefrontClient.settle_agreement` and `refund_settlement` over `ASGITransport`, with the real app, SQLite and DI, replacing only the payments-client provider at `PaymentsClient`. Cases: pending then verified, an impostor-signed receipt, a receipt for another mandate, unavailable, idempotent repeat, refund, and the `refund` failure action. Bare metal and API credits each prove one happy path and one invalid receipt.
 - **System:** one API-credit payment scenario covering publication, discovery, negotiation, approval, receipt-gated issuance, status, recovery, and a seller refund stage. It is readiness-gated: it reports blocked, never mocked, when no payments target is reachable. VM and bare-metal payment variants remain live-qualification gaps.
 
-No test can build a receipt over its own Agreement without signing it. The published vector receipt covers a fixed three-part mandate with nonce `vector-1` and a placeholder deal, which no accepted Agreement derives. The kit therefore exposes `receipt_message(receipt)`, the bytes its verifier checks, and ships `market_arkhai_payments.fixtures.receipts` (`sign_receipt`, `build_signed_receipt`), which takes an injected signer and ships no key material. Its unit test reproduces the vector's message and signature byte for byte. This was checked against the current kit: message, issuer, and signature all match. `kit/identity` exposes its field framing as a public function so the payments kit stops importing `market_identity.canonical._frame`. `domains/vms/storefront/examples/payment_smoke.py` uses the fixture. The `TESTING.md` amendment that makes this compliant is under [Accepted permanent wording](#accepted-permanent-wording).
+No test can build a receipt over its own Agreement without signing it. The published vector receipt covers a fixed three-part mandate with nonce `vector-1` and a placeholder deal, which no accepted Agreement derives. The kit therefore exposes `receipt_message(receipt)`, the bytes its verifier checks, and ships `market_arkhai_payments.fixtures.receipts` (`sign_receipt`, `build_signed_receipt`), which takes an injected signer and ships no key material. Its unit test reproduces the vector's message and signature byte for byte. This was checked against the current kit: message, issuer, and signature all match. `kit/identity` exposes its field framing as a public function so the payments kit stops importing `market_identity.canonical._frame`; that step runs after the merge ([P1](#p1-the-identity-framing-function-goes-public-after-the-merge)). `domains/vms/storefront/examples/payment_smoke.py` uses the fixture. The `TESTING.md` amendment that makes this compliant is under [Accepted permanent wording](#accepted-permanent-wording).
 
 ### R4. One payments mechanism implementation
 
@@ -330,6 +330,40 @@ Replace the scenarios "Buyer approves with an optional Agreement attachment" and
 ```
 
 The receipt-outcome classification (R2), the neutral settle response fields (R4), bare-metal settle-starts-delivery (R6), and the refund route (R7) are written as requirements in the same capability during implementation, following the decisions above.
+
+## Planning findings
+
+Found while naming files for the review-round plan. Each refines how a decision is carried out; none reopens one.
+
+### P1. The identity framing function goes public after the merge
+
+Exposing framing publicly is new API on `arkhai-kit-identity`, which needs a version bump. About fifteen packages here and twenty-five on the development branch pin it exactly (`==0.3.0`), so bumping now means repinning and relocking every one of them, then repeating that in the merge. Until the merge, `receipt_message` in the payments kit remains the single framing implementation that both the verifier and the receipt fixture call, still importing `_frame`; R3's test rule holds without the identity change. After the merge, `frame_fields` becomes public, the identity kit is bumped once, and every pin moves in one step.
+
+### P2. `make check-packaging` exists only on the development branch
+
+This tree has no `check-packaging` target. There, it runs uv-setup, lock-currency, Python-version and project-layout checks. Before the merge the gate is `make dist`, a lock-currency check in every changed project against `.dist` (`uv lock --check --find-links .dist`), and typing for changed packages. `make check-packaging` runs on the merged tree.
+
+### P3. Bare-metal settlement records gain `refunded` in place
+
+`bare_metal_settlement_records.status` has `CHECK (status IN ('accepted', 'settlement_verified'))`, which SQLite cannot alter. The table is new on this unmerged branch. Following task 4.0's precedent, migration `bare-metal-storefront-0008-settlement-records` is edited in place to admit `refunded` rather than adding a rebuild migration that would also need renumbering over the development branch's chain. VM and API credits record `refunded` in the unconstrained `escrows.status`.
+
+### P4. The kit takes an injected client factory
+
+The kit's seller stage and buyer approval take a `client_for_owner` callable, defaulting to `payments_client_for_owner(config, owner)`. Integration tests replace it with a fake `PaymentsClient`, which is the code that wraps the payments boundary. The fake ships beside the receipt fixture as `market_arkhai_payments.fixtures.payments_client` so the kit and all three storefront suites share one fake.
+
+### P5. A refund re-checks the receipt itself
+
+API credits verifies each receipt on demand and stores none, so a refund cannot rely on a stored receipt. The kit's reversal therefore checks the current receipt first. It needs `Verified`, otherwise it returns not-paid (409) or unavailable (503); then it calls `reverse`. Payments-service codes map exactly:
+
+- `transaction_not_found` → not paid, 409;
+- `hold_matured`, `hold_not_reversible`, `insufficient_held_funds` → nothing left to reverse, 409;
+- transport, protocol and every other code → unavailable, 503.
+
+The same mapping serves the `refund` failure action.
+
+### P6. `refunded` is never overwritten
+
+The R8 failure action can record `refunded` while a domain's own failure path is about to record `failed` (VM's payment coordinator after a not-fulfilled result; API credits' issuance failure). Those writes become conditional on the current status not being `refunded`, and `settle` checks `refunded` before checking the receipt.
 
 ## Merge with the development branch
 

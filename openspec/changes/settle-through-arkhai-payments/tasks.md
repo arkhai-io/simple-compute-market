@@ -48,3 +48,169 @@ Dependency: exact Agreement bytes from Section 2.
   Shared registry/config/client helper replaces the local surface without shims. Buyer payer input and accepted seller owner stay separate from service policy. Checks: buyer 17, storefront 70, domain 35, service 32, kit 7; kit typing/vectors/generated models pass. Evidence and runnable configuration first use: `docs/attachments/settle-through-arkhai-payments/index.md#api-credit-shared-configuration-254`. Real-ledger phases updated, not rerun.
 - [x] 4.7 Close out SCM #254: run Ruff on touched files, comment hygiene and strict change validation; check introduced imports and permanent configuration docs, record evidence and promotion, and compress final task notes. No roadmap change: this restores the already-promoted shared-kit boundary without changing Goal 6.
   Ruff correctness/import checks, comment hygiene and strict validation pass; no new local imports. Permanent destinations: settlement-configuration spec/architecture and deployment/config guide; promotion record updated. Recovery import shadowing and canonical publication booleans repaired separately; existing assertions retained.
+
+## 5. Review round: one payments mechanism, agreement settlement, seller refunds
+
+Decisions: `design.md#review-round-decisions` (R1–R10) and `design.md#planning-findings` (P1–P6). This section runs on this branch before the merge; §6 runs on the merged tree.
+
+Dependencies:
+- 5.1 comes first; every other task consumes it.
+- 5.2 precedes the domain tasks 5.3–5.5, which are independent of each other.
+- 5.6 needs 5.3 and 5.5.
+- 5.7 needs 5.2–5.6.
+
+No compatibility shims: the settlement-data shape, settle response fields, and client method names change directly on this unmerged branch.
+
+- [ ] 5.1 **Payments kit: one mechanism implementation** (R2, R4, R5, R7, P4, P5).
+  - `kit/arkhai-payments/src/market_arkhai_payments/agreement.py` (new): `mandate_policy_for_agreement(agreement, config, *, expected_payer=None)`, replacing the four copies, and `PaymentSettlementData` `{mandate, transaction_id}` with construction from an Agreement and validation of stored data against exact Agreement bytes.
+  - `.../seller.py` (new): receipt outcomes `ReceiptPending`, `ReceiptVerified`, `ReceiptInvalid`, `ReceiptUnavailable`; refund outcomes `Refunded`, `NotPaid`, `NothingToReverse`, `RefundUnavailable`; `PaymentSellerStage(config, client_for_owner=...)`. The stage provides:
+    - settlement data at acceptance;
+    - a single-`GET` receipt check;
+    - stored-receipt re-check;
+    - `deposit_if_advertised`;
+    - `reverse`, which re-checks the receipt first and maps service codes as P5 lists.
+  - `.../buyer.py` (new): `PaymentApproval(config, payer_account, client_for_owner=...)`. Its `approve` validates Agreement bytes, the seller's transaction ID, and the optional advertised option; it attaches only under `attach_agreement`, approves, verifies the approval receipt, polls, and verifies the snapshot receipt. It never calls `ensure_agreement_attached`.
+  - `.../receipts.py`: add `receipt_message(receipt)`; `verify_receipt_signature` uses it.
+  - `.../settlement_config.py`: `attach_agreement: bool = False`; the seller-role preflight reports blocker `arkhai_payments.attach_agreement_buyer_only` when it is true. `payments_client_for_owner` is unchanged.
+  - `.../fixtures/__init__.py`, `.../fixtures/receipts.py` (`sign_receipt`, `build_signed_receipt`), `.../fixtures/payments_client.py` (`FakePaymentsClient`: serves a receipt or none, simulates unavailable and service error codes, records approve/attach/reverse calls).
+  - `.../__init__.py`: export the new public API.
+  - `kit/arkhai-payments/README.md` and `kit/arkhai-payments/examples/local_e2e.py`: use the stage and approval API.
+  - Tests, all new under `kit/arkhai-payments/tests/`:
+    - `test_mandates.py`: hold rounding up, approval expiry rounding down, authorities, nonce, fee, per-field `check` tamper rejection.
+    - `test_receipts.py`: scheme, issuer, signature, deal, from, to.
+    - `test_client.py` (`httpx.MockTransport`): not-found, API errors, protocol errors, redirect, attachment.
+    - `test_seller.py`: every receipt and refund outcome, deposit ordering, single `GET`.
+    - `test_buyer.py`: approval checks and the attachment policy truth table.
+    - `test_agreement.py`: settlement-data shape and stored-data validation.
+    - `test_receipt_fixture.py`: byte-exact reproduction of the published vector.
+    - `test_settlement_config.py` (extend): the seller-role blocker.
+  - Bump `kit/arkhai-payments/pyproject.toml` to 0.2.0.
+  - Validation: kit `make test` (typing, vectors, generated models, unit).
+
+- [ ] 5.2 **Core carriers and the typed client** (R1, R4, R7).
+  - `core/storefront/src/core_storefront/models/settle_models.py`: `AgreementSettleResponse` (`negotiation_id`, `escrow_uid` equal to the negotiation ID, `settlement_ref`, `status`, `retryable`, domain fields allowed), `RefundSettlementResponse` (`negotiation_id`, `settlement_ref`, `status`). Bump `core/storefront/pyproject.toml` to 0.4.0.
+  - `core/storefront-client/src/storefront_client/client.py`, async and sync:
+    - rename `settle` to `settle_evm`;
+    - add `settle_agreement(negotiation_id, *, request_id=None)` (buyer, `settle_escrow`, `/api/v1/settle/{negotiation_id}`, body `{negotiation_id, buyer_principal}`);
+    - add `refund_settlement(negotiation_id, *, request_id=None)` (seller, `refund_settlement`, `POST /api/v1/settlements/{negotiation_id}/refund`, empty body).
+  - `core/storefront-client/src/storefront_client/models.py`: matching response dataclasses.
+  - `core/storefront-client/src/storefront_client/__init__.py`: exports.
+  - Bump `core/storefront-client/pyproject.toml` to 0.18.0.
+  - Repin consumers: `domains/vms/storefront/pyproject.toml` and `e2e-tests/pyproject.toml` (`>=0.18.0`), `provisioning/compute/service/pyproject.toml` (`==0.18.0`).
+  - Rename callers: `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`, `.../test_non_erc20_settlement.py`.
+  - Tests:
+    - `core/storefront-client/tests/test_settlement_requests.py` (new): bodies, routes, roles, and operations for all three methods, async and sync.
+    - `domains/vms/storefront/tests/unit/test_storefront_client_parity.py` (new): public method names and signatures match across `StorefrontClient` and `SyncStorefrontClient`. It sits in the owning service's suite, per `TESTING.md`.
+
+- [ ] 5.3 **VM** (R2, R4, R5, R7, R8, P4, P6).
+  - Storefront `domains/vms/storefront/src/market_storefront/`:
+    - `arkhai_payments.py`: tombstone; replaced by the kit stage.
+    - `settlement_composition.py`: build `PaymentSellerStage` only from ready configuration; a not-ready payments registration composes no stage.
+    - `negotiation_runtime.py`: settlement data from `PaymentSettlementData`.
+    - `payment_settlement.py`:
+      - the coordinator consumes the R2 outcomes;
+      - it checks `refunded` first;
+      - it deposits before delivery;
+      - its `failed` write is conditional on the status not being `refunded`;
+      - add `refund(negotiation_id, thread)` writing `refunded`, inserting the escrow row when absent.
+    - `controllers/settle_controller.py`: outcome-to-HTTP mapping (202/409/503), the `AgreementSettleResponse` neutral fields, and `POST /settlements/{negotiation_id}/refund` on the existing empty `settlements_router` (non-payment mechanisms → 409).
+    - `middleware/seller_auth.py`: resolve the refund path as seller mutation `refund_settlement` bound to the negotiation ID, authorized without a listing lookup.
+    - `services/fulfillment_resume_runtime.py`: validate stored settlement data through the kit.
+    - `failure_actions.py`: `refund` dispatches on the deal's Agreement mechanism; the payments branch reverses only when nothing was delivered (no `ready` escrow status and no active fulfillment) and records `refunded`.
+    - `domains/vms/storefront/examples/payment_smoke.py`: receipts from the kit fixture and no `_frame` import.
+  - Buyer `domains/vms/buyer/`:
+    - `arkhai_payments.py`: `VmArkhaiPaymentsBuyer` replaced by the kit `PaymentApproval`; `VmSettlementTransport` stays (R1).
+    - `pyproject.toml`: relock.
+  - Tests:
+    - `domains/vms/storefront/tests/integration/test_payment_settlement.py` (new): through `StorefrontClient.settle_agreement` and `refund_settlement` over `ASGITransport`, with the real app, SQLite and DI, and `FakePaymentsClient` injected through the stage's client factory. Cases:
+      - pending, then verified;
+      - impostor-signed receipt → 409, no delivery;
+      - receipt for another mandate → 409;
+      - unavailable → 503;
+      - deposit before delivery, and a failed deposit → 503 without delivery;
+      - idempotent repeat;
+      - refund before delivery blocks a later settle;
+      - repeated refund issues one `reverse`;
+      - matured hold → 409;
+      - buyer-signed refund rejected;
+      - `refund` failure action enabled reverses once and records `refunded`; disabled reverses nothing;
+      - a concurrent `failed` write does not overwrite `refunded`.
+    - Update `domains/vms/storefront/tests/unit/test_settlement_composition.py` and `test_server_app_composition.py`, and VM buyer tests under `domains/vms/buyer/tests/`.
+  - Validation: VM storefront `make test` (unit and integration), VM buyer `make test`.
+
+- [ ] 5.4 **Bare metal** (R2, R4, R5, R6, R7, P3).
+  - Storefront `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`:
+    - `arkhai_payments.py`: tombstone.
+    - `settlement_composition.py`: kit stage and `settlement_data_dispatch` through `PaymentSettlementData`.
+    - `settlement_service.py`:
+      - R2 outcomes;
+      - deposit, then call `fulfillment_service.begin` after a verified receipt, as R6 specifies;
+      - add `refund`.
+    - `fulfillment_service.py`: `begin` refuses a `refunded` record.
+    - `api.py`: payment settle response mapping; `POST /api/v1/settlements/{negotiation_id}/refund` with a new `_seller` helper over `_principal`.
+    - `models.py`: the payment path returns `AgreementSettleResponse` with lifecycle fields; the Alkahest responses are unchanged.
+    - `sqlite_client.py`: `mark_bare_metal_settlement_refunded`.
+    - `migrations.py`: migration 0008's CHECK admits `refunded` (P3).
+    - The Alkahest `begin` route stays on this tree.
+  - Buyer `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/`:
+    - `arkhai_payments.py`: kit `PaymentApproval`; `BareMetalSettlementTransport` stays.
+    - `cli.py`: the payment flow retries `settle` while `pending`, then polls fulfillment status, with no `begin` call.
+  - Packaging:
+    - `domains/bare_metal/{storefront,buyer}/pyproject.toml`: payments kit `==0.2.0`.
+    - The storefront dev group adds `arkhai-core-storefront-client>=0.18.0`.
+    - Relock.
+  - Tests:
+    - `domains/bare_metal/storefront/tests/test_payment_settlement_client.py` (new), through the typed client with `FakePaymentsClient`: verified starts fulfillment once; impostor receipt → 409 with no fulfillment; refund before delivery makes `begin` refuse.
+    - Update `domains/bare_metal/storefront/tests/test_http_settlement.py`, `test_persistence.py`, `test_fulfillment_service.py`, and the buyer tests.
+  - Validation: bare-metal storefront and buyer `make test`.
+
+- [ ] 5.5 **API credits** (R2, R4, R5, R7, R8, P5, P6).
+  - `domains/apicredits/settlement/payments.py`: remove `mandate_policy_from_agreement`; keep payer and publication-clause validation. Update `domains/apicredits/settlement/__init__.py`.
+  - Storefront `domains/apicredits/storefront/src/apicredits_storefront/`:
+    - `settlement_composition.py`: kit stage; `payment_settlement_artifacts` delegates to `PaymentSettlementData`.
+    - `services/payment_settlement_service.py` (new): the payment orchestration moved out of the controller. It uses R2 outcomes, checks `refunded` first, deposits before issuance, keeps the uncertain-issuance-is-pending behavior, makes its `failed` write conditional (P6), and adds `refund`.
+    - `controllers/settle_controller.py`: thin binding with the R2 mapping and neutral fields; the refund route.
+    - `middleware/seller_auth.py`: `make_seller_auth_dep(operation, resource_param="listing_id")`; the refund route binds `negotiation_id`.
+    - `services/fulfillment_service.py`: a `refund` handler on the failure policy, dispatching on mechanism, pre-delivery only.
+    - `server.py`: wiring.
+  - Buyer `domains/apicredits/buyer/payments.py`: kit `PaymentApproval`, keeping its listing and option binding through `advertised_option`; `submit_settlement_request` stays.
+  - Packaging: the storefront dev group adds `arkhai-core-storefront-client>=0.18.0`; relock `domains/apicredits/{.,storefront,buyer}`.
+  - Tests:
+    - `domains/apicredits/storefront/tests/integration/test_payment_settlement.py` (new): verified issues once; impostor receipt → 409 with no grant; refund before issuance blocks a later settle; the `refund` failure action enabled reverses once.
+    - Update `tests/unit/test_settlement_fulfillment.py` and `test_sync_negotiation.py`, and `domains/apicredits/buyer/tests/test_settlement_composition.py`.
+  - Validation: API-credit domain, storefront, buyer, and service `make test`.
+
+- [ ] 5.6 **API-credit payment system scenario** (R3, R7).
+  - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py` (new), on `DomainDealState` and the profiled buyer CLI. Stages: publication, discovery, negotiation selecting `arkhai.payments.v1`, approval, receipt-gated issuance, consumption, status, restart recovery, then a seller refund through `StorefrontClient.refund_settlement` with the transaction observed reversed.
+  - `e2e-tests/src/settings.py` and `e2e-tests/config/config.yml`: optional payments target settings (service URL, receipt identity, buyer and payee accounts, credential environment names). `require_state` reports the scenario blocked when they are absent or the target is not ready.
+  - Register marker `e2e_credits_payment_deal` in `e2e-tests/pyproject.toml` and the API-credit lane expression in `e2e-tests/Makefile`.
+  - Validation: e2e unit suite; the scenario runs here only if a payments target is reachable, otherwise its blocked result is disclosed.
+
+- [ ] 5.7 **Diagnostics, comments, and the gate** (R3, R10, P2).
+  - `docs/attachments/settle-through-arkhai-payments/{vm_smoke,bare_metal_smoke,api_credit_smoke,smoke_common}.py`: move to the kit stage, approval, and fixture APIs; `index.md` records that they were updated, not rerun.
+  - `core/src/market_core/schemas.py`: current-state docstrings for `SettlementPlan` and `SettlementObligation` (R10); a neutral example in the `SettlementSelection.params` comment.
+  - Gate:
+    - `make dist`;
+    - `uv lock --check --find-links .dist` in every changed project;
+    - typing for `kit/arkhai-payments` and the changed storefronts against their recorded baselines;
+    - focused suites from 5.1–5.6;
+    - `make check-comment-hygiene`.
+
+    Disclose that `make check-packaging` is not available on this tree (P2).
+
+## 6. Merge with the development branch
+
+Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; the decisions are taken with the reviewer.
+
+- [ ] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`.
+- [ ] 6.2 Make `kit/identity`'s field framing public as `frame_fields`, use it in `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, bump `arkhai-kit-identity` once, and move every pin to it in one step (P1).
+- [ ] 6.3 Re-run every suite from §5 on the merged tree, then `make check-packaging` (P2), and resolve every failure.
+
+## 7. Closeout
+
+- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; read touched comments for review or migration provenance the target cannot catch.
+- [ ] 7.2 **Import placement.** Review each function-level import added or touched by §5–§6 and move it to module scope where safe, verifying with the relevant suites.
+- [ ] 7.3 **Documentation compliance.** Re-check R1–R10, P1–P6 and the merge outcomes against `openspec/README.md` placement. Reconcile the delta specs once: remove deferred §1 statements, add deltas for R1–R9, address the >500-character warnings, and pass `openspec validate settle-through-arkhai-payments --strict` (R10).
+- [ ] 7.4 **Narrative compression.** Compress §5–§6 notes to final behavior, validation evidence, unresolved work, and destinations; move any debugging narrative into `design.md` first.
+- [ ] 7.5 **Roadmap currency.** Goal 6 current state names agreement settlement, owned attachment policies, and seller-initiated refunds in `docs/development/ROADMAP.md`; the live-qualification row stays until a live run. Name the update in the promotion record.
+- [ ] 7.6 **Promotion.** Apply `design.md#accepted-permanent-wording` and every row of `design.md#planned-promotion`, then move each row into the design promotion record.
