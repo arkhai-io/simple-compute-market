@@ -73,9 +73,8 @@ Bare-metal storefront restart recovery MUST be proven by integration tests that 
 the production application over the same database. After a rebuild following settlement
 commit or teardown acceptance, the buyer MUST retrieve the same operation without a
 second obligation, mechanism selection, or physical teardown, and duplicate polling and
-result reads MUST be idempotent. An authenticated trading pause MUST survive the rebuild,
-refusing new negotiations until an authenticated resume. The end-to-end lane starts from
-empty state and does not restart services.
+result reads MUST be idempotent. The end-to-end lane starts from empty state and does
+not restart services.
 
 #### Scenario: Process stops after settlement commit
 
@@ -86,8 +85,3 @@ empty state and does not restart services.
 
 - **WHEN** teardown was accepted before the response was lost
 - **THEN** after the rebuild, recovery observes the same lease release operation and the site releases capacity once
-
-#### Scenario: Storefront is paused and restarted
-
-- **WHEN** an authenticated operator pauses the storefront and the application is rebuilt
-- **THEN** the paused state remains active and new negotiations are refused until an authenticated resume operation

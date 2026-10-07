@@ -118,9 +118,10 @@ Former tasks 3.5–3.6 are storefront behaviour proven at integration level.
       and after teardown acceptance; the buyer retrieves the same operation with no
       second obligation, mechanism selection, or teardown, and duplicate polling and
       result reads are idempotent. Planned in 7.7.
-- [ ] 3.6 **Pause survives restart.** In the same suite, an authenticated trading pause
-      remains active across the rebuild and new negotiations are refused until an
-      authenticated resume. Planned in 7.7.
+- [x] 3.6 **Withdrawn** 2026-10-07 (`design.md`, "Section 6 design: bare metal on the
+      negotiation runtime (2026-10-07)", decision 4): the trading pause is process-local
+      in every storefront, so nothing requires it to survive a restart, and its scenario
+      is dropped from the `test-compatibility` delta.
 
 ## 4. Executor selection and the compute mock mechanism
 
@@ -2569,7 +2570,7 @@ re-verifies them by grep before each move.
       402s API-credit exhaustion, the 410s introduction retention. Expired leases were
       released. The VM lane runs no relay, so 5B.10.D's port path is proven by the
       integration suites, not by this run.
-- [ ] 5B.12 Job-backed fulfillment. Re-planned 2026-10-05 before implementation, after the
+- [x] 5B.12 Job-backed fulfillment. Re-planned 2026-10-05 before implementation, after the
       design review (`design.md`, "Job-backed fulfillment (5B.12)"): the family owns the
       whole job-backed provider and one delivery contract; domains contribute preparation
       and their codec's output. Amended 2026-10-06 by the implementation audit (`design.md`,
@@ -3382,7 +3383,17 @@ re-verifies them by grep before each move.
             snapshot form, every lock's markers matching the snapshot;
           - `make check-locks`, `make check-packaging`, comment hygiene, the change's
             documentation citations, and OpenSpec strict validation (1.14.0) pass.
-        - Not yet run end to end.
+        - End-to-end: run 37590585800, on this checkpoint, installed
+          compute-provisioning-service 0.17.1 and vms-storefront 0.14.1, with
+          compute-provisioning 0.19.0, contracts 0.9.0, kit-site 0.10.0,
+          bare-metal-storefront 0.10.0, and e2e-tests 0.1.8. The VM lane passed 135 and the
+          bare-metal lane 16. Neither lane's logs show a traceback, a 5xx, a 401, or a 403;
+          the 4xx responses are the VM lane's 402s on an exhausted grant and 404 checks
+          before creation, and the bare-metal introduction scenario's 410s once an operator
+          deleted the payloads. No cycle logged "diagnostics query failed". The sweep's
+          counts are not visible in the lanes' logs, whose format prints a record's message
+          and not its structured fields, so the run proves the sweep never failed a cycle,
+          not what it counted.
   - Each slice's gate: the provisioning-family suites, both adapters, both storefronts (the
     VM storefront by frozen sync), the e2e unit suite and collection, the root aggregate,
     `make check-packaging`, comment hygiene, documentation citations, OpenSpec strict

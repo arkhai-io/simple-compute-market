@@ -45,7 +45,12 @@ API-credit deal runs inside the VM lane.
   under the mock profile, with its own `/test/bare-metal` rule routes.
 - Compose bare metal onto `kit/negotiation-runtime` through its existing routes and
   delete its domain-local negotiation (migrated from `bare-metal-and-credits-domain-stacks`
-  4a.1, 4a.2, and the runtime half of 4a.3).
+  4a.1, 4a.2, and the runtime half of 4a.3). What the two compute storefronts share is
+  built once in kit first, with VM and API credits rebound to it: the runtime rechecks a
+  listing against its source before every seller round and every acceptance through a
+  domain-contributed check, with VM's inventory guard moved to `kit/policy`; a retryable
+  refusal for a source that cannot be confirmed; one process-local trading pause; and a
+  thread recorded as successful only after its agreement and plan.
 - Move the deal controls into kit as framework-free route services, bound by every
   storefront that has or needs them (implemented in place of the corresponding part of
   `kit-owned-storefront-shell`). Force-accept goes through a new administrative
@@ -128,7 +133,10 @@ None.
   built once; bare-metal storefront restart recovery is proven at integration level.
 - `market-composition`: storefront deal controls are kit-owned route services;
   administrative acceptance and opening previews go through the negotiation runtime;
-  compute mock executors share one compute-family mechanism.
+  compute mock executors share one compute-family mechanism; the runtime rechecks a
+  listing's source before every seller round and acceptance, refuses a source it cannot
+  confirm as retryable, and records success only after the agreement and plan; the
+  trading pause is one process-local kit mechanism.
 - `physical-provisioning`: compute provisioning owns the job and host authorities;
   adapters contribute preparation and meaning while shared execution technology invokes
   it; job, host, and readiness wire models are compute-owned; no adapter imports another
@@ -153,7 +161,10 @@ None.
 - `resource-pool-management`: the pool wire contract and client are thin distributions.
 - `fulfillment`: `VersionedEnvelope` is provided by `arkhai-core`.
 - `storefront-publication`: bare-metal fulfillment starts at settlement verification,
-  and bare-metal teardown releases capacity through the site's lease lifecycle.
+  and bare-metal teardown releases capacity through the site's lease lifecycle; the
+  inventory guard's recheck runs before every seller round and acceptance, and a backed
+  bare-metal listing is checked for availability; an accepted thread is successful only
+  once its agreement and plan are recorded, rather than persisted atomically.
 
 ## Non-Goals
 
@@ -199,14 +210,21 @@ None.
 - `domains/bare_metal`: its lease surface and lease client are deleted.
 - Both provisioning adapters: their compute adapters are deleted, with the generic action
   route, its contract job routes, and `ExecutorAdapterRegistry`.
-- `kit/negotiation-runtime`: administrative acceptance and opening preview.
+- `kit/negotiation-runtime`: administrative acceptance and opening preview; the listing
+  source check hook, the retryable refusal, and success recorded last. `kit/policy`: the
+  listing-source verdict and `has_matching_inventory_guard`, moved from
+  `domains/vms/negotiation`. `kit/storefront`: the process-local trading pause and the
+  stage-event read's signed resource.
   `kit/settlement-runtime`, `kit/capacity-publication`, and `kit/storefront`:
   deal-control route services and the evaluate-settle hook. `core/storefront`: the
   bypassing `NegotiationService.force_accept` removed; `core/storefront-client`:
   `evaluate_negotiate` takes the opening request.
 - `domains/vms/storefront` and `domains/apicredits/storefront`: rebinding to the kit
-  route services and removing their copies.
-- `domains/bare_metal/storefront`: negotiation on the kit runtime, deal controls,
+  route services and removing their copies, including their trading-pause flags and
+  event-resource rebuilds; VM contributes its listing source check to the runtime.
+  `domains/vms/negotiation`: the inventory guard leaves for `kit/policy`.
+- `domains/bare_metal/storefront`: negotiation on the kit runtime with a configured
+  seller chain and no hold, its durable pause removed, deal controls,
   settlement-started fulfillment, teardown through lease termination, the
   capacity-released callback, the publication dry run, restart integration tests.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.

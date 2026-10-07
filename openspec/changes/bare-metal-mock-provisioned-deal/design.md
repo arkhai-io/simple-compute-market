@@ -149,6 +149,11 @@ The implementation satisfies `bare-metal-and-credits-domain-stacks`' delta
 "Bare-metal negotiation preserves demand and authority ownership", which that change's
 4b.1 and 4b.2 continue to verify and promote.
 
+*Refined by "Section 6 design: bare metal on the negotiation runtime (2026-10-07)": the
+listing recheck, the trading pause, the retryable refusal, and the order of acceptance
+writes become kit behaviour shared with VM and API credits, and bare metal places no
+hold.*
+
 ### Deal controls are kit-owned route services
 
 Decided with the maintainer: the parts of `kit-owned-storefront-shell` this scenario needs
@@ -2071,6 +2076,172 @@ Settled with the maintainer when 5B.1 began:
   generator would need to produce the controller skeleton and client method from one
   source.
 
+### Section 6 design: bare metal on the negotiation runtime (2026-10-07)
+
+Re-read against the code before planning, then reviewed by the previous implementation
+agent and a review agent; decided with the maintainer. The premise behind every
+decision below is the long-term one: the VM and bare-metal storefronts become one shared
+compute storefront, as the provisioning service already is, so a behaviour the two
+domains share is built once in kit and each domain contributes only what is its own.
+
+What the code showed, against the plan Section 6 carried:
+
+| Finding | Consequence |
+|---|---|
+| Bare metal places no hold during negotiation; it reserves when fulfillment starts. 6.2 said "`place_hold` as today" | Decision 1 |
+| The listing recheck is an async site call; the runtime's `validate_opening` is synchronous | Decision 2 |
+| The runtime calls `evaluate_round` only for an opening and a counter. A buyer's accept and administrative acceptance resume the thread and accept without it, in VM as in bare metal | Decision 2 |
+| VM's recheck is the `has_matching_inventory_guard` middleware, always prepended to its chain, reading a result the storefront computes before the round. It skips every listing without a `gpu_model`, and reports a site projection it has not loaded as a declared mismatch (409); bare metal reports a source it cannot read as retryable (503) | Decisions 2 and 3 |
+| Bare metal never checks a backed listing's availability, which `storefront-publication`'s inventory-guard requirement asks of every capacity-backed listing; every bare-metal listing is backed | Decision 2 |
+| The runtime's known opening refusals include no retryable type, so a 503 refusal would escape evaluate-negotiate as a 500 | Decision 3 |
+| Bare metal's trading pause is a database row (`bare_metal_operator_state`), read asynchronously; VM's and API credits' are identical in-memory module flags, read by the runtime's synchronous hook | Decision 4 |
+| Bare-metal openings record `initial_proposal`, which the runtime's transcript reader refuses, and number their own rounds | Decision 5 |
+| Exact-option openings skip seller policy and accept at the trusted option's amount | Decision 6 |
+| The escrow path's opening returns a plan built without the seller wallet and commits none; verify rebuilds it with the wallet. The buyer funds from the plan the negotiation response carries | Decision 7 |
+| The runtime records a thread's terminal `success` before it commits the agreed terms and plan. `storefront-publication`'s bare-metal lifecycle scenario says the accepted thread's principals, binding, agreement, and plan persist atomically | Decision 8 |
+| Bare metal's seller chain is fixed to `escrow_shape_guard` then `listed_price`, which never counters: it accepts at or above the listed rate and exits below it, so no bare-metal thread is ever open after round zero | Decision 11 |
+| The signed resource of the stage-event read is rebuilt by hand in VM and API credits, and only VM's copy refuses unauthenticated query aliases and a stream request | Decision 12 |
+
+Decisions:
+
+1. **No hold at negotiation.** Bare metal's hooks set no `place_hold`; it reserves
+   when fulfillment starts. This follows the interim posture of
+   `default-no-pre-settlement-capacity-hold`; when `negotiation-time-capacity-hold`
+   lands, bare metal adds its hold through this hook. Acceptance and force-accept record
+   the terms and the settlement plan and reserve or hold nothing.
+2. **The listing recheck is the runtime's, for every domain.** The runtime decides when;
+   each domain contributes only what it checks.
+   - `NegotiationDomainHooks` gains an optional async `check_listing_source`, returning a
+     verdict whose outcome is one of matches, declared mismatch, unavailable, or
+     unverifiable, with a reason and the differing fields for the log. The verdict
+     type lives in `kit/policy`, below the runtime, so the guard that reads it needs no
+     runtime import.
+   - The runtime calls it before every seller round, opening and counter (so the preview
+     reports it), and before the first write of a buyer's accept and of administrative
+     acceptance. It is never called on exit, so a buyer can always leave.
+   - `has_matching_inventory_guard` migrates from VM's negotiation package to
+     `kit/policy`, under the same name, so its chain position, the reason precedence of
+     the guards before it, `accept_unpriced_selection`'s placement after it, and every
+     configuration naming it keep working. It becomes domain-neutral: it reads the
+     runtime's verdict, drops VM's `gpu_model` condition, rejects a declared mismatch as
+     `no_matching_declaration` and an unavailable listing as `no_matching_inventory`, and
+     refuses when it is in a chain and no verdict was supplied. On the paths no chain
+     runs, the runtime refuses through the same kit function, so the two cannot disagree.
+   - VM contributes its existing `check_listing_source` (its cached projections and live
+     capacity snapshot) and drops the per-round closure that fed the guard. Bare metal
+     contributes its existing recheck, which also reports unavailable when its Physical
+     Resource is taken, read from the same site's capacity snapshot VM reads. API credits
+     sets no check; its listings are not derived from a declaration.
+   - VM's behaviour changes in three ways: buyer accept and force-accept now recheck;
+     listings without a `gpu_model` are checked; and an unloaded projection is
+     unverifiable (503), not a mismatch.
+   - Rejected: the recheck only in `evaluate_round`, which misses buyer and administrative
+     acceptance; in the opening and continuation resolvers, or in an async
+     `validate_continuation`, each of which also runs on exit (a site outage would stop a
+     buyer leaving) and, for openings, runs before term decoding and the pause check;
+     deleting the guard outright, which would break its chain-order dependents and every
+     configuration naming it.
+   - Each domain keeps reading the source its own publication reads. Bare metal reading
+     cached projections, as VM does, belongs with unifying publication and is recorded as
+     an open gap (closeout task 2.6).
+3. **One retryable refusal.** The kit runtime gains `NegotiationUnavailableError`, not a
+   `ValueError` (VM's route answers any `ValueError` with 404), included in the
+   refusals an opening preview reports. An unverifiable verdict and an absent site
+   authority raise it. Every storefront route that calls `start` or
+   `continue_negotiation` maps it to 503, whether or not its domain raises it yet.
+   Evaluate-negotiate keeps answering 200 with `refused: true` and the refusal named in
+   `decision_reason`; no retryability field is added, since nothing reads one.
+4. **One process-local trading pause, owned by kit.** The durable pause was carried from
+   `market-platform-bare-metal-10-storefront-composition`, whose design stated it without
+   a reason; the permanent requirement ("Storefront is globally paused") already
+   describes a process-scoped pause. A pause is used in end-to-end runs and by an operator
+   actively correcting an issue, who would notice and handle a restart. So:
+   - `kit/storefront` owns one process-local trading pause, beside and separate from the
+     loop controller's lifecycle pause, held by each storefront's composition and read by
+     the runtime's synchronous `storefront_is_paused` hook and by system status; each
+     storefront's existing pause and resume routes set it, with unchanged paths and
+     responses.
+   - VM's and API credits' `_GLOBALLY_PAUSED` flags and bare metal's database pause are
+     removed; a bare-metal migration drops `bare_metal_operator_state`.
+   - The test-compatibility delta's "Storefront is paused and restarted" scenario is
+     dropped and task 3.6 withdrawn.
+   - Rejected: making the runtime's pause hook async to read a durable flag, which only
+     the dropped requirement needed.
+5. **Legacy open threads are abandoned.** A bare-metal migration marks every
+   non-terminal thread `abandoned`, the state the negotiation watchdog gives stale open
+   threads; terminal threads are untouched. Continue was never served on them, and
+   bare metal holds nothing, so there is nothing to release. Its test proves an
+   abandoned thread can be neither continued nor force-accepted, and that the migration
+   starts no settlement or release.
+6. **Exact-option openings keep their round-zero acceptance.** An opening selecting an
+   exact hosted or contact-exchange option is accepted at the trusted option's amount
+   inside `evaluate_round`, after the listing recheck, without seller price policy, and
+   is committed through the runtime's acceptance path like any other. Escrow proposals
+   go through the configured chain every round.
+7. **The plan is committed at acceptance, and the committed plan is the agreement.**
+   `build_artifacts` builds the escrow path's plan from the inputs verify uses (the seller
+   wallet and the chain configuration paths); `persist_artifacts` commits it on both
+   paths, with `BareMetalTerms`, for negotiated acceptance and force-accept alike, and
+   `commit_settlement_plan` already refuses a conflicting plan. The buyer funds from the
+   plan the response carries, so a verify that rebuilds from changed configuration would
+   describe an obligation nobody funded: Section 7 replaces verify's rebuild with a read
+   of the committed plan. Until then, a test asserts that the response's plan, the
+   committed plan, and verify's rebuild are equal under unchanged configuration. Whether
+   today's walletless response plan differs from what verify registers is not
+   established; that test will show it.
+8. **A thread is successful only once its agreement is recorded.** The runtime writes a
+   thread's terminal `success` last, after the agreed terms, any hold, and the plan, on
+   every acceptance path (opening, counter, buyer accept, administrative acceptance);
+   `_record_seller_decision` splits its message write from its terminal write. A crash
+   mid-acceptance leaves a non-terminal thread, which the negotiation watchdog abandons,
+   and settlement reads only successful threads, so it never sees a partial agreement.
+   On VM and API credits, a hold placed before such a crash lives out its TTL. The
+   lifecycle scenario's "atomically" is replaced by this, since the runtime does not
+   provide strict atomicity. An orphaned thread blocks nothing: the only uniqueness on
+   threads is `(negotiation_id, round)`.
+   - Rejected: a transactional repository contract across all three storefronts, too
+     large for this section; amending the scenario alone, which would leave a successful
+     thread with no agreement for settlement to refuse forever.
+9. **Continuation is bound to the recorded thread.** Bare metal follows VM: its opening
+   copies the listing binding to the thread, and continuation loads the thread's binding,
+   requires the listing's current binding to equal it, and resolves from that frozen
+   authority; nothing from the buyer's payload reselects a site, resource, or domain.
+10. **Refusals keep their status codes.** A bare-metal refusal type, a `ValueError`
+    carrying its status, keeps the domain's tested 400, 404, and 409 cases and is
+    reported by the preview. The kit's retryable type owns 503 for an unverifiable source,
+    `StorefrontPausedError` stays 503, and `OfferUnfulfillableError` stays 409. The
+    runtime decodes terms before it checks the pause, so bad terms on a paused storefront
+    answer 400, as on VM.
+11. **Bare metal's seller chain is configured.** Bare metal reads its chain from
+    `[negotiation] policies`, as VM does, defaulting to today's `escrow_shape_guard` and
+    `listed_price`, with `has_matching_inventory_guard` prepended. The bare-metal lane
+    configures `bisection` (registered in `kit/policy`), so round zero counters and the
+    scenario's force-accept finds an open thread. Unit tests inject the chain they need.
+12. **The kit owns the event read's signed resource.** `StageEventRouteService` rebuilds
+    the resource the canonical client signs, refusing unknown or repeated query
+    parameters and a stream request with 400s, as VM's copy does. VM and API credits
+    rebind to it, so API credits gains the refusals it lacks, and bare metal binds it.
+13. **Section 6 splits in two**, each keeping both lanes green:
+    - **6A, kit and rebinding:** decisions 2, 3, 4, 8, and 12 in the kit, with VM and API
+      credits rebound and VM's guard migrated; its gate is the kit, VM, and API-credit
+      suites and the VM lane.
+    - **6B, bare metal on the runtime:** decisions 1, 5, 6, 7, 9, 10, and 11; its gate
+      is the bare-metal suite and the bare-metal lane's publication scenario.
+
+What this changes beyond Section 6:
+
+- **Section 7.** 7.2's commit half is done (the Alkahest path commits before fulfillment)
+  and its registration half no longer exists (5B.12.D). Its trailing finding, that the
+  family's lease reads should count only registered leases, is superseded: a lease now
+  begins at commit for every domain, which is what those reads count. What remains of
+  7.2 is `get_lease` and `terminate_lease` on `SelectedSiteFulfillmentClient`, routed by
+  the reservation's recorded site. Verify reads the committed plan (decision 7). 7.6's
+  test list drops lease registration.
+- **Open gaps for closeout task 2.6:** bare metal reading cached projections; API
+  credits' `credit_quota_guard`, which reads availability its storefront precomputes, as
+  VM's guard did, and could move onto the kit verdict; and the fulfillment convergence
+  sweep's counts, which the lanes' plain-text log format does not print.
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,
@@ -2086,6 +2257,10 @@ application over the same database file and a fake site: after settlement commit
 after teardown acceptance the buyer retrieves the same operation with no second
 obligation, mechanism selection, or teardown, and the trading pause survives the
 restart.
+
+*Amended by "Section 6 design: bare metal on the negotiation runtime (2026-10-07)",
+decision 4: the trading pause is process-local, so the pause-survives-restart case
+(task 3.6) is withdrawn.*
 
 ### The scenario uses typed clients
 
@@ -2158,6 +2333,10 @@ site's reservation watchdog and carries no lease end for expiry to find, so stag
 lease window, as the hosted path does, and the storefront registers the lease through
 the site's contract lease route once fulfillment is active, as VM does. This is inside
 "add the functionality required for the 10b–11 stages".
+
+*Superseded in part: 5B.12.D made the Alkahest path commit before fulfillment and
+removed lease registration ("5B.12.D decision gate (2026-10-06)"); what remains for 7.2
+is in "Section 6 design: bare metal on the negotiation runtime (2026-10-07)".*
 
 ### Lane composition files
 
