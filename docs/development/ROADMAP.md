@@ -160,6 +160,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Open gap | Owned by |
 |---|---|
 | Live Arkhai payment qualification across VM delivery, API-credit issuance, and bare-metal selected-site access/teardown | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Production buyers build storefront requests by hand instead of using the storefront's typed client, so the route contract has two independent implementations | [`buyers-use-the-storefront-client`](../../openspec/changes/buyers-use-the-storefront-client/) |
 
 **Design promotion (2026-08-15).** `kit-storefront-composition-seam`,
 `kit-owned-negotiation-runtime`, and `kit-owned-capacity-and-publication` are now

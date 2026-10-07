@@ -74,6 +74,7 @@ kit-storefront-composition-seam
       ├──► kit-owned-negotiation-runtime ─────────┐
       ├──► kit-owned-settlement-runtime ──────────┼──► bare-metal-and-credits-domain-stacks
       └──► kit-owned-capacity-and-publication ────┘
+settle-through-arkhai-payments ──► buyers-use-the-storefront-client
 ```
 
 | Change | Status | Acceptance boundary |
@@ -83,6 +84,7 @@ kit-storefront-composition-seam
 | [`kit-owned-settlement-runtime`](kit-owned-settlement-runtime/) | active; depends on the seam | Extracts settlement job orchestration, claim servicing, and failure handling as one control flow. Coordinate with `add-settlement-plan-shapes` |
 | [`kit-owned-capacity-and-publication`](kit-owned-capacity-and-publication/) | active; depends on the seam | Extracts the storefront capacity client and publication runtime; the capacity client's size gap needs per-capability judgment rather than a whole-file move |
 | [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; depends on all four extractions and on `bare-metal-buyer-domain` | A bare-metal deployable stack, per-domain end-to-end deal paths, and API-credits recomposition onto kit. Delivers the goal's completion test |
+| [`buyers-use-the-storefront-client`](buyers-use-the-storefront-client/) | design phase; depends on `settle-through-arkhai-payments` and the storefront shell's typed-client placement | Production buyers call storefront routes through the typed client instead of `core_buyer` signed-JSON helpers and domain transports, so the route contract has one owner on both sides |
 
 ## Roadmap goal — Make capacity exclusivity compensated
 
@@ -106,7 +108,7 @@ and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchang
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; verification and closeout active; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
+| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; review-round design accepted, planning next; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
 | [`spot-deals-through-arkhai-payments`](spot-deals-through-arkhai-payments/) | design phase; depends on payments `rate-parts` and `route-settlement-by-mechanism` | VM interruptible deals settle through an `arkhai.payments.v1` rate part with `until: stop`. The VM payment seller stage tears down by the signed funded-through time or on a stop event, and seller preemption and buyer cancellation issue stops |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation

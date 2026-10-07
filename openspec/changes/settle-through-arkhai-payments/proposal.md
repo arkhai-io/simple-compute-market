@@ -6,38 +6,57 @@ Fiat is charge-first: money moves at payment and is undone by refund or dispute.
 
 ## What Changes
 
-- **The deal is a pipeline, negotiate → settle → provision.** Each stage understands the output of the stage before it and nothing else. A stage may discriminate on its input internally: one provisioning stage can accept both Alkahest and Arkhai payment evidence and translate each into its own internal form. Stages may fuse, as `contact-exchange.v1` fuses settle and provision. There is no shared adapter API; each mechanism defines its own API towards the domains that support it.
-- **Core defines only what at least two of buyer, seller and registry read.** For settlement that is the listing's `settlement_options` (`{option_id, mechanism, asset, rates, params}`) and the selected option in the accepted deal. Mechanism status, servicing and refunds are the mechanism's and the domain's business.
-- **Escrow semantics move into `alkahest.v1`.** `claimant`, `claimant_principal`, `expiration_unix` and `conditions` leave `SettlementObligation` for Alkahest params, the listing's `accepted_escrows`, `demands` and `oracle_address` fold into Alkahest's option params, and `ConditionalEscrowClient` becomes Alkahest's internal detail.
-- **Negotiation emits one explicit agreement object on acceptance**, the output a settle stage consumes. Core does not define its hash; a settle stage that needs one defines it.
-- **Add `arkhai.payments.v1`**, a stateless kit over the Arkhai payments HTTP API. The seller's kit derives the mandate from the agreement, with `deal = sha256(JCS(agreement))`, and hands both to the buyer, so both know the transaction id before approval. The buyer approves it with its owner's credentials, optionally depositing the agreement for disputes; both poll the id, and the seller provisions once the receipt matches. A refund is a `reverse`. Holds release without SCM calls, so the kit keeps no servicing state and runs no daemon.
+- **The deal is a pipeline, negotiate → settle → provision.** Each stage understands the output of the stage before it and nothing else. A stage may discriminate on its input internally, and stages may fuse, as `contact-exchange.v1` fuses settle and provision. There is no shared adapter API; each mechanism defines its own API towards the domains that support it.
+- **Core defines only what at least two of buyer, seller and registry read.** For settlement that is the listing's `settlement_options` and the selected option in the accepted deal. Mechanism status, servicing and refunds belong to the mechanism and the domain.
+- **Negotiation emits one explicit Agreement on acceptance**, the output a settle stage consumes. Both parties keep the exact bytes. Core does not define its hash; a settle stage that needs one defines it.
+- **Add `arkhai.payments.v1`**, a stateless kit over the Arkhai payments HTTP API, as a peer of Alkahest in the VM, bare-metal and API-credit domains. The seller's kit derives the mandate from the Agreement, with `deal = sha256(JCS(agreement))`, and returns both at acceptance, so both parties know the transaction ID before approval. The buyer approves with its owner's credentials and polls; the seller polls the same ID and delivers once the signed receipt matches. Holds release without SCM calls, so the kit keeps no servicing state and runs no daemon.
+- **One payments mechanism implementation.** The kit owns Agreement-to-mandate policy, one `settlement_data` wire shape, buyer approval, the seller receipt check with a typed outcome (pending, verified, invalid, unavailable), the seller's Agreement deposit, and reversal. Domains keep payer-account sourcing, HTTP binding, delivery, journals and recovery.
+- **Agreement settlement through the typed storefront client.** `StorefrontClient` gains `settle_agreement(negotiation_id)`; the EVM method is renamed `settle_evm`. The settle response carries mechanism-neutral `negotiation_id`, `settlement_ref`, a reserved `pending` status and `retryable`. All three domains verify payment and start delivery in `settle`.
+- **Receipt outcomes are classified, not inferred.** Pending is retryable 202, an unreachable service is retryable 503, and a receipt that does not prove the Agreement is non-retryable 409 with no state persisted.
+- **Agreement attachment is two owned policies.** A buyer-role `attach_agreement` setting, off by default, decides whether the buyer attaches at approval. The seller deposits when its option advertises `deposit_agreement`, after receipt verification and before delivery.
+- **Refunds are seller-initiated only.** A seller-authenticated `POST /api/v1/settlements/{negotiation_id}/refund` (`StorefrontClient.refund_settlement`) reverses still-held funds and records a terminal `refunded` state. A storefront's opt-in `refund` failure action also reverses payment deals that fail before any delivery. The normal deal flow never refunds; the buyer's recourse is a dispute.
 - **Delete `fiat.stripe.v1` and `kit/hosted-settlement`.** The hosted-fiat changes built on them are superseded (see design).
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `settlement-configuration`: hosted funding profiles, release pins and Stripe registration are removed; `arkhai.payments.v1` registers as a peer mechanism.
-- `settlement-servicing`: the obligation servicing lifecycle becomes Alkahest-owned; core keeps the neutral obligation fields.
-- `negotiation-protocol`: acceptance produces an explicit agreement object.
+- `settlement-configuration`: hosted funding profiles, release pins and Stripe registration are removed; `arkhai.payments.v1` registers as a peer mechanism with a buyer-role attachment policy.
+- `settlement-servicing`: Arkhai payments settles charge-first from the Agreement with classified receipt outcomes, owned attachment policies, and seller-initiated refunds; the obligation servicing lifecycle remains in place for Alkahest and contact exchange.
+- `negotiation-protocol`: acceptance produces an explicit Agreement and opaque settlement data.
 - `market-composition`: domains compose settle and provision stages rather than an escrow client.
+- `buyer-orchestration`: payment buyers approve through the kit and settle by negotiation ID.
+- `test-compatibility`: payment tests obtain signed receipts from a vector-pinned kit fixture.
 
 ## Non-Goals
 
-- Identity and negotiation as advertised listing slots, and per-stage kit declarations (deferred; see design).
-- Rate parts, and spot and interruptible deals through `arkhai.payments.v1`. They are the payments service's first product, and come next in `spot-deals-through-arkhai-payments`. This change settles `once` parts only.
+- **Moving escrow semantics into `alkahest.v1`.** `claimant`, `claimant_principal`, `expiration_unix` and `conditions` stay on `SettlementObligation`, the listing keeps `accepted_escrows`, and `ConditionalEscrowClient` stays in `kit/settlement-runtime`. Arkhai payments bypasses those carriers. This is an unowned follow-up recorded in the roadmap.
+- Identity and negotiation as advertised listing slots, and per-stage kit declarations.
+- Rate parts, and spot and interruptible deals through `arkhai.payments.v1`. They come next in `spot-deals-through-arkhai-payments`. This change settles `once` parts only.
+- Partial reversal, and automatic refund after delivery.
+- Migrating buyer calls from `core_buyer` helpers and domain transports to `StorefrontClient`, owned by `buyers-use-the-storefront-client`.
 - Cash movement. Stripe top-ups and payouts are internal to the payments service; SCM trusts the ledger.
 
 ## Impact
 
-- Affected code: `core/src/market_core/schemas.py`, `kit/settlement-runtime`, `kit/alkahest`, `kit/negotiation-runtime`, a new `kit/arkhai-payments`, the removed `kit/hosted-settlement`, and every domain's settlement composition, hosted routes and buyer funding commands (vms, bare_metal, apicredits).
-- Affected wire: registry listing columns, the accepted-deal carrier, and the negotiation acceptance response.
+- Affected code: `core/src/market_core/schemas.py`, `core/storefront`, `core/storefront-client`, `kit/identity`, `kit/settlement-runtime`, `kit/alkahest`, `kit/negotiation-runtime`, a new `kit/arkhai-payments`, the removed `kit/hosted-settlement`, and every domain's settlement composition, settle and refund routes, failure policy, and buyer payment commands (vms, bare_metal, apicredits).
+- Affected wire: registry listing columns, the accepted-deal carrier, the negotiation acceptance response, the settle response's neutral fields, the new refund route, and the `settlement_data` shape.
 - External dependency: headless callers authenticate to the payments service with WorkOS user-scoped API keys, owned by `arkhai-payments` (`agent-credentials`).
+- Merge: this change lands after `bare-metal-mock-provisioned-deal` on the development branch; the merge decisions it raises are in `design.md#merge-with-the-development-branch`.
 
 ## Permanent documentation impact
 
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
 ### Knowledge to promote
 
-- The negotiate → settle → provision pipeline and "core defines only what two parties read" go to `docs/development/ARCHITECTURE.md`.
-- The neutral obligation and agreement shapes go to `openspec/specs/settlement-servicing/spec.md` and `openspec/specs/negotiation-protocol/spec.md`.
-- ROADMAP Goal 6's current state drops `fiat.stripe.v1` and names `arkhai.payments.v1`.
+- The negotiate → settle → provision pipeline and "core defines only what two parties read" — `docs/development/ARCHITECTURE.md`.
+- The Agreement and acceptance settlement data — `openspec/specs/negotiation-protocol/spec.md`.
+- Mandate derivation, receipt outcomes, attachment policies, seller-initiated refunds, and negotiation-scoped settlement — `openspec/specs/settlement-servicing/spec.md` and its `architecture.md`.
+- Payments registration and the buyer-role `attach_agreement` setting — `openspec/specs/settlement-configuration/spec.md`.
+- Payment buyer approval and agreement settlement — `openspec/specs/buyer-orchestration/spec.md`.
+- The vector-pinned receipt fixture rule — `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`.
+- Goal 6 current state names `arkhai.payments.v1` and drops `fiat.stripe.v1` — `docs/development/ROADMAP.md`.

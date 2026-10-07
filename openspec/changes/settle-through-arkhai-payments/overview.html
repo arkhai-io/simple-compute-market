@@ -64,7 +64,8 @@
 </div>
 <p class="note">Each stage understands only its predecessor's output. No shared adapter API between mechanisms. The listing advertises which kit fills each slot, so buyers and registries can filter; behavior is dispatch on the mechanism id. Core defines only what ≥ 2 of buyer, seller, registry read.</p>
 
-<h2>2 · What leaves core</h2>
+<h2>2 · What would leave core (deferred)</h2>
+<p class="note">Not in this change. Core keeps these fields and <code>ConditionalEscrowClient</code>; Arkhai payments bypasses them without a plan or obligation. Moving them into <code>alkahest.v1</code> is an unowned follow-up.</p>
 <div class="cols">
   <div class="card"><h3><code>SettlementObligation</code></h3>
 <pre>  payer, payee
@@ -92,9 +93,9 @@
   <div class="card"><h3>Flow</h3>
     <ol class="seq">
       <li>Seller's kit derives the mandate from the agreement (one <code>once</code> part, held to term end + window, <code>deal = sha256(JCS(agreement))</code>) and returns both in the accept response. Tx id = mandate hash, known to both before payment.</li>
-      <li>Buyer agent checks it and approves (WorkOS user API key), optionally attaching the agreement for Arkhai's dispute fast path.</li>
-      <li>Both poll the id; seller provisions once the signed receipt matches.</li>
-      <li>Failure while held → seller sends <code>reverse</code>, buyer is refunded. Otherwise the hold releases on its own.</li>
+      <li>Buyer agent checks it and approves (WorkOS user API key). It attaches the agreement only if its own <code>attach_agreement</code> policy is on (default off).</li>
+      <li>Buyer retries <code>settle_agreement</code> with only the negotiation id. The seller checks the receipt (pending → 202, invalid → 409, unavailable → 503); once verified it deposits the agreement if its option advertises <code>deposit_agreement</code>, then starts delivery.</li>
+      <li>No automatic refund in the normal flow. A seller operator refunds with <code>reverse</code> through <code>refund_settlement</code>, or an opted-in <code>refund</code> failure action reverses a deal that failed before delivery. Otherwise the buyer disputes, and an un-reversed hold releases to the seller on its own.</li>
     </ol>
   </div>
   <div class="card"><h3>Why charge-first</h3>
@@ -117,6 +118,9 @@
       <li>Identity as an advertised slot: when a listing needs several schemes.</li>
       <li>Negotiation as a slot: when a second protocol (e.g. auctions) arrives.</li>
       <li>Per-stage "accepts output of" declarations: with the negotiation slot.</li>
+      <li>Escrow carriers into <code>alkahest.v1</code>: unowned follow-up.</li>
+      <li>Buyer calls through <code>StorefrontClient</code>: <code>buyers-use-the-storefront-client</code>.</li>
+      <li>Snapshot proof verification: with <code>spot-deals-through-arkhai-payments</code>.</li>
     </ul>
   </div>
 </div>
