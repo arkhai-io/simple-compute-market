@@ -354,6 +354,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-admissibility"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-pricing"
 version = "0.1.0"
 source = { registry = "../../../.dist" }
@@ -530,6 +541,7 @@ name = "arkhai-kit-resource-pools"
 version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
     { name = "pyyaml" },

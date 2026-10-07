@@ -51,7 +51,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, cast
 
-from market_capability_shape import shape_structure_problems
+from market_capability_admissibility import split_listing_shapes
 
 
 DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
@@ -524,11 +524,19 @@ def validate_listing_shapes(policy_tags: Mapping[str, Any]) -> list[str]:
 
     Empty list means valid, including "not supplied at all": the hint is
     optional. A present value must map each offering mode to a non-empty list
-    of structurally well-formed family-grouped capability shapes. Which
-    families and fields exist, and which are required, is the reading domain's
-    to validate, so a well-formed shape naming a field no domain defines is
-    accepted here. An empty list is refused because stopping sales is done by
-    closing listings, not by declaring nothing.
+    of structurally well-formed stated listing shapes, whose fields are
+    scalars or structurally valid ``{offer, min, max}`` constraint mappings.
+    Which families and fields exist, which are required, and which may carry
+    constraints is the reading domain's to validate, so a well-formed shape
+    naming a field no domain defines, or constraining one, is accepted here.
+    An empty list is refused because stopping sales is done by closing
+    listings, not by declaring nothing.
+
+    A list stating one base shape twice with different constraints is refused
+    naming both entries: it contradicts itself whichever storefront reads it,
+    and the admissibility kit's list-level split finds it without a schema.
+    Identical entries are accepted. No shape is judged against any
+    storefront's configured constraints.
     """
     if LISTING_SHAPES_POLICY_TAG not in policy_tags:
         return []
@@ -544,10 +552,12 @@ def validate_listing_shapes(policy_tags: Mapping[str, Any]) -> list[str]:
         if not isinstance(shapes, list) or not shapes:
             problems.append(f"{tag}.{mode} must be a non-empty list of shapes")
             continue
-        for index, shape in enumerate(shapes):
-            for problem in shape_structure_problems(shape):
-                location = f"{tag}.{mode}[{index}]"
-                if problem.path:
-                    location += f".{problem.path}"
-                problems.append(f"{location}: {problem.message}")
+        split = split_listing_shapes(shapes, tier=LISTING_SHAPES_POLICY_TAG)
+        for problem in split.problems:
+            location = f"{tag}.{mode}[{', '.join(str(entry) for entry in problem.entries)}]"
+            if len(problem.paths) == 1:
+                location += f".{problem.paths[0]}"
+            elif problem.paths:
+                location += f" ({', '.join(problem.paths)})"
+            problems.append(f"{location}: {problem.message}")
     return problems

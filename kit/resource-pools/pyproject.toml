@@ -5,7 +5,10 @@ license = "MIT"
 description = "Provider-neutral resource-pool administration: persistence, YAML reconciliation, and the pool-config handler protocol."
 requires-python = ">=3.12"
 dependencies = [
-    # Shape hints are validated with the shared capability-shape utility.
+    # Listing-shape hints, inline constraints included, are validated by the
+    # shape admissibility kit's structural split; asking-rate shapes by the
+    # capability-shape utility directly.
+    "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-kit-capability-shape>=0.1.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",

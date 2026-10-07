@@ -118,27 +118,53 @@ bullet and the `resource-pool-management` delta "Listing-shape hint validation".
 project that locks `kit/resource-pools`. No Helm checks owed: no chart, image input, or
 configuration surface changes.
 
-- [ ] 2.1 Add the dependency on `arkhai-kit-capability-admissibility` to
+- [x] 2.1 Add the dependency on `arkhai-kit-capability-admissibility` to
       `kit/resource-pools`, then `make lock` so every dependent lock gains the new wheel.
       A foundation kit below an authority kit is a permitted edge (`ARCHITECTURE.md`, kit
       layers). (D2)
-- [ ] 2.2 `validate_listing_shapes` calls `split_listing_shapes(..., schema=None)` per mode
+      Done. `make lock` added only the new wheel, to 12 locks. The first attempt resolved
+      against a `.dist` holding higher-versioned wheels built on other branches
+      (resource-pools 0.6.0, site 0.10.0, …) and rewrote locks to them; reverted, `.dist`
+      rebuilt from empty, relocked. The shape-kit dependency stays: `asking_rates.py`
+      still calls `shape_structure_problems`.
+- [x] 2.2 `validate_listing_shapes` calls `split_listing_shapes(..., schema=None)` per mode
       in place of `shape_structure_problems`: malformed constraints and conflicting
       duplicates are refused naming each entry; identical entries are accepted; an empty
       list is refused as today. `raw_listing_shapes` keeps passing the value unread. No
       comparison with any storefront's configured default. (D10)
-- [ ] 2.3 Unit tests in `kit/resource-pools/tests/unit/test_hints.py` for every scenario of
+      Done. Every pool-write surface already reached it through `service.py`, so nothing
+      else changed. The tier label is `listing_shapes`; a problem's location is
+      `listing_shapes.<mode>[<entries>].<path>`, e.g. `vm[0, 2].gpu.count` for a conflict.
+- [x] 2.3 Unit tests in `kit/resource-pools/tests/unit/test_hints.py` for every scenario of
       the delta requirement. Library integration in
       `tests/integration/test_resource_pool_service.py`: the individual create, replace,
       and update surfaces and bulk import refuse alike without changing stored metadata.
-- [ ] 2.4 Provisioning integration in
+      Done. `TestListingShapesHint` gains every delta scenario (constrained list accepted,
+      six malformed constraints, an attribute constraint accepted, a conflicting duplicate
+      named once with both entries, identical repeats and scalar/`{offer}` equivalence
+      accepted, modes judged apart). `TestListingShapeConstraintsOnEveryWriteSurface`
+      covers create, replace, patch, and bulk validation for both refusals.
+- [x] 2.4 Provisioning integration in
       `provisioning/compute/service/tests/integration/test_pools_api.py`: a conflicting
       duplicate and a malformed constraint are refused through the typed client, asserting
       status and stored state only (`TESTING.md` rejection-path rule).
-- [ ] 2.5 Verify: `make -C kit test-resource-pools`, the compute provisioning service's
+      Done: a conflicting duplicate on create, a malformed constraint on replace.
+- [x] 2.5 Verify: `make -C kit test-resource-pools`, the compute provisioning service's
       integration suite, and `make check-packaging`. Confirm the bare-metal storefront,
       which reads `listing_shapes` only for its presence (`site_reading.py`), is unaffected
       by running its unit suite.
+      Done. `make -C kit/resource-pools test`: 301 passed. Provisioning service
+      `make test-integration`: 285 passed. Bare-metal storefront `make test` (one suite, no
+      `unit/` split): 227 passed. `make check-packaging`, `make check-comment-hygiene`, and
+      `make check-doc-citations CHANGE=capacity-shape-envelope`: OK.
+
+Handoff from section 2:
+
+- `make lock` resolves against whatever `.dist` holds, and that wheelhouse may carry
+  higher-versioned wheels built on other branches; check its added/updated lines name only
+  this section's wheels, and if not, rebuild `.dist` from empty and relock.
+- The fresh-context check found one stale `pyproject.toml` comment (fixed); nothing else.
+- `domains/vms/listings` has no lock of its own; the VM storefront's lock covers it.
 
 ## 3. VM domain: stated-shape resolution and the bounded generator
 

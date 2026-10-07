@@ -1046,6 +1046,114 @@ pools:
         assert refused and refused[0].path.endswith(".policy_tags.listing_shapes")
 
 
+class TestListingShapeConstraintsOnEveryWriteSurface:
+    """A malformed constraint and a base shape stated twice with different
+    constraints are refused alike on create, replace, patch, and bulk import,
+    and nothing is stored; a constrained list is kept verbatim."""
+
+    VALID = {"listing_shapes": {"vm": [
+        {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}, "memory": {"gib": {"max": 512}}},
+    ]}}
+    REFUSED = {
+        "malformed_constraint": {"listing_shapes": {"vm": [
+            {"gpu": {"model": "H100", "count": {"offer": 1, "min": 4, "max": 2}}},
+        ]}},
+        "conflicting_duplicate": {"listing_shapes": {"vm": [
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
+        ]}},
+    }
+    CASES = pytest.mark.parametrize("case", sorted(REFUSED))
+
+    def _create(self, svc, tags):
+        return svc.create_pool(
+            PoolCreate(
+                id="shaped",
+                label="Shaped",
+                provider="ansible",
+                policy_tags=_declared(tags),
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+    def test_create_keeps_a_constrained_list_verbatim(self, svc):
+        assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
+
+    @CASES
+    def test_create_refuses_and_stores_nothing(self, svc, case):
+        with pytest.raises(PoolValidationError) as refused:
+            self._create(svc, self.REFUSED[case])
+        assert "listing_shapes.vm[" in str(refused.value)
+        assert svc.list_pools() == []
+
+    @CASES
+    def test_replace_refuses_and_keeps_stored_metadata(self, svc, case):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.replace_pool(
+                "shaped",
+                PoolReplace(
+                    label="Shaped",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags=_declared(self.REFUSED[case]),
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
+
+    @CASES
+    def test_patch_refuses_and_keeps_stored_metadata(self, svc, case):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.update_pool("shaped", PoolUpdate(policy_tags=_declared(self.REFUSED[case])))
+        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
+
+    def test_bulk_import_refuses_a_conflicting_duplicate_naming_both_entries(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+      listing_shapes:
+        vm:
+          - gpu: {model: H100, count: {offer: 1, max: 4}}
+          - gpu: {model: H100, count: {offer: 1, max: 8}}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        refused = [p for p in response.problems if p.code == "invalid_listing_shapes"]
+        assert len(refused) == 1
+        assert refused[0].path.endswith(".policy_tags.listing_shapes")
+        assert "vm[0, 1]" in refused[0].message
+
+    def test_bulk_import_refuses_a_malformed_constraint(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+      listing_shapes:
+        vm:
+          - gpu: {model: H100, count: {offer: 1, step: 2}}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        assert [p.code for p in response.problems] == ["invalid_listing_shapes"]
+
+
 class TestAskingRatesValidationOnEveryWriteSurface:
     """A malformed `asking_rates` is refused identically on create, replace,
     patch, and bulk import, nothing is stored, and a valid one is kept
