@@ -1,32 +1,45 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Shape-bounds hint validation
+### Requirement: Listing-shape hint validation
 
-Resource Pool policy metadata SHALL support a domain-neutral `shape_bounds` key mapping
-each offering mode to a shape bounds declaration. Every surface capable of persisting a
-Resource Pool's `policy_tags` — the bulk pool-document import path and the individual
-pool admin API (`create`/`replace`/`update`) — SHALL refuse a `shape_bounds` value that
-fails the admissibility kit's structural check, without changing the stored policy
-metadata. Which families and fields are quantities SHALL NOT be validated here. A pool's
-`listing_shapes` SHALL NOT be compared with its `shape_bounds` at write, because a
-storefront's own tiers may widen a pool's bound.
+A Resource Pool management surface that accepts `listing_shapes` MUST require a mapping from
+offering mode to a non-empty list of structurally well-formed stated listing shapes. A
+well-formed stated listing shape is a non-empty mapping of family name to a non-empty
+mapping of field name to either a scalar value or a structurally valid constraint mapping.
+The check MUST be the shared structural split the shape admissibility kit provides, which
+applies the capability shape utility's structural check to the base shape, and MUST NOT
+depend on any domain's family or field names. Which families and fields are meaningful,
+which are required, and which may carry constraints MUST be validated by the domain that
+reads the hint. A pool's stated shapes MUST NOT be judged against any storefront's
+configured constraints at write. Every surface capable of persisting a Resource Pool's
+`policy_tags` MUST apply the same check: the bulk pool-document import path and the
+individual pool admin API (`create`/`replace`/`update`).
 
-#### Scenario: Operator submits a malformed declaration
+#### Scenario: Operator supplies a malformed shape list
 
-- **WHEN** an operator submits `shape_bounds` whose `bounds` field states a `min` above
-  its `max`, a non-positive value, or an unknown key, through any pool-write surface
-- **THEN** Resource Pool validation rejects the update without changing the stored
-  policy metadata
+- **WHEN** an operator submits `listing_shapes` whose VM list is empty, or whose shape
+  holds a family that is not a mapping, through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy
+  metadata
 
-#### Scenario: Operator bounds a field no domain defines
+#### Scenario: Operator names a field no domain defines
 
-- **WHEN** an operator submits a structurally well-formed declaration bounding a field the
-  VM domain does not define
+- **WHEN** an operator submits a structurally well-formed shape naming a field the VM domain
+  does not define
 - **THEN** Resource Pool validation accepts it, and the VM storefront reports the pool's
-  bounds as unusable when it derives listings
+  shapes as unreadable when it derives listings
 
-#### Scenario: A pool's listing shapes fall outside its own bounds
+#### Scenario: Operator supplies a malformed constraint
 
-- **WHEN** an operator submits a pool whose `listing_shapes` include a shape outside its
-  `shape_bounds`
-- **THEN** Resource Pool validation accepts it
+- **WHEN** an operator submits a stated shape whose constraint mapping states a `min`
+  above its `max`, a non-positive value, an `offer` outside its own range, no key, or an
+  unknown key, through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy
+  metadata
+
+#### Scenario: Operator constrains an attribute
+
+- **WHEN** an operator submits a structurally valid constraint mapping on a field the VM
+  domain defines as an attribute
+- **THEN** Resource Pool validation accepts it, and the VM storefront reports that
+  listing's constraints as unusable when it derives listings

@@ -1,16 +1,16 @@
 ## Why
 
 Once a buyer can request a capacity shape, a seller has to say which shapes it will
-sell. Nothing expresses that today. `has_matching_inventory_guard` checks a listing
-against its own source; a pool's `listing_shapes` hint lists what it advertises, not
-what a buyer may ask for; site admission bounds only physical capacity, offering mode,
-and the host requirement. No structure states that a seller will rent between 1 and 8
-GPUs, or at most 512 GiB of memory, per deal — and publication cannot keep a stated
-shape out on those grounds.
+sell for a listing. Nothing expresses that today. `has_matching_inventory_guard` checks a
+listing against its own source; a pool's `listing_shapes` hint states what a listing
+offers, not what a buyer may ask for instead; site admission bounds only physical
+capacity, offering mode, and the host requirement. No structure states that a listing
+offered at one GPU will also be sold with up to four, or that memory a buyer asks for
+stays at or under 512 GiB — and publication cannot keep an offer out on those grounds.
 
 The concept is not domain-specific: a per-dimension admissible range is the same for VM
-vCPUs, bare-metal disk, pod memory, and inference tokens, so it belongs in a foundation
-kit beside the shape and pricing kits rather than being rebuilt per domain.
+vCPUs, pod memory, and inference tokens, so it belongs in a foundation kit beside the
+shape and pricing kits rather than being rebuilt per domain.
 
 The interface matters more than the first implementation. A static minimum and maximum
 per dimension is a box, but a seller's real policy can couple dimensions — at most
@@ -21,22 +21,24 @@ about it makes them new implementations.
 
 ## What Changes
 
-- A new foundation kit, `kit/capability-admissibility`, the only reader of a bounds
-  declaration: it parses declarations (checking quantity paths against a domain's
-  schema), resolves tiers into an opaque policy with each section owning its merge rule,
-  and evaluates that policy with a whole-shape check returning structured problems and a
-  query for the values one dimension may take given a partial shape, such that a
-  counter-proposal can be built one dimension at a time without search. A static
-  per-field minimum/maximum is the only section. No operation exposes readable bounds.
-- A `shape_bounds` pool policy tag, keyed by offering mode, holding named constraint
-  sections; this change defines `bounds`. Unknown sections and keys make a declaration
-  unreadable, so later constraint forms fail closed on older readers.
-- Storefront resolution of bounds per field across the site-scoped pool override, the
-  pool hint, and a configured default, where a higher tier may replace a value but not
-  remove it.
-- VM and bare-metal publication never advertise an inadmissible shape; an unusable or
-  empty declaration closes the pool's listings and is reported. The VM default generator
-  generates only admissible shapes. Override writes are checked.
+- A new foundation kit, `kit/capability-admissibility`, the only reader of a constraint:
+  it splits a listing shape into its base shape and its constraints, parses the
+  configured default, resolves labelled tiers into an opaque per-listing policy, and
+  evaluates it with a whole-shape check returning structured problems and a query for
+  the values one dimension may take given a partial shape, such that a counter-proposal
+  can be built one dimension at a time without search. `min` and `max` are the only
+  constraints. No operation exposes readable bounds.
+- Stated listing shapes — the pool's `listing_shapes` hint and a storefront override's
+  `listing_shapes` — may give a quantity field `{offer, min, max}` in place of its
+  scalar. A plain scalar is shorthand for an offer. An offer alone says nothing about
+  negotiability. Unknown keys make the constraint unreadable, so later forms fail
+  closed on older readers.
+- A listing's constraints merge per field with the VM storefront's configured default,
+  which adds values where the listing omits them and states no offer. An override that
+  states shapes replaces the hint's list whole, as it does today.
+- VM publication never advertises an inadmissible offer; a listing whose policy cannot
+  be computed closes, alone, and is reported. The VM default generator generates only
+  counts the configured default admits. Override writes and pool writes are checked.
 
 ## Capabilities
 
@@ -48,72 +50,86 @@ None.
 
 Provisional; planning and review confirm the destinations (`design.md`, D11).
 
-- `market-composition`: the admissibility kit's contract.
-- `resource-pool-management`: the `shape_bounds` hint and its write-time validation.
-- `storefront-publication`: tier resolution, publication and generator behavior, the
-  override write check, and the reports.
+- `market-composition`: the admissibility kit's contract and the inline constraint form.
+- `resource-pool-management`: listing-shape hint validation accepting constraints.
+- `storefront-publication`: listing shapes carrying constraints, per-listing resolution,
+  publication and generator behavior, the override write check, and the reports.
 
 ## Non-Goals
 
 - Occupancy-dependent bounds. A limit that depends on what is already rented is
   availability, owned by `negotiation-capacity-feasibility-probe` and site admission.
-- Coupled constraint sections (`ratios`, `required`) and bounds keyed by attribute value.
-  The declaration and interface admit them; this change ships `bounds` only.
+- Ratios, a requirement that a dimension be stated, and constraints keyed by attribute
+  value. The form and interface admit coupled constraints; this change ships `min` and
+  `max` only.
+- Bare metal. A whole-machine listing negotiates no shape.
+- A ceiling on what is provisioned per deal. Constraints govern the dimensions an agreed
+  shape states; an omitted dimension is the site's.
 - Site-enforced limits. Admissibility is the storefront's policy; site admission is
   unchanged.
+- Selecting individual listings from an override.
 - Pricing shapes (`capacity-shape-pricing`, archived) and categorical constraints.
 - Negotiation wiring. `negotiation-driven-capacity-resize` composes admissibility first
   in the seller's round; this change records inputs to it.
-- Disclosing bounds to buyers (`publish-shape-bounds`).
+- Disclosing constraints to buyers (`publish-shape-bounds`).
 
 ## Impact
 
 - New distribution `kit/capability-admissibility` (`arkhai-kit-capability-admissibility`).
-- `kit/resource-pools`: the tag key, a raw reader, and the structural check on every
-  pool-write surface.
-- VM: `arkhai_vms` supplies `VM_CAPABILITY_SCHEMA` to the kit's parser; the VM
-  storefront's publication, default generator, pool
-  override terms and contribution, configuration, and derivation report.
-- Bare metal: the storefront's publication, pool override terms, configuration, and
-  derivation report.
-- Not affected: site admission and the ledger, scheduling, fulfillment, pricing, the
-  registry, negotiation.
+- `kit/resource-pools`: `listing_shapes` validation calls the kit's structural split on
+  every pool-write surface.
+- VM: `arkhai_vms` — the default generator takes the default-only policy, so the domain
+  package depends on the kit; `arkhai_vms_listings` — stated shapes split through the
+  kit, per-listing resolution, publication, identity over the base shape, and the
+  derivation report; the VM storefront — the configured default, the override
+  contribution's write check, and system status.
+- Not affected: bare metal, `kit/pool-overrides` (an override's shapes are stored as
+  today), site admission and the ledger, scheduling, fulfillment, pricing, the registry,
+  negotiation.
 - Tests: kit unit tests against a synthetic schema and an import-boundary test; hint
-  validation; tier resolution; VM and bare-metal publication; the override write check;
-  one end-to-end run publishing from a pool that declares bounds.
+  validation; per-listing resolution; VM publication and the generator; the override
+  write check; one end-to-end run publishing from a pool whose stated shape carries
+  constraints.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the foundation kit list, and an
-      authority-boundary row for which shapes a storefront sells.
+- [x] `docs/development/ARCHITECTURE.md` — the foundation kit list; the
+      close-rather-than-hold principle with an example; "Omission states no commitment"
+      extended to an offer without a range; the VM listing shapes authority row.
 - [x] Existing subsystem specification — provisional: `market-composition`,
       `resource-pool-management`, `storefront-publication`.
 - [ ] New subsystem specification — none.
-- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the configured default.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the inline constraint form and the
+      configured default.
 
 ### Knowledge to promote
 
 Destinations are provisional (D11).
 
-- The admissibility contract: the kit is the only reader of a declaration; parsing,
-  resolution with per-section merge rules, and evaluation; whole shape in, structured
-  problems out, never readable bounds; `admissible_values` and its one-dimension-at-a-time guarantee; the opaque
-  value set; omitted dimensions are free; sections intersect; unknown sections and keys
-  are unreadable — `openspec/specs/market-composition/spec.md`.
+- The admissibility contract: the kit is the only reader of a constraint; splitting,
+  parsing, labelled resolution with per-form merge rules, and evaluation; whole shape
+  in, structured problems out, never readable bounds; `admissible_values`, its invalid
+  requests, and its one-dimension-at-a-time guarantee; the opaque value set; omitted
+  dimensions are free; constraints intersect; unknown keys are unreadable; the inline
+  form — `openspec/specs/market-composition/spec.md`.
 - Why the interface is shaped for coupled declared constraints and counter-proposals,
-  why occupancy is excluded, and why the declaration has sections —
+  why occupancy is excluded, why constraints sit inline on the listing, and why a
+  requirement that a dimension be stated is not a constraint —
   `openspec/specs/market-composition/architecture.md`.
-- The `shape_bounds` hint and its write-time structural check —
+- Listing-shape validation accepting constraints —
   `openspec/specs/resource-pool-management/spec.md`.
-- Per-field tier resolution without removal; unusable and empty declarations close
-  listings; inadmissible shapes are not published; the generator; the override check;
-  the reports — `openspec/specs/storefront-publication/spec.md`.
-- Admissibility is the storefront's policy and a pool bound an advisory site default;
-  absence commits nothing; why bounds close where pricing holds —
+- Per-listing resolution with the configured default; a listing whose policy cannot be
+  computed closes alone; inadmissible offers are not published; the generator; the
+  override check; identity over the base shape; the reports —
+  `openspec/specs/storefront-publication/spec.md`.
+- Admissibility is the storefront's policy and a site's constraint an advisory input;
+  why constraints close where pricing holds —
   `openspec/specs/storefront-publication/architecture.md`.
-- The foundation kit and the authority boundary — `docs/development/ARCHITECTURE.md`.
-- The configured default — `docs/development/DEPLOYMENT_AND_CONFIG.md`.
-- The negotiation invariant and the omitted-dimension refusal —
+- The foundation kit; storefront policy that cannot be reconciled with the site closes
+  rather than holds, with an example; an offer without a range commits nothing about
+  negotiability — `docs/development/ARCHITECTURE.md`.
+- The inline form and the configured default — `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- The negotiation invariant and the omitted-dimension policy —
   `negotiation-driven-capacity-resize`'s own deltas; not promoted by this change.
 
 ## Dependencies and Related Changes
@@ -123,5 +139,5 @@ Destinations are provisional (D11).
   admissibility first; `design.md` records the inputs it takes.
 - Complements `negotiation-capacity-feasibility-probe`: admissibility asks whether the
   seller would sell a shape, the probe whether the site can serve it now.
-- `publish-shape-bounds` discloses the resolved bounds to buyers and depends on this
-  change.
+- `publish-shape-bounds` discloses each listing's resolved constraints to buyers in this
+  change's inline form and depends on this change.
