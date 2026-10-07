@@ -10,6 +10,12 @@ non-authoritative transcript that no review or triage step reads, kept for expor
 A run whose output is not a review publishes nothing; its output is kept beside the
 transcript as `NN-<kind>.rejected.md`.
 
+A later review of the same kind continues the reviewer session that wrote the
+latest one, so the reviewer weighs a revision with the context that led to its
+findings; the session is named in a comment at the end of each published record,
+because transcripts are disposable and the record is not. A continued reviewer
+still reads the triage and dispositions from the records.
+
 Contract: openspec/specs/change-workflow/spec.md.
 """
 
@@ -38,6 +44,8 @@ FIELDS = {
 _NUMBERED = re.compile(r"^(\d+)-")
 _FINDING = re.compile(r"^### F\d+\b", re.M)
 _FIELD = re.compile(r"^- \*\*(\w+):\*\*\s*(.*?)\s*$", re.M)
+_SESSION_LINE = re.compile(r"^session id: (\S+)\s*$", re.M)
+_SESSION_MARKER = re.compile(r"<!-- reviewer-session: (\S+) -->")
 
 Runner = Callable[[Sequence[str], Path], int]
 
@@ -98,25 +106,58 @@ def review_prompt(kind: str, change: str, base: str) -> str:
     return prompt
 
 
+def continuation_prompt(kind: str, change: str, base: str, previous: str) -> str:
+    prompt = (f"The change {change} has been revised since your review, {previous}. Re-read the "
+              "change-review skill, which may have changed, and every file in the change, including "
+              f"the triage records in reviews/. Then write a complete new {kind} review in the skill's "
+              "format: say for each earlier finding, yours and any triaged beside it, whether the "
+              "revision resolves it, and review the revised change as a whole.")
+    if kind != "design":
+        prompt += f" Base: {base}."
+    return prompt
+
+
+def prior_session(reviews: Path, kind: str) -> tuple[str, str] | None:
+    """The reviewer session and record of the latest published review of `kind`."""
+    records = sorted(reviews.glob(f"[0-9]*-{kind}.md")) if reviews.is_dir() else []
+    for record in reversed(records):
+        if match := _SESSION_MARKER.search(record.read_text("utf-8")):
+            return match.group(1), record.stem
+    return None
+
+
+def _options(output: Path, model: str | None, effort: str | None) -> list[str]:
+    options = ["--output-last-message", str(output)]
+    if model:
+        options += ["--model", model]
+    if effort:
+        options += ["--config", f'model_reasoning_effort="{effort}"']
+    return options
+
+
 def codex_command(prompt: str, output: Path, root: Path, model: str | None,
                   effort: str | None = None) -> list[str]:
-    command = ["codex", "exec", "--sandbox", "read-only", "--cd", str(root),
-               "--output-last-message", str(output)]
-    if model:
-        command += ["--model", model]
-    if effort:
-        command += ["--config", f'model_reasoning_effort="{effort}"']
-    return command + [prompt]
+    return ["codex", "exec", "--sandbox", "read-only", "--cd", str(root),
+            *_options(output, model, effort), prompt]
+
+
+def resume_command(session: str, prompt: str, output: Path, model: str | None,
+                   effort: str | None = None) -> list[str]:
+    # `exec resume` takes no --sandbox flag, so the read-only sandbox is set through
+    # configuration; the reviewer must never be able to change what it reviews.
+    return ["codex", "exec", "resume", session, "--config", 'sandbox_mode="read-only"',
+            *_options(output, model, effort), prompt]
 
 
 def _run_codex(command: Sequence[str], log: Path) -> int:
     with log.open("w", encoding="utf-8") as stream:
-        return subprocess.run(list(command), stdin=subprocess.DEVNULL, stdout=stream,
+        return subprocess.run(list(command), cwd=ROOT, stdin=subprocess.DEVNULL, stdout=stream,
                               stderr=subprocess.STDOUT, check=False).returncode
 
 
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
-               effort: str | None = None, root: Path = ROOT, runner: Runner = _run_codex) -> Path:
+               effort: str | None = None, fresh: bool = False, root: Path = ROOT,
+               runner: Runner = _run_codex) -> Path:
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     change_dir = root / CHANGES / change
@@ -128,7 +169,14 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     output = next_review_path(reviews, kind)
     log = transcripts / output.with_suffix(".log").name
     draft = transcripts / output.with_suffix(".rejected.md").name
-    status = runner(codex_command(review_prompt(kind, change, base), draft, root, model, effort), log)
+    prior = None if fresh else prior_session(reviews, kind)
+    if prior:
+        session, previous = prior
+        command = resume_command(session, continuation_prompt(kind, change, base, previous),
+                                 draft, model, effort)
+    else:
+        command = codex_command(review_prompt(kind, change, base), draft, root, model, effort)
+    status = runner(command, log)
     text = draft.read_text("utf-8") if draft.is_file() else ""
     problems = [f"the reviewer exited {status}"] if status != 0 else review_problems(text, kind, change)
     if problems:
@@ -136,7 +184,11 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
             draft.unlink(missing_ok=True)
         raise ReviewError("the reviewer produced no review: " + "; ".join(problems)
                           + f"; see {log.relative_to(root)}")
-    draft.replace(output)
+    session = _SESSION_LINE.search(log.read_text("utf-8")) if log.is_file() else None
+    if session:
+        text = text.rstrip("\n") + f"\n\n<!-- reviewer-session: {session.group(1)} -->\n"
+    output.write_text(text, "utf-8")
+    draft.unlink()
     return output
 
 
@@ -147,10 +199,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--model", default=None)
     parser.add_argument("--effort", default=None)
+    parser.add_argument("--fresh", action="store_true",
+                        help="start a new reviewer session instead of continuing the last one")
     args = parser.parse_args(argv)
     try:
         output = run_review(args.change, args.kind, base=args.base, model=args.model or None,
-                            effort=args.effort or None)
+                            effort=args.effort or None, fresh=args.fresh)
     except ReviewError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

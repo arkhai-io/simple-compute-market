@@ -1032,15 +1032,15 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 REVIEW_BASE ?= dev
 REVIEW_MODEL ?= gpt-6-sol
 REVIEW_EFFORT ?= high
-review: ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high])
-	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)")
+review: ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1])
+	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh)
 
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change>)
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-design $(CHANGE)"
 
-design-review: ## Design review of an OpenSpec change in Codex (CHANGE=<change>)
+design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
 
 run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.

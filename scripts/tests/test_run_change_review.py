@@ -44,11 +44,12 @@ def _repository(tmp_path: Path, *records: str) -> Path:
     return tmp_path
 
 
-def _writing(text: str, status: int = 0, calls: list[list[str]] | None = None):
+def _writing(text: str, status: int = 0, calls: list[list[str]] | None = None,
+             session: str = "s-1"):
     def runner(command: Sequence[str], log: Path) -> int:
         if calls is not None:
             calls.append(list(command))
-        log.write_text("session output\n", "utf-8")
+        log.write_text(f"--------\nsession id: {session}\n--------\nsession output\n", "utf-8")
         Path(command[command.index("--output-last-message") + 1]).write_text(text, "utf-8")
         return status
     return runner
@@ -65,7 +66,7 @@ def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> 
     path = reviewer.run_review(CHANGE, kind, root=root, runner=_writing(_review()))
 
     assert path == _reviews(root) / f"01-{kind}.md"
-    assert path.read_text("utf-8") == _review()
+    assert path.read_text("utf-8") == _review().rstrip("\n") + "\n\n<!-- reviewer-session: s-1 -->\n"
     assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
     assert sorted(p.name for p in _reviews(root).iterdir()) == [path.name, "transcripts"]
 
@@ -152,3 +153,51 @@ def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: st
 
     with pytest.raises(reviewer.ReviewError):
         reviewer.run_review(change, kind, root=root, runner=_writing(_review()))
+
+
+def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    calls: list[list[str]] = []
+
+    path = reviewer.run_review(CHANGE, "design", root=root,
+                               runner=_writing(_review(), calls=calls, session="first"))
+
+    command = calls[0]
+    assert command[:4] == ["codex", "exec", "resume", "first"]
+    assert command[command.index("--config") + 1] == 'sandbox_mode="read-only"'
+    assert "01-design" in command[-1] and "triage records" in command[-1]
+    assert path.stem == "02-design"
+    assert path.read_text("utf-8").endswith("<!-- reviewer-session: first -->\n")
+
+
+def test_fresh_starts_a_new_reviewer(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    calls: list[list[str]] = []
+
+    reviewer.run_review(CHANGE, "design", fresh=True, root=root,
+                        runner=_writing(_review(), calls=calls, session="second"))
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    calls: list[list[str]] = []
+
+    reviewer.run_review(CHANGE, "implementation", root=root,
+                        runner=_writing(_review("implementation"), calls=calls))
+
+    assert "resume" not in calls[0]
+
+
+def test_an_external_review_is_never_continued(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "01-design-external.md").write_text(_review(), "utf-8")
+    calls: list[list[str]] = []
+
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls))
+
+    assert "resume" not in calls[0]

@@ -143,8 +143,21 @@ later review reads earlier reviews and their triage from that directory instead 
 relying on the reviewer's session memory. That is what lets a pre-closeout review
 ask "did the implementation address all your feedback" of a different session,
 survive context compaction, run under either harness, and later be split across
-per-lens reviewer agents that never shared a session. Continuing a reviewer session
-where the harness supports it is an optimization, never a dependency.
+per-lens reviewer agents that never shared a session.
+
+A re-review continues its own reviewer. When a change is revised after a review, the
+next review of the same kind resumes the session that wrote the latest one, so the
+reviewer weighs the revision with the context that led to its findings — the
+owner's established practice with browser reviewers, and the reason a re-review is
+not simply a new review. The session is named in a comment at the end of each
+published record, because transcripts are disposable and the record is not. A
+continued reviewer still reads the triage and dispositions from the records, and is
+told to re-read the skill, which may have changed since its session began. A fresh
+reviewer is used when there is no earlier review of the kind, for a pasted external
+review, or on request (`FRESH=1`). Continuation is a reviewer's own context; reading
+another session's transcript remains forbidden. `codex exec resume` takes no sandbox
+flag, so the resumed session is held read-only through configuration, which was
+verified to refuse writes.
 
 ```text
 openspec/changes/<change>/reviews/        (untracked)

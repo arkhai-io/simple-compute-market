@@ -43,8 +43,10 @@ Each review of a change MUST be written as one Markdown file in that change's
 `reviews/` directory, numbered in the order reviews are produced, and that file
 MUST be the only record of its findings. Each finding MUST state its lens, its
 basis, its severity, and the evidence it cites. A later review MUST obtain earlier
-findings and their dispositions from these files rather than from a reviewer's
-session memory. The `reviews/` directory MUST NOT be tracked by version control and
+findings and their dispositions from these files rather than from session memory;
+a review of the same kind as an earlier one MAY continue the reviewer session that
+wrote it, so the reviewer keeps the context behind its findings, but MUST still read
+the triage and dispositions from the records. The `reviews/` directory MUST NOT be tracked by version control and
 MUST NOT be cited by permanent documentation; anything durable in it MUST reach
 permanent documentation through the ordinary promotion path before archival.
 

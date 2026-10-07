@@ -115,6 +115,15 @@ to repair by hand.
       `scripts/tests/test_code_snapshot.py`, which fails without the flag. The
       ledger schema now covers design redirections (`design.md`, the
       `change-workflow` delta).
+- [x] 4.2b A re-review continues its reviewer: `make review` resumes the session
+      that wrote the latest review of the same kind, read-only through
+      configuration (verified to refuse writes), named by a session comment in
+      each published record; `FRESH=1` starts a new reviewer. `change-triage`
+      amended after its second use: findings that depend on an open decision are
+      held from the first pass, review findings are always logged under their
+      own review, revised dispositions name what they revise, the count of
+      ledger entries written is reported, and a re-review is recommended when
+      dispositions changed a central decision.
 - [ ] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.

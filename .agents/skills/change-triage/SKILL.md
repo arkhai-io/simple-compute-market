@@ -89,6 +89,12 @@ For each finding, write five parts:
 
 Present in two passes.
 
+Before the first pass, check each finding against the decisions still open in the
+second pass. A finding whose outcome could change with an open decision does not
+belong in the first pass: hold it, and say which decision it waits on. Disposing of
+it early only for the decision to overturn it wastes the owner's attention and
+leaves revised dispositions behind.
+
 **First pass, in one message:** every finding that needs no choice between
 alternatives — outcomes `edit`, `task`, or `none`, and findings you disagree with —
 ordered by lens (`direction`, `consistency`, `architecture`, `testing`,
@@ -133,7 +139,16 @@ the shape `design.md` and the `change-workflow` delta define:
 ```
 
 `review` names the record (`NN-<kind>` or `NN-<kind>-external`); `section` is the
-`tasks.md` section or `null`.
+`tasks.md` section or `null`. A review finding is always logged under its own
+review record, even when it was settled in the second pass as a design decision;
+`"review": "design"` is only for a redirection of a decision no review raised. When
+a disposition revises an earlier one, the new entry's `owner_disposition` starts
+with `revises <review> <finding>:` so the ledger reads as history rather than as a
+contradiction.
+
+After writing ledger entries, say how many you appended and for which findings.
+The ledger is often a new, untracked file whose changes do not show in a diff, so
+the owner cannot otherwise see that it was written.
 
 ## 5. Carry out the accepted outcomes
 
@@ -167,3 +182,8 @@ When the owner passes a phase-closing gate, set the change's `Status` in
 
 When the gate does not pass, leave the status, and say what must happen before the
 next review.
+
+When the dispositions changed a central decision — the representation, an authority
+boundary, an interface's operations, or the change's scope — the reviews just
+triaged no longer describe the design. Recommend another review round of the same
+kind before the gate is passed, and say which decisions changed.
