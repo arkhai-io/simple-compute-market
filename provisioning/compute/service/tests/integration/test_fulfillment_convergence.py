@@ -29,6 +29,7 @@ from market_core import VersionedEnvelope
 from market_fulfillment.db import Base, SettlementRecord
 from market_core import envelope
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_site.ledger import CapacityConflictError
 
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
@@ -235,22 +236,27 @@ _JOB_METADATA = {
 class _RecordingLedger:
     """Records the activation's target write, and in which session it came."""
 
-    def __init__(self, *, recorded_target: str | None = None, error=None) -> None:
+    def __init__(
+        self, *, recorded_target: str | None = None, error=None, failures: int = -1
+    ) -> None:
         self.calls: list[tuple[str, str, str]] = []
         self._recorded_target = recorded_target
         self._error = error
+        # How many calls raise ``error``; -1 for every call.
+        self._failures = failures
 
     def record_executor_target_in_session(self, db, capacity_reservation_id, executor_target):
         # Read through the session given: inside the activation's transaction
         # the record is already active, though not yet committed.
         state = db.get(SettlementRecord, capacity_reservation_id).state
         self.calls.append((state, capacity_reservation_id, executor_target))
-        if self._error is not None:
+        if self._error is not None and self._failures != 0:
+            self._failures -= 1
             raise self._error
         return {"executor_target": self._recorded_target or executor_target}
 
 
-async def _activate(session_factory, repo, ledger, metadata):
+def _activation_watchdog(session_factory, repo, ledger, metadata):
     _accepted_row(repo, session_factory)
     with session_factory() as db:
         repo.transition(
@@ -261,14 +267,17 @@ async def _activate(session_factory, repo, ledger, metadata):
         status=ProviderStatus(state=ProviderOperationState.succeeded),
         resolve_result=(metadata.get("executor_target", "vm-42"),),
     )
-    watchdog = FulfillmentConvergenceWatchdog(
+    return FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
         provider_registry=ProviderRegistry({"ansible": provider}),
         settings=_settings(),
         capacity_ledger=ledger,
     )
-    await watchdog.converge_creates()
+
+
+async def _activate(session_factory, repo, ledger, metadata):
+    await _activation_watchdog(session_factory, repo, ledger, metadata).converge_creates()
     with session_factory() as db:
         return repo.get(db, "cr-1").state
 
@@ -290,20 +299,46 @@ async def test_activation_records_the_target_in_its_own_transaction(session_fact
 @pytest.mark.parametrize(
     ("ledger", "metadata"),
     [
-        (_RecordingLedger(error=RuntimeError("ledger unavailable")), _JOB_METADATA),
+        (
+            _RecordingLedger(error=CapacityConflictError("reservation records no offering mode")),
+            _JOB_METADATA,
+        ),
         (_RecordingLedger(), {"job": "1"}),
         (_RecordingLedger(recorded_target="tenant-recorded-earlier"), _JOB_METADATA),
     ],
-    ids=["ledger-error", "not-job-backed", "different-target-recorded"],
+    ids=["reservation-refused", "not-job-backed", "different-target-recorded"],
 )
-async def test_a_target_that_cannot_be_recorded_never_fails_the_activation(
+async def test_a_target_the_data_prevents_recording_keeps_the_activation(
     session_factory, repo, ledger, metadata
 ):
     """The workload exists and teardown addresses the fulfillment's own
-    metadata, so a missing or disagreeing lease target is a reporting gap."""
+    metadata, so a target its data prevents recording is a reporting gap the
+    sweep keeps trying, never a reason to hold the activation back."""
     assert await _activate(session_factory, repo, ledger, metadata) == (
         SettlementRecordState.active.value
     )
+
+
+async def test_any_other_failure_leaves_the_activation_to_a_later_cycle(
+    session_factory, repo
+):
+    """A failure the data does not explain rolls the activation back: the
+    record stays dispatching, and once the claim lapses the next cycle
+    activates it and records the target."""
+    ledger = _RecordingLedger(error=RuntimeError("database is locked"), failures=1)
+    watchdog = _activation_watchdog(session_factory, repo, ledger, _JOB_METADATA)
+
+    await watchdog.converge_creates()
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.dispatching.value
+        record = db.get(SettlementRecord, "cr-1")
+        record.claim_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    await watchdog.converge_creates()
+
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.active.value
+    assert [call[2] for call in ledger.calls] == [_JOB_METADATA["executor_target"]] * 2
 
 
 async def test_converge_creates_fails_terminally_on_invalid_resource_metadata(

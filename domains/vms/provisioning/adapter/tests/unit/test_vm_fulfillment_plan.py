@@ -209,6 +209,12 @@ class TestRelayAccessPath:
 class TestGuestName:
     """Provisioning names the guest; every playbook use of the name accepts it."""
 
+    def test_the_derivation_never_changes(self):
+        """A retried fulfillment names its guest again; a changed namespace,
+        prefix, or algorithm would rename a guest prepared by an earlier
+        release."""
+        assert fulfillment_guest_name("alloc-1") == "tenant-ea780533c5915a9b85ba26b9"
+
     def test_the_name_is_stable_per_reservation_and_distinct_across_them(self):
         assert fulfillment_guest_name("alloc-1") == fulfillment_guest_name("alloc-1")
         names = {fulfillment_guest_name(f"reservation-{index}") for index in range(1000)}

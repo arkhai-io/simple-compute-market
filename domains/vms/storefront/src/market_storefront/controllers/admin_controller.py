@@ -1243,11 +1243,17 @@ class AdminController:
                 detail=f"Reservation {body.capacity_reservation_id!r} not found",
             )
         deal_ref = reservation.get("deal_ref") or {}
+        # The reservation's own escrow is the one commit recorded on a hold
+        # placed before the deal had an escrow; its deal reference never
+        # learns it.
+        escrow_uid = (
+            body.escrow_uid or reservation.get("escrow_uid") or deal_ref.get("escrow_uid")
+        )
         result = await apply_fulfillment_failure_policy(
             self._db,
             FulfillmentFailureContext(
                 capacity_reservation_id=body.capacity_reservation_id,
-                escrow_uid=body.escrow_uid or deal_ref.get("escrow_uid"),
+                escrow_uid=escrow_uid,
                 listing_id=listing_id,
                 provider_id=body.provider_id,
                 provider_job_id=body.provider_job_id,

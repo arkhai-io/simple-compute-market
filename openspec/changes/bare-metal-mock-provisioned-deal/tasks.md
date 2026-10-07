@@ -3307,7 +3307,7 @@ re-verifies them by grep before each move.
           learns only at commit now. Expired leases were released. Both storefronts and
           provisioning moved together, as the accepted wire break requires. The bare-metal
           lane is the only exercise of the hosted path's commit-then-materialize.
-  - [ ] 5B.12.D.D Fixes from the implementation review of 5B.12.C and 5B.12.D (2026-10-07;
+  - [x] 5B.12.D.D Fixes from the implementation review of 5B.12.C and 5B.12.D (2026-10-07;
         `design.md`, "Implementation review of 5B.12.C and 5B.12.D").
         - Lease targets (finding 1), in the provisioning service's
           `services/fulfillment_convergence.py`:
@@ -3362,6 +3362,27 @@ re-verifies them by grep before each move.
         - Validation: the provisioning service, the VM adapter, the VM storefront by
           frozen sync, the root aggregate, `make check-packaging`, comment hygiene,
           citations, OpenSpec, and both end-to-end lanes.
+        Done 2026-10-07, as planned:
+        - The sweep's counts join the cycle's `fulfillment_recovery_diagnostics` log event
+          as `lease_targets`; a sweep that raises is logged and does not stop the cycle.
+          A reservation the sweep finds missing for an active fulfillment counts as
+          `no_reservation`, so the outer join keeps such fulfillments in the report.
+        - The retry test expires the record's claim rather than waiting for its backoff.
+        - The fulfillment-failed test stands in for the failure policy to observe the
+          escrow it receives.
+        - Beyond the plan: `e2e-tests`' lock, which pins the VM storefront's wheel, was
+          relocked.
+        - Validation:
+          - VM adapter 28; provisioning service 677 unit and 456 integration;
+          - VM storefront by frozen sync 1102 unit and 354 integration (the two known
+            `test_alkahest` failures);
+          - the root `make -k test` aggregate passes its 44 suites, failing only where this
+            environment cannot run a suite; the locks its reinit rewrote were restored,
+            and the bare-metal and API-credit storefronts re-hand-locked from their
+            snapshot form, every lock's markers matching the snapshot;
+          - `make check-locks`, `make check-packaging`, comment hygiene, the change's
+            documentation citations, and OpenSpec strict validation (1.14.0) pass.
+        - Not yet run end to end.
   - Each slice's gate: the provisioning-family suites, both adapters, both storefronts (the
     VM storefront by frozen sync), the e2e unit suite and collection, the root aggregate,
     `make check-packaging`, comment hygiene, documentation citations, OpenSpec strict

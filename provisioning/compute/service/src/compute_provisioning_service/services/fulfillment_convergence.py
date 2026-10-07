@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from market_fulfillment.ids import derive_provisioned_resource_id
@@ -18,9 +19,19 @@ from market_fulfillment import (
 )
 from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
+from market_fulfillment.db import SettlementRecord
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_site.db import CapacityReservation, ReservationState
+from market_site.ledger import CapacityConflictError
 
 from compute_provisioning.job_fulfillment import fulfillment_executor_target
+
+# Reservations a lease target is never recorded on: their lease is over.
+_TERMINAL_RESERVATION_STATES = (
+    ReservationState.released.value,
+    ReservationState.force_released.value,
+    ReservationState.provisioning_failed.value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +172,9 @@ class FulfillmentConvergenceWatchdog:
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
+        lease_targets = self._reconcile_lease_targets_logged()
         after = self.diagnostics_snapshot()
-        self._log_diagnostics(after)
+        self._log_diagnostics(after, lease_targets=lease_targets)
         return {"before": before, "after": after}
 
     def diagnostics_snapshot(self) -> dict[str, object]:
@@ -191,16 +203,97 @@ class FulfillmentConvergenceWatchdog:
                 SettlementRecordState.teardown_dispatch_pending.value,
             )
 
-    def _log_diagnostics(self, diagnostics: dict[str, object] | None = None) -> None:
+    def reconcile_lease_targets(self) -> dict[str, object] | None:
+        """Record the target of every active fulfillment whose lease lacks one.
+
+        Activation records a lease's target in its own transaction, and a
+        target its data prevents recording does not fail the activation. This
+        sweep keeps trying: for each active fulfillment on a reservation whose
+        lease is not over, a missing target is recorded wherever the write now
+        succeeds, for instance after the reservation's data was corrected.
+        What it cannot record, and each reservation that records a different
+        target, is counted for the cycle's diagnostics; a recorded target is
+        never replaced. Nothing acts on the site's recorded target, since
+        teardown reads the fulfillment's own metadata, so these are reporting
+        gaps rather than lifecycle faults.
+
+        Returns the counts, or ``None`` where no site ledger is composed.
+        """
+        if self._capacity_ledger is None:
+            return None
+        repaired = 0
+        different = 0
+        unrecordable = {"metadata": 0, "reservation_refused": 0, "no_reservation": 0}
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            rows = db.execute(
+                select(
+                    SettlementRecord.capacity_reservation_id,
+                    SettlementRecord.provider_metadata,
+                    CapacityReservation.executor_target,
+                    CapacityReservation.state,
+                )
+                .outerjoin(
+                    CapacityReservation,
+                    CapacityReservation.capacity_reservation_id
+                    == SettlementRecord.capacity_reservation_id,
+                )
+                .where(SettlementRecord.state == SettlementRecordState.active.value)
+            ).all()
+            for reservation_id, metadata, recorded, reservation_state in rows:
+                if reservation_state is None:
+                    unrecordable["no_reservation"] += 1
+                    continue
+                if reservation_state in _TERMINAL_RESERVATION_STATES:
+                    continue
+                try:
+                    target = fulfillment_executor_target(dict(metadata or {}))
+                except ProviderConfigInvalidError:
+                    unrecordable["metadata"] += 1
+                    continue
+                if recorded is not None:
+                    if recorded != target:
+                        different += 1
+                    continue
+                try:
+                    self._capacity_ledger.record_executor_target_in_session(
+                        db, reservation_id, target
+                    )
+                except CapacityConflictError:
+                    unrecordable["reservation_refused"] += 1
+                    continue
+                repaired += 1
+            db.commit()
+        return {
+            "repaired": repaired,
+            "unrecordable": unrecordable,
+            "different_target_recorded": different,
+        }
+
+    def _reconcile_lease_targets_logged(self) -> dict[str, object] | None:
+        try:
+            return self.reconcile_lease_targets()
+        except Exception:  # noqa: BLE001
+            # A reporting pass must not make lifecycle progress appear to
+            # fail; the next cycle sweeps again.
+            logger.exception("[FULFILLMENT_CONVERGENCE] lease target sweep failed")
+            return None
+
+    def _log_diagnostics(
+        self,
+        diagnostics: dict[str, object] | None = None,
+        *,
+        lease_targets: dict[str, object] | None = None,
+    ) -> None:
         try:
             diagnostics = diagnostics or self.diagnostics_snapshot()
-            logger.info(
-                "[FULFILLMENT_CONVERGENCE] recovery diagnostics",
-                extra={
-                    "event": "fulfillment_recovery_diagnostics",
-                    "recovery_diagnostics": diagnostics,
-                },
-            )
+            extra: dict[str, object] = {
+                "event": "fulfillment_recovery_diagnostics",
+                "recovery_diagnostics": diagnostics,
+            }
+            if lease_targets is not None:
+                extra["lease_targets"] = lease_targets
+            logger.info("[FULFILLMENT_CONVERGENCE] recovery diagnostics", extra=extra)
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed
@@ -440,11 +533,15 @@ class FulfillmentConvergenceWatchdog:
 
         Written in the activation's own transaction and session: that
         transaction holds SQLite's single writer slot, so a second session
-        would wait out the busy timeout instead. Best-effort, as the create
-        handle is: the fulfillment is active and its workload exists, and
-        teardown addresses the target in the fulfillment's own metadata, so a
-        missing lease target is a reporting gap, never a reason to fail the
-        activation. Neither the decoding nor the ledger raises after a write.
+        would wait out the busy timeout instead.
+
+        A target the data prevents recording (metadata naming no job-backed
+        target, or a reservation the site refuses) keeps the activation: the
+        workload exists, teardown addresses the target in the fulfillment's
+        own metadata, and ``reconcile_lease_targets`` keeps trying and reports
+        it. Any other failure escapes, so the activation rolls back and the
+        record stays ``dispatching`` for the next cycle to activate. Neither
+        the decoding nor the ledger raises after a write.
         """
         if self._capacity_ledger is None:
             return
@@ -453,9 +550,10 @@ class FulfillmentConvergenceWatchdog:
             recorded = self._capacity_ledger.record_executor_target_in_session(
                 db, reservation_id, target
             )
-        except Exception:
+        except (ProviderConfigInvalidError, CapacityConflictError):
             logger.exception(
-                "[FULFILLMENT] Could not record the executor target of reservation %s",
+                "[FULFILLMENT] Could not record the executor target of reservation %s; "
+                "convergence keeps trying",
                 reservation_id,
             )
             return

@@ -952,6 +952,58 @@ class TestFulfillmentEvents:
         assert reservation["failure_message"] == "host rejected request"
         assert fake._available("pool-h200-1") == 4
 
+    async def test_fulfillment_failed_finds_the_escrow_its_commit_recorded(
+        self, db, service_client, monkeypatch
+    ):
+        """A hold placed before the deal had an escrow learns it at commit, on
+        the reservation itself; a failure callback naming none still reaches the
+        failure policy with that escrow."""
+        from types import SimpleNamespace
+
+        from market_storefront.controllers import admin_controller
+        from tests.fake_site import site_capacity
+
+        received = []
+
+        async def failure_policy(_db, context, *, capacity):
+            received.append(context)
+            return SimpleNamespace(
+                capacity_reservation_id=context.capacity_reservation_id,
+                state="released",
+                resource_id=None,
+                gpu_count=None,
+                resource_state=None,
+                reopened_listing_ids=[],
+            )
+
+        monkeypatch.setattr(
+            admin_controller, "apply_fulfillment_failure_policy", failure_policy
+        )
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+
+        with site_capacity(fake, project_pool_modes=True) as capacity:
+            reserved = await capacity.reserve(
+                claim={"offering_mode": "vm", "resource_id": "pool-h200-1", "gpu_count": 2},
+                deal_ref={"listing_id": "listing-2x"},
+            )
+            capacity_reservation_id = str(reserved["capacity_reservation_id"])
+            await capacity.commit(
+                resource_id=None,
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc="2099-01-01 01:00",
+                deal_ref={"escrow_uid": "escrow-committed"},
+                site_id="default",
+            )
+            await service_client.notify_fulfillment_failed(
+                capacity_reservation_id,
+                site_id="default",
+                reason="provisioning_error",
+                message="host rejected request",
+            )
+
+        assert [context.escrow_uid for context in received] == ["escrow-committed"]
+
     async def test_release_of_unknown_reservation_is_idempotent(
         self, service_client
     ):

@@ -263,7 +263,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.17.0"
+version = "0.17.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
