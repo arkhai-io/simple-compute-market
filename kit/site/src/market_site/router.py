@@ -249,6 +249,7 @@ def make_capacity_router(
                 lease_start_utc=body.lease_start_utc,
                 lease_end_utc=body.lease_end_utc,
                 idempotency_ref=body.idempotency_ref,
+                deal_ref=body.deal_ref,
             )
         except CapacityConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc))

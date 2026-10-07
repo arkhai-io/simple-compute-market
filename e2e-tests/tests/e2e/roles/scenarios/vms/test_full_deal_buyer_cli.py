@@ -7,7 +7,7 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00b  Registry reachable:      GET /api/v1/system/status → checks.registry=ok
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
-  00e  Provisioning mock mode:  GET /api/v1/system/ansible/readiness → ansible_mode=mock
+  00e  Provisioning mock mode:  GET /api/v1/system/status → execution.mocked
   00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
                                 upserts the compute row this test needs
   00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
@@ -64,7 +64,7 @@ Phase 9 — Provisioning completion
          Popen.wait → returncode 0
          GET /api/v1/listings/{id} → status=closed
          GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
-  09c  Lease registered:
+  09c  Lease recorded:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
@@ -88,6 +88,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import resources
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
@@ -164,14 +165,12 @@ DEMAND_RESOURCE = {
     "amount": 10 * 10**18,
 }
 # Listing-side accepted_escrows. The escrow_address is resolved from the
-# same alkahest_anvil_addresses.json that ships with market-storefront and
+# same alkahest_anvil_addresses.json that ships with the Alkahest kit and
 # that the seller's `market publish` flow reads at listing-create time —
 # so the listing mirrors what a real seller would publish, and the buyer
 # CLI's signed EscrowProposal (which derives the same address from the
 # same file) matches under the storefront's strict (chain, address) check.
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _ALKAHEST_CFG = resolve_alkahest_address_config(
     get_alkahest_network("anvil"),
     config_path=_ALKAHEST_ADDRESSES_PATH,
@@ -288,27 +287,26 @@ class TestStage00b_RegistryReachable:
 
 class TestStage00c_ProvisioningHealth:
     def test_00c_provisioning_is_healthy(self, provisioning_client, deal_state: DealState):
-        """GET /api/v1/system/ansible/readiness → playbook.exists=True.
+        """GET /api/v1/system/status → the Ansible component is ready.
 
-        Uses the ansible readiness endpoint rather than /health because it
-        confirms the mock profile is correctly configured — not just that
-        the HTTP server is running. In mock mode the playbook points to
-        /dev/null which always exists; a missing playbook means the mock
-        profile isn't active.
+        Uses status rather than /health because the component confirms the
+        executors are composed as the lane expects — not just that the HTTP
+        server is running. Mocked executors are ready without Ansible or
+        playbooks; a component that is not ready means real executors that
+        cannot run.
         """
         require_state(deal_state, "_storefront_healthy", "_registry_reachable")
-        resp = provisioning_client.get_ansible_readiness()
-        playbook_exists = resp.get("playbook", {}).get("exists", False)
-        assert playbook_exists, (
-            f"Provisioning playbook path does not exist: {resp.get('playbook')}\n"
+        status = provisioning_client.get_system_status()
+        ansible = status.component("ansible")
+        assert ansible is not None and ansible.ready, (
+            f"Provisioning's Ansible component is not ready: {ansible!r}\n"
             "Ensure ACTIVE_PROFILES=mock is set on the provisioning container.\n"
-            f"Full response: {resp}"
+            f"Full status: {status!r}"
         )
         deal_state._provisioning_healthy = True
         log.info(
-            "[00c] Provisioning ansible readiness: playbook.exists=%s ansible=%s",
-            playbook_exists,
-            resp.get("ansible_version"),
+            "[00c] Provisioning Ansible component ready: ansible=%s",
+            ansible.detail.payload.get("ansible_version"),
         )
 
 
@@ -340,21 +338,20 @@ class TestStage00d_NegotiationStrategy:
 
 class TestStage00e_ProvisioningMockMode:
     def test_00e_provisioning_is_in_mock_mode(self, provisioning_client, deal_state: DealState):
-        """GET /api/v1/system/ansible/readiness → ansible_mode=mock.
+        """GET /api/v1/system/status → execution.mocked.
 
         Guards the full e2e deal flow from accidentally targeting a production
-        provisioning service. If ansible_mode is 'real', any settlement attempt
-        would run an actual Ansible playbook against a real KVM host.
+        provisioning service. If any composed executor is real, a settlement
+        attempt would run an actual Ansible playbook against a real KVM host.
 
         Fix: set provisioning.mockMode=true in the helm values and redeploy,
         or set ACTIVE_PROFILES=production,provisioning-secrets,mock on the
         provisioning container.
         """
         require_state(deal_state, "_provisioning_healthy")
-        resp = provisioning_client.get_ansible_readiness()
-        mode = resp.get("ansible_mode", "real")
-        assert mode == "mock", (
-            f"Provisioning service is running in '{mode}' mode, not 'mock'.\n"
+        execution = provisioning_client.get_system_status().execution
+        assert execution.mocked, (
+            f"Provisioning executes jobs for real: {execution!r}.\n"
             "The e2e deal flow requires mock mode to avoid running real Ansible "
             "playbooks against live infrastructure.\n"
             "Fix: set provisioning.mockMode=true in values.yaml and redeploy, or\n"
@@ -362,7 +359,7 @@ class TestStage00e_ProvisioningMockMode:
             "provisioning container."
         )
         deal_state._provisioning_mock_mode = True
-        log.info("[00e] Provisioning mock mode confirmed: ansible_mode=%s", mode)
+        log.info("[00e] Provisioning mock mode confirmed: %s", execution.executors)
 
 
 class TestStage00f_ResourceSeed:
@@ -515,7 +512,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
         health = provisioning_client.get_system_status()
-        checks = health.get("checks", {})
+        checks = health.checks
 
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (
@@ -759,7 +756,14 @@ class TestStage05a_EvaluateNegotiate:
                 },
                 "expiration_unix": 2_000_000_000,
             },
-            requested_duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": buyer_config["ssh_public_key"],
+                },
+            },
             buyer_principal=_signer(
                 "eip191",
                 settings.BUYER.MARKETPLACE_CREDENTIAL,
@@ -937,13 +941,17 @@ class TestStage07_ArmProvisioningGate:
             rule_id=PROV_RULE_ID,
             match={"vm_action": "create"},
             pause_before_result=True,
+            # The create fact the VM playbook prints, with the forwarded port and
+            # the time access became ready: a create reporting neither says
+            # nothing a buyer can use, and fails.
             result_stdout=(
-                '{"vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
-                '"tenant_ssh_key_path": "/tmp/e2e.key", '
-                '"frp": {"enabled": false}, '
+                'ok: [kvm1] => {\n    "vm_creation_data": '
+                '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+                '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+                '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
                 '"authentication": {"tenant": {"ssh_commands": '
                 '{"external": "ssh vmuser@localhost", '
-                '"internal": "ssh vmuser@10.0.0.1"}}}}'
+                '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
             ),
             fail_with=None,
         )
@@ -1121,7 +1129,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             f"fulfillment_id absent from settle status after job_submitted event: {status_resp}"
         )
 
-        status = provisioning_client.get_fulfillment_status(fulfillment_id)
+        status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
         assert status.get("state") == "dispatching", (
             f"Expected fulfillment dispatched but gated on the paused mock rule, got: {status}"
         )
@@ -1152,7 +1160,7 @@ class TestStage09a_ProvisioningCompletes:
         provisioning_test_client.drain(timeout=30)
         provisioning_client.advance_fulfillment_convergence_cycle()
 
-        status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
+        status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
         assert status.get("state") == "active", (
             f"Expected fulfillment to converge to active, got: {status}"
         )
@@ -1344,8 +1352,8 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         )
 
 
-class TestStage09c_LeaseRegistered:
-    def test_09c_provisioning_lease_registered(self, provisioning_client, deal_state: DealState):
+class TestStage09c_LeaseRecorded:
+    def test_09c_provisioning_lease_recorded(self, provisioning_client, deal_state: DealState):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Placement is confirmed here, not at stage 08b -- see
@@ -1391,7 +1399,7 @@ class TestStage09c_LeaseRegistered:
         deal_state.lease_status = lease.get("status")
         deal_state.host_id = host_id
         log.info(
-            "[09c] Lease %s registered for escrow %s (resource=%s status=%s mode=%s)",
+            "[09c] Lease %s recorded for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,
             deal_state.real_escrow_uid,
             deal_state.reserved_resource_id,
@@ -1484,7 +1492,7 @@ class TestStage10b_LeaseCycleBeginsTeardown:
         assert lease.get("status") == "releasing", lease
         fulfillment_id = lease.get("fulfillment_id")
         assert fulfillment_id, lease
-        fulfillment = provisioning_client.get_fulfillment_status(fulfillment_id)
+        fulfillment = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
         assert fulfillment.get("state") == "teardown_dispatch_pending", fulfillment
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
@@ -1508,7 +1516,7 @@ class TestStage11a_TeardownDispatch:
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
         diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
         assert "before" in diagnostics and "after" in diagnostics
-        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
+        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
         assert fulfillment.get("state") == "tearing_down", fulfillment
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id

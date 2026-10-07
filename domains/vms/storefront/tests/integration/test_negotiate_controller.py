@@ -7,21 +7,24 @@ pinned seller trust, and signed seller responses.
 
 from __future__ import annotations
 
+
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_capacity_publication import publication_binding
-from market_core.schemas import EscrowProposal, SettlementSelection
 
 import market_storefront.container as _container
+import market_storefront.middleware.admin_identity as _admin_identity
+from market_storefront.controllers.negotiations_controller import (
+    router as negotiations_router,
+)
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
-    _proposal_payload,
     router as negotiate_router,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
@@ -52,25 +55,6 @@ def _assert_canonical_owners(result: dict) -> None:
     assert result["seller_principal"] == _SELLER_SIGNER.identity.model_dump(mode="json")
 
 
-def test_proposal_payload_preserves_settlement_selection() -> None:
-    proposal = EscrowProposal(
-        chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
-        fields={"amount": "2000"},
-        expiration_unix=1_800_000_000,
-    )
-    selection = SettlementSelection(
-        mechanism="fiat.stripe.v1",
-        option_id="1" * 64,
-        expiration_unix=1_800_000_000,
-    )
-
-    payload = _proposal_payload(proposal, selection)
-
-    assert payload["fields"] == {"amount": "2000"}
-    assert payload["settlement_selection"] == selection.model_dump(mode="json")
-
-
 @pytest_asyncio.fixture
 async def db(tmp_path):
     from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
@@ -84,6 +68,10 @@ async def db(tmp_path):
 _SITE_POOLS: list[dict] = []
 # The fixture's recorded site requests, for tests asserting no site call.
 _SITE_REQUESTS: list[list[str]] = []
+# The fixture's application, for tests that also drive it as an administrator.
+_APPS: list[FastAPI] = []
+# A deterministic development key for these tests only; never used on any network.
+_ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
 
 
 def _declare_source(
@@ -254,9 +242,18 @@ async def client(db, monkeypatch):
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = db.domain_registry
     _container.resolved_marketplace_signer = _SELLER_SIGNER
+    monkeypatch.setattr(
+        _admin_identity,
+        "get_administrator_configs",
+        lambda: {"operator": TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))},
+    )
+    _admin_identity.initialize_administrator_identities(db.db_path)
     app = FastAPI()
     app.include_router(negotiate_router)
+    app.include_router(negotiations_router)
     app.middleware("http")(listing_lifecycle_middleware)
+    app.middleware("http")(_admin_identity.administrator_identity_middleware)
+    _APPS[:] = [app]
 
     # The injected seller-round and acceptance-hold collaborator runs against
     # an in-memory site ledger with the same exact durable site binding.
@@ -272,11 +269,7 @@ async def client(db, monkeypatch):
             "vm_host": "kvm1",
         },
     )
-    address_config_path = (
-        Path(_negotiation_runtime.__file__).resolve().parent
-        / "data"
-        / "alkahest_anvil_addresses.json"
-    )
+    address_config_path = anvil_address_book_path()
     monkeypatch.setattr(
         _negotiation_runtime,
         "CHAINS",
@@ -750,3 +743,110 @@ class TestUnbackedListingNegotiation:
 
         assert "no_matching_declaration" in str(exc_info.value)
         assert site_requests == []
+
+
+class TestAdministrativeAcceptance:
+    """Force-accept, sent through the canonical administrator client, goes
+    through the runtime's acceptance, so the domain's hold is attempted and its
+    accepted settlement artifacts recorded exactly as after a negotiated
+    acceptance."""
+
+    async def test_force_accept_records_the_hold_and_settlement_plan(
+        self, client, db
+    ):
+        c, db = client
+        await _seed_listing(db, "neg-listing-force", demand_amount=5000)
+        with settings_overrides(**{"capacity.hold_ttl_seconds": 900}):
+            opened = await c.negotiate_new(
+                listing_id="neg-listing-force",
+                initial_amount=4500,
+                provision_terms=_vm_provision(),
+                token=_TOKEN,
+                chain_name="anvil",
+                escrow_address="0x" + "11" * 20,
+                escrow_expiration_unix=1_800_000_000,
+            )
+            assert opened["action"] == "counter"
+            negotiation_id = opened["negotiation_id"]
+            (site_requests,) = _SITE_REQUESTS
+            site_requests.clear()
+
+            (app,) = _APPS
+            async with StorefrontClient(
+                "http://test",
+                signer=_ADMIN_SIGNER,
+                caller_role="admin",
+                expected_publishers=_EXPECTED_PUBLISHERS,
+                transport=httpx.ASGITransport(app=app),
+            ) as admin:
+                accepted = await admin.force_accept_negotiation(
+                    "neg-listing-force", negotiation_id, amount=5000
+                )
+
+        assert accepted.action == "accept"
+        assert accepted.amount == 5000
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        plan = thread["settlement_plan"]
+        assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
+        assert thread["terminal_state"] == "success"
+        assert int(thread["agreed_price"]) == 5000
+        # The acceptance hold reserves at the listing's site, as it does after
+        # a negotiated acceptance.
+        assert any("reserv" in request for request in site_requests), site_requests
+
+
+class TestAcceptanceRechecksTheSource:
+    """A buyer's accept rechecks the listing against its source, as a round does.
+
+    The negotiation opens while the source matches, so the seller counters; the
+    source then changes, or becomes unreadable, before the buyer accepts.
+    """
+
+    async def _open_countered(self, c, db, listing_id: str) -> str:
+        await _upsert_bound_listing(db, listing_id)
+        opened = await c.negotiate_new(
+            listing_id=listing_id,
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+        )
+        assert opened["action"] == "counter"
+        return opened["negotiation_id"]
+
+    async def test_an_accept_after_the_source_changed_is_refused(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-changed")
+        (pool,) = [p for p in _SITE_POOLS if p["pool_id"] == "pool-neg-recheck-changed"]
+        pool["resources"][0]["attributes"]["gpu_model"] = "B300"
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 409
+        assert "no_matching_declaration" in str(refused.value)
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        assert thread["terminal_state"] is None
+        assert thread["agreed_at"] is None
+
+    async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+
+    async def test_a_buyer_exits_whatever_the_source(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        result = await c.negotiate_continue(negotiation_id, action="exit")
+
+        assert result["action"] == "exit"

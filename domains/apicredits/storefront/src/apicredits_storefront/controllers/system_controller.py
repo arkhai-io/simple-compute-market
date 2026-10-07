@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import DealControlRouteError, StageEventRouteService
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
-from apicredits_storefront.server import is_globally_paused
+from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from core_storefront.models.system_models import (
     STAGE_EVENT_PAGE_CAP,
     HealthResponse,
-    StageEventResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,13 +51,12 @@ class SystemController:
     )
     async def system_status(self) -> HealthResponse:
         body = await self._svc.get_health(include_registry=True)
-        body["paused"] = is_globally_paused()
+        body["paused"] = _container.trading_pause.paused
         return HealthResponse(**body)
 
     @router.get(
         "/api/v1/system/events",
         summary="Stage event log",
-        dependencies=[Depends(require_admin_principal)],
     )
     async def stream_events(
         self,
@@ -72,45 +68,25 @@ class SystemController:
         listing_id: Annotated[str | None, Query()] = None,
         negotiation_id: Annotated[str | None, Query()] = None,
     ):
-        last_event_id_hdr = request.headers.get("last-event-id")
-        if last_event_id_hdr:
-            try:
-                since_id = int(last_event_id_hdr)
-            except (ValueError, TypeError):
-                pass
-
+        try:
+            resource = StageEventRouteService.signed_resource(
+                request.query_params.multi_items()
+            )
+        except DealControlRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        await authenticate_admin(
+            request, operation="admin_system_events", resource=resource
+        )
+        events = StageEventRouteService(self._db)
+        since_id = events.resume_point(since_id, request.headers.get("last-event-id"))
+        filters = {
+            "stage": stage,
+            "listing_id": listing_id,
+            "negotiation_id": negotiation_id,
+        }
         if not stream:
-            # The page and the fact that it is a page. A reader that
-            # filters these rows and concludes something about the whole log
-            # (the e2e claims stage does exactly that) needs to know whether
-            # it saw the whole log, and only the server knows -- `count` on
-            # its own cannot distinguish a log that ended on the boundary
-            # from one that continues past it.
-            rows, truncated = await self._db.list_stage_events_page(
-                after_id=since_id,
-                limit=limit,
-                stage=stage,
-                listing_id=listing_id,
-                negotiation_id=negotiation_id,
-            )
-            return StageEventResponse(
-                events=rows, count=len(rows), truncated=truncated
-            )
-
-        async def _generate():
-            cursor = since_id
-            while True:
-                rows = await self._db.list_stage_events(
-                    after_id=cursor,
-                    limit=50,
-                    stage=stage,
-                    listing_id=listing_id,
-                    negotiation_id=negotiation_id,
-                )
-                for row in rows:
-                    cursor = row["id"]
-                    yield f"id: {cursor}\ndata: {json.dumps(row, default=str)}\n\n"
-                if not rows:
-                    await asyncio.sleep(0.2)
-
-        return StreamingResponse(_generate(), media_type="text/event-stream")
+            return await events.page(since_id=since_id, limit=limit, **filters)
+        return StreamingResponse(
+            events.stream(since_id=since_id, **filters),
+            media_type="text/event-stream",
+        )

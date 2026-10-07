@@ -5,8 +5,10 @@ source no longer supports. A bare-metal listing's shape comes from its Physical
 Resource's declaration and its region from its pool, so the recheck reads both
 back from the site's projection through the same classification publication
 uses: whatever publication would now publish for the resource is what the
-listing must still be. It checks the declaration, not availability; a machine
-leased since publication still matches its declaration. See
+listing must still be. A machine leased since publication still matches its
+declaration but is not available; the two are reported apart, declaration
+first, so a buyer and an operator can tell a shape the seller no longer
+declares from a machine that is taken for now. See
 openspec/specs/storefront-publication/spec.md, "The seller's inventory guard
 checks a listing against its own source" and "Bare-metal opening rechecks its
 listing against its source".
@@ -36,6 +38,9 @@ SOURCE_MISMATCH = "declared_mismatch"
 #: The source no longer offers the resource: it is missing, withdrawn, or its
 #: pool no longer admits bare metal.
 SOURCE_ABSENT = "absent"
+#: The listing matches its declaration, but the whole machine is not available
+#: now: the site's view reports it leased.
+SOURCE_UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,10 @@ def recheck_bare_metal_listing_source(
         return ListingSourceCheck(
             SOURCE_MISMATCH, "the pool's region differs from the published region"
         )
+    if item.classification == UNAVAILABLE:
+        return ListingSourceCheck(
+            SOURCE_UNAVAILABLE, "the Physical Resource is not available"
+        )
     return ListingSourceCheck(SOURCE_MATCHES, "the listing matches its source")
 
 
@@ -107,6 +116,7 @@ __all__ = [
     "SOURCE_ABSENT",
     "SOURCE_MATCHES",
     "SOURCE_MISMATCH",
+    "SOURCE_UNAVAILABLE",
     "ListingSourceCheck",
     "recheck_bare_metal_listing_source",
 ]

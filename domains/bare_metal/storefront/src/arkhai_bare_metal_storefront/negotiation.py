@@ -1,9 +1,18 @@
-"""Deterministic seller negotiation policy for bare-metal leases."""
+"""Seller negotiation policy for bare-metal leases.
+
+The domain's own checks (duration bounds, access method, SSH key, no
+buyer-supplied access authority) run first and refuse for their own reasons;
+then a configured chain decides the price. The chain always begins with
+``has_matching_inventory_guard``, which reads the negotiation runtime's check of
+the listing against its source for the round. The default chain accepts at or
+above the listed rate and exits below it; a chain ending in ``bisection``
+counters.
+"""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from arkhai_bare_metal.schema import (
@@ -12,19 +21,37 @@ from arkhai_bare_metal.schema import (
     BareMetalMessage,
     BareMetalTerms,
 )
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
+    NegotiationMiddleware,
     NegotiationRound,
+    load_negotiation_chain,
+    normalize_policy_chain_config,
     run_negotiation_chain_with_context,
     their_last_proposal,
 )
-from market_policy.scalar_policies import (
-    escrow_shape_guard,
-    listed_price_middleware,
-    proposal_uses_scalar_amount,
-)
+from market_policy.scalar_policies import proposal_uses_scalar_amount
 from market_policy.seller_round import SellerRoundResult
+
+#: The seller chain when none is configured: the escrow shape, then the listed rate.
+DEFAULT_SELLER_POLICIES: tuple[str, ...] = ("escrow_shape_guard", "listed_price")
+#: Prepended to every chain, so no configuration can drop the source check.
+REQUIRED_SELLER_GUARDS: tuple[str, ...] = ("has_matching_inventory_guard",)
+
+
+def seller_policy_names(configured: Any = None) -> list[str]:
+    """The seller chain's middleware names: the required guards, then ``configured``.
+
+    ``configured`` is any form the policy kit normalizes (a name, a list, or a
+    mapping naming a chain); nothing configured means the default chain.
+    """
+    names = normalize_policy_chain_config(configured) or list(DEFAULT_SELLER_POLICIES)
+    return [
+        *REQUIRED_SELLER_GUARDS,
+        *(name for name in names if name not in REQUIRED_SELLER_GUARDS),
+    ]
 
 
 class BareMetalSellerRoundHook(Protocol):
@@ -39,6 +66,7 @@ class BareMetalSellerRoundHook(Protocol):
         seller_reference_amount: int,
         listing_ref: str | None = None,
         strategy_label: str | None = None,
+        listing_source: ListingSourceVerdict | None = None,
     ) -> SellerRoundResult: ...
 
 
@@ -81,6 +109,10 @@ def _rejected_result(
 
 
 class _DefaultBareMetalSellerRoundHook:
+    def __init__(self, names: Sequence[str]) -> None:
+        self._names = list(names)
+        self._chain: list[NegotiationMiddleware] = load_negotiation_chain(self._names)
+
     async def __call__(
         self,
         *,
@@ -90,6 +122,7 @@ class _DefaultBareMetalSellerRoundHook:
         seller_reference_amount: int,
         listing_ref: str | None = None,
         strategy_label: str | None = None,
+        listing_source: ListingSourceVerdict | None = None,
     ) -> SellerRoundResult:
         listing_resource = _listing_resource(listing)
         requested = BareMetalMessage.model_validate(message)
@@ -163,6 +196,7 @@ class _DefaultBareMetalSellerRoundHook:
             our_reference_amount=int(seller_reference_amount),
             listing=listing_data,
             our_escrow_proposal=peer_proposal,
+            listing_source=listing_source,
             intermediate={
                 "uses_scalar_amount": uses_scalar_amount,
                 "bare_metal_message": requested.model_dump(
@@ -176,7 +210,7 @@ class _DefaultBareMetalSellerRoundHook:
             },
         )
         decision, context = run_negotiation_chain_with_context(
-            [escrow_shape_guard, listed_price_middleware],
+            self._chain,
             history,
             context,
         )
@@ -184,12 +218,16 @@ class _DefaultBareMetalSellerRoundHook:
             our_amount=seller_reference_amount if uses_scalar_amount else 0,
             strategy_label=strategy,
             direction="maximize",
-            chain_label="escrow_shape_guard,listed_price",
+            chain_label=",".join(self._names),
             decision=decision,
             intermediate=dict(context.intermediate),
         )
 
 
-def default_seller_round_hook() -> BareMetalSellerRoundHook:
-    """Build the deterministic default bare-metal seller policy."""
-    return _DefaultBareMetalSellerRoundHook()
+def default_seller_round_hook(policies: Any = None) -> BareMetalSellerRoundHook:
+    """Build the bare-metal seller policy over the configured chain.
+
+    ``policies`` names the chain after the required guards; ``None`` selects the
+    default. An unknown name is refused here, when the storefront is composed.
+    """
+    return _DefaultBareMetalSellerRoundHook(seller_policy_names(policies))

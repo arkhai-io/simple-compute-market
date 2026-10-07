@@ -74,7 +74,7 @@ def resolve_vm_listing_cardinality_mode(
     # resolver at its own module level) -- notably the buyer distribution,
     # which imports `arkhai_vms_listings` for unrelated helpers and has no
     # reason to depend on `kit/resource-pools`.
-    from market_resource_pools.hints import (
+    from market_resource_pools_contracts.hints import (
         DEPRECATED_LISTING_MODE_POLICY_TAG,
         LISTING_CARDINALITY_MODE_POLICY_TAG,
         listing_cardinality_mode_source,

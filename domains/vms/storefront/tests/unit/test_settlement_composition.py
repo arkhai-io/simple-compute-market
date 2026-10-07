@@ -592,6 +592,50 @@ async def test_persist_outcome_preserves_legacy_ready_projection(db):
     assert json.loads(row["tenant_credentials"]) == {"password": "secret"}
 
 
+@pytest.mark.asyncio
+async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass(
+    tmp_path,
+):
+    """A VM that exists but whose lease or evidence step is pending is deferred:
+    the outcome says so, and the escrow is neither ready nor failed."""
+    deferred = {
+        "negotiation_id": "neg-1",
+        "escrow_uid": "0xescrow",
+        "site_id": "site-1",
+        "state": "deferred",
+        "domain_result": {
+            "status": "deferred",
+            "message": "lease registration did not complete after provisioning: down",
+        },
+    }
+    domain = build_vm_storefront_domain()
+    domain = replace(
+        domain,
+        fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=deferred)),
+    )
+    db = SQLiteClient(
+        db_path=str(tmp_path / "deferred-fulfillment.db"),
+        registry=build_vm_storefront_registry(domain),
+    )
+    prepared = _prepared(db)
+    await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
+    status_before = (await db.load_escrow(escrow_uid="0xescrow"))["status"]
+
+    outcome = await fulfill_vm_settlement(
+        domain,
+        prepared,
+        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
+        sqlite_client=db,
+    )
+    await persist_vm_settlement_outcome(prepared, outcome)
+
+    assert outcome.status == "deferred"
+    assert "lease registration" in outcome.reason
+    row = await db.load_escrow(escrow_uid="0xescrow")
+    assert row["status"] == status_before
+    assert row["status"] not in {"ready", "failed", "refunded"}
+
+
 def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
     serialized = serialize_settlement_job(
         {

@@ -239,3 +239,4 @@ pi-session-*.html
 # Local-only mise overrides (machine-specific paths).
 mise.local.toml
 .claude/skills/implement-change/SKILL.md
+openspec/changes/*/reviews/*

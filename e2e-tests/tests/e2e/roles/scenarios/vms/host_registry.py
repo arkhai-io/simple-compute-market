@@ -43,15 +43,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from market_resource_pools.hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     DELIVERABLE_MODES_POLICY_TAG,
 )
-from vm_provisioning_operator import PoolCreate, PoolUpdate
-from vm_provisioning_operator.client import ProvisioningError
-from vm_provisioning_operator.models import HostCreate, HostUpdate
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
+from compute_provisioning_client import ComputeProvisioningError
+from market_resource_pools_client import SyncResourcePoolClient
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
 
 #: GPUs physically present on an executor host. Must cover the largest single
 #: slice any scenario reserves — 4, in the dynamic-listings cases.
@@ -89,6 +90,11 @@ E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
 E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
 E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
+
+
+def _pools(provisioning_client: Any) -> SyncResourcePoolClient:
+    """Pool administration over the family client's signing transport."""
+    return SyncResourcePoolClient(provisioning_client)
 
 
 def register_e2e_pool(
@@ -129,8 +135,8 @@ def register_e2e_pool(
     # lookup. A transport or auth failure means the service is unreachable, and
     # creating on top of that would report success over an error.
     try:
-        existing = provisioning_client.get_pool(pool_id)
-    except ProvisioningError:
+        existing = _pools(provisioning_client).get_pool(pool_id)
+    except ComputeProvisioningError:
         existing = None
 
     if existing is not None:
@@ -147,13 +153,13 @@ def register_e2e_pool(
             **({"region": region} if region is not None else {}),
         }
         if any(tags.get(k) != v for k, v in wanted.items()):
-            provisioning_client.patch_pool(pool_id, PoolUpdate(
+            _pools(provisioning_client).patch_pool(pool_id, PoolUpdate(
                 policy_tags={**tags, **wanted},
             ))
-            return provisioning_client.get_pool(pool_id)
+            return _pools(provisioning_client).get_pool(pool_id)
         return existing
 
-    provisioning_client.create_pool(PoolCreate(
+    _pools(provisioning_client).create_pool(PoolCreate(
         id=pool_id,
         label=label or pool_id,
         provider="ansible",
@@ -171,7 +177,7 @@ def register_e2e_pool(
         },
         provider_config=_default_pool_provider_config(provisioning_client),
     ))
-    return provisioning_client.get_pool(pool_id)
+    return _pools(provisioning_client).get_pool(pool_id)
 
 
 def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
@@ -193,7 +199,7 @@ def _default_pool_provider_config(provisioning_client: Any) -> dict[str, Any]:
     configuration, so it is the one place a scenario can read a valid
     `playbook_path` for whatever profile the stack is running under.
     """
-    default_pool = provisioning_client.get_pool(SYSTEM_DEFAULT_POOL_ID)
+    default_pool = _pools(provisioning_client).get_pool(SYSTEM_DEFAULT_POOL_ID)
     config = dict(getattr(default_pool, "provider_config", None) or {})
     assert config.get("playbook_path"), (
         f"the {SYSTEM_DEFAULT_POOL_ID!r} pool reports no playbook_path "
@@ -212,9 +218,9 @@ def register_e2e_host(
 ) -> Any:
     """Register one executor host into `pool_id`, idempotently.
 
-    `ssh_key_type='path'` stores the value verbatim, so no key material is needed:
-    nothing here SSHes anywhere — provisioning runs in mock mode — and the host
-    exists to be an executor identity, not to be reached.
+    A `key_path` connection names a key file without carrying it, so no key
+    material is needed: nothing here SSHes anywhere — provisioning runs in mock
+    mode — and the host exists to be an executor identity, not to be reached.
 
     Reconciles rather than accepting what is there. A host may survive an earlier
     run against the same stack with a different GPU count or pool, and the contract
@@ -222,17 +228,17 @@ def register_e2e_host(
     """
     try:
         existing = provisioning_client.get_host(name)
-    except ProvisioningError:
+    except ComputeProvisioningError:
         existing = None
 
     if existing is None:
         provisioning_client.register_host(HostCreate(
             host_id=name,
-            ssh_host="127.0.0.1",
-            ssh_user="e2e",
+            connection=ConnectionSubmission(
+                kind="ssh",
+                public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
+            ),
             gpu_count=gpu_count,
-            ssh_key_type="path",
-            ssh_key_value="/dev/null",
             pool_id=pool_id,
         ))
     elif (existing.gpu_count or 0) < gpu_count or existing.pool_id != pool_id:

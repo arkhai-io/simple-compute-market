@@ -1339,7 +1339,6 @@ class StorefrontClient(_StorefrontClientBase):
         provider_lease_id: "str | None" = None,
         resource_id: "str | None" = None,
         host_id: "str | None" = None,
-        vm_target: "str | None" = None,
         gpu_count: "int | None" = None,
         lease_end_utc: "str | None" = None,
         request_id: str | None = None,
@@ -1365,8 +1364,6 @@ class StorefrontClient(_StorefrontClientBase):
             body["resource_id"] = resource_id
         if host_id is not None:
             body["host_id"] = host_id
-        if vm_target is not None:
-            body["vm_target"] = vm_target
         if gpu_count is not None:
             body["gpu_count"] = gpu_count
         if lease_end_utc is not None:
@@ -1458,29 +1455,29 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
@@ -1826,18 +1823,23 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",
@@ -2762,7 +2764,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         provider_lease_id: str | None = None,
         resource_id: str | None = None,
         host_id: str | None = None,
-        vm_target: str | None = None,
         gpu_count: int | None = None,
         lease_end_utc: str | None = None,
         request_id: str | None = None,
@@ -2778,7 +2779,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "provider_lease_id": provider_lease_id,
             "resource_id": resource_id,
             "host_id": host_id,
-            "vm_target": vm_target,
             "gpu_count": gpu_count,
             "lease_end_utc": lease_end_utc,
         }
@@ -2872,29 +2872,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
@@ -3237,18 +3237,23 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",

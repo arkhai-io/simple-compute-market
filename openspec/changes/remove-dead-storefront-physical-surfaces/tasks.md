@@ -68,10 +68,39 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions authorized by this change
       `_do_provision`, and `_register_vm_lease_with_settings`. Leave
       `vm_host` inside the provisioning adapter untouched — it is the real
       execution target there.
+      **Rebase note (2026-10-05).** `bare-metal-mock-provisioned-deal`
+      (5B.8.B.1, B.7, B.8, B.9) rewrote the code this task edits. In
+      `vm_fulfillment_service.py`, the post-provision path now registers the lease
+      with the window the reservation's commit returned (`committed_lease_window`).
+      A missing window, a failed registration, or a failed evidence publication now
+      returns a `deferred` result rather than an error. `_register_vm_lease_with_settings`
+      no longer sends an offering mode. Remove `reserved_vm_host` from that code as it
+      stands, keeping those paths intact.
 - [ ] 3.6 Confirm `fulfill_vm_obligation`'s committed-claim reads are untouched
       by 3.5.
 - [ ] 3.7 Run the storefront and `core/storefront-client` suites plus the
       client parity contract test.
+- [x] 3.8 Remove the dead VM expiry hook (routed here on 2026-10-05 from
+      `bare-metal-mock-provisioned-deal`'s closeout findings). Delivered by
+      `bare-metal-mock-provisioned-deal` task 5B.8.C.6 (2026-10-05), on the maintainer's
+      ruling at that change's slice C design review: `_do_shutdown`, the
+      `schedule_shutdown` parameter, `ScheduleShutdownFn`,
+      `_schedule_shutdown_best_effort`, and the module's background-task set are gone, and
+      the three test files below no longer pass the hook. 3.5 still owns
+      `reserved_vm_host`.
+      - What is dead: `fulfillment_service.py` wires `schedule_shutdown=_do_shutdown`,
+        and `_do_shutdown` always raises, because the provisioning service has no
+        expiry-scheduling endpoint. `vm_fulfillment_service.py`'s
+        `_schedule_shutdown_best_effort` runs it as a background task after every
+        deal, so every VM deal logs "Failed to schedule VM expiry". The lease
+        watchdog performs expiry from the registered lease's window.
+      - Remove `_do_shutdown`, the `schedule_shutdown` parameter and its
+        `ScheduleShutdownFn` type, `_schedule_shutdown_best_effort`, and the
+        module's `_background_tasks` set if nothing else uses it.
+      - Update the tests that pass the hook: `test_fulfillment_provisioning.py`,
+        `test_fulfillment_service.py`, and
+        `test_fulfill_vm_obligation_error_handling.py`.
+      - Coordinate with 3.5, which removes `reserved_vm_host` from the same call.
 
 ## 4. Closeout
 

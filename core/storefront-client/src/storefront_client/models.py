@@ -717,18 +717,22 @@ class ReserveCapacityResponse:
 
 @dataclass
 class EvaluateNegotiateResponse:
-    """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+    """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
+
+    The amounts are ``None`` when the opening would be refused.
+    """
 
     listing_id: str = ""
-    our_reference_amount: int = 0
-    their_proposed_amount: int = 0
+    our_reference_amount: int | None = None
+    their_proposed_amount: int | None = None
     direction: str = ""
-    strategy: str = ""
+    strategy: str | None = None
     decision: str = ""
     decision_amount: int | None = None
     decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
+    refused: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -736,19 +740,25 @@ class EvaluateNegotiateResponse:
         known = {
             "listing_id", "our_reference_amount", "their_proposed_amount",
             "direction", "strategy", "decision", "decision_amount",
-            "decision_proposal", "decision_reason", "would_negotiate",
+            "decision_proposal", "decision_reason", "would_negotiate", "refused",
         }
+
+        def _amount(key: str) -> int | None:
+            value = d.get(key)
+            return int(value) if value is not None else None
+
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_amount=int(d.get("our_reference_amount", 0)),
-            their_proposed_amount=int(d.get("their_proposed_amount", 0)),
+            our_reference_amount=_amount("our_reference_amount"),
+            their_proposed_amount=_amount("their_proposed_amount"),
             direction=d.get("direction", ""),
-            strategy=d.get("strategy", ""),
+            strategy=d.get("strategy"),
             decision=d.get("decision", ""),
-            decision_amount=int(d["decision_amount"]) if d.get("decision_amount") is not None else None,
+            decision_amount=_amount("decision_amount"),
             decision_proposal=d.get("decision_proposal"),
             decision_reason=d.get("decision_reason"),
             would_negotiate=bool(d.get("would_negotiate", False)),
+            refused=bool(d.get("refused", False)),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

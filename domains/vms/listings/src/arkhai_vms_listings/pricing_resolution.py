@@ -138,7 +138,7 @@ def _pool_pricing(policy_tags: Mapping[str, Any]) -> Mapping[str, Any] | None:
     # in arkhai_vms_listings.listing_cardinality_mode for the reason (kept
     # out of any consumer that imports this module's signatures without
     # calling it).
-    from market_resource_pools.hints import raw_pricing
+    from market_resource_pools_contracts.hints import raw_pricing
 
     pricing = raw_pricing(policy_tags)
     return pricing if isinstance(pricing, Mapping) else None

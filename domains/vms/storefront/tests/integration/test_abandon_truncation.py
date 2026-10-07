@@ -158,8 +158,74 @@ def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "abandon-test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
+async def _terminal_reservation(db, fake, *, pool_id: str, commit: bool) -> str:
+    """A terminal agreement with a bound reservation, committed or still a hold."""
+    capacity = capacity_runtime_over(fake)
+    agreement_ref = f"negotiation-{pool_id}"
+    binding = await _persist_terminal_negotiation(
+        db,
+        agreement_ref=agreement_ref,
+        listing_id=f"listing-{pool_id}",
+        pool_id=pool_id,
+    )
+    reserved = await capacity.reserve(
+        binding,
+        claim={"offering_mode": "vm"},
+        deal_ref={"listing_id": f"listing-{pool_id}", "negotiation_id": agreement_ref},
+    )
+    assert reserved is not None
+    reservation_id = str(reserved["capacity_reservation_id"])
+    if commit:
+        await capacity.commit(
+            binding,
+            resource_id=None,
+            capacity_reservation_id=reservation_id,
+            lease_start_utc="2099-01-01T00:00:00Z",
+            lease_end_utc="2099-01-01 01:00",
+        )
+    await _persist_reservation_identity(
+        db,
+        agreement_ref=agreement_ref,
+        escrow_uid=f"0x{pool_id}",
+        capacity_reservation_id=reservation_id,
+    )
+    return reservation_id
+
+
+@pytest.mark.asyncio
+async def test_an_uncommitted_hold_is_released_not_truncated(db):
+    pool_id = "res-hold"
+    fake = FakeSite(deliverable_modes={"vm"})
+    fake.add_resource(pool_id, 2, attributes={"vm_host": "kvm1"})
+
+    with (
+        patch.dict(
+            site_projection_cache._caches,
+            {"default": _pool_projection_caches(pool_id)},
+            clear=True,
+        ),
+        patch(
+            "market_storefront.settlement_composition.build_capacity_runtime",
+            return_value=capacity_runtime_over(fake),
+        ),
+    ):
+        reservation_id = await _terminal_reservation(db, fake, pool_id=pool_id, commit=False)
+        released = await truncate_lease_for_terminal_settlement(
+            sqlite_client=db,
+            agreement_ref=f"negotiation-{pool_id}",
+            reason="expiration window passed",
+        )
+
+    assert released is not None
+    row = fake.reservations[reservation_id]
+    assert (row["state"], row["failure_reason"]) == ("released", "expiration window passed")
+    assert not any(path.endswith("/truncate-lease") for _, path in fake.requests)
+
+
 @pytest.mark.asyncio
 async def test_truncates_the_ledger_lease_to_now(db):
+    """A delivered lease cannot be freed by the storefront: the site refuses the
+    release, and the storefront truncates it so its lifecycle tears it down."""
     pool_id = "res-trunc"
     listing_id = "listing-abandoned"
     fake = FakeSite(deliverable_modes={"vm"})
@@ -195,6 +261,7 @@ async def test_truncates_the_ledger_lease_to_now(db):
         )
         assert reserved is not None
         reservation_id = str(reserved["capacity_reservation_id"])
+        fake.delivered.add(reservation_id)
         await capacity.commit(
             binding,
             resource_id=None,

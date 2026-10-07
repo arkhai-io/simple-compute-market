@@ -10,8 +10,15 @@ from urllib.parse import quote, urlencode
 from typing import Annotated, Any
 
 from core_storefront.auth import AuthError, authenticate_request
-from core_storefront.models.listing_models import ListingListResponse, ListingResponse
+from core_storefront.models.listing_models import (
+    EvaluateNegotiateRequest,
+    EvaluateNegotiateResponse,
+    ListingListResponse,
+    ListingResponse,
+)
 from core_storefront.models.negotiation_models import (
+    ForceAcceptRequest,
+    ForceAcceptResponse,
     NegotiateContinueRequest,
     NegotiateContinueResponse,
     NegotiateNewRequest,
@@ -19,7 +26,7 @@ from core_storefront.models.negotiation_models import (
     NegotiationDetailResponse,
     NegotiationListResponse,
 )
-from core_storefront.models.system_models import AdminPauseResponse
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP, AdminPauseResponse
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from market_contact_exchange import (
@@ -41,10 +48,21 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
     pool_override_contract,
 )
+from market_negotiation_runtime import (
+    NegotiationStateError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
 from market_storefront_kit import (
+    DealControlRouteError,
     LifecycleRouteError,
+    NegotiationControlRouteService,
+    StageEventRouteService,
     StorefrontLifecycleRouteService,
+    TradingPauseRouteService,
     get_storefront_container,
+    opening_proposal,
 )
 from market_settlement_runtime import (
     HostedSettlementRouteError,
@@ -61,7 +79,7 @@ from .models import (
     BareMetalSettleStatusResponse,
 )
 from .fulfillment_service import BareMetalFulfillmentError
-from .negotiation_service import NegotiationRequestError
+from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
@@ -442,6 +460,42 @@ async def get_listing(listing_id: str, request: Request) -> ListingResponse:
     return ListingResponse.model_validate(_listing_response(runtime, row))
 
 
+def _negotiation_error(exc: Exception) -> HTTPException:
+    """The HTTP answer to a negotiation the runtime or the domain refused."""
+    if isinstance(exc, BareMetalNegotiationRefusal):
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+    if isinstance(exc, StorefrontPausedError):
+        return HTTPException(
+            status_code=503, detail={"error": "paused", "reason": exc.reason}
+        )
+    if isinstance(exc, NegotiationUnavailableError):
+        # The listing's source could not be confirmed; a retry may succeed.
+        return HTTPException(
+            status_code=503,
+            detail={"error": "listing_source_unavailable", "reason": exc.reason},
+        )
+    if isinstance(exc, OfferUnfulfillableError):
+        return HTTPException(
+            status_code=409,
+            detail={"error": "offer_unfulfillable", "reason": exc.reason},
+        )
+    if isinstance(exc, NegotiationStateError):
+        message = str(exc)
+        status = 404 if message.startswith("Unknown negotiation") else 409
+        return HTTPException(status_code=status, detail=message)
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+_NEGOTIATION_REFUSALS = (
+    BareMetalNegotiationRefusal,
+    StorefrontPausedError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+    NegotiationStateError,
+    ValueError,
+)
+
+
 @router.post("/api/v1/negotiate/new", response_model=NegotiateNewResponse)
 async def negotiate_new(
     body: NegotiateNewRequest,
@@ -457,12 +511,24 @@ async def negotiate_new(
             body=await _request_body(request),
             expected_principal=body.buyer_principal,
         )
-        return await runtime.negotiation_service().open(
-            request=body,
-            buyer_principal=identity,
-        )
-    except (AuthError, NegotiationRequestError) as exc:
+    except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    try:
+        selection = exact_selection(body.proposal, body.settlement_selection)
+        result = await runtime.negotiation_runtime.start(
+            repository=runtime.db,
+            listing_id=body.listing_id,
+            buyer_principal=identity,
+            seller_principal=runtime.seller_principal,
+            actor_principal=identity,
+            proposal=opening_proposal(body.proposal, selection),
+            terms=body.provision_terms,
+            seller_agent_url=runtime.storefront_url,
+            buyer_agent_url=body.buyer_agent_url,
+        )
+    except _NEGOTIATION_REFUSALS as exc:
+        raise _negotiation_error(exc) from exc
+    return NegotiateNewResponse(**result)
 
 
 @router.post(
@@ -490,11 +556,116 @@ async def negotiate_continue(
         raise HTTPException(status_code=404, detail="negotiation not found")
     if Identity.model_validate(thread.get("buyer_principal")) != identity:
         raise HTTPException(status_code=403, detail="negotiation buyer mismatch")
-    if thread.get("terminal_state") is not None:
-        raise HTTPException(status_code=409, detail="negotiation is terminal")
-    raise HTTPException(
-        status_code=409,
-        detail="default bare-metal policy does not support additional rounds",
+    if body.action == "counter" and body.proposal is None and body.settlement_selection is None:
+        raise HTTPException(
+            status_code=400,
+            detail="'proposal' or 'settlement_selection' required for counter",
+        )
+    try:
+        result = await runtime.negotiation_runtime.continue_negotiation(
+            repository=runtime.db,
+            negotiation_id=negotiation_id,
+            buyer_action=body.action,
+            buyer_proposal=opening_proposal(body.proposal, body.settlement_selection),
+            buyer_reason=body.reason,
+            buyer_principal=body.buyer_principal,
+            actor_principal=identity,
+            actor_role="buyer",
+            seller_principal=runtime.seller_principal,
+        )
+    except _NEGOTIATION_REFUSALS as exc:
+        raise _negotiation_error(exc) from exc
+    return NegotiateContinueResponse(**result)
+
+
+def _negotiation_controls(runtime: BareMetalStorefrontRuntime) -> NegotiationControlRouteService:
+    return NegotiationControlRouteService(
+        runtime=runtime.negotiation_runtime,
+        repository=runtime.db,
+        seller_principal=lambda: runtime.seller_principal,
+    )
+
+
+@router.post(
+    "/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
+    response_model=EvaluateNegotiateResponse,
+)
+async def evaluate_negotiate(
+    listing_id: str,
+    body: EvaluateNegotiateRequest,
+    request: Request,
+) -> EvaluateNegotiateResponse:
+    """Preview the opening ``negotiate/new`` would receive, writing nothing."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_evaluate_negotiation",
+        resource=listing_id,
+        body=await _request_body(request),
+    )
+    return await _negotiation_controls(runtime).evaluate_negotiate(listing_id, body)
+
+
+@router.post(
+    "/api/v1/listings/{listing_id}/negotiations/{negotiation_id}/force-accept",
+    response_model=ForceAcceptResponse,
+)
+async def force_accept_negotiation(
+    listing_id: str,
+    negotiation_id: str,
+    body: ForceAcceptRequest,
+    request: Request,
+) -> ForceAcceptResponse:
+    """Accept a negotiation at an administrator's amount, as a negotiated acceptance would."""
+    runtime = _runtime(request)
+    actor = await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_force_accept_negotiation",
+        resource=f"{listing_id}/{negotiation_id}",
+        body=await _request_body(request),
+    )
+    try:
+        return await _negotiation_controls(runtime).force_accept(
+            listing_id, negotiation_id, body, actor_principal=actor
+        )
+    except DealControlRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except BareMetalNegotiationRefusal as exc:
+        # Acceptance builds the domain's artifacts, so it can refuse for a
+        # reason the domain owns; it answers as negotiate/{id} would.
+        raise _negotiation_error(exc) from exc
+
+
+@router.get("/api/v1/system/events")
+async def read_events(
+    request: Request,
+    since_id: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=STAGE_EVENT_PAGE_CAP)] = 100,
+    stage: Annotated[str | None, Query()] = None,
+    listing_id: Annotated[str | None, Query()] = None,
+    negotiation_id: Annotated[str | None, Query()] = None,
+) -> Any:
+    """A page of this storefront's stage-event log; a signed read is never a stream."""
+    runtime = _runtime(request)
+    try:
+        resource = StageEventRouteService.signed_resource(request.query_params.multi_items())
+    except DealControlRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_system_events",
+        resource=resource,
+    )
+    events = StageEventRouteService(runtime.db)
+    return await events.page(
+        since_id=events.resume_point(since_id, request.headers.get("last-event-id")),
+        limit=limit,
+        stage=stage,
+        listing_id=listing_id,
+        negotiation_id=negotiation_id,
     )
 
 
@@ -963,8 +1134,7 @@ async def pause(request: Request) -> AdminPauseResponse:
         resource="",
         body=await _request_body(request),
     )
-    await runtime.db.set_global_paused(paused=True)
-    return AdminPauseResponse(paused=True, message="storefront paused")
+    return TradingPauseRouteService(runtime.trading_pause).pause()
 
 
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)
@@ -977,8 +1147,7 @@ async def resume(request: Request) -> AdminPauseResponse:
         resource="",
         body=await _request_body(request),
     )
-    await runtime.db.set_global_paused(paused=False)
-    return AdminPauseResponse(paused=False, message="storefront resumed")
+    return TradingPauseRouteService(runtime.trading_pause).resume()
 
 
 # Lifecycle controls: one pause holding the timer loops, and one step per loop.

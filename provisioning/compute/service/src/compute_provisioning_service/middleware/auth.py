@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from compute_provisioning.client import (
+from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -18,8 +18,7 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
-    canonical_provisioning_request_body,
-    resolve_provisioning_route_contract,
+    ProvisioningRouteTable,
 )
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
@@ -44,6 +43,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from compute_provisioning_service.db.models import ProvisioningReplayReservation
 from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.route_table import canonical_request_body
 
 logger = logging.getLogger(__name__)
 
@@ -207,9 +207,13 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         identity_provider: Callable[[], ProvisioningIdentityContext],
         replay_store_provider: Callable[[], SqlAlchemyProvisioningReplayStore],
         principal_authority_provider: Callable[[], Any],
+        route_table: ProvisioningRouteTable,
         max_timestamp_skew: int = 300,
     ) -> None:
         super().__init__(app)
+        # The assembled table of every contributed route; a route outside it
+        # is refused before authentication.
+        self._route_table = route_table
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
         self._identity_provider = identity_provider
@@ -227,7 +231,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         if body_error is not None:
             return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
         try:
-            route, resource = resolve_provisioning_route_contract(
+            route, resource = self._route_table.resolve(
                 request.method,
                 request.url.path,
                 body,
@@ -468,7 +472,7 @@ async def _request_body(request: Request) -> tuple[Any, str | None]:
         values = request.query_params.getlist(key)
         query[key] = values[0] if len(values) == 1 else values
     try:
-        return canonical_provisioning_request_body(
+        return canonical_request_body(
             request.method,
             request.url.path,
             body,

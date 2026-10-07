@@ -31,6 +31,7 @@ from .domain_conformance import (
     DomainConformanceCase,
     assert_domain_conformance,
 )
+from .envelopes import VersionedEnvelope, envelope
 from .query_dsl import (
     ComparisonOperator,
     FieldDescriptor,
@@ -93,6 +94,8 @@ __all__ = [
     "DomainCodecExample",
     "DomainConformanceCase",
     "assert_domain_conformance",
+    "VersionedEnvelope",
+    "envelope",
     "ComparisonOperator",
     "FieldDescriptor",
     "MissingValueRule",

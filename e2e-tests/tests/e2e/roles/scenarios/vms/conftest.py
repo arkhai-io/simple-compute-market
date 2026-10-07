@@ -11,8 +11,11 @@ Clients
 * ``storefront_client``        — canonical ``SyncStorefrontClient``, buyer key
 * ``storefront_admin_client``  — same, seller key + admin key
 * ``registry_client``          — ``SyncRegistryClient`` from the registry-client wheel
-* ``provisioning_client``      — ``SyncProvisioningClient`` signing as the
-  provisioning admin principal
+* ``provisioning_client``      — ``SyncComputeProvisioningClient`` signing as
+  the provisioning admin principal
+* ``vm_operator_client``       — VM's typed routes over that client's transport
+* ``resource_pool_client``     — pool administration over that transport
+* ``site_capacity``            — the site's capacity reads, signed as admin
 * ``provisioning_test_client`` — thin sync wrapper over ``/test/*`` endpoints
 
 Settings access uses the ``settings.SECTION.KEY`` attribute pattern
@@ -21,6 +24,7 @@ Settings access uses the ``settings.SECTION.KEY`` attribute pattern
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -39,6 +43,10 @@ from market_identity import (
     create_signer,
     sign_request,
 )
+from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
+from market_resource_pools_client import SyncResourcePoolClient
+from market_site_client import SiteCapacityClient
+from vm_provisioning_operator import SyncVmOperatorClient
 from e2e_harness.settings import settings
 from e2e_harness.provisioning_test_client import ProvisioningTestClient
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -95,7 +103,6 @@ class DealState(DomainDealState):
     # dry-run capture; the buyer-CLI scenario reads host_id from the
     # lease instead (see below).
     _evaluate_settle_host_id: Optional[str] = None
-    _evaluate_settle_vm_target: Optional[str] = None
     _evaluate_settle_passed: bool = False
     # Synthetic-buyer only: phase 09a evaluate-provisioning-job dry-run
     _provision_job_evaluated: bool = False
@@ -591,30 +598,83 @@ def registry_seller_client():
 
 @pytest.fixture(scope="module")
 def provisioning_client():
-    """Admin-signed SyncProvisioningClient.
+    """Admin-signed SyncComputeProvisioningClient.
 
     Provisioning authenticates per caller: each request carries the caller's
     marketplace signature plus an asserted role, and the service verifies the
     principal against the durable trust set bound to that role.
 
     This suite drives provisioning as the **admin** principal, and that is not
-    a preference. ``SyncProvisioningClient`` asserts ``admin`` on every request
-    and exposes no way to override it, while the service resolves the trust set
-    from the asserted role. Signing as the storefront principal would construct
-    successfully and then be refused on authorisation, so the credential here
-    must be the principal pinned as the provisioning admin identity.
+    a preference: the client asserts the ``admin`` role, and the service
+    resolves the trust set from the asserted role. Signing as the storefront
+    principal would construct successfully and then be refused on
+    authorisation, so the credential here must be the principal pinned as the
+    provisioning admin identity.
 
     ``expected_authorities`` pins the service's own signing principal, which is
     a different identity again, so responses are verified as well as requests.
     """
-    from vm_provisioning_operator import SyncProvisioningClient
-
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    client = SyncProvisioningClient(
-        url, _provisioning_admin_signer(), _provisioning_authority_trust()
+    client = SyncComputeProvisioningClient(
+        url, _provisioning_admin_signer(), "admin", _provisioning_authority_trust()
     )
     yield client
     client.close()
+
+
+@pytest.fixture(scope="module")
+def vm_operator_client(provisioning_client) -> SyncVmOperatorClient:
+    """VM's operations, relays, and lease routes over the family client's transport."""
+    return SyncVmOperatorClient(provisioning_client)
+
+
+@pytest.fixture(scope="module")
+def resource_pool_client(provisioning_client) -> SyncResourcePoolClient:
+    """Pool administration over the family client's transport."""
+    return SyncResourcePoolClient(provisioning_client)
+
+
+class SiteCapacity:
+    """The site's capacity reads and lease truncation, from a sync scenario.
+
+    Drives the canonical async ``SiteCapacityClient`` signed as the provisioning
+    admin, one ``asyncio.run`` per call, as the bare-metal scenarios drive the
+    site's admin client. Only call shape lives here.
+    """
+
+    def _client(self) -> SiteCapacityClient:
+        return SiteCapacityClient(
+            _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL"),
+            _provisioning_admin_signer(),
+            _provisioning_authority_trust(),
+            caller_role="admin",
+        )
+
+    def snapshot(self) -> list[dict]:
+        return asyncio.run(self._client().snapshot())
+
+    def list_reservations(self, *, state: str | None = None, escrow_uid: str | None = None) -> list[dict]:
+        return asyncio.run(self._client().list_reservations(state=state, escrow_uid=escrow_uid))
+
+    def get_reservation(self, capacity_reservation_id: str) -> dict:
+        return asyncio.run(self._client().get_reservation(capacity_reservation_id)) or {}
+
+    def reserve(self, *, claim: dict, deal_ref: dict) -> dict | None:
+        return asyncio.run(self._client().reserve(claim=claim, deal_ref=deal_ref))
+
+    def truncate_lease(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
+        """End a leased reservation's lease early; ``None`` if the site refuses."""
+        return asyncio.run(
+            self._client().truncate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc=lease_end_utc,
+            )
+        )
+
+
+@pytest.fixture(scope="module")
+def site_capacity() -> SiteCapacity:
+    return SiteCapacity()
 
 
 @pytest.fixture(scope="module")
@@ -650,14 +710,13 @@ def _ensure_provisioning_host_registered(provisioning_client):
     Real-host integration tests use a real key path; this fixture is
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
-    from vm_provisioning_operator import ProvisioningError
-    from vm_provisioning_operator import HostCreate
+    from compute_provisioning_contracts import ConnectionSubmission, HostCreate
 
     host_name = "kvm1"
 
     try:
         provisioning_client.get_host(host_name)
-    except ProvisioningError as exc:
+    except ComputeProvisioningError as exc:
         if exc.status_code != 404:
             pytest.skip(f"Could not probe provisioning host {host_name!r}: {exc}")
     else:
@@ -666,16 +725,16 @@ def _ensure_provisioning_host_registered(provisioning_client):
 
     body = HostCreate(
         host_id=host_name,
-        ssh_host="127.0.0.1",
-        ssh_user="stub",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/stub-e2e-key",
+        connection=ConnectionSubmission(
+            kind="ssh",
+            public={"ssh_host": "127.0.0.1", "ssh_user": "stub", "key_path": "/tmp/stub-e2e-key"},
+        ),
         gpu_count=1,
         enabled=True,
     )
     try:
         provisioning_client.register_host(body)
-    except ProvisioningError as exc:
+    except ComputeProvisioningError as exc:
         pytest.skip(f"Could not register provisioning host {host_name!r}: {exc}")
     log.info("[conftest] Registered provisioning host %r", host_name)
 
@@ -857,12 +916,12 @@ def advance_fulfillment_to(
     needing several means something is wrong and the failure names the
     state it stalled in.
     """
-    last: dict = provisioning_client.get_fulfillment_status(fulfillment_id)
+    last: dict = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
     for _ in range(max_advances):
         if last.get("state") == expected:
             return last
         provisioning_client.advance_fulfillment_convergence_cycle()
-        last = provisioning_client.get_fulfillment_status(fulfillment_id)
+        last = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
     if last.get("state") != expected:
         pytest.fail(
             f"fulfillment {fulfillment_id} did not reach {expected!r} within "
@@ -931,37 +990,37 @@ class DealLease:
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` and ``release_job_id`` come from the authoritative compute
-    provisioning lease contract.  For VM release, ``release_job_id`` is the
-    durable fulfillment id rather than an Ansible queue job id.
+    ``status`` and ``release_job_id`` come from the compute family's lease
+    contract, read through the family client. ``release_job_id`` is the
+    durable fulfillment id: release goes through the fulfillment aggregate.
+    The lease's end moves only through the site's truncation, which is how
+    the scenario back-dates it.
     """
 
     def __init__(self, provisioning_client, escrow_uid: str) -> None:
-        self._client = provisioning_client
+        self._leases = provisioning_client
+        self._site = SiteCapacity()
         self.escrow_uid = escrow_uid
         self.is_ledger = True
-        reservations = (
-            provisioning_client.list_capacity_reservations(escrow_uid=escrow_uid)
-            .get("reservations") or []
-        )
+        reservations = self._site.list_reservations(escrow_uid=escrow_uid)
         live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
             f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the lease registered after fulfillment?"
+            f"{escrow_uid!r} — was the deal's reservation committed with its escrow?"
         )
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
     def refresh(self) -> dict:
         """Current lease fields from the public compute lease contract."""
-        lease = self._client.get_lease(self.lease_id)
-        row = self._client.get_capacity_reservation(self.lease_id)
-        data = lease.model_dump(mode="json") if hasattr(lease, "model_dump") else dict(lease)
+        lease = self._leases.get_lease(self.lease_id)
+        row = self._site.get_reservation(self.lease_id)
+        data = lease.model_dump(mode="json")
         return {
             "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "host_id": row.get("host_id"),
-            "vm_target": row.get("vm_target"),
+            "executor_target": data.get("executor_target"),
             "status": data.get("status"),
             "fulfillment_id": data.get("release_job_id"),
             "create_job_id": data.get("create_job_id"),
@@ -970,16 +1029,19 @@ class DealLease:
     def backdate(self, lease_end_utc: str) -> dict:
         """Move the lease end into the past so the next watchdog cycle fires.
 
-        Uses PATCH /api/v1/leases/{id} (update_lease) to update the ledger
-        reservation's lease_end_utc directly.  Returns the refreshed normalized
-        lease view.
+        Truncates the lease at the site, signed as admin: truncation is the
+        only operation that moves a lease's end, and only earlier.
+        Returns the refreshed normalized lease view.
         """
-        self._client.update_lease(self.lease_id, lease_end_utc=lease_end_utc)
+        truncated = self._site.truncate_lease(self.lease_id, lease_end_utc)
+        assert truncated is not None, (
+            f"the site refused to truncate lease {self.lease_id!r} to {lease_end_utc!r}"
+        )
         return self.refresh()
 
     def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:
         """Whether the deal's capacity is still held, per the ledger."""
-        for row in self._client.capacity_snapshot():
+        for row in self._site.snapshot():
             if str(row.get("resource_id")) == resource_id:
                 total = int(row.get("value") or 0)
                 return int(row.get("available_units") or 0) < total

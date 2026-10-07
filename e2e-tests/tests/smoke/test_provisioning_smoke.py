@@ -14,8 +14,8 @@ import logging
 import pytest
 
 from market_identity import Identity, TrustedIdentitySet, create_signer
-from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
-from vm_provisioning_operator import HostCreate, HostUpdate
+from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 def _client(
     provisioning_settings: dict,
     seller_settings: dict,
-) -> SyncProvisioningClient:
+) -> SyncComputeProvisioningClient:
     credential = provisioning_settings.get("admin_credential") or ""
     authority = provisioning_settings.get("authority_identifier") or ""
     if not credential or not authority:
@@ -32,11 +32,12 @@ def _client(
             "are required: provisioning authenticates each caller and signs its "
             "responses, so a smoke check needs both halves configured."
         )
-    return SyncProvisioningClient(
+    return SyncComputeProvisioningClient(
         provisioning_settings["api_url"],
         create_signer(
             str(provisioning_settings.get("admin_scheme") or "eip191"), str(credential)
         ),
+        "admin",
         TrustedIdentitySet(
             identities=(
                 Identity(
@@ -57,30 +58,29 @@ class TestProvisioningSmoke:
     def test_health_returns_ok(
         self, provisioning_settings: dict, seller_settings: dict
     ):
-        """GET /health -> 200 with status field present."""
+        """GET /health -> a typed liveness body, ok or degraded."""
         with _client(provisioning_settings, seller_settings) as client:
             data = client.get_health()
-        assert "status" in data, f"Missing status field: {data}"
-        assert data["status"] in ("ok", "degraded"), f"Unexpected status: {data['status']}"
+        assert data.status in ("ok", "degraded"), f"Unexpected status: {data.status}"
         log.info("Health: %s", data)
 
     @pytest.mark.provisioning_readonly
-    def test_ansible_readiness_returns_structured_response(
+    def test_status_reports_execution_and_the_ansible_component(
         self, provisioning_settings: dict, seller_settings: dict
     ):
-        """GET /api/v1/system/ansible/readiness returns structured diagnostics."""
+        """GET /api/v1/system/status reports what executes jobs and the
+        Ansible readiness component, typed, whether or not it is degraded."""
         with _client(provisioning_settings, seller_settings) as client:
-            data = client.get_ansible_readiness()
-        assert "inventory" in data, f"Missing inventory field: {data}"
-        assert "playbook" in data, f"Missing playbook field: {data}"
-        assert "ssh_keys" in data, f"Missing ssh_keys field: {data}"
-        inv = data["inventory"]
-        assert "source" in inv
-        assert "host_count" in inv
+            status = client.get_system_status()
+        assert status.execution.executors, f"No composed executors: {status.execution}"
+        assert "execution" in status.checks, f"Missing execution check: {status.checks}"
+        ansible = status.component("ansible")
+        assert ansible is not None, f"Missing ansible component: {status.components}"
         log.info(
-            "Readiness: ansible_version=%s, host_count=%s",
-            data.get("ansible_version"),
-            inv.get("host_count"),
+            "Status: execution.mocked=%s, ansible ready=%s, version=%s",
+            status.execution.mocked,
+            ansible.ready,
+            ansible.detail.payload.get("ansible_version"),
         )
 
     @pytest.mark.provisioning_readonly
@@ -114,10 +114,10 @@ class TestProvisioningSmoke:
         """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
         test_host = HostCreate(
             host_id="smoke-test-host",
-            ssh_host="192.0.2.1",
-            ssh_user="ubuntu",
-            ssh_key_type="path",
-            ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            connection=ConnectionSubmission(
+                kind="ssh",
+                public={"ssh_host": "192.0.2.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"},
+            ),
             gpu_count=0,
             enabled=True,
         )
@@ -125,21 +125,20 @@ class TestProvisioningSmoke:
         with _client(provisioning_settings, seller_settings) as client:
             try:
                 reg = client.register_host(test_host)
-            except ProvisioningError as exc:
+            except ComputeProvisioningError as exc:
                 if exc.status_code != 409:
                     raise
                 log.info("smoke-test-host already exists - updating instead of inserting")
                 reg = client.update_host(
-                    "smoke-test-host",
-                    HostUpdate(ssh_host=test_host.ssh_host, ssh_user=test_host.ssh_user),
+                    "smoke-test-host", HostUpdate(connection=test_host.connection),
                 )
                 client.enable_host("smoke-test-host")
 
             assert reg.host_id == "smoke-test-host"
-            assert not hasattr(reg, "ssh_key_value"), "ssh_key_value must never be returned"
+            assert "secrets" not in reg.connection.model_dump(), "secrets must never be returned"
 
             got = client.get_host("smoke-test-host")
-            assert got.ssh_host == "192.0.2.1"
+            assert got.connection.public["ssh_host"] == "192.0.2.1"
 
             disabled = client.disable_host("smoke-test-host")
             assert disabled.enabled is False

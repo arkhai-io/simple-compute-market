@@ -32,7 +32,7 @@ from market_storefront.middleware.service_peer_auth import (
     initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
-import market_storefront.server as _server
+import market_storefront.lifecycle as _lifecycle
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
@@ -75,10 +75,10 @@ async def db(tmp_path) -> SQLiteClient:
 
 @pytest_asyncio.fixture(autouse=True)
 def reset_pause_state():
-    """Ensure global pause flag is reset between tests."""
-    _server._GLOBALLY_PAUSED = False
+    """Ensure the process's trading pause is reset between tests."""
+    _lifecycle.trading_pause().resume()
     yield
-    _server._GLOBALLY_PAUSED = False
+    _lifecycle.trading_pause().resume()
 
 
 @pytest_asyncio.fixture
@@ -340,7 +340,7 @@ class TestAdminPause:
         c, _ = client
         result = await c.admin_pause()
         assert result.paused is True
-        assert _server._GLOBALLY_PAUSED is True
+        assert _lifecycle.trading_pause().paused is True
 
     async def test_pause_reflected_in_system_status(self, client, admin_client):
         c, _ = client
@@ -362,10 +362,10 @@ class TestAdminResume:
     async def test_resume_clears_flag(self, client):
         c, _ = client
         await c.admin_pause()
-        assert _server._GLOBALLY_PAUSED is True
+        assert _lifecycle.trading_pause().paused is True
         result = await c.admin_resume()
         assert result.paused is False
-        assert _server._GLOBALLY_PAUSED is False
+        assert _lifecycle.trading_pause().paused is False
 
     async def test_resume_reflected_in_system_status(self, client, admin_client):
         c, _ = client
@@ -831,7 +831,6 @@ class TestFulfillmentEvents:
                 provider_lease_id="lease-2x",
                 resource_id="provider-resource-2x",
                 host_id="kvm1",
-                vm_target="tenant-2x",
                 lease_end_utc="2026-01-01T00:00:00Z",
             )
 
@@ -952,6 +951,58 @@ class TestFulfillmentEvents:
         assert reservation["failure_reason"] == "provisioning_error"
         assert reservation["failure_message"] == "host rejected request"
         assert fake._available("pool-h200-1") == 4
+
+    async def test_fulfillment_failed_finds_the_escrow_its_commit_recorded(
+        self, db, service_client, monkeypatch
+    ):
+        """A hold placed before the deal had an escrow learns it at commit, on
+        the reservation itself; a failure callback naming none still reaches the
+        failure policy with that escrow."""
+        from types import SimpleNamespace
+
+        from market_storefront.controllers import admin_controller
+        from tests.fake_site import site_capacity
+
+        received = []
+
+        async def failure_policy(_db, context, *, capacity):
+            received.append(context)
+            return SimpleNamespace(
+                capacity_reservation_id=context.capacity_reservation_id,
+                state="released",
+                resource_id=None,
+                gpu_count=None,
+                resource_state=None,
+                reopened_listing_ids=[],
+            )
+
+        monkeypatch.setattr(
+            admin_controller, "apply_fulfillment_failure_policy", failure_policy
+        )
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+
+        with site_capacity(fake, project_pool_modes=True) as capacity:
+            reserved = await capacity.reserve(
+                claim={"offering_mode": "vm", "resource_id": "pool-h200-1", "gpu_count": 2},
+                deal_ref={"listing_id": "listing-2x"},
+            )
+            capacity_reservation_id = str(reserved["capacity_reservation_id"])
+            await capacity.commit(
+                resource_id=None,
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc="2099-01-01 01:00",
+                deal_ref={"escrow_uid": "escrow-committed"},
+                site_id="default",
+            )
+            await service_client.notify_fulfillment_failed(
+                capacity_reservation_id,
+                site_id="default",
+                reason="provisioning_error",
+                message="host rejected request",
+            )
+
+        assert [context.escrow_uid for context in received] == ["escrow-committed"]
 
     async def test_release_of_unknown_reservation_is_idempotent(
         self, service_client
@@ -1312,3 +1363,23 @@ class TestPatchResource:
         # gpu_model not in patch → should be preserved
         assert result["attributes"].get("gpu_model") == "RTX 5080"
         assert result["attributes"].get("lease_end_utc") is None
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/system/events: what the signature does not bind is refused
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["limit=100&since_id=0&stream=false&after=1", "stream=true", "stage=a&stage=b"],
+)
+async def test_an_event_read_the_signature_does_not_bind_is_refused(admin_app, query):
+    # Rejection path: the canonical client cannot send these, so the request is
+    # raw, and only its status is asserted. The refusal precedes authentication,
+    # since the signed resource cannot be built.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app), base_url="http://test"
+    ) as raw:
+        response = await raw.get(f"/api/v1/system/events?{query}")
+    assert response.status_code == 400

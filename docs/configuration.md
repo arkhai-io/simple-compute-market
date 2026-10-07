@@ -79,11 +79,23 @@ Keys may be exact Alkahest kinds such as
 terminal policy. A nested table with `chain = [...]`, `policies = [...]`,
 or `policy = "..."` is used when one escrow kind needs its own sequence.
 
+### Bare-metal storefront
+
+The bare-metal storefront reads its seller chain from the environment variable
+`BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES`, a JSON list of the policy names
+below, for example `["escrow_shape_guard", "bisection"]`. Unset, the chain is
+`["escrow_shape_guard", "listed_price"]`: it accepts at or above the listed rate
+and exits below it, so it never counters; a chain ending in `bisection` counters.
+`has_matching_inventory_guard` always runs first, whether named or not, and the
+domain's own checks (lease duration bounds, access method, SSH key) run before
+the chain. An unknown name, or a value that is not JSON, stops the storefront at
+startup.
+
 ### Bundled policies
 
 | Name | Type | Round(s) | Behavior |
 |---|---|---|---|
-| `has_matching_inventory_guard` | Guard | 0 | Rejects with `no_matching_inventory` if the seller's portfolio has no available resource matching the listing's `listing_resource`. |
+| `has_matching_inventory_guard` | Guard | every | Rejects with `no_matching_declaration` when the listing's own source (its site's pool or Physical Resource) no longer declares what it publishes, and with `no_matching_inventory` when a capacity-backed listing's published quantity is not free at its own site. It reads the check the negotiation runtime makes before every seller decision; the runtime also enforces that check itself, at a buyer's or an administrator's acceptance and whatever the chain contains, and refuses a source it cannot confirm with a retryable 503. |
 | `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |

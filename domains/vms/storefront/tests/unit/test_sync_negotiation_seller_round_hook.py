@@ -16,12 +16,12 @@ from market_capacity_publication import (
     CapacityBinding,
     CapacityRuntime,
     CapacitySite,
-    UnbackedBinding,
 )
 from market_core.schemas import EscrowProposal, ProvisionTerms
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
@@ -201,6 +201,11 @@ def _proposal(amount: int) -> EscrowProposal:
     )
 
 
+async def _source_matches(_repository, _resolved) -> ListingSourceVerdict:
+    """These tests exercise the policy hook; the source check has its own."""
+    return ListingSourceVerdict("matches")
+
+
 async def _start(
     *,
     sqlite_client,
@@ -213,6 +218,7 @@ async def _start(
     their_agent_url,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -221,6 +227,7 @@ async def _start(
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     proposal_wire = (
         proposal.model_dump(mode="json")
@@ -252,6 +259,7 @@ async def _continue(
     seller_principal=None,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -260,6 +268,7 @@ async def _continue(
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     return await runtime.continue_negotiation(
         repository=sqlite_client,
@@ -334,23 +343,12 @@ def test_default_policy_is_resolved_from_the_injected_contract(
             run_negotiation_policy=policy,
         ),
     )
-    capacity_runtime = _capacity_runtime()
-    binding = UnbackedBinding("site-a", "vm", "pool-a")
-
-    assert (
-        _default_seller_round_hook(
-            domain,
-            capacity_runtime,
-            repository=Mock(),
-            listing_record={"listing_id": "listing-1"},
-            binding=binding,
-        )
-        is seller_hook
-    )
-    # The policy receives this round's own-source check, not a capacity
-    # client from which it could read availability anywhere.
+    assert _default_seller_round_hook(domain) is seller_hook
+    # The policy is given no source check and no capacity client: the
+    # runtime checks the listing against its source and hands each round
+    # the verdict.
     assert policy.call_args.args == ()
-    assert callable(policy.call_args.kwargs["source_check"])
+    assert "source_check" not in policy.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -387,6 +385,7 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
         seen["history"] = kwargs["history"]
         seen["has_policy_inputs"] = "policy_inputs" in kwargs
         seen["has_sqlite_client"] = "sqlite_client" in kwargs
+        seen["listing_source"] = kwargs.get("listing_source")
         return SellerRoundResult(
             our_amount=123,
             strategy_label="maximize",
@@ -421,6 +420,7 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
     assert seen["history"][0].proposal["fields"]["amount"] == 50
     assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
+    assert seen["listing_source"] == ListingSourceVerdict("matches")
     listing_binding = await db.load_listing_binding(listing_id="L-hook")
     thread_binding = await db.load_thread_binding(
         negotiation_id=response["negotiation_id"]

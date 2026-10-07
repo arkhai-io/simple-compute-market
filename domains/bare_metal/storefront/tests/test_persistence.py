@@ -8,16 +8,17 @@ import pytest
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
-    BareMetalAccessResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
+    BareMetalResult,
     BareMetalTerms,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_identity import Ed25519Signer
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from seeded_threads import seed_thread
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -57,12 +58,10 @@ def _artifacts():
             status="fulfilled",
             result_ref={"result_id": "result-1"},
         ),
-        "result": BareMetalAccessResult(
-            action="node_grant_access",
-            host_id="machine-1",
-            physical_host_id="host-1",
+        "result": BareMetalResult(
             ssh_user="tenant-1",
-            status="success",
+            ready_at=NOW,
+            lease_end_utc=LATER,
         ),
     }
 
@@ -99,21 +98,16 @@ async def _seed_opening(
     message: BareMetalMessage,
     terms: BareMetalTerms | None,
 ) -> None:
-    await client.persist_bare_metal_opening(
+    await seed_thread(
+        client,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
-        seller_principal=SELLER,
-        buyer_agent_id="https://buyer.example",
         buyer_principal=BUYER,
-        seller_reference_amount=100,
-        strategy="listed",
+        seller_principal=SELLER,
         message=message,
         proposal={"fields": {"amount": "100"}},
-        buyer_amount=100,
-        seller_action="accept" if terms is not None else "counter",
-        seller_amount=100,
+        amount=100,
         terms=terms,
-        agreed_amount=100 if terms is not None else None,
     )
 
 

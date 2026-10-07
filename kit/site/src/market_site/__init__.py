@@ -30,7 +30,7 @@ from .ledger import (  # noqa: F401
     ResourceFeasibilityView,
     resource_feasibility_view,
     resource_satisfies_requirement,
-    SettlementAbandonmentHook,
+    CapacityReleaseGuard,
     UndeclaredOfferingModeError,
     UnknownPoolError,
 )

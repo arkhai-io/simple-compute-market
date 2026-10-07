@@ -71,18 +71,6 @@ from apicredits_storefront.middleware.response_auth import authenticate_response
 
 logger = logging.getLogger(__name__)
 
-_GLOBALLY_PAUSED: bool = False
-
-
-def is_globally_paused() -> bool:
-    return _GLOBALLY_PAUSED
-
-
-def _set_globally_paused(value: bool) -> None:
-    global _GLOBALLY_PAUSED
-    _GLOBALLY_PAUSED = value
-
-
 def run_serve(host: str = "0.0.0.0", port: int | None = None) -> None:
     """Launch uvicorn. Called by ``apicredits-storefront serve``."""
     import uvicorn
@@ -291,6 +279,9 @@ from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
+from apicredits_storefront.controllers.trading_pause_controller import (  # noqa: E402
+    router as trading_pause_router,
+)
 
 
 def build_api_credits_storefront_registry(
@@ -359,6 +350,7 @@ def build_api_credits_storefront_app(
                     settle_router,
                     admin_settle_router,
                     lifecycle_router,
+                    trading_pause_router,
                 ),
                 middleware=(authenticate_response,),
             ),

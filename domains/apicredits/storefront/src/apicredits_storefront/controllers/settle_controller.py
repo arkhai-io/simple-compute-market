@@ -9,18 +9,17 @@ the issued credentials ({key_id, secret?, base_url}) ride
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
+from market_settlement_runtime import SettlementAdminRouteService
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
+from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from apicredits_storefront.domain_runtime import (
     serialize_api_credit_settlement,
     serialize_api_credit_settlement_start,
@@ -166,7 +165,6 @@ class AdminSettleController:
     def __init__(
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
-        _key=Depends(require_admin_principal),
     ) -> None:
         self._db = db
 
@@ -178,6 +176,7 @@ class AdminSettleController:
     async def wait_for_settlement(
         self,
         escrow_uid: str,
+        request: Request,
         timeout: float = Query(
             default=60.0,
             gt=0,
@@ -185,31 +184,27 @@ class AdminSettleController:
             description="Maximum seconds to wait (server-enforced, max 120)",
         ),
     ) -> SettleWaitResponse:
-        _terminal = {"ready", "failed"}
-        start = time.monotonic()
-        deadline = start + timeout
+        # The canonical client signs the timeout exactly as it sends it, so the
+        # wait it authorizes cannot be lengthened by rewriting the query.
+        raw_timeout = request.query_params.get("timeout")
+        if raw_timeout is None:
+            raise HTTPException(
+                status_code=400, detail="admin settlement wait requires explicit timeout"
+            )
+        await authenticate_admin(
+            request,
+            operation="admin_settle_wait",
+            resource=f"{escrow_uid}?timeout={raw_timeout}",
+        )
+        async def settle_status(uid: str):
+            return await self._db.load_escrow(escrow_uid=uid)
 
-        while True:
-            job = await self._db.load_escrow(escrow_uid=escrow_uid)
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            status = (job or {}).get("status", "")
-
-            if status in _terminal:
-                return SettleWaitResponse(
-                    ready=True,
-                    status=status,
-                    elapsed_ms=elapsed_ms,
-                )
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(1.0, remaining))
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        job = await self._db.load_escrow(escrow_uid=escrow_uid)
+        waited = await SettlementAdminRouteService(
+            settle_status=settle_status,
+            is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        ).wait(escrow_uid, timeout=timeout)
         return SettleWaitResponse(
-            ready=False,
-            status=(job or {}).get("status", "unknown"),
-            elapsed_ms=elapsed_ms,
+            ready=waited["ready"],
+            status=waited["status"],
+            elapsed_ms=waited["elapsed_ms"],
         )

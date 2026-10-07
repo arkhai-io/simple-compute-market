@@ -122,7 +122,10 @@ def resolve_vm_listing_shapes(
         return resolve_stated_shapes(override_shapes, source=SHAPE_SOURCE_OVERRIDE)
     # Local import: buyers install this package without the resource-pool kit,
     # and only storefront derivation reads pool hints.
-    from market_resource_pools import LISTING_SHAPES_POLICY_TAG, raw_listing_shapes
+    from market_resource_pools_contracts import (
+        LISTING_SHAPES_POLICY_TAG,
+        raw_listing_shapes,
+    )
 
     declared = policy_tags.get(LISTING_SHAPES_POLICY_TAG)
     if declared is not None and not isinstance(declared, Mapping):

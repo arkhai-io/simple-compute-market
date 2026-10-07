@@ -12,16 +12,20 @@ the chain runner raises an operator-facing configuration error.
 
 This module is schema-agnostic. It owns only the shared transcript,
 decision, context carrier, chain runner, registration/discovery, and config
-normalization. Domain-specific middlewares such as scalar bisection,
-Alkahest escrow dispatch, escrow-shape guards, and inventory guards live in
-domain packages and self-register when those packages are imported.
+normalization. Domain-specific middlewares such as Alkahest escrow dispatch
+and escrow-shape guards live in domain packages and self-register when those
+packages are imported. The inventory guard is domain-neutral and lives beside
+the listing-source verdict it reads (``market_policy.listing_source``).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
+
+if TYPE_CHECKING:
+    from market_policy.listing_source import ListingSourceVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,9 @@ class NegotiationContext:
     our_escrow_proposal: dict[str, Any] | None = None
     available_resources: dict[str, Any] = field(default_factory=dict)
     max_rounds: int = 10
+    #: The negotiation runtime's check of the listing against its own source,
+    #: for this round; ``None`` where the domain contributes no check.
+    listing_source: ListingSourceVerdict | None = None
     intermediate: dict[str, Any] = field(default_factory=dict)
 
 

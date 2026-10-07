@@ -42,13 +42,6 @@ from market_config import (
     load_dynaconf,
 )
 
-BARE_METAL_RECLAIM_POLICIES = frozenset({
-    "remove_lease_key",
-    "lock_user",
-    "delete_user",
-})
-DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
-
 # The service owns environment lookup and optional-include policy; the shared kit
 # owns deterministic profile/include resolution and Dynaconf construction.
 _SRC_DIR = Path(__file__).parent
@@ -109,24 +102,6 @@ class Settings:
         return Path(str(self._source.bare_metal_playbook_path)).resolve()
 
     @property
-    def bare_metal_reclaim_policy(self) -> str:
-        policy = str(
-            getattr(
-                self._source,
-                "bare_metal_reclaim_policy",
-                DEFAULT_BARE_METAL_RECLAIM_POLICY,
-            )
-            or DEFAULT_BARE_METAL_RECLAIM_POLICY
-        ).strip()
-        if policy not in BARE_METAL_RECLAIM_POLICIES:
-            allowed = ", ".join(sorted(BARE_METAL_RECLAIM_POLICIES))
-            raise ValueError(
-                "Invalid bare_metal_reclaim_policy "
-                f"{policy!r}; expected one of: {allowed}"
-            )
-        return policy
-
-    @property
     def resolved_inventory_path(self) -> Path:
         return Path(str(self._source.inventory_path)).resolve()
 
@@ -138,11 +113,6 @@ class Settings:
     @property
     def resolved_capacity_definitions_path(self) -> Path | None:
         raw = str(getattr(self._source, "capacity_definitions_path", "") or "").strip()
-        return Path(raw).resolve() if raw else None
-
-    @property
-    def resolved_relay_definitions_path(self) -> Path | None:
-        raw = str(getattr(self._source, "relay_definitions_path", "") or "").strip()
         return Path(raw).resolve() if raw else None
 
     @property

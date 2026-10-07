@@ -1,89 +1,50 @@
-from pathlib import Path
+"""VM's host operation: the capacity check job.
+
+Connectivity is the family's host route service, probing through each kind's
+probe; the Ansible probe is the Ansible distribution's, tested there.
+"""
+
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from compute_provisioning_service.db.models import Host
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
-from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
+from compute_provisioning.hosts.service import HostNotFoundError
+from compute_provisioning.jobs.submission import JobSubmissionService
+from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
-from vm_provisioning_adapter.services.host_service import HostNotFoundError
+from vm_provisioning_operator.models import VmActionRequest
 
 
-def _host() -> Host:
-    return Host(
-        host_id="kvm1",
-        ssh_host="10.0.0.1",
-        public_host="host.example",
-        ssh_user="ubuntu",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/key",
-        gpu_count=1,
-        enabled=True,
+def _service(*registered: str) -> tuple[HostOperationsService, MagicMock]:
+    engine = MagicMock()
+    engine.submit = AsyncMock(return_value=JobSubmitResponse(job_id="job-1", status="queued"))
+    hosts = SimpleNamespace(
+        get_host=lambda host_id: (
+            SimpleNamespace(host_id=host_id, enabled=True) if host_id in registered else None
+        )
     )
+    submission = JobSubmissionService(engine=engine, hosts=hosts, job_queue_provider=lambda: "q")
+    return HostOperationsService(submission=submission), engine
 
 
 @pytest.mark.asyncio
 async def test_check_capacity_requires_registered_host():
-    host_service = MagicMock()
-    host_service.get_host.return_value = None
-    service = HostOperationsService(
-        ansible_service=MagicMock(),
-        host_service=host_service,
-        job_service=MagicMock(),
-        job_queue_provider=lambda: object(),
-    )
+    service, engine = _service()
 
     with pytest.raises(HostNotFoundError):
         await service.check_capacity(host="ghost", body=VmActionRequest())
+    engine.submit.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_check_capacity_submits_check_job_to_resolved_queue():
-    job_queue = object()
-    host_service = MagicMock()
-    host_service.get_host.return_value = _host()
-    job_service = MagicMock()
-    job_service.submit = AsyncMock(return_value=JobSubmitResponse(job_id="job-1", status="queued"))
-    service = HostOperationsService(
-        ansible_service=MagicMock(),
-        host_service=host_service,
-        job_service=job_service,
-        job_queue_provider=lambda: job_queue,
-    )
+async def test_check_capacity_submits_a_check_job_on_the_host():
+    service, engine = _service("kvm1")
 
     response = await service.check_capacity(host="kvm1", body=VmActionRequest(max_retries=2))
 
     assert response.job_id == "job-1"
-    params, queue = job_service.submit.await_args.args
-    assert params.host_id == "kvm1"
-    assert params.vm_action == "check"
-    assert params.vm_target is None
-    assert params.max_retries == 2
-    assert queue is job_queue
-
-
-@pytest.mark.asyncio
-async def test_check_connectivity_renders_temp_inventory_and_cleans_it_up(tmp_path: Path):
-    inv_path = tmp_path / "inventory.ini"
-    inv_path.write_text("[kvm_hosts]\nkvm1\n", encoding="utf-8")
-    ansible_service = MagicMock()
-    ansible_service.write_inventory.return_value = inv_path
-    ansible_service.check_connectivity_with_inventory = AsyncMock(
-        return_value=ConnectivityResult(host="kvm1", reachable=True, detail="pong")
-    )
-    host_service = MagicMock()
-    host_service.get_host.return_value = _host()
-    service = HostOperationsService(
-        ansible_service=ansible_service,
-        host_service=host_service,
-        job_service=MagicMock(),
-        job_queue_provider=lambda: object(),
-    )
-
-    result = await service.check_connectivity(host="kvm1")
-
-    assert result.reachable is True
-    ansible_service.write_inventory.assert_called_once()
-    ansible_service.check_connectivity_with_inventory.assert_awaited_once_with("kvm1", inv_path)
-    assert not inv_path.exists()
+    submitted = engine.submit.await_args.kwargs
+    assert (submitted["host_id"], submitted["action"]) == ("kvm1", "check")
+    assert submitted["params"]["vm_target"] is None
+    assert submitted["max_retries"] == 2
+    assert submitted["job_queue"] == "q"

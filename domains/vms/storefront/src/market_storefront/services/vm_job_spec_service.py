@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-from typing import Any, Callable
+from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
 from arkhai_vms_listings import extract_compute_from_order
@@ -107,19 +106,20 @@ async def build_provisioning_job_spec(
     ssh_public_key: str,
     duration_seconds: int,
     capacity: Any,
-    vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
-    """Probe the capacity ledger (read-only) and build a VM job spec."""
+    """Probe the capacity ledger (read-only) and build a VM job spec.
+
+    The spec names no guest: provisioning names it from the capacity
+    reservation, which a probe has not made.
+    """
     capacity_claim = compute_capacity_claim_from_order(order_dict)
     selected = await capacity.probe(claim=capacity_claim)
     if not selected:
         return None
 
-    make_vm_target = vm_target_factory or (lambda: f"tenant-{uuid.uuid4().hex[:4]}")
     return {
         "resource_id": str(selected["resource_id"]),
         "host_id": selected["host_id"],
-        "vm_target": make_vm_target(),
         "required_attributes": capacity_claim,
         "ssh_public_key": ssh_public_key,
         "duration_seconds": duration_seconds,

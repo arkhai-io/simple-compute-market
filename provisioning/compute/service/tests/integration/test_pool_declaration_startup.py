@@ -88,7 +88,6 @@ class _Deployment:
             session_factory=self.session_factory,
             settings=SimpleNamespace(resolved_pool_definitions_path=self.document),
             pool_service=self.pool_service,
-            relay_service=None,
         )
 
     def recorded_digest(self) -> str | None:

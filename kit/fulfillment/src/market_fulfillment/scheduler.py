@@ -19,12 +19,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from market_resource_pools import (
-    HostRequirement,
-    ResourcePoolService,
-    pool_delivers_offering_mode,
-    pool_needs_host,
-)
+from market_resource_pools import HostRequirement, ResourcePoolService, pool_needs_host
+from market_resource_pools_contracts import pool_delivers_offering_mode
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 

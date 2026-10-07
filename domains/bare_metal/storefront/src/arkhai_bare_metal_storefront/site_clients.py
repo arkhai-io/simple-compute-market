@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from compute_provisioning import (
-    ComputeProvisioningClient,
+from compute_provisioning_client import ComputeProvisioningClient
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,

@@ -455,6 +455,28 @@ def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
+    """Abandon threads opened before negotiation moved to the kit runtime, and drop
+    the durable trading pause.
+
+    Those threads were never resumable: continuing one was always refused, and
+    their transcripts use actions the runtime does not read. They are abandoned
+    as the negotiation watchdog abandons a stale thread, which starts no
+    settlement or release, since nothing was reserved or held during
+    negotiation. Terminal threads keep their outcome. The trading pause is now
+    process-local, so its table goes.
+    """
+    conn.execute(
+        """
+        UPDATE negotiation_threads
+        SET terminal_state = 'abandoned', status = 'terminated',
+            updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE terminal_state IS NULL
+        """
+    )
+    conn.execute("DROP TABLE IF EXISTS bare_metal_operator_state")
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -502,5 +524,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0011-accepted-site-generations",
         apply=_add_accepted_site_generations,
+    ),
+    Migration(
+        id="bare-metal-storefront-0012-retire-storefront-negotiation",
+        apply=_retire_storefront_negotiation,
     ),
 )

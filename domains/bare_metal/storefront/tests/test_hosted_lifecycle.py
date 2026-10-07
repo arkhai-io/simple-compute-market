@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 from market_identity import Ed25519Signer
 from market_settlement_runtime import SettlementObligationRecord
+from arkhai_bare_metal import BareMetalMaterialization, bare_metal_digest
+from market_core import VersionedEnvelope
 
 from arkhai_bare_metal_storefront.hosted_lifecycle import (
     BareMetalHostedLifecycleCallbacks,
@@ -82,9 +84,17 @@ class FakeLifecycleDb:
 
 
 class FakeSite:
-    def __init__(self, reservation=None, *, reservations=None) -> None:
+    def __init__(self, reservation=None, *, reservations=None, release=None) -> None:
         self.reservation = reservation
         self.reservations = list(reservations or [])
+        #: What the site answers a release with: the released reservation, or
+        #: ``None`` when its release guard refuses.
+        self.release_answer = release
+        self.released: list[str] = []
+
+    async def release(self, *, capacity_reservation_id, deal_ref=None):
+        self.released.append(capacity_reservation_id)
+        return self.release_answer
 
     async def list_reservations(self):
         return list(self.reservations)
@@ -527,3 +537,181 @@ async def test_reclaim_blocks_when_fulfillment_authority_is_unreachable() -> Non
 
     with pytest.raises(RuntimeError, match="fulfillment unavailable"):
         await guard(settlement, "worker-a")
+
+
+def _teardown_without_fulfillment(release_answer):
+    """A reclaimed deal whose reservation no fulfillment ever began on."""
+    settlement = record(mechanism="fiat.stripe.v1", mechanism_status="reclaimed")
+    db = FakeLifecycleDb(settlement)
+    db.lifecycle.financial_state = "reclaimed"
+    db.lifecycle.capacity_reservation_id = "reservation-a"
+    site = FakeSite(release=release_answer)
+    lifecycle = BareMetalHostedLifecycleCallbacks(
+        db=db,
+        runtime=FakeRuntime(),
+        local_principal=SELLER,
+        capacity_client=FakeCapacityClient(site),
+        fulfillment_client=FakeFulfillmentClient("assigned"),
+        publish_evidence=NoPhysicalEffects(),
+    )
+    lifecycle.capacity_client.reservation_sites = {"reservation-a": "site-a"}
+    return settlement, db, site, lifecycle
+
+
+@pytest.mark.asyncio
+async def test_a_reservation_no_fulfillment_began_on_is_released_at_teardown() -> None:
+    settlement, db, site, lifecycle = _teardown_without_fulfillment(
+        {"capacity_reservation_id": "reservation-a", "state": "released"}
+    )
+
+    await lifecycle.teardown_lease(settlement.obligation_ref)
+
+    assert site.released == ["reservation-a"]
+    assert {"obligation_ref": settlement.obligation_ref, "teardown_state": "released"} in (
+        db.advances
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_release_the_site_refuses_leaves_the_lease_unreleased() -> None:
+    """The site frees capacity only when fulfillment proves nothing was
+    dispatched; a refusal means one began that this lifecycle never recorded,
+    so teardown is not recorded as done and is retried."""
+    settlement, db, site, lifecycle = _teardown_without_fulfillment(None)
+
+    with pytest.raises(BareMetalHostedLifecycleError, match="refused to release"):
+        await lifecycle.teardown_lease(settlement.obligation_ref)
+
+    assert site.released == ["reservation-a"]
+    assert not any(advance.get("teardown_state") == "released" for advance in db.advances)
+
+
+_KEY = "ssh-ed25519 AAAA tenant-a"
+
+
+class _AccessReadyDb(FakeLifecycleDb):
+    """A deal whose fulfillment was begun and is about to be reported active."""
+
+    def __init__(self, settlement: SettlementObligationRecord) -> None:
+        super().__init__(settlement)
+        self.lifecycle.accepted_binding.buyer_principal = BUYER
+        self.lifecycle.accepted_binding.seller_principal = SELLER
+        self.lifecycle.accepted_binding.claimant_principal = SELLER
+        self.lifecycle.accepted_binding.listing_id = "listing-a"
+        self.lifecycle.accepted_binding.access_public_digest = bare_metal_digest(
+            {"ssh_public_key": _KEY}
+        )
+        self.lifecycle.accepted_binding.option.facts.resource_selection = "fungible"
+        self.lifecycle.accepted_binding.option.facts.physical_resource_id = None
+        self.lifecycle.accepted_binding.option.facts.pool_id = "pool-a"
+        self.lifecycle.accepted_binding.option.facts.offering_mode = "bare_metal"
+        self.lifecycle.accepted_binding.option.facts.access_method = "ssh"
+        self.lifecycle.physical_state = "fulfillment_pending"
+        self.lifecycle.capacity_reservation_id = "reservation-a"
+        self.lifecycle.settlement_resource_id = "settlement-resource-a"
+        self.lifecycle.fulfillment_id = "fulfillment-a"
+        self.lifecycle.fulfillment_identity = "fulfillment-identity-a"
+        self.lifecycle.public_result = None
+
+    async def load_bare_metal_fulfillment_context(self, *, negotiation_id):
+        return {
+            "terminal_state": "success",
+            "buyer_scheme": BUYER.scheme.value,
+            "buyer_identifier": BUYER.identifier,
+            "seller_scheme": SELLER.scheme.value,
+            "seller_identifier": SELLER.identifier,
+            "site_id": "site-a",
+            "pool_id": "pool-a",
+            "claimed_attributes": {"gpu_model": "H200"},
+        }
+
+    async def load_bare_metal_terms(self, *, negotiation_id):
+        return SimpleNamespace(
+            access_method="ssh", ssh_public_key=_KEY, duration_seconds=3600, access_ref=None
+        )
+
+    async def load_bare_metal_materialization(self, *, negotiation_id):
+        return BareMetalMaterialization(
+            settlement_obligation_ref="obligation-a",
+            host_id="machine-1",
+            physical_host_id="host-1",
+            lease_start_utc="2099-01-01T00:00:00+00:00",
+            lease_end_utc="2099-01-01T01:00:00+00:00",
+            ssh_public_key=_KEY,
+        )
+
+    async def advance_bare_metal_hosted_lifecycle(self, **fields):
+        self.advances.append(fields)
+        for name, value in fields.items():
+            if name != "obligation_ref":
+                setattr(self.lifecycle, name, value)
+        return self.lifecycle
+
+    async def ensure_bare_metal_fulfillment_lifecycle(self, **fields):
+        return None
+
+    async def update_bare_metal_fulfillment_lifecycle(self, **fields):
+        return None
+
+
+class _ActiveFulfillment:
+    """Reports the grant done on machine-1. It offers no lease registration:
+    nothing writes a lease after delivery."""
+
+    def __init__(self, db: _AccessReadyDb) -> None:
+        self.db = db
+
+    async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
+        return SimpleNamespace(state="active", failure_reason=None, failure_message=None)
+
+    async def get_fulfillment_result(self, fulfillment_id, *, capacity_reservation_id):
+        return VersionedEnvelope(
+            kind="fulfillment.result.v1",
+            schema_version=1,
+            payload={
+                "state": "active",
+                "domain_result": {
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
+                    "payload": {
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.25",
+                                "port": 22,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2099-01-01T00:00:05+00:00",
+                    },
+                },
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_access_readiness_writes_no_lease() -> None:
+    """Once the grant is reported active the deal is recorded access-ready.
+    The lease was written at commit and its target at activation, so this step
+    registers nothing; the evidence states the window the commit recorded."""
+    settlement = record(mechanism="fiat.stripe.v1", mechanism_status="succeeded")
+    db = _AccessReadyDb(settlement)
+    fulfillment = _ActiveFulfillment(db)
+    capacity = FakeCapacityClient(FakeSite())
+    capacity.reservation_sites = {}
+    lifecycle = BareMetalHostedLifecycleCallbacks(
+        db=db,
+        runtime=FakeRuntime(),
+        local_principal=SELLER,
+        capacity_client=capacity,
+        fulfillment_client=fulfillment,
+        publish_evidence=NoPhysicalEffects(),
+    )
+
+    ready = await lifecycle._ensure_access_ready(settlement)
+
+    assert ready.physical_state == "access_ready"
+    # Readiness is the delivery's; the window is the one commit recorded.
+    assert ready.public_result.access_ready_at.isoformat() == "2099-01-01T00:00:05+00:00"
+    assert ready.public_result.expires_at.isoformat() == "2099-01-01T01:00:00+00:00"

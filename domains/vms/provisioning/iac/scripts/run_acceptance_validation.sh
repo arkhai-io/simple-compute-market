@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INVENTORY="${INVENTORY:-$ROOT_DIR/ansible/inventory/hosts}"
+INVENTORY="${INVENTORY:-$ROOT_DIR/ansible/inventory/}"
 KVM_HOST="${KVM_HOST:-}"
 VM_NAME="${VM_NAME:-iac-acceptance-$(date -u +%Y%m%d%H%M%S)}"
 VM_IMAGE_TYPE="${VM_IMAGE_TYPE:-scratch}"
@@ -21,7 +21,7 @@ intentionally operator-run and not part of the default CI path.
 
 Options:
   --kvm-host <alias>         Required inventory alias from [kvm_hosts]
-  --inventory <path>         Inventory file to use (default: ansible/inventory/hosts)
+  --inventory <path>         Inventory file or directory to use (default: ansible/inventory/)
   --vm-name <name>           Acceptance VM name (default: iac-acceptance-<timestamp>)
   --vm-image-type <type>     VM image type to validate (default: scratch)
   --extra-vars-file <path>   Optional extra vars file passed as @file

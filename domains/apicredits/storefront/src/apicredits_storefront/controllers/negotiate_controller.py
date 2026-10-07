@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import opening_proposal
 from pydantic import ValidationError
 
 import apicredits_storefront.container as _container
@@ -21,6 +22,7 @@ from core_storefront.models.negotiation_models import (
 )
 from market_negotiation_runtime import (
     NegotiationRuntime,
+    NegotiationUnavailableError,
     OfferUnfulfillableError,
     StorefrontPausedError,
 )
@@ -35,21 +37,6 @@ def _seller_principal():
     if signer is None:
         raise HTTPException(status_code=503, detail="storefront is not initialized")
     return signer.identity
-
-
-def _proposal_payload(proposal: Any, settlement_selection: Any) -> Any:
-    if settlement_selection is None:
-        return proposal
-    selection = settlement_selection.model_dump(mode="json")
-    if proposal is None:
-        return {"settlement_selection": selection}
-    payload = (
-        dict(proposal)
-        if isinstance(proposal, dict)
-        else proposal.model_dump(mode="json")
-    )
-    payload["settlement_selection"] = selection
-    return payload
 
 
 @cbv(router)
@@ -107,7 +94,7 @@ class NegotiateController:
                 seller_principal=seller_principal,
                 actor_principal=auth.principal,
                 terms=body.provision_terms,
-                proposal=_proposal_payload(
+                proposal=opening_proposal(
                     body.proposal,
                     body.settlement_selection,
                 ),
@@ -135,6 +122,18 @@ class NegotiateController:
                         "cover the requested quantity, or the key claim was "
                         "rejected. See `reason`."
                     ),
+                },
+            )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
                 },
             )
         except ValidationError as exc:
@@ -217,7 +216,7 @@ class NegotiateController:
                 detail="'proposal' required for counter",
             )
 
-        proposal_payload = _proposal_payload(
+        proposal_payload = opening_proposal(
             body.proposal,
             body.settlement_selection,
         )
@@ -258,6 +257,29 @@ class NegotiateController:
                 actor_principal=auth.principal,
                 actor_role="buyer",
                 seller_principal=seller_principal,
+            )
+        except OfferUnfulfillableError as exc:
+            # A buyer's accept on a listing its source no longer supports, or
+            # whose capacity is taken.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "offer_unfulfillable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                },
+            )
+        except NegotiationUnavailableError as exc:
+            # The listing's source could not be confirmed; nothing is known to be
+            # wrong, so a retry may succeed.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_source_unavailable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": "The seller could not confirm the listing; retry later.",
+                },
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

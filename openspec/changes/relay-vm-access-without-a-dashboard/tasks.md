@@ -86,6 +86,9 @@ amendment rather than rewritten, and the replacement work is appended.
       with the `ssh_decryption_key` setting — the same profile key that already
       protects embedded host key material. The database holds ciphertext, so a
       stored token is not a usable credential without a key held outside it.
+      *Since moved (2026-10-05, `bare-metal-mock-provisioned-deal`): the VM
+      adapter's `crypto.py` is gone; encryption at rest is `encrypt_secret` in
+      `kit/config/src/market_config/secret_at_rest.py`, under the same key.*
 - [x] 1.9a Do not add a second encryption setting. One profile key with two
       uses is one thing for a deployment to rotate; two keys protecting
       material of the same class is a second rotation path that will drift from
@@ -153,6 +156,13 @@ amendment rather than rewritten, and the replacement work is appended.
       snapshot in cleartext, or if it must, that the snapshot is not returned by
       any read path. Follow how the existing redaction in `ansible_service.py`
       treats `password` and `ssh_key_path_host`.
+      *Since moved (2026-10-05, `bare-metal-mock-provisioned-deal`): the VM
+      adapter's `ansible_service.py` is gone. VM's codec forwards the token
+      (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/codec.py`),
+      lists `frp_auth_token` among `VM_SECRET_FIELDS`, and the Ansible
+      distribution redacts those fields
+      (`provisioning/compute/ansible/src/compute_provisioning_ansible/runner.py`,
+      `redact_ansible_output`).*
 
 **Validation:** `make test` in `domains/vms/storefront`,
 `provisioning/compute/service`, `domains/vms/provisioning`, and
@@ -186,6 +196,19 @@ to provide — and the property section 9's seeding must not quietly take back.
       question: a relay with live leases cannot simply be removed, and
       refusing, disabling, or cascading a release are all defensible. Task
       1A.7 is the gate.
+**Moved (2026-10-05).** `bare-metal-mock-provisioned-deal` task 5B.9 moved the relay
+code from the provisioning service into the VM adapter
+(`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`): the relay services
+(`relay_service.py`, `relay_definitions.py`, `relay_rebinding.py`,
+`relay_port_allocator.py`, `relay_execution.py`) under `services/`; the `Relay`,
+`RelayPortLease`, and `AnsiblePoolConfig` models in `db.py`; and the relays controller as
+the router factory `controllers/relays_controller.py`. The release on a fulfillment's
+terminal transition is now VM's contributed terminal effect
+(`release_fulfillment_ports`), which fulfillment convergence and the release guard run;
+the relay definitions document and the port reconciliation are VM's contributions too.
+The relay routes admit only the administrator. Completed tasks below keep the paths they
+were done at; the open ones name none of the moved files.
+
 - [ ] 1A.7 **Decide and record** the deletion semantics in `design.md` once
       section 2's reconciliation behaviour is settled, then implement the
       decision or record why it stays deferred. This is a decision task, not an

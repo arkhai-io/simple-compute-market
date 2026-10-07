@@ -19,8 +19,9 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.container import Container
 from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
-from market_resource_pools import PoolCreate
+from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
+from vm_provisioning_adapter.db import Base as VmBase
 from market_site.db import Base as SiteBase
 
 
@@ -28,7 +29,7 @@ def _build_container():
     """A fresh `Container` instance wired to an isolated in-memory database.
 
     `ACTIVE_PROFILES=mock` (set for this whole test run, see Makefile)
-    makes `build_vm_runtime` compose `ProgrammableMockAnsibleService`
+    makes `build_vm_runtime` compose the mock Ansible runner
     instead of a real Ansible client, so resolving the container's VM
     runtime -- required to resolve `resource_pool_service`'s Ansible pool
     config handler -- performs no real network I/O.
@@ -40,6 +41,7 @@ def _build_container():
     )
     Base.metadata.create_all(bind=engine)
     PoolsBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)

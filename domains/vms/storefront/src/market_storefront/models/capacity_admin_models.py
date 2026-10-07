@@ -121,7 +121,6 @@ class UsageStartedEventRequest(BaseModel):
     provider_lease_id: str | None = None
     resource_id: str | None = None
     host_id: str | None = None
-    vm_target: str | None = None
     gpu_count: int | None = None
     lease_end_utc: str | None = None
 

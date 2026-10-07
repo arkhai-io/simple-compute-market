@@ -57,3 +57,33 @@ def test_runtime_imports_capacity_after_the_pools_and_hosts_it_names():
     assert names.index("import-pool-definitions") < capacity
     assert names.index("seed-inventory") < capacity
     assert capacity < names.index("create-job-queue")
+
+
+def test_runtime_imports_contributed_documents_after_composition_and_before_pools():
+    """A contributed document may declare what pool configuration references,
+    and its kinds are known only once the adapters are composed."""
+    names = [step.name for step in worker.app_runtime.startup_steps()]
+    contributed = names.index("import-contributed-definitions")
+    assert names.index("resolve-request-path-services") < contributed
+    assert contributed < names.index("import-pool-definitions")
+
+
+def test_a_contributed_task_named_like_a_service_worker_is_refused(monkeypatch):
+    """Every running task has the identity it declares: a contribution may not
+    reuse a name the service gives one of its own workers."""
+    from compute_provisioning import ComputeProvisioningBackgroundTask
+    from compute_provisioning_service import container as container_module
+
+    async def run():
+        return None
+
+    monkeypatch.setattr(
+        container_module,
+        "resolved_background_tasks",
+        (ComputeProvisioningBackgroundTask("lease-watchdog", run),),
+        raising=False,
+    )
+    monkeypatch.setattr(container_module, "resolved_job_queue", object(), raising=False)
+
+    with pytest.raises(RuntimeError, match="two background tasks are named 'lease-watchdog'"):
+        worker.app_runtime.background_tasks()

@@ -20,7 +20,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
-from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
+)
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_backfill
 from market_fulfillment import (
@@ -34,15 +39,9 @@ from market_fulfillment import (
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
-from vm_provisioning_adapter.release import (
-    VM_OFFERING_MODE,
-    FulfillmentServiceTeardownPort,
-    VmFulfillmentReleaseJobPort,
-    VmReleaseExecutor,
-)
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+from compute_provisioning.job_fulfillment import JobFulfillmentProvider
+from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _INVENTORY_GROUP = "legacy_hosts"
@@ -106,9 +105,11 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     # case that happens to skip the "initiate teardown" step.
     with engine.begin() as connection:
         connection.execute(text(
-            "INSERT INTO hosts (host_id, ssh_host, ssh_user, ssh_key_type, ssh_key_value, "
-            "gpu_count, enabled, pool_id) "
-            "VALUES ('kvm1', '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, 'default')"
+            "INSERT INTO hosts (host_id, connection_kind, connection_version, "
+            "connection_public, connection_protected, gpu_count, enabled, pool_id) "
+            "VALUES ('kvm1', 'ssh', 1, '{\"ssh_host\": \"10.0.0.1\", \"ssh_user\": "
+            "\"root\", \"ssh_port\": 22, \"public_host\": null, \"key_path\": "
+            "\"/keys/id_ed25519\"}', '{}', 0, 1, 'default')"
         ))
         connection.execute(text(
             "INSERT INTO capacity_reservations (capacity_reservation_id, units, state) "
@@ -141,8 +142,12 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     settlement_repository = SettlementRepository()
     fulfillment_service = FulfillmentOrchestrator(
         provider_registry=ProviderRegistry({
-            "ansible": AnsibleFulfillmentProvider(
-                job_service=None, job_queue_provider=lambda: None,
+            # No job authority: a backfilled teardown is dispatched as
+            # persisted, and preparing nothing reads no create job.
+            "ansible": JobFulfillmentProvider(
+                plan=VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys),
+                submission=None,
+                jobs=None,
             ),
         }),
         unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
@@ -151,25 +156,21 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
             repository=settlement_repository,
         ),
     )
-    ledger = CapacityLedgerService(session_factory=session_factory)
-    executor_release = ExecutorReleaseDispatcher({
-        VM_OFFERING_MODE: VmReleaseExecutor(
-            settlement_repository=settlement_repository,
-            session_factory=session_factory,
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
-    release_jobs = ReleaseJobDispatcher({
-        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
+    ledger = CapacityLedgerService(
+        session_factory=session_factory,
+        release_guard=FulfillmentReleaseGuard(settlement_repository),
+    )
+    teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
     settings = _settings()
     lease_lifecycle = LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
-        executor_release=executor_release,
-        release_jobs=release_jobs,
+        release_executor=FulfillmentReleaseExecutor(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+            teardown_port=teardown_port,
+        ),
+        release_status=FulfillmentReleaseStatusPort(teardown_port),
         capacity_released_notifier=_successful_notification,
     )
 

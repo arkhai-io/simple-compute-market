@@ -32,7 +32,7 @@ from core_buyer.action_policy import (
 from core_buyer.hosted_settlement import make_hosted_settle_hook
 
 import typer
-from arkhai_vms import make_vm_provision_terms
+from arkhai_vms import VmConnectionDetails, make_vm_provision_terms
 from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
@@ -1131,29 +1131,23 @@ def register(app: typer.Typer) -> None:
             attempts=attempt_digest,
         )
 
-        # Quiet mode: one concise block instead of the full panel. The public
-        # host comes from the seller_url (the connection_details ssh_command
-        # carries the seller's internal host, not its public address).
+        # Quiet mode: one concise block instead of the full panel. Where to
+        # connect is what the seller's storefront recorded from the delivery.
         if quiet:
-            from urllib.parse import urlparse
-
             console.print()  # end the "provisioning …" line
-            cd: dict = {}
+            details: VmConnectionDetails | None = None
             if result.connection_details:
                 try:
-                    cd = json.loads(result.connection_details)
-                except (ValueError, TypeError):
-                    cd = {}
-            host = urlparse(result.seller_url or "").hostname or "?"
-            port = (cd.get("ansible_result") or {}).get("external_ssh_port") or "?"
-            user = cd.get("tenant_user") or "?"
+                    details = VmConnectionDetails.model_validate_json(
+                        result.connection_details
+                    )
+                except ValueError:
+                    details = None
             console.print(f"status   {result.status}")
             if result.escrow_uid:
                 console.print(f"escrow   {result.escrow_uid}")
-            if cd.get("vm_name"):
-                console.print(f"vm       {cd['vm_name']} ({cd.get('vm_state', '?')})")
-            if user != "?" and port != "?":
-                console.print(f"connect  ssh -p {port} {user}@{host}")
+            if details is not None and details.connect:
+                console.print(f"connect  {details.connect}")
             if result.status != "ready":
                 raise typer.Exit(4)
             return

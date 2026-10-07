@@ -358,4 +358,4 @@ class TestEvaluateSettle:
             f"Expected would_submit=True with matching inventory. reason={result.get('reason')!r}"
         )
         assert result.get("host_id") == "host-match"
-        assert result.get("vm_target")  # non-empty generated target name
+        assert "vm_target" not in result  # provisioning names the guest

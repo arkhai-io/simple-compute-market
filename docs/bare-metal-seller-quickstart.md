@@ -55,6 +55,9 @@ Create an operator-owned inventory file outside the repository:
 host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
 ```
 
+The provisioning service registers every host entry in this file; the section
+name is yours to choose and means nothing to it. List only hosts to sell.
+
 Create a Resource Pool document outside the repository. The pool id must match
 the inventory host's `pool_id`; executor connectivity remains service-owned:
 

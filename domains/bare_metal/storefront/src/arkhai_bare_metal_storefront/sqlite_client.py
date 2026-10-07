@@ -6,13 +6,12 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Callable, Collection, Mapping
-from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
     BareMetalAcceptedHostedBinding,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     BareMetalListing,
@@ -31,7 +30,6 @@ from core_storefront import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
     StorefrontListingBinding,
-    StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
 from market_contact_exchange import CONTACT_EXCHANGE_MIGRATIONS
@@ -88,45 +86,6 @@ class SQLiteClient(CoreSQLiteClient):
             *pool_override_migrations(),
             *BARE_METAL_STOREFRONT_MIGRATIONS,
         )
-
-    async def is_global_paused(self) -> bool:
-        """Return the durable storefront-wide negotiation pause state."""
-
-        def _load() -> bool:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    "SELECT paused FROM bare_metal_operator_state "
-                    "WHERE singleton_id = 1",
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError("bare-metal operator state is missing")
-                return bool(row[0])
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def set_global_paused(self, *, paused: bool) -> None:
-        """Persist storefront-wide negotiation pause state."""
-
-        def _save() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cursor = conn.execute(
-                    "UPDATE bare_metal_operator_state "
-                    "SET paused = ?, "
-                    "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                    "WHERE singleton_id = 1",
-                    (1 if paused else 0,),
-                )
-                if cursor.rowcount != 1:
-                    raise RuntimeError("bare-metal operator state is missing")
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
 
     async def count_open_bare_metal_resources(self) -> int:
         """Count open, unpaused bare-metal listings for operator status."""
@@ -212,168 +171,6 @@ class SQLiteClient(CoreSQLiteClient):
                 shape_digest=shape_digest,
             ),
         )
-
-    async def persist_bare_metal_opening(
-        self,
-        *,
-        negotiation_id: str,
-        listing_id: str,
-        seller_principal: Identity,
-        buyer_agent_id: str,
-        buyer_principal: Identity,
-        seller_reference_amount: int,
-        strategy: str,
-        message: BareMetalMessage,
-        proposal: Mapping[str, Any],
-        buyer_amount: int | None,
-        seller_action: str,
-        seller_amount: int | None,
-        terms: BareMetalTerms | None,
-        agreed_amount: int | None,
-    ) -> None:
-        """Persist one opening under the listing's immutable domain/site binding."""
-        listing_binding = await self.load_listing_binding(listing_id=listing_id)
-        if listing_binding is None:
-            raise RuntimeError(
-                f"listing {listing_id!r} has no immutable storefront binding"
-            )
-        self._domain_registry.resolve(listing_binding.binding)
-        thread_binding = StorefrontThreadBinding(
-            negotiation_id=negotiation_id,
-            listing_id=listing_id,
-            site_id=listing_binding.site_id,
-            binding=listing_binding.binding,
-        )
-        normalized_message = self._market_domain.codecs.message(message)
-        prepared_message, _ = self.prepare_domain_artifact(
-            artifact_slot="message",
-            value=normalized_message,
-            binding=thread_binding.binding,
-            registry=self._domain_registry,
-        )
-        now = datetime.now(timezone.utc).isoformat()
-        owner_id = f"{seller_principal.scheme.value}:{seller_principal.identifier}"
-        await self.create_negotiation_opening(
-            thread={
-                "negotiation_id": negotiation_id,
-                "listing_id": listing_id,
-                "counterparty_listing_id": "",
-                "seller_agent_url": "",
-                "buyer_agent_url": buyer_agent_id,
-                "requested_duration_seconds": message.duration_seconds,
-                "requested_start_utc": None,
-                "pinned_proposal": dict(proposal),
-                "terms_wire": normalized_message.model_dump(
-                    mode="json",
-                    exclude_none=True,
-                ),
-                "buyer_principal": buyer_principal,
-                "seller_principal": seller_principal,
-                "owner_id": owner_id,
-                "seller_initial_amount": seller_reference_amount,
-                "strategy_label": strategy,
-            },
-            initial_message={
-                "round_number": 0,
-                "sender_role": "buyer",
-                "sender_principal": buyer_principal,
-                "seller_amount": seller_reference_amount,
-                "buyer_amount": buyer_amount,
-                "proposed_amount": buyer_amount,
-                "action_taken": "initial_proposal",
-                "message_type": "initial_proposal",
-                "timestamp": now,
-            },
-            binding=thread_binding,
-            domain_artifact=prepared_message,
-        )
-        normalized_terms = (
-            self._market_domain.codecs.terms(terms) if terms is not None else None
-        )
-        terms_payload = (
-            self._canonical_artifact_json(normalized_terms)
-            if normalized_terms is not None
-            else None
-        )
-        terminal_state = "success" if seller_action == "accept" else None
-        status = "terminated" if terminal_state else "active"
-        seller_action_taken = {
-            "accept": "accept_offer",
-            "counter": "counter_offer",
-        }.get(seller_action, seller_action)
-        seller_message_type = {
-            "accept": "accepted",
-            "counter": "counter_proposal",
-        }.get(seller_action, seller_action)
-
-        def _finish() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                conn.execute(
-                    """
-                    UPDATE negotiation_threads
-                    SET status=?, terminal_state=?, agreed_price=?,
-                        agreed_duration_seconds=?, agreed_at=?, updated_at=?
-                    WHERE negotiation_id=?
-                    """,
-                    (
-                        status,
-                        terminal_state,
-                        None if agreed_amount is None else str(agreed_amount),
-                        message.duration_seconds if agreed_amount is not None else None,
-                        now if agreed_amount is not None else None,
-                        now,
-                        negotiation_id,
-                    ),
-                )
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO negotiation_messages(
-                      negotiation_id, round, sender_role, sender_scheme,
-                      sender_identifier, our_price, their_price, proposed_price,
-                      action_taken, message_type, timestamp
-                    ) VALUES (?, 1, 'seller', ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        negotiation_id,
-                        seller_principal.scheme.value,
-                        seller_principal.identifier,
-                        str(seller_reference_amount),
-                        None if buyer_amount is None else str(buyer_amount),
-                        None if seller_amount is None else str(seller_amount),
-                        seller_action_taken,
-                        seller_message_type,
-                        now,
-                    ),
-                )
-                if terms_payload is not None:
-                    binding = thread_binding.binding
-                    conn.execute(
-                        """
-                        INSERT OR IGNORE INTO storefront_domain_artifacts(
-                          negotiation_id, artifact_slot, offering_mode,
-                          domain_identity, contract_major, contract_minor,
-                          artifact_json
-                        ) VALUES (?, 'terms', ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            negotiation_id,
-                            binding.offering_mode,
-                            str(binding.domain_identity),
-                            binding.contract_major,
-                            binding.contract_minor,
-                            terms_payload,
-                        ),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_finish)
 
     async def upsert_bare_metal_listing(
         self,
@@ -591,7 +388,7 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        result: BareMetalAccessResult | Mapping[str, Any],
+        result: BareMetalResult | Mapping[str, Any],
     ) -> None:
         await self._save_artifact(
             negotiation_id=negotiation_id,
@@ -604,7 +401,7 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-    ) -> BareMetalAccessResult | None:
+    ) -> BareMetalResult | None:
         return await self._load_artifact(
             negotiation_id=negotiation_id,
             artifact="result",

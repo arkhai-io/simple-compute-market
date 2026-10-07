@@ -364,8 +364,14 @@ class BareMetalReceipt(BaseModel):
         return self
 
 
-class BareMetalLeaseCreate(BaseModel):
-    """Request to attach a bare-metal lease tail to a live reservation."""
+class BareMetalAccessGrant(BaseModel):
+    """The access a bare-metal fulfillment grants, and later reclaims.
+
+    Prepared by the bare-metal fulfillment provider from a deal's
+    materialization and frozen in the fulfillment aggregate, so the reclaim
+    names exactly what the grant gave. Access is granted only through
+    fulfillment; no route accepts this directly.
+    """
 
     capacity_reservation_id: str | None = Field(
         default=None,
@@ -411,7 +417,7 @@ class BareMetalLeaseCreate(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_non_empty_ids(self) -> "BareMetalLeaseCreate":
+    def _validate_non_empty_ids(self) -> "BareMetalAccessGrant":
         for field_name in ("host_id", "physical_host_id"):
             value = getattr(self, field_name)
             if not str(value).strip():
@@ -438,99 +444,39 @@ class BareMetalLeaseCreate(BaseModel):
         )
 
 
-class BareMetalLeaseView(BaseModel):
-    """Minimal reservation-backed bare-metal lease view."""
+class BareMetalResult(BaseModel):
+    """What a buyer is told of a delivered bare-metal lease.
 
-    capacity_reservation_id: str
-    escrow_uid: str | None = None
-    host_id: str
-    physical_host_id: str
-    lease_start_utc: str | None = None
-    lease_end_utc: str | None = None
-    state: str
-    release_job_id: str | None = None
-    access_ref: dict[str, Any] | None = None
+    How access works, as which tenant account, since when, and until when. The
+    storefront writes it from provisioning's delivery and its own
+    materialization, whose window it sold. Where to connect is not part of it:
+    the endpoint is served live while the lease is active and never stored, so
+    a result read after the lease ends names no address that once granted
+    access.
+    """
 
-
-class BareMetalAccessResult(BaseModel):
-    """Result shape for bare-metal grant/reclaim executor slots."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
-    action: str = Field(
-        description="Bare-metal executor lifecycle action that completed.",
-    )
-    host_id: str = Field(
-        description="Executor-local bare-metal machine identity.",
-    )
-    physical_host_id: str | None = Field(
-        default=None,
-        description="Stable cross-mode physical host identity when available.",
-    )
-    ssh_user: str | None = Field(
-        default=None,
-        description="Tenant SSH account touched by the access operation.",
-    )
-    escrow_uid: str | None = Field(
-        default=None,
-        description="On-chain escrow UID associated with the lease.",
-    )
-    settlement_obligation_ref: str | None = Field(
-        default=None,
-        description="Hosted settlement obligation identity associated with the lease.",
-    )
-    access_grant_ref: str | None = Field(
-        default=None,
-        description="Opaque access-authority operation reference.",
-    )
-    host: str | None = Field(
-        default=None,
-        description="Transient buyer-reachable SSH host.",
-    )
-    port: int | None = Field(
-        default=None,
-        ge=1,
-        le=65535,
-        description="Transient buyer-reachable SSH port.",
-    )
-    lease_expires_at: datetime | None = Field(
-        default=None,
-        description="Authoritative lease expiry for access-ready projection.",
-    )
-    timestamp: str | None = Field(
-        default=None,
-        description="Executor-reported completion timestamp.",
-    )
-    status: str = Field(
-        default="success",
-        description="Executor-reported terminal status.",
-    )
-    details: dict[str, Any] | None = Field(
-        default=None,
-        description="Implementation-specific result details.",
-    )
+    access_method: str = Field(default=SSH_ACCESS_METHOD, min_length=1)
+    ssh_user: str = Field(min_length=1, description="The tenant account access was granted to.")
+    ready_at: datetime = Field(description="When access became ready.")
+    lease_end_utc: datetime = Field(description="When the lease ends.")
 
     @model_validator(mode="after")
-    def _validate_action(self) -> "BareMetalAccessResult":
-        if self.action not in BARE_METAL_ACCESS_ACTIONS:
-            raise ValueError(
-                f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
-            )
-        if not self.host_id.strip():
-            raise ValueError("host_id must be non-empty")
-        if self.host is not None and not self.host.strip():
-            raise ValueError("host must be non-empty")
-        if (self.host is None) != (self.port is None):
-            raise ValueError("host and port must be provided together")
+    def _validate_result(self) -> "BareMetalResult":
+        if self.ready_at.tzinfo is None or self.lease_end_utc.tzinfo is None:
+            raise ValueError("result times must be timezone-aware")
         return self
 
 
-def materialization_to_lease_create(
+def materialization_to_access_grant(
     materialization: BareMetalMaterialization,
     *,
     capacity_reservation_id: str | None = None,
     create_job_id: str | None = None,
-) -> BareMetalLeaseCreate:
-    """Adapt domain materialization into the current provisioning API request."""
+) -> BareMetalAccessGrant:
+    """The access grant a deal's materialization asks for."""
     access_ref = dict(materialization.access_ref or {})
     if materialization.ssh_public_key:
         access_ref.setdefault("ssh_public_key", materialization.ssh_public_key)
@@ -543,7 +489,7 @@ def materialization_to_lease_create(
         "ssh_user",
         f"arkhai-{hashlib.sha256(settlement_identity.encode('utf-8')).hexdigest()[:16]}",
     )
-    return BareMetalLeaseCreate(
+    return BareMetalAccessGrant(
         capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,
         settlement_obligation_ref=materialization.settlement_obligation_ref,
@@ -554,27 +500,3 @@ def materialization_to_lease_create(
         access_ref=access_ref or None,
         create_job_id=create_job_id,
     )
-
-
-def receipt_from_lease_view(
-    lease: BareMetalLeaseView,
-    *,
-    result_ref: dict[str, Any] | None = None,
-) -> BareMetalReceipt:
-    """Adapt the current reservation-backed lease view into a domain receipt."""
-    return BareMetalReceipt(
-        escrow_uid=lease.escrow_uid,
-        host_id=lease.host_id,
-        physical_host_id=lease.physical_host_id,
-        lease_start_utc=_parse_optional_datetime(lease.lease_start_utc),
-        lease_end_utc=_parse_optional_datetime(lease.lease_end_utc),
-        status=lease.state,
-        access_ref=lease.access_ref,
-        result_ref=result_ref,
-    )
-
-
-def _parse_optional_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value)

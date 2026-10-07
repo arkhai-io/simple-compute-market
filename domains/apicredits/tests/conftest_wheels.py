@@ -76,6 +76,12 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "resource-pools",
             "arkhai_kit_resource_pools-*.whl",
         ),
+        # The pool authority's wire models and declaration hints, which the
+        # service, the pool kit, and the site kit import.
+        "resource_pools_contracts": (
+            REPO / "kit" / "resource-pools-contracts",
+            "arkhai_kit_resource_pools_contracts-*.whl",
+        ),
         # The pool kit validates listing-shape hints with this kit.
         "capability_shape": (
             REPO / "kit" / "capability-shape",

@@ -45,7 +45,12 @@ API-credit deal runs inside the VM lane.
   under the mock profile, with its own `/test/bare-metal` rule routes.
 - Compose bare metal onto `kit/negotiation-runtime` through its existing routes and
   delete its domain-local negotiation (migrated from `bare-metal-and-credits-domain-stacks`
-  4a.1, 4a.2, and the runtime half of 4a.3).
+  4a.1, 4a.2, and the runtime half of 4a.3). What the two compute storefronts share is
+  built once in kit first, with VM and API credits rebound to it: the runtime rechecks a
+  listing against its source before every seller round and every acceptance through a
+  domain-contributed check, with VM's inventory guard moved to `kit/policy`; a retryable
+  refusal for a source that cannot be confirmed; one process-local trading pause; and a
+  thread recorded as successful only after its agreement and plan.
 - Move the deal controls into kit as framework-free route services, bound by every
   storefront that has or needs them (implemented in place of the corresponding part of
   `kit-owned-storefront-shell`). Force-accept goes through a new administrative
@@ -66,9 +71,15 @@ API-credit deal runs inside the VM lane.
   Neither adapter imports the other or the deployed service. The composition root
   builds the one job authority and the one host authority and hands both to every
   adapter runtime.
-  Once that boundary is proven, the two job-backed fulfillment providers' shared shape
-  becomes a helper in `compute_provisioning`, leaving each domain its job preparation
-  and result mapping.
+  Once that boundary is proven, job-backed fulfillment becomes the family's: one provider
+  in `compute_provisioning` submits through one job submission, reads status, and
+  delivers, and each domain contributes only its preparation and its codec. A codec
+  reports a create as typed delivery evidence, which the provider validates before the
+  create succeeds; the delivery says only how to reach what was provisioned; teardown is
+  prepared from the create job's own parameters; jobs correlate on the capacity
+  reservation rather than a deal reference; provisioning names the guests it creates; and
+  no caller writes a lease: commit begins it, once, for every domain, and provisioning
+  records its executor target when the fulfillment becomes active.
   Job results and credentials are stored and served as envelopes, executors classify
   retryability and redact, a cancelled job stays cancelled, and hosts carry a connection
   envelope whose codec belongs to its implementation (only `ssh` today); connection
@@ -80,13 +91,22 @@ API-credit deal runs inside the VM lane.
   wire models and route contracts move to `provisioning/compute/contracts`, and both
   existing generic clients are replaced by `provisioning/compute/client`, async and sync,
   with VM keeping a small extension for its own operations. `VersionedEnvelope` moves to
-  `arkhai-core`, so the contracts carry no kit weight.
+  `arkhai-core`, so the contracts carry no kit weight. Routes the provisioning service hosts
+  for other capabilities keep their owners: resource pools get thin contracts and client
+  distributions of their own, capacity-definition import joins `kit/site-client`, and
+  Ansible host import moves to the Ansible distribution.
 - Consolidate leases on one family surface that records and releases and never delivers:
   VM's lease routes are absorbed into it, bare metal's lease routes (and the access grant
   they made outside fulfillment) are deleted, there is no lease update, a lease's end moves
-  only through the site's truncation, lease registration writes the lease tail once, and
-  the lease lifecycle and release are mode-agnostic. Every route on the provisioning
-  service admits the administrator.
+  only through the site's truncation, the lease tail is written once, `commit` begins a
+  lease once and neither resurrects a lease nor moves a committed lease's window, and the
+  lease lifecycle and release are mode-agnostic. A lease that was never delivered is
+  released by what its fulfillment proves, and an uncommitted hold is released rather than
+  truncated. The site authority frees capacity only behind a release guard the
+  provisioning composition supplies, replacing the settlement-abandonment hook. Every
+  route on the provisioning service admits the administrator.
+- Delete the generic executor-action route, its contract job routes, and the
+  compute-adapter architecture behind them, so delivery happens only through fulfillment.
 - Serve the family's job, host, lease, and test-job routes from framework-free route
   services the provisioning service binds, with adapters binding their own routes through
   accessors rather than reaching into the service's module state; report execution
@@ -114,22 +134,38 @@ None.
   built once; bare-metal storefront restart recovery is proven at integration level.
 - `market-composition`: storefront deal controls are kit-owned route services;
   administrative acceptance and opening previews go through the negotiation runtime;
-  compute mock executors share one compute-family mechanism.
+  compute mock executors share one compute-family mechanism; the runtime rechecks a
+  listing's source before every seller round and acceptance, refuses a source it cannot
+  confirm as retryable, and records success only after the agreement and plan; the
+  trading pause is one process-local kit mechanism.
 - `physical-provisioning`: compute provisioning owns the job and host authorities;
   adapters contribute preparation and meaning while shared execution technology invokes
   it; job, host, and readiness wire models are compute-owned; no adapter imports another
   adapter or the deployed service; lease release delegates to durable fulfillment teardown for
   every offering mode; storefront teardown goes through lease termination; job execution
   resolves its executor by offering mode and action from a compute-provisioning table;
-  leases have one family surface that records and releases, with executor identity and
-  evidence fixed at registration; every provisioning route admits the administrator;
+  leases have one family surface that records and releases, with no lease written by a
+  caller: commit begins a lease, and provisioning records its executor target when the
+  fulfillment becomes active; every provisioning route admits the administrator;
   execution readiness is reported in system status; host connectivity is probed by
-  connection kind; the family's wire contract and client are thin distributions.
-- `site-capacity`: a reservation's lease tail is written once; lease truncation neither
-  resurrects nor extends a lease.
+  connection kind; the family's wire contract and client are thin distributions; delivery
+  happens only through fulfillment; an undelivered lease is released by what its
+  fulfillment proves; host import belongs to the implementation that reads its format;
+  executor registration is the job executor table's.
+- `site-capacity`: a reservation's lease tail is written once; `commit` begins a lease
+  once and neither resurrects a lease nor moves a committed lease's window; lease truncation neither resurrects nor
+  extends a lease, and refuses an uncommitted hold; every capacity reclaim consults a
+  composition-supplied release guard, which replaces the settlement-abandonment hook;
+  capacity-definition import has a thin typed client.
+- `compute-provisioning-contract`: the versioned executor action submission is removed;
+  jobs are submitted by fulfillment providers.
+- `resource-pool-management`: the pool wire contract and client are thin distributions.
 - `fulfillment`: `VersionedEnvelope` is provided by `arkhai-core`.
 - `storefront-publication`: bare-metal fulfillment starts at settlement verification,
-  and bare-metal teardown releases capacity through the site's lease lifecycle.
+  and bare-metal teardown releases capacity through the site's lease lifecycle; the
+  inventory guard's recheck runs before every seller round and acceptance, and a backed
+  bare-metal listing is checked for availability; an accepted thread is successful only
+  once its agreement and plan are recorded, rather than persisted atomically.
 
 ## Non-Goals
 
@@ -153,12 +189,19 @@ None.
   executor, its mock, its readiness component).
 - New `provisioning/compute/contracts` (the family's wire models and route contracts) and
   `provisioning/compute/client` (the family's async and sync typed client) distributions.
+- New `kit/resource-pools-contracts` and `kit/resource-pools-client` distributions;
+  `kit/resource-pools` imports its models from the former. `kit/site-client` gains
+  capacity-definition import.
+- `provisioning/compute/ansible`: the host-import route contract, route service, and client
+  extension.
 - `domains/vms/provisioning/client` (`vm_provisioning_operator`): its generic clients are
   deleted; it keeps VM's models, route declarations, relays' client surface, and a VM
   extension client over the family client.
 - `core` (`arkhai-core`): `VersionedEnvelope`. `kit/fulfillment` and its importers take it
   from there.
-- `kit/site`: write-once lease attachment and guarded truncation.
+- `kit/site`: write-once lease attachment, guarded commit and truncation, and the release
+  guard in place of the settlement-abandonment hook. `kit/fulfillment` records the create
+  handle through the ledger's narrowed create-handle write.
 - `provisioning/compute/service`: Dockerfile and settings copy each domain's `iac`; the
   service composes contributed diagnostics and mounts the moved route services.
 - `provisioning/compute`: the `(offering_mode, action)` executor table, the
@@ -166,14 +209,23 @@ None.
   (no mode-keyed dispatch), and framework-free job, host, lease, and test-job route
   services; its client and route contracts move to the thin distributions.
 - `domains/bare_metal`: its lease surface and lease client are deleted.
-- `kit/negotiation-runtime`: administrative acceptance and opening preview.
+- Both provisioning adapters: their compute adapters are deleted, with the generic action
+  route, its contract job routes, and `ExecutorAdapterRegistry`.
+- `kit/negotiation-runtime`: administrative acceptance and opening preview; the listing
+  source check hook, the retryable refusal, and success recorded last. `kit/policy`: the
+  listing-source verdict and `has_matching_inventory_guard`, moved from
+  `domains/vms/negotiation`. `kit/storefront`: the process-local trading pause and the
+  stage-event read's signed resource.
   `kit/settlement-runtime`, `kit/capacity-publication`, and `kit/storefront`:
   deal-control route services and the evaluate-settle hook. `core/storefront`: the
   bypassing `NegotiationService.force_accept` removed; `core/storefront-client`:
   `evaluate_negotiate` takes the opening request.
 - `domains/vms/storefront` and `domains/apicredits/storefront`: rebinding to the kit
-  route services and removing their copies.
-- `domains/bare_metal/storefront`: negotiation on the kit runtime, deal controls,
+  route services and removing their copies, including their trading-pause flags and
+  event-resource rebuilds; VM contributes its listing source check to the runtime.
+  `domains/vms/negotiation`: the inventory guard leaves for `kit/policy`.
+- `domains/bare_metal/storefront`: negotiation on the kit runtime with a configured
+  seller chain and no hold, its durable pause removed, deal controls,
   settlement-started fulfillment, teardown through lease termination, the
   capacity-released callback, the publication dry run, restart integration tests.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
@@ -202,7 +254,8 @@ None.
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
 - [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
-      `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`.
+      `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`,
+      `compute-provisioning-contract`, `resource-pool-management`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -230,19 +283,42 @@ None.
   `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
 - Bare-metal fulfillment starts at settlement verification —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
+- The negotiation runtime rechecks a listing against its source before every seller
+  decision and every acceptance, refuses a source it cannot confirm as retryable, and
+  records a thread as successful only once its agreement and plan are recorded; the
+  trading pause is one process-local kit mechanism —
+  `openspec/specs/market-composition/spec.md`,
+  `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`,
+  `docs/configuration.md`.
 - A capability's HTTP surface is five pieces, the binding owned by whatever composes the
   process — `docs/development/ARCHITECTURE.md` ("Route contracts and their HTTP binding",
   promoted during design at the maintainer's request).
-- Leases have one family surface that records and releases; executor identity and
-  evidence are fixed at registration; leases are keyed by reservation id; every
+- Leases have one family surface that records and releases; commit begins a lease, and
+  executor identity and evidence are fixed once recorded; leases are keyed by reservation
+  id; every
   provisioning route admits the administrator; readiness is part of system status;
   connectivity is probed by connection kind; the family's wire contract and client are
   thin distributions — `openspec/specs/physical-provisioning/spec.md`,
   `docs/development/ARCHITECTURE.md`.
-- A lease tail is written once and truncation neither resurrects nor extends a lease —
+- A lease tail is written once; `commit` begins a lease once and neither resurrects a
+  lease nor moves a committed lease's window; truncation neither resurrects nor extends a lease, nor ends an
+  uncommitted hold; capacity reclaims consult a release guard; capacity-definition import
+  has a thin client —
   `openspec/specs/site-capacity/spec.md`.
+- Delivery happens only through fulfillment; an undelivered lease is released by what its
+  fulfillment proves; host import belongs to its implementation —
+  `openspec/specs/physical-provisioning/spec.md`; the executor-action submission is removed
+  from `openspec/specs/compute-provisioning-contract/spec.md`.
+- The pool wire contract and client are thin distributions of the resource-pool capability —
+  `openspec/specs/resource-pool-management/spec.md`, `docs/development/ARCHITECTURE.md`.
 - `VersionedEnvelope` lives in `arkhai-core` — `openspec/specs/fulfillment/spec.md`,
   `docs/development/ARCHITECTURE.md`.
+- Job-backed fulfillment is the compute family's: one provider and one job submission,
+  domains contributing preparation and codecs; a create succeeds only with readable
+  delivery evidence; delivery says only how to reach what was provisioned; jobs correlate
+  on the capacity reservation; provisioning names what it provisions —
+  `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`
+  ("Family kits", "Fulfillment status and results").
 
 ## Dependencies
 

@@ -1,43 +1,52 @@
-"""VM/Ansible operator surfaces contributed to the compute service."""
+"""VM/Ansible operator surfaces contributed to the compute service.
+
+Each surface is a router factory taking zero-argument accessors for its
+collaborators: the service mounts the routers when it builds the app, and
+composes the collaborators later, at startup.
+"""
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
 
 from compute_provisioning import ComputeProvisioningRouterMount
 
 
-def vm_mock_router():
-    from vm_provisioning_adapter.controllers.test_controller import make_router
+def vm_route_contracts():
+    """The signed contracts of every route VM mounts, test routes included."""
+    from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 
-    return make_router()
+    return VM_PROVISIONING_ROUTES
 
 
-def vm_router_mounts() -> tuple[ComputeProvisioningRouterMount, ...]:
-    from vm_provisioning_adapter.controllers.hosts_controller import HostController
-    from vm_provisioning_adapter.controllers.jobs_controller import (
-        AnsibleJobsController,
+def vm_mock_router(
+    *,
+    vm_runner: Callable[[], Any],
+    host_authority: Callable[[], Any],
+):
+    """VM's mock control routes, mounted only under the mock profile."""
+    from vm_provisioning_adapter.controllers.test_controller import make_mock_router
+
+    return make_mock_router(vm_runner=vm_runner, host_authority=host_authority)
+
+
+def vm_router_mounts(
+    *,
+    vm_operations: Callable[[], Any],
+    host_operations: Callable[[], Any],
+    relay_service: Callable[[], Any],
+) -> tuple[ComputeProvisioningRouterMount, ...]:
+    """VM's operator routes: VM operations, the host capacity check, and relay
+    administration."""
+    from vm_provisioning_adapter.controllers.hosts_controller import (
+        make_host_capacity_router,
     )
-    from vm_provisioning_adapter.controllers.leases_controller import (
-        AdminLeasesController,
-        LeasesController,
-    )
-    from vm_provisioning_adapter.controllers.system_controller import SystemController
-    from vm_provisioning_adapter.controllers.vms_controller import VmController
+    from vm_provisioning_adapter.controllers.relays_controller import make_relays_router
+    from vm_provisioning_adapter.controllers.vms_controller import make_vms_router
 
     return (
-        ComputeProvisioningRouterMount(SystemController.make_health_router()),
-        ComputeProvisioningRouterMount(
-            SystemController.make_system_router(),
-            "/api/v1",
-        ),
-        ComputeProvisioningRouterMount(
-            AnsibleJobsController.make_router(),
-            "/api/v1",
-        ),
-        ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(VmController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(LeasesController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(
-            AdminLeasesController.make_router(),
-            "/api/v1",
-        ),
+        ComputeProvisioningRouterMount(make_host_capacity_router(host_operations), "/api/v1"),
+        ComputeProvisioningRouterMount(make_vms_router(vm_operations), "/api/v1"),
+        ComputeProvisioningRouterMount(make_relays_router(relay_service), "/api/v1"),
     )

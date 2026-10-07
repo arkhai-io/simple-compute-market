@@ -229,6 +229,20 @@ CAPACITY_ROUTE_CONTRACTS: tuple[SiteRouteContract, ...] = (
 )
 
 
+#: Capacity-definition import: operator administration of the declarations
+#: themselves, so only ``admin`` reaches it (``permits()`` admits ``admin`` on
+#: every route; no other role is named). A standalone site authority does not
+#: mount it; a service hosting the site's ledger alongside its own routes
+#: assembles it into the table its request authentication reads.
+CAPACITY_DEFINITION_ROUTE_CONTRACTS: tuple[SiteRouteContract, ...] = (
+    SiteRouteContract(
+        method="POST",
+        pattern=re.compile(r"/api/v1/capacity/definitions/import"),
+        operation="provisioning_capacity_definitions_import",
+        allowed_roles=frozenset(),
+    ),
+)
+
 def resolve_site_route(
     method: str,
     path: str,

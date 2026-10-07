@@ -25,7 +25,6 @@ from core_storefront.models.listing_models import (
     CloseListingResponse,
     CreateListingRequest,
     CreateListingResponse,
-    EvaluateNegotiateResponse,
     ReclaimRequest,
     RefundRequest,
 )
@@ -42,7 +41,6 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.models.listing_models import VmCreateListingRequest
-from market_storefront.negotiation_runtime import compute_round_zero_decision
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
 from market_storefront.services.listing_sources import resolve_source_backing
@@ -770,75 +768,6 @@ class ListingService:
         return CloseListingResponse(
             status=result.get("status", "closed"),
             listing_id=listing_id,
-        )
-
-    async def evaluate_negotiate(
-        self,
-        listing_id: str,
-        proposal: dict[str, Any],
-        requested_duration_seconds: int | None = None,
-    ) -> EvaluateNegotiateResponse:
-        """Dry-run the round-0 negotiation decision without creating a thread.
-
-        Loads the listing from SQLite, then delegates to the same VM policy
-        adapter used by round zero of a real negotiation.
-
-        Raises ``ValueError`` if the listing doesn't exist or has no usable
-        negotiation strategy. The controller converts these to HTTP 404.
-        """
-
-        row = await self._db.load_listing(listing_id=listing_id)
-        if not row:
-            raise ValueError(f"Listing {listing_id} not found")
-        listing_binding = await self._db.load_listing_binding(listing_id=listing_id)
-        if listing_binding is None:
-            raise ValueError(f"Listing {listing_id} has no durable domain binding")
-        if listing_binding.binding != self._binding:
-            raise ValueError(
-                f"Listing {listing_id} is not bound to the selected VM domain"
-            )
-        domain = self._registry.resolve(listing_binding.binding)
-        if domain is not self._domain:
-            raise RuntimeError(
-                "listing binding did not resolve to the startup-owned VM contract"
-            )
-        listing = Listing.model_validate(row)
-        their_amount_raw = _amount_from_proposal(proposal)
-        if their_amount_raw is None:
-            raise ValueError(
-                "proposal must include fields.amount (absolute amount in base units)"
-            )
-        their_amount = int(their_amount_raw)
-        (
-            our_amount,
-            _strategy_label,
-            direction,
-            strategy_name,
-            decision,
-        ) = await compute_round_zero_decision(
-            repository=self._db,
-            registry=self._registry,
-            binding=listing_binding.binding,
-            domain=domain,
-            capacity_runtime=self._capacity_runtime,
-            listing=listing,
-            proposal=proposal,
-            requested_duration_seconds=requested_duration_seconds,
-        )
-        decision_amount = _amount_from_proposal(decision.proposal)
-        return EvaluateNegotiateResponse(
-            listing_id=listing_id,
-            our_reference_amount=int(our_amount),
-            their_proposed_amount=their_amount,
-            direction=direction,
-            strategy=strategy_name,
-            decision=decision.action,
-            decision_amount=int(decision_amount)
-            if decision_amount is not None
-            else None,
-            decision_proposal=decision.proposal,
-            decision_reason=decision.reason,
-            would_negotiate=(decision.action != "exit"),
         )
 
     async def refund(self, listing_id: str, payload: RefundRequest) -> tuple[int, dict]:

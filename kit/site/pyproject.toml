@@ -1,10 +1,11 @@
 [project]
 name = "arkhai-kit-site"
-version = "0.6.0"
+version = "0.10.0"
 license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [
+    "arkhai-kit-resource-pools-contracts>=0.1.0",
     # The site authority signs its own responses and verifies its callers'
     # requests, so the identity primitives are a runtime dependency of the
     # router package, not only of its clients.

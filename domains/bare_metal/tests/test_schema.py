@@ -15,9 +15,8 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     PHYSICAL_HOST_ID_REF_KEY,
     SSH_ACCESS_METHOD,
-    BareMetalAccessResult,
-    BareMetalLeaseCreate,
-    BareMetalLeaseView,
+    BareMetalResult,
+    BareMetalAccessGrant,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -26,8 +25,7 @@ from arkhai_bare_metal import (
     BareMetalTerms,
     bare_metal_executor_ref,
     make_bare_metal_provision_terms,
-    materialization_to_lease_create,
-    receipt_from_lease_view,
+    materialization_to_access_grant,
 )
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
@@ -213,7 +211,7 @@ def test_bare_metal_materialization_rejects_invalid_window():
         )
 
 
-def test_materialization_to_lease_create_adapts_current_api_request():
+def test_materialization_to_access_grant_adapts_current_api_request():
     materialization = BareMetalMaterialization(
         escrow_uid="0xbm",
         host_id="bm-node-1",
@@ -223,7 +221,7 @@ def test_materialization_to_lease_create_adapts_current_api_request():
         access_ref={"ssh_user": "tenant-a"},
     )
 
-    request = materialization_to_lease_create(
+    request = materialization_to_access_grant(
         materialization,
         capacity_reservation_id="alloc-1",
         create_job_id="job-1",
@@ -251,9 +249,9 @@ def test_hosted_materialization_derives_stable_identity_bound_ssh_user():
         ssh_public_key="ssh-ed25519 AAAA buyer",
     )
 
-    first = materialization_to_lease_create(materialization)
-    replayed = materialization_to_lease_create(materialization)
-    distinct = materialization_to_lease_create(
+    first = materialization_to_access_grant(materialization)
+    replayed = materialization_to_access_grant(materialization)
+    distinct = materialization_to_access_grant(
         materialization.model_copy(
             update={"settlement_obligation_ref": "obligation-b"}
         )
@@ -285,35 +283,8 @@ def test_bare_metal_receipt_is_domain_view_not_executor_result():
     assert "executor_action" not in receipt.model_dump()
 
 
-def test_receipt_from_lease_view_adapts_current_api_view():
-    lease = BareMetalLeaseView(
-        capacity_reservation_id="alloc-1",
-        escrow_uid="0xbm",
-        host_id="bm-node-1",
-        physical_host_id="host-physical-1",
-        lease_start_utc="2099-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01T01:00:00+00:00",
-        state="leased",
-        release_job_id=None,
-        access_ref={"ssh_user": "tenant-a"},
-    )
-
-    receipt = receipt_from_lease_view(
-        lease,
-        result_ref={"capacity_reservation_id": "alloc-1"},
-    )
-
-    assert receipt.escrow_uid == "0xbm"
-    assert receipt.host_id == "bm-node-1"
-    assert receipt.status == "leased"
-    assert receipt.lease_start_utc == datetime(
-        2099, 1, 1, tzinfo=timezone.utc,
-    )
-    assert receipt.result_ref == {"capacity_reservation_id": "alloc-1"}
-
-
 def test_bare_metal_lease_create_keeps_machine_and_physical_ids_separate():
-    body = BareMetalLeaseCreate(
+    body = BareMetalAccessGrant(
         capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
         host_id="bm-node-1",
@@ -339,7 +310,7 @@ def test_bare_metal_executor_ref_uses_reserved_physical_host_key():
 
 def test_bare_metal_lease_create_rejects_blank_identity_fields():
     with pytest.raises(ValidationError):
-        BareMetalLeaseCreate(
+        BareMetalAccessGrant(
             escrow_uid="0xbm",
             host_id=" ",
             physical_host_id="host-physical-1",
@@ -354,23 +325,24 @@ def test_bare_metal_access_actions_are_domain_owned():
     )
 
 
-def test_bare_metal_access_result_accepts_contract_action():
-    result = BareMetalAccessResult(
-        action=NODE_GRANT_ACCESS_ACTION,
-        host_id="bm-node-1",
-        physical_host_id="host-physical-1",
+def test_the_buyer_result_names_the_account_and_window_but_no_endpoint():
+    result = BareMetalResult(
         ssh_user="tenant-a",
-        escrow_uid="0xbm",
+        ready_at=datetime(2026, 10, 6, 12, tzinfo=timezone.utc),
+        lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
     )
 
-    assert result.action == NODE_GRANT_ACCESS_ACTION
-    assert result.host_id == "bm-node-1"
-    assert result.status == "success"
-
-
-def test_bare_metal_access_result_rejects_unknown_action():
+    assert result.access_method == SSH_ACCESS_METHOD
     with pytest.raises(ValidationError):
-        BareMetalAccessResult(
-            action="delete_everything",
-            host_id="bm-node-1",
+        BareMetalResult.model_validate(
+            {**result.model_dump(mode="json"), "host": "203.0.113.7", "port": 22}
+        )
+
+
+def test_the_buyer_result_refuses_naive_times():
+    with pytest.raises(ValidationError):
+        BareMetalResult(
+            ssh_user="tenant-a",
+            ready_at=datetime(2026, 10, 6, 12),
+            lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
         )

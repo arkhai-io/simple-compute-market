@@ -218,9 +218,9 @@ class VmManagementContractTests(unittest.TestCase):
         tasks here are protected, but json-output.yml's own `debug:
         var:`/`debug: msg:` tasks (which also render the credential-bearing
         vm_creation_data/vm_creation_json) MUST NOT gain no_log, since they
-        are the literal transport AnsibleService._extract_ansible_json
-        parses out of raw stdout -- see ansible_service.py's
-        redact_ansible_output docstring.
+        are the literal transport the VM codec's fact extraction parses
+        out of raw stdout -- see the Ansible runner's redact_ansible_output
+        docstring.
         """
         text = _read(VM_CREATE)
 
@@ -257,8 +257,8 @@ class VmManagementContractTests(unittest.TestCase):
 
     def test_json_output_transport_tasks_are_not_no_log_protected(self) -> None:
         """The inverse of the previous test: json-output.yml's tasks are a
-        deliberate exception and must stay readable by
-        AnsibleService._extract_ansible_json's marker search."""
+        deliberate exception and must stay readable by the VM codec's
+        fact extraction."""
         text = _read(JSON_OUTPUT)
         idx = text.index("- name: Output VM creation data as parsable JSON")
         next_idx = text.find("\n- name:", idx + 1)

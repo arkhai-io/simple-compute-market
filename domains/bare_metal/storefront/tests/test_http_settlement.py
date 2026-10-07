@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from storefront_client import StorefrontClient, StorefrontClientError
 from storefront_client.models import SettleResponse, SettleStatusResponse
 from market_core.schemas import SettlementPlan
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     EMPTY_BODY,
@@ -35,6 +35,7 @@ from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
+from seeded_threads import seed_thread
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -54,6 +55,7 @@ ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
 ESCROW_ADDRESS = "0x1111111111111111111111111111111111111111"
 ESCROW_UID = "0x" + "ab" * 32
 OTHER_ESCROW_UID = "0x" + "cd" * 32
+TOKEN = "0x2222222222222222222222222222222222222222"
 
 
 def _buyer(app) -> StorefrontClient:
@@ -206,14 +208,12 @@ async def _accepted_runtime(
         accepted_escrows=[],
     )
     negotiation_id = "neg-accepted"
-    await db.persist_bare_metal_opening(
+    await seed_thread(
+        db,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
-        seller_principal=runtime.seller_principal,
-        buyer_agent_id="https://buyer.example",
         buyer_principal=BUYER_SIGNER.identity,
-        seller_reference_amount=100,
-        strategy="listed",
+        seller_principal=runtime.seller_principal,
         message=BareMetalMessage(
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 persisted-key",
@@ -224,9 +224,7 @@ async def _accepted_runtime(
             "fields": {"amount": "100"},
             "expiration_unix": int(time.time()) + 3600,
         },
-        buyer_amount=100,
-        seller_action="accept",
-        seller_amount=100,
+        amount=100,
         terms=BareMetalTerms(
             host_id="machine-1",
             physical_host_id="host-1",
@@ -234,7 +232,6 @@ async def _accepted_runtime(
             ssh_public_key="ssh-ed25519 persisted-key",
             listing_ref="listing-1",
         ),
-        agreed_amount=100,
     )
     return runtime, negotiation_id
 
@@ -469,6 +466,8 @@ class _CapacityClient:
         self.site_client = _FulfillmentSite()
         self.reservation_sites = {}
         self.reserve_calls = []
+        self.commit_calls = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -480,6 +479,20 @@ class _CapacityClient:
         return {
             "capacity_reservation_id": "reservation-a",
             "site": request["site"],
+        }
+
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commit_calls.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
         }
 
 
@@ -530,18 +543,19 @@ class _ProvisioningClient:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "host_id": "machine-1",
-                        "physical_host_id": "host-1",
-                        "ssh_user": "tenant-a",
-                        "host": "203.0.113.25",
-                        "port": 2222,
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.25",
+                                "port": 2222,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
@@ -630,15 +644,18 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     public_result = result
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
-    assert public_result["result"]["host"] is None
-    assert public_result["result"]["port"] is None
+    # Where to connect is served live by the access route, never stored.
+    assert "host" not in public_result["result"]
+    assert "port" not in public_result["result"]
+    lease_end = public_result["receipt"]["lease_end_utc"]
+    assert public_result["result"]["lease_end_utc"] == lease_end
     assert access == {
         "negotiation_id": negotiation_id,
         "method": "ssh",
         "host": "203.0.113.25",
         "port": 2222,
         "username": "tenant-a",
-        "expires_at": None,
+        "expires_at": lease_end,
     }
     serialized_result = json.dumps(public_result, sort_keys=True)
     for forbidden in (
@@ -649,3 +666,112 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         "provider_metadata",
     ):
         assert forbidden not in serialized_result
+
+
+async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
+    """The opening commits the plan verify registers, built from the same inputs.
+
+    The buyer funds from the plan in the negotiation response, so that plan, the
+    one committed at acceptance, and the one settlement verification builds must
+    be the same plan. Built here with the real builder against the development
+    chain's addresses, every build recorded.
+    """
+    from market_alkahest.dev_chain import anvil_address_book_path
+    from source_sites import SourceSites
+
+    from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
+
+    builds: list[dict] = []
+
+    def recording_builder(**kwargs):
+        artifacts = build_bare_metal_settlement_plan(**kwargs)
+        builds.append(artifacts["settlement_plan"])
+        return artifacts
+
+    async def verifier(**_kwargs):
+        # The escrow matches the plan's only obligation.
+        return 0
+
+    domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
+    runtime = BareMetalStorefrontRuntime(
+        db=db,
+        domain=domain,
+        seller_principal=SELLER_SIGNER.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        marketplace_signer=SELLER_SIGNER,
+        seller_evm_address="0x3333333333333333333333333333333333333333",
+        plan_builder=recording_builder,
+        chain_clients={"anvil": object()},
+        chain_config_paths={"anvil": str(anvil_address_book_path())},
+        escrow_verifier=verifier,
+        capacity_client=SourceSites(),
+    )
+    await db.upsert_bare_metal_listing(
+        listing_id="listing-1",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
+            "physical_host_id": "physical-host-1",
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": ESCROW_ADDRESS,
+                "literal_fields": {"token": TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }
+        ],
+    )
+    opened = await runtime.negotiation_runtime.start(
+        repository=db,
+        listing_id="listing-1",
+        buyer_principal=BUYER_SIGNER.identity,
+        seller_principal=runtime.seller_principal,
+        actor_principal=BUYER_SIGNER.identity,
+        proposal={
+            "chain_name": "anvil",
+            "escrow_address": ESCROW_ADDRESS,
+            "fields": {"amount": "100", "token": TOKEN},
+            "literal_fields": {"token": TOKEN},
+            "expiration_unix": int(time.time()) + 3600,
+        },
+        terms={
+            "kind": "bare_metal.v2",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 3600,
+                "access_method": "ssh",
+                "ssh_public_key": "ssh-ed25519 persisted-key",
+            },
+        },
+        seller_agent_url=runtime.storefront_url,
+        buyer_agent_url="https://buyer.example",
+    )
+    assert opened["action"] == "accept"
+    negotiation_id = opened["negotiation_id"]
+
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+
+    thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    committed = thread["settlement_plan"]
+    committed = json.loads(committed) if isinstance(committed, str) else committed
+    assert len(builds) == 2, "the opening and settlement verification each build once"
+    assert opened["settlement_plan"] == committed == builds[0] == builds[1]

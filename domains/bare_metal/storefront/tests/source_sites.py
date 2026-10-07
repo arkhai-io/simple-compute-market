@@ -36,6 +36,7 @@ def listing_source_projection(
     capacity: dict[str, Any] | None = None,
     gpu_model: str = LISTING_HARDWARE["gpu_model"],
     region: str | None = LISTING_HARDWARE["region"],
+    available: bool = True,
 ) -> dict[str, Any]:
     declared = dict(DECLARED_CAPACITY if capacity is None else capacity)
     resource = build_projected_resource(
@@ -50,6 +51,7 @@ def listing_source_projection(
                 host_id=host_id,
                 physical_host_id=physical_host_id,
                 capacity=declared,
+                available=available,
             )
         },
     )

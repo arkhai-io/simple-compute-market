@@ -9,7 +9,7 @@ import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
 from .asking_rates import ASKING_RATES_POLICY_TAG, validate_asking_rates
-from .hints import (
+from market_resource_pools_contracts.hints import (
     CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     LISTING_SHAPES_POLICY_TAG,
@@ -24,7 +24,7 @@ from .hints import (
     validate_sla_preference,
 )
 from .pool_config_handler import PoolConfigHandler
-from .pools import (
+from market_resource_pools_contracts import (
     PoolCreate,
     PoolImportDiff,
     PoolReplace,

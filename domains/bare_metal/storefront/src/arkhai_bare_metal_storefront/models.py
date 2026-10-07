@@ -7,7 +7,7 @@ from typing import Literal
 
 from arkhai_bare_metal import (
     BareMetalAcceptedHostedBinding,
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     BareMetalReceipt,
@@ -144,7 +144,7 @@ class BareMetalFulfillmentResponse(BaseModel):
 class BareMetalFulfillmentResultResponse(BaseModel):
     negotiation_id: str
     receipt: BareMetalReceipt
-    result: BareMetalAccessResult
+    result: BareMetalResult
 
 
 class BareMetalAccessDeliveryResponse(BaseModel):

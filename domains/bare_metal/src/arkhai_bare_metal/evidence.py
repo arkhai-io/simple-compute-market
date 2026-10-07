@@ -39,7 +39,6 @@ class BareMetalLeaseReadyResult(BaseModel):
     capacity_reservation_ref: str = Field(min_length=1, max_length=256)
     settlement_resource_ref: str = Field(min_length=1, max_length=256)
     fulfillment_ref: str = Field(min_length=1, max_length=256)
-    access_grant_ref: str = Field(min_length=1, max_length=256)
     access_method: Literal["ssh"] = "ssh"
     access_ready: Literal[True] = True
     access_ready_at: datetime
@@ -51,7 +50,6 @@ class BareMetalLeaseReadyResult(BaseModel):
         "capacity_reservation_ref",
         "settlement_resource_ref",
         "fulfillment_ref",
-        "access_grant_ref",
     )
     @classmethod
     def _validate_public_ref(cls, value: str | None) -> str | None:

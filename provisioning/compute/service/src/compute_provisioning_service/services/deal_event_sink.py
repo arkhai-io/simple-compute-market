@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from market_identity import TrustedIdentitySet
 
-from compute_provisioning import LifecycleEvent
+from compute_provisioning_contracts import LifecycleEvent
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 

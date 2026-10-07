@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-policy"
-version = "0.2.0"
+version = "0.3.0"
 description = "Domain-agnostic policy engine for the market — negotiation thread store, action builders, callable registry, and policy evaluation. Ships with the `market-policy` CLI for the train/eval/export lifecycle."
 license = "MIT"
 requires-python = ">=3.10,<3.14"

@@ -12,6 +12,7 @@ import logging
 import sqlite3
 from typing import Any
 
+from arkhai_vms import VmConnectionDetails
 from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
     LegacyMigrationInputs,
     Migration,
@@ -470,6 +471,142 @@ def _migrate_resource_settlement_clauses(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_capacity_pools", "settlements", "TEXT")
 
 
+# The fields a deal's connection details may hold.
+_CONNECTION_FIELDS = frozenset({"host", "port", "user", "ready_at", "provisioned_resource_ids"})
+
+
+def _connection_details(stored: dict[str, Any]) -> dict[str, Any]:
+    """An older record's connection details, rewritten to what a delivery holds.
+
+    Only a buyer-facing address is a ``host``. A record that predates
+    deliveries names it ``host_ip``, except behind a relay: there the buyer
+    connects to the relay's address and the relay's port, and such a record's
+    ``host_ip`` is the KVM host's address while its ``ssh_port`` is the relay's
+    port, a pair that never granted access. A relayed record therefore takes
+    both from its relay record, and omits the host when that record lacks
+    either. Later records named only the KVM host's inventory name, so their
+    host is omitted. A field the record cannot supply is omitted rather than
+    invented.
+    """
+    frp = stored.get("frp") if isinstance(stored.get("frp"), dict) else {}
+    if str(frp.get("enabled")).lower() == "true":
+        relay_addr = frp.get("relay_addr")
+        relay_port = frp.get("remote_port")
+        proven = (
+            isinstance(relay_addr, str)
+            and relay_addr.strip() not in ("", "N/A")
+            and str(relay_port).isdigit()
+        )
+        host = relay_addr.strip() if proven else None
+        port = relay_port if proven else None
+    else:
+        ansible_result = stored.get("ansible_result")
+        host = stored.get("host_ip") or None
+        port = stored.get("ssh_port") or (
+            ansible_result.get("external_ssh_port")
+            if isinstance(ansible_result, dict)
+            else None
+        )
+    candidate: dict[str, Any] = {
+        "host": host,
+        "port": int(str(port)) if port is not None and str(port).isdigit() else None,
+        "user": stored.get("tenant_user") or None,
+        "ready_at": stored.get("timestamp") or None,
+        "provisioned_resource_ids": stored.get("provisioned_resource_ids") or [],
+    }
+    for name in ("host", "port", "user", "ready_at"):
+        try:
+            VmConnectionDetails.model_validate({name: candidate[name]})
+        except ValueError:
+            candidate[name] = None
+    return VmConnectionDetails.model_validate(candidate).model_dump(
+        mode="json", exclude_none=True
+    )
+
+
+def _migrate_connection_details_to_delivery(conn: sqlite3.Connection) -> None:
+    """Rewrite stored connection details into the shape a delivery records.
+
+    Covers each deal's escrow record and the listing a VM was delivered on.
+    Rows already in that shape are left alone, so a rerun changes nothing; a
+    value that is not a JSON object was never readable as connection details
+    and is left as it is.
+    """
+    for table, column, key in (
+        ("escrows", "connection_details", "escrow_uid"),
+        ("listings", "fulfillment_resource", "listing_id"),
+    ):
+        if not _table_exists(conn, table) or not _column_exists(conn, table, column):
+            continue
+        rows = conn.execute(
+            f"SELECT {key}, {column} FROM {table} WHERE {column} IS NOT NULL"
+        ).fetchall()
+        for row_key, raw in rows:
+            try:
+                stored = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(stored, dict) or set(stored) <= _CONNECTION_FIELDS:
+                continue
+            conn.execute(
+                f"UPDATE {table} SET {column} = ? WHERE {key} = ?",
+                (json.dumps(_connection_details(stored), sort_keys=True), row_key),
+            )
+
+
+def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> None:
+    """Remove the guest name from every escrow's stored fulfillment request.
+
+    Provisioning names a VM's guest and refuses a request that names one. A
+    stored request is replayed verbatim when restart convergence resumes a deal,
+    and provisioning accepts a repeat only when it equals its own stored copy,
+    which the provisioning service rewrites the same way, so a replay of a
+    rewritten request still matches.
+
+    Every escrow is rewritten, in every state. Contexts of another kind or
+    version, values that are not JSON, and requests naming no guest are left as
+    they are, so a rerun changes nothing.
+    """
+    if not _table_exists(conn, "escrows") or not _column_exists(
+        conn, "escrows", "fulfillment_context"
+    ):
+        return
+    rows = conn.execute(
+        "SELECT escrow_uid, fulfillment_context FROM escrows "
+        "WHERE fulfillment_context IS NOT NULL"
+    ).fetchall()
+    for escrow_uid, raw in rows:
+        try:
+            context = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(context, dict) or context.get("kind") != (
+            "vm.storefront.fulfillment-context"
+        ):
+            continue
+        payload = context.get("payload")
+        request = payload.get("fulfillment_request") if isinstance(payload, dict) else None
+        fields = request.get("payload") if isinstance(request, dict) else None
+        if not isinstance(fields, dict) or "vm_target" not in fields:
+            continue
+        rewritten = {
+            **context,
+            "payload": {
+                **payload,
+                "fulfillment_request": {
+                    **request,
+                    "payload": {
+                        key: value for key, value in fields.items() if key != "vm_target"
+                    },
+                },
+            },
+        }
+        conn.execute(
+            "UPDATE escrows SET fulfillment_context = ? WHERE escrow_uid = ?",
+            (json.dumps(rewritten, sort_keys=True, separators=(",", ":")), escrow_uid),
+        )
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -502,5 +639,13 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260813_010_resource_settlement_clauses",
         _migrate_resource_settlement_clauses,
+    ),
+    Migration(
+        "20261006_011_connection_details_to_delivery",
+        _migrate_connection_details_to_delivery,
+    ),
+    Migration(
+        "20261006_012_fulfillment_context_names_no_guest",
+        _migrate_fulfillment_context_names_no_guest,
     ),
 )
