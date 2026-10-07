@@ -499,10 +499,10 @@ async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:
     assert threads.count == 0
 
 
-async def test_durable_pause_blocks_new_negotiation(tmp_path) -> None:
+async def test_a_trading_pause_blocks_new_negotiation(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
-    await runtime.db.set_global_paused(paused=True)
+    runtime.trading_pause.pause()
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
@@ -621,7 +621,7 @@ async def test_an_opening_on_a_listing_its_source_no_longer_supports_is_refused(
     refused, threads, site = await _open_against(tmp_path, SourceSite(projection))
 
     assert refused.status_code == 409
-    assert "no longer matches its declaration" in str(refused)
+    assert "no_matching_declaration" in str(refused)
     assert threads == 0
     assert site.calls == 1
 
@@ -632,7 +632,8 @@ async def test_an_opening_whose_site_cannot_answer_is_refused_as_retryable(tmp_p
     )
 
     assert refused.status_code == 503
-    assert "site-a" in str(refused)
+    # The refusal names no source detail; the seller's log carries it.
+    assert "listing_source_unverifiable" in str(refused)
     assert threads == 0
 
 
@@ -666,4 +667,255 @@ async def test_a_hosted_opening_on_a_listing_its_source_no_longer_supports_is_re
                 await _negotiate_hosted(buyer, _hosted_opening(option))
 
     assert refused.value.status_code == 409
-    assert "no longer matches its declaration" in str(refused.value)
+    assert "no_matching_declaration" in str(refused.value)
+
+
+# ---------------------------------------------------------------------------
+# Rounds, acceptance, and the listing's source after the opening
+# ---------------------------------------------------------------------------
+
+_COUNTERING_CHAIN = ["escrow_shape_guard", "bisection"]
+
+
+def _countering_runtime(path: str, site: SourceSite) -> BareMetalStorefrontRuntime:
+    """A storefront whose seller counters below the listed rate, as the lane's does."""
+    return replace(
+        _runtime(path),
+        negotiation_policies=_COUNTERING_CHAIN,
+        capacity_client=SourceSites(site),
+    )
+
+
+def _escrow_proposal(amount: int) -> dict:
+    return {
+        "chain_name": "anvil",
+        "escrow_address": ESCROW,
+        "fields": {"amount": str(amount), "token": TOKEN},
+        "literal_fields": {"token": TOKEN},
+        "expiration_unix": int(time.time()) + 3600,
+    }
+
+
+async def _open_countered(buyer: StorefrontClient) -> dict:
+    """Open below the listed rate (100 for the hour), which the seller counters."""
+    opened = await buyer.negotiate_new(
+        listing_id="listing-1",
+        initial_amount=80,
+        provision_terms=_opening()["provision_terms"],
+        token=TOKEN,
+        chain_name="anvil",
+        escrow_address=ESCROW,
+        proposal_fields={"token": TOKEN},
+    )
+    assert opened["action"] == "counter"
+    return opened
+
+
+async def _accepted_records(runtime: BareMetalStorefrontRuntime, negotiation_id: str):
+    thread = await runtime.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    terms = await runtime.db.load_bare_metal_terms(negotiation_id=negotiation_id)
+    return thread, terms
+
+
+async def test_a_countering_seller_negotiates_over_rounds_to_acceptance(tmp_path) -> None:
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            countered = int(opened["proposal"]["fields"]["amount"])
+            accepted = await buyer.negotiate_continue(
+                opened["negotiation_id"], action="accept"
+            )
+
+    assert accepted["action"] == "accept"
+    thread, terms = await _accepted_records(runtime, opened["negotiation_id"])
+    assert thread["terminal_state"] == "success"
+    assert int(thread["agreed_price"]) == countered
+    assert terms is not None and terms.host_id == "machine-1"
+    assert thread["settlement_plan"] is not None
+    # One recheck at the opening, one before the buyer's accept.
+    assert site.calls == 2
+
+
+async def test_force_accept_records_terms_and_plan_and_reserves_nothing(tmp_path) -> None:
+    site = SourceSite()
+    sites = SourceSites(site)
+    runtime = replace(_countering_runtime(str(tmp_path / "storefront.db"), site), capacity_client=sites)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            forced = await admin.force_accept_negotiation(
+                "listing-1", opened["negotiation_id"], amount=95
+            )
+
+    assert (forced.action, forced.amount) == ("accept", 95)
+    thread, terms = await _accepted_records(runtime, opened["negotiation_id"])
+    assert thread["terminal_state"] == "success"
+    assert terms is not None
+    assert thread["settlement_plan"] is not None
+    # Bare metal holds nothing at negotiation: capacity is reserved when
+    # settlement starts fulfillment.
+    assert sites.reservation_sites == {}
+    assert await runtime.db.load_capacity_hold(negotiation_id=opened["negotiation_id"]) is None
+
+
+async def test_evaluate_negotiate_reports_what_negotiate_new_refuses(tmp_path) -> None:
+    site = SourceSite(listing_source_projection(gpu_model="B200"))
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            preview = await admin.evaluate_negotiate(
+                "listing-1",
+                proposal=_escrow_proposal(80),
+                buyer_principal=BUYER_SIGNER.identity,
+                provision_terms=_opening()["provision_terms"],
+            )
+            threads = await admin.list_negotiations("listing-1")
+
+    assert preview.refused is True
+    assert "no_matching_declaration" in (preview.decision_reason or "")
+    assert threads.count == 0
+
+
+_SOURCE_CHANGES = [
+    pytest.param(
+        {"projection": listing_source_projection(gpu_model="B200")},
+        409,
+        "no_matching_declaration",
+        id="declaration changed",
+    ),
+    pytest.param(
+        {"projection": listing_source_projection(available=False)},
+        409,
+        "no_matching_inventory",
+        id="machine taken",
+    ),
+    pytest.param(
+        {"error": ConnectionError("site unreachable")},
+        503,
+        "listing_source_unverifiable",
+        id="site unreachable",
+    ),
+]
+
+
+def _change_source(site: SourceSite, change: dict) -> None:
+    if "projection" in change:
+        site.projection = change["projection"]
+    else:
+        site.error = change["error"]
+
+
+@pytest.mark.parametrize(("change", "status", "reason"), _SOURCE_CHANGES)
+async def test_a_counter_rechecks_the_source(tmp_path, change, status, reason) -> None:
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            _change_source(site, change)
+            if status == 503:
+                with pytest.raises(StorefrontClientError) as refused:
+                    await buyer.negotiate_continue(
+                        opened["negotiation_id"],
+                        action="counter",
+                        proposal=_escrow_proposal(85),
+                    )
+                assert refused.value.status_code == 503
+                assert reason in str(refused.value)
+                result = None
+            else:
+                result = await buyer.negotiate_continue(
+                    opened["negotiation_id"],
+                    action="counter",
+                    proposal=_escrow_proposal(85),
+                )
+
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=opened["negotiation_id"]
+    )
+    if result is None:
+        # Retryable: nothing was recorded, so the buyer may try again.
+        assert thread["terminal_state"] is None
+    else:
+        # The seller rejects the round, as its inventory guard would.
+        assert (result["action"], result["reason"]) == ("reject", reason)
+        assert thread["terminal_state"] == "failure"
+
+
+@pytest.mark.parametrize(("change", "status", "reason"), _SOURCE_CHANGES)
+async def test_a_buyer_accept_rechecks_the_source(tmp_path, change, status, reason) -> None:
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            _change_source(site, change)
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_continue(opened["negotiation_id"], action="accept")
+
+    assert refused.value.status_code == status
+    assert reason in str(refused.value)
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=opened["negotiation_id"]
+    )
+    assert (thread["terminal_state"], thread["agreed_at"]) == (None, None)
+
+
+@pytest.mark.parametrize(("change", "status", "reason"), _SOURCE_CHANGES)
+async def test_a_force_accept_rechecks_the_source(tmp_path, change, status, reason) -> None:
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+        _change_source(site, change)
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.force_accept_negotiation(
+                    "listing-1", opened["negotiation_id"], amount=95
+                )
+
+    assert refused.value.status_code == status
+    assert reason in str(refused.value)
+    thread = await runtime.db.load_negotiation_thread_row(
+        negotiation_id=opened["negotiation_id"]
+    )
+    assert (thread["terminal_state"], thread["agreed_at"]) == (None, None)
+
+
+async def test_a_buyer_exits_whatever_the_source(tmp_path) -> None:
+    site = SourceSite()
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            site.error = ConnectionError("site unreachable")
+            calls = site.calls
+            exited = await buyer.negotiate_continue(opened["negotiation_id"], action="exit")
+
+    assert exited["action"] == "exit"
+    assert site.calls == calls

@@ -44,6 +44,7 @@ from .inventory_guard import (
     SOURCE_ABSENT,
     SOURCE_MATCHES,
     SOURCE_MISMATCH,
+    SOURCE_UNAVAILABLE,
     ListingSourceCheck,
     recheck_bare_metal_listing_source,
 )
@@ -146,6 +147,7 @@ __all__ = [
     "SOURCE_ABSENT",
     "SOURCE_MATCHES",
     "SOURCE_MISMATCH",
+    "SOURCE_UNAVAILABLE",
     "SSH_ACCESS_METHOD",
     "UNITS_DIMENSION",
     "BareMetalAcceptedHostedBinding",

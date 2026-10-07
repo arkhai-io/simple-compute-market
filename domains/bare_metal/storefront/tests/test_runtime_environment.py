@@ -59,3 +59,36 @@ def test_a_credential_that_does_not_own_the_identity_is_refused(environment, mon
 
     with pytest.raises(RuntimeError, match="identity"):
         build_runtime_from_environment()
+
+
+def test_the_seller_chain_defaults_when_none_is_configured(environment):
+    runtime = build_runtime_from_environment()
+
+    assert runtime.negotiation_policies is None
+
+
+def test_the_seller_chain_is_read_from_the_environment(environment, monkeypatch):
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES",
+        json.dumps(["escrow_shape_guard", "bisection"]),
+    )
+
+    runtime = build_runtime_from_environment()
+
+    assert runtime.negotiation_policies == ["escrow_shape_guard", "bisection"]
+
+
+def test_a_malformed_seller_chain_is_refused(environment, monkeypatch):
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", "[escrow_shape_guard")
+
+    with pytest.raises(RuntimeError, match="NEGOTIATION_POLICIES"):
+        build_runtime_from_environment()
+
+
+def test_an_unknown_seller_policy_is_refused_at_composition(environment, monkeypatch):
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", json.dumps(["no_such_policy"])
+    )
+
+    with pytest.raises(KeyError, match="no_such_policy"):
+        build_runtime_from_environment()

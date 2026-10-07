@@ -4,9 +4,18 @@ from copy import deepcopy
 
 import pytest
 
-from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
+from arkhai_bare_metal_storefront.negotiation import (
+    DEFAULT_SELLER_POLICIES,
+    default_seller_round_hook,
+    seller_policy_names,
+)
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationRound
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+
+
+#: The verdict the negotiation runtime supplies for a listing its source supports.
+MATCHES = ListingSourceVerdict("matches")
 
 
 def _listing(**overrides):
@@ -55,6 +64,7 @@ async def test_policy_accepts_ssh_request_at_duration_boundaries(duration) -> No
         history=_history(),
         seller_reference_amount=0,
         listing_ref="trusted-listing",
+        listing_source=MATCHES,
     )
 
     assert result.decision.action == "accept"
@@ -108,6 +118,7 @@ async def test_policy_rejects_invalid_physical_request(
         message=_message(**message_overrides),
         history=_history(),
         seller_reference_amount=100,
+        listing_source=MATCHES,
     )
 
     assert result.decision.action == "reject"
@@ -135,6 +146,7 @@ async def test_policy_applies_shared_listed_price_after_domain_guards() -> None:
         message=_message(),
         history=_history(proposal),
         seller_reference_amount=100,
+        listing_source=MATCHES,
     )
 
     assert result.decision.action == "accept"
@@ -156,13 +168,94 @@ async def test_policy_is_deterministic_and_does_not_mutate_history() -> None:
         message=message,
         history=history,
         seller_reference_amount=0,
+        listing_source=MATCHES,
     )
     second = await hook(
         listing=listing,
         message=message,
         history=history,
         seller_reference_amount=0,
+        listing_source=MATCHES,
     )
 
     assert first == second
     assert history == original
+
+
+_ACCEPTED = {
+    "chain_name": "base",
+    "escrow_address": "0x1111111111111111111111111111111111111111",
+    "literal_fields": {"token": "0x2222222222222222222222222222222222222222"},
+    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+}
+
+
+def _escrow(amount: str) -> dict:
+    return {
+        "chain_name": _ACCEPTED["chain_name"],
+        "escrow_address": _ACCEPTED["escrow_address"],
+        "literal_fields": dict(_ACCEPTED["literal_fields"]),
+        "fields": {"amount": amount},
+    }
+
+
+def test_every_chain_begins_with_the_inventory_guard() -> None:
+    assert seller_policy_names() == [
+        "has_matching_inventory_guard",
+        *DEFAULT_SELLER_POLICIES,
+    ]
+    assert seller_policy_names(["escrow_shape_guard", "bisection"]) == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
+    assert seller_policy_names(
+        ["has_matching_inventory_guard", "listed_price"]
+    ) == ["has_matching_inventory_guard", "listed_price"]
+
+
+def test_an_unknown_policy_is_refused_when_the_chain_is_composed() -> None:
+    with pytest.raises(KeyError):
+        default_seller_round_hook(["no_such_policy"])
+
+
+@pytest.mark.asyncio
+async def test_a_round_without_a_source_verdict_is_rejected() -> None:
+    result = await default_seller_round_hook()(
+        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        message=_message(),
+        history=_history(_escrow("100")),
+        seller_reference_amount=100,
+    )
+
+    assert (result.decision.action, result.decision.reason) == (
+        "reject",
+        "no_matching_declaration",
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_default_chain_exits_below_the_listed_rate() -> None:
+    result = await default_seller_round_hook()(
+        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        message=_message(),
+        history=_history(_escrow("80")),
+        seller_reference_amount=100,
+        listing_source=MATCHES,
+    )
+
+    assert result.decision.action == "exit"
+
+
+@pytest.mark.asyncio
+async def test_a_bisection_chain_counters_below_the_listed_rate() -> None:
+    result = await default_seller_round_hook(["escrow_shape_guard", "bisection"])(
+        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        message=_message(),
+        history=_history(_escrow("80")),
+        seller_reference_amount=100,
+        listing_source=MATCHES,
+    )
+
+    assert result.decision.action == "counter"
+    assert result.chain_label == "has_matching_inventory_guard,escrow_shape_guard,bisection"

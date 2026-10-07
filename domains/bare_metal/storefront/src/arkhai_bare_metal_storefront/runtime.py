@@ -33,17 +33,19 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
 )
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
+from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontLoopController,
+    TradingPause,
     build_alkahest_clients,
 )
 
 from .domain_runtime import get_market_domain_contract
 from .negotiation import default_seller_round_hook
-from .opening_guard import build_listing_source_guard
-from .negotiation_service import BareMetalNegotiationService
+from .listing_source_check import build_listing_source_check
+from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
@@ -142,6 +144,9 @@ class BareMetalStorefrontRuntime:
     escrow_verifier: Callable[..., Awaitable[int]] = field(
         default_factory=lambda: create_alkahest_registration().settlement_verifier
     )
+    # The seller chain after the required guards, in any form the policy kit
+    # normalizes; None selects the default (``negotiation.DEFAULT_SELLER_POLICIES``).
+    negotiation_policies: Any = None
     # Composes one publication cycle for the administrator's publication step;
     # None composes it from the process environment as the command does.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -158,6 +163,11 @@ class BareMetalStorefrontRuntime:
     loops: StorefrontLoopController = field(
         default_factory=StorefrontLoopController, init=False, repr=False, compare=False
     )
+    # Whether this process opens new negotiations; separate from the loops' pause.
+    trading_pause: TradingPause = field(
+        default_factory=TradingPause, init=False, repr=False, compare=False
+    )
+    negotiation_runtime: NegotiationRuntime = field(init=False, repr=False)
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
@@ -194,6 +204,28 @@ class BareMetalStorefrontRuntime:
                 deliver=self._deliver_introduction,
             ),
         )
+        object.__setattr__(
+            self,
+            "negotiation_runtime",
+            build_bare_metal_negotiation_runtime(
+                domain=self.domain,
+                seller_principal=self.seller_principal,
+                round_hook=default_seller_round_hook(self.negotiation_policies),
+                listing_source_check=build_listing_source_check(
+                    self.db,
+                    self.capacity_client.site if self.capacity_client is not None else None,
+                ),
+                trading_pause=self.trading_pause,
+                plan_builder=self.plan_builder,
+                accepted_obligation_dispatch=(
+                    self.settlement_composition.accepted_obligation_dispatch()
+                    if self.settlement_composition is not None
+                    else default_hosted_selection_dispatch()
+                ),
+                seller_wallet_address=self.seller_evm_address,
+                chain_config_paths=self.chain_config_paths,
+            ),
+        )
         register_bare_metal_lifecycle_steps(self)
 
     def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
@@ -208,26 +240,6 @@ class BareMetalStorefrontRuntime:
         except (KeyError, ValueError):
             return None
         return binding.site_id
-
-    def negotiation_service(self) -> BareMetalNegotiationService:
-        """Build the request-scoped bare-metal negotiation orchestrator."""
-        return BareMetalNegotiationService(
-            db=self.db,
-            domain=self.domain,
-            seller_principal=self.seller_principal,
-            round_hook=default_seller_round_hook(),
-            build_plan=self.plan_builder,
-            accepted_obligation_dispatch=(
-                self.settlement_composition.accepted_obligation_dispatch()
-                if self.settlement_composition is not None
-                else default_hosted_selection_dispatch()
-            ),
-            source_guard=(
-                build_listing_source_guard(self.db, self.capacity_client.site)
-                if self.capacity_client is not None
-                else None
-            ),
-        )
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
@@ -326,18 +338,16 @@ class BareMetalStorefrontRuntime:
         }
         try:
             await asyncio.to_thread(_check_database)
-            paused = await self.db.is_global_paused()
             resource_count = await self.db.count_open_bare_metal_resources()
         except Exception:
             checks["database"] = "error"
-            paused = None
             resource_count = None
         return {
             "status": (
                 "ok" if all(value == "ok" for value in checks.values()) else "degraded"
             ),
             "checks": checks,
-            "paused": paused,
+            "paused": self.trading_pause.paused,
             "principal": self.seller_principal.model_dump(mode="json"),
             "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
@@ -573,7 +583,16 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
         ) from exc
+    try:
+        negotiation_policies = json.loads(
+            os.environ.get("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", "null")
+        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES must be a JSON list of policy names"
+        ) from exc
     runtime = BareMetalStorefrontRuntime(
+        negotiation_policies=negotiation_policies,
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

@@ -122,7 +122,7 @@ def _admin_client(app) -> StorefrontClient:
     )
 
 
-async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -> None:
+async def test_pause_is_admin_authenticated_and_process_local(tmp_path) -> None:
     path = str(tmp_path / "storefront.db")
     first_app = _app(_runtime(path))
 
@@ -132,16 +132,19 @@ async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -
     async with first_app.router.lifespan_context(first_app):
         async with _admin_client(first_app) as admin:
             paused = await admin.admin_pause()
-    assert (paused.paused, paused.message) == (True, "storefront paused")
+            paused_status = await admin.get_system_status()
+            resumed = await admin.admin_resume()
+            resumed_status = await admin.get_system_status()
+            await admin.admin_pause()
+    assert paused.paused is True and paused_status.paused is True
+    assert resumed.paused is False and resumed_status.paused is False
 
+    # The trading pause belongs to the process: a rebuilt application trades.
     second_app = _app(_runtime(path))
     async with second_app.router.lifespan_context(second_app):
         async with _admin_client(second_app) as admin:
             status = await admin.get_system_status()
-            resumed = await admin.admin_resume()
-
-    assert status.paused is True
-    assert resumed.paused is False
+    assert status.paused is False
 
 
 async def _health(runtime: BareMetalStorefrontRuntime) -> HealthResponse:

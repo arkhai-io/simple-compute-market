@@ -3618,11 +3618,11 @@ storefront kits, and the VM and API-credit storefronts; bare metal changes only 
 Decisions 1, 5, 6, 7, 9, 10, and 11. Reviewable alone: the bare-metal domain and
 storefront.
 
-- [ ] 6B.1 Domain (`domains/bare_metal`, 0.8.0 → 0.9.0): `inventory_guard.py`'s
+- [x] 6B.1 Domain (`domains/bare_metal`, 0.8.0 → 0.9.0): `inventory_guard.py`'s
       `recheck_bare_metal_listing_source` takes the site's capacity snapshot and reports
       the Physical Resource taken (no available unit) as its own outcome, distinct from a
       declared mismatch or an absent source; `tests/test_inventory_guard.py` covers it.
-- [ ] 6B.2 Runtime hooks: a new
+- [x] 6B.2 Runtime hooks: a new
       `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/negotiation_runtime.py`
       building the `NegotiationRuntime`:
       - resolvers: opening loads the listing and requires its bare-metal binding;
@@ -3653,14 +3653,14 @@ storefront.
         `listing_is_live` as the other domains; `stage_event`;
       - `BareMetalNegotiationRefusal`, a `ValueError` carrying its status, for the
         domain's 400, 404, and 409 cases (decision 10).
-- [ ] 6B.3 Seller policy: `negotiation.py` keeps the domain's checks (duration bounds,
+- [x] 6B.3 Seller policy: `negotiation.py` keeps the domain's checks (duration bounds,
       access method, SSH key, no buyer `access_ref`) and runs them ahead of a chain read
       from `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES` (a JSON list, normalized by the
       policy kit), defaulting to `escrow_shape_guard` and `listed_price`, with
       `has_matching_inventory_guard` prepended (decision 11); its hook takes the round's
       `listing_source`. `domain_runtime.py` binds the policy as the contract's
       negotiation capability. `docs/configuration.md` documents the variable.
-- [ ] 6B.4 Composition and routes:
+- [x] 6B.4 Composition and routes:
       - `runtime.py` composes the negotiation runtime, the `TradingPause`, and the chain
         setting; `negotiation_service()` is removed; system status reads the pause;
       - `api.py`: `negotiate/new` and `negotiate/{id}` served over the runtime, mapping
@@ -3673,11 +3673,11 @@ storefront.
         `POST /api/v1/listings/{listing_id}/negotiations/{negotiation_id}/force-accept`
         (`admin_force_accept_negotiation`) over the kit route services; pause and resume
         through `TradingPauseRouteService`.
-- [ ] 6B.5 Removal and migration: tombstone `negotiation_service.py`;
+- [x] 6B.5 Removal and migration: tombstone `negotiation_service.py`;
       `sqlite_client.py` loses `persist_bare_metal_opening`, `is_global_paused`, and
       `set_global_paused`; `migrations.py` gains one migration that marks every
       non-terminal thread `abandoned` (decision 5) and drops `bare_metal_operator_state`.
-- [ ] 6B.6 Tests (`domains/bare_metal/storefront/tests`):
+- [x] 6B.6 Tests (`domains/bare_metal/storefront/tests`):
       - a new `test_negotiation_runtime.py`: each hook, the exact-option short-circuit
         after the recheck, the plan built from verify's inputs, no hold placed;
       - `test_negotiation.py`: the domain checks ahead of a configured chain, the default
@@ -3700,7 +3700,7 @@ storefront.
         rather than `persist_bare_metal_opening`; `test_selection_dispatch.py`: the
         dispatch through the runtime hooks and `BareMetalNegotiationRefusal`;
       - `test_app_composition.py`: the runtime and chain composed from the environment.
-- [ ] 6B.7 Versions and locks: `arkhai-bare-metal-storefront` 0.11.0 and the domain's
+- [x] 6B.7 Versions and locks: `arkhai-bare-metal-storefront` 0.11.0 and the domain's
       bump, cascaded through `cascade_pins.py`; the bare-metal storefront relocked and
       hand-locked from its snapshot form.
 - [ ] 6B.8 **Gate.** The bare-metal domain and storefront suites, the e2e unit suite and
@@ -3708,6 +3708,59 @@ storefront.
       documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
       modules, and both end-to-end lanes (the bare-metal lane's publication scenario
       unchanged).
+  - Done 2026-10-07. Notes:
+    - Versions: arkhai-bare-metal 0.9.0, arkhai-bare-metal-storefront 0.11.0, and
+      arkhai-vms-storefront 0.15.1 (its exact pin of the bare-metal storefront moved).
+      The storefront now declares the negotiation runtime (==0.4.0) and needs the
+      policy kit >=0.3.0 and the domain >=0.9.0. The bare-metal and VM storefronts were
+      hand-locked; five other locks were regenerated.
+    - 6B.1 reads availability from the site's resource-pool projection the recheck
+      already fetches, not from a capacity snapshot: a Physical Resource's view already
+      reports whether the whole machine is available, and the recheck classifies a
+      declared, shaped, unavailable resource as taken, after the declaration checks.
+    - The source check moved from `opening_guard.py` to `listing_source_check.py`,
+      since it now runs before every seller decision and acceptance; it answers with
+      the policy kit's verdict instead of raising for an unreadable site.
+    - An exact-option opening is validated, and its plan built, inside the round
+      evaluation, because the runtime's artifact builder is synchronous and the
+      physical-fact checks read the repository. The request-carrier checks (a selection
+      both beside and inside the proposal, or beside an escrow proposal) stay in the
+      route: the runtime sees only the merged proposal.
+    - The terms the thread records, and the response returns, are the envelope the
+      buyer sent (`kind`, `version`, `payload`), which continuation decodes again.
+    - Refusals now use the shared reasons: a source mismatch answers 409
+      `no_matching_declaration` (before: "listing no longer matches its declaration:
+      ..."), a taken machine 409 `no_matching_inventory`, and an unreadable site or a
+      missing site authority 503 `listing_source_unverifiable`, which names no site;
+      the seller's log carries the detail. An opening below the listed rate under the
+      default chain is recorded and answered as `exit` (200), where it was refused with
+      409 and nothing recorded.
+    - Found: the retired opening built the escrow path's plan without the seller
+      wallet. With the real builder, a proposal carrying no demands cannot be
+      materialized that way at all ("must carry demands, arbiter+demand literals, or a
+      recipient fallback"), so that plan could not have matched what verification
+      builds. The new equality test runs the real builder against the development
+      chain's address book and finds the response's plan, the committed plan, and
+      verification's rebuild equal.
+    - Found: the policy kit's refusal of an unknown middleware name tells the operator
+      to import "the VM policy package", which misleads a bare-metal operator; recorded
+      for closeout task 2.6. The Compose wrapper does not yet forward
+      `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES`; 9.5 sets it for the lane.
+    - Tests: the chain-configuration cases are in `test_runtime_environment.py`, where
+      the runtime is built from its environment, rather than `test_app_composition.py`.
+      `test_negotiation_runtime.py` covers what HTTP cannot observe (the plan builder's
+      inputs, the recorded terms); the exact-option short-circuit after the recheck,
+      reserving nothing at force-accept, and plan equality are tested over HTTP.
+      `tests/seeded_threads.py` seeds threads with the writes the runtime makes, for the
+      persistence and settlement tests.
+    - Suites: the domain 133, the storefront 255, VM by frozen sync (unit 1103;
+      integration 360, with the known `test_alkahest` pair failing), the e2e unit suite
+      (236, with the known `test_hosted_public_boundary` failure) and collection (162).
+      The root aggregate passed 44 suites; its failures are the expected ones.
+      `make check-packaging`, comment hygiene, documentation citations for the change,
+      and OpenSpec strict validation (1.14.0) pass; pyflakes reports nothing new on any
+      edited module.
+    - Not yet run end to end; 6B.8 stays open until both lanes pass.
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
@@ -4016,6 +4069,8 @@ service code.
       during a bare-metal `begin`, and passed on the rerun.
       Production uses a file database with a connection per session. The harness needs
       the same, or an equivalent that gives each session its own connection.
+      Found in 6B: the policy kit's refusal of an unknown middleware name tells the
+      operator to import "the VM policy package", which misleads a bare-metal operator.
       Found in Section 6's design (`design.md`, "Section 6 design: bare metal on the
       negotiation runtime (2026-10-07)"): bare metal's listing recheck and publication
       fetch each site's projection live, where VM reads the projections its storefront

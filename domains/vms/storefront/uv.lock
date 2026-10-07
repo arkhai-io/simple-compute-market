@@ -181,7 +181,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -190,12 +190,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -212,6 +212,7 @@ dependencies = [
     { name = "arkhai-kit-delivery-apprise" },
     { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides" },
     { name = "arkhai-kit-resource-pools" },
@@ -224,7 +225,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -720,7 +721,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.15.0"
+version = "0.15.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -800,7 +801,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.10.1" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.11.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },

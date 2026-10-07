@@ -79,6 +79,18 @@ Keys may be exact Alkahest kinds such as
 terminal policy. A nested table with `chain = [...]`, `policies = [...]`,
 or `policy = "..."` is used when one escrow kind needs its own sequence.
 
+### Bare-metal storefront
+
+The bare-metal storefront reads its seller chain from the environment variable
+`BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES`, a JSON list of the policy names
+below, for example `["escrow_shape_guard", "bisection"]`. Unset, the chain is
+`["escrow_shape_guard", "listed_price"]`: it accepts at or above the listed rate
+and exits below it, so it never counters; a chain ending in `bisection` counters.
+`has_matching_inventory_guard` always runs first, whether named or not, and the
+domain's own checks (lease duration bounds, access method, SSH key) run before
+the chain. An unknown name, or a value that is not JSON, stops the storefront at
+startup.
+
 ### Bundled policies
 
 | Name | Type | Round(s) | Behavior |

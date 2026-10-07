@@ -18,6 +18,7 @@ from arkhai_bare_metal import (
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_identity import Ed25519Signer
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from seeded_threads import seed_thread
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -97,21 +98,16 @@ async def _seed_opening(
     message: BareMetalMessage,
     terms: BareMetalTerms | None,
 ) -> None:
-    await client.persist_bare_metal_opening(
+    await seed_thread(
+        client,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
-        seller_principal=SELLER,
-        buyer_agent_id="https://buyer.example",
         buyer_principal=BUYER,
-        seller_reference_amount=100,
-        strategy="listed",
+        seller_principal=SELLER,
         message=message,
         proposal={"fields": {"amount": "100"}},
-        buyer_amount=100,
-        seller_action="accept" if terms is not None else "counter",
-        seller_amount=100,
+        amount=100,
         terms=terms,
-        agreed_amount=100 if terms is not None else None,
     )
 
 

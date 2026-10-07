@@ -6,9 +6,13 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from core_storefront.models.negotiation_models import NegotiateNewRequest
+from core_storefront.models.negotiation_models import (
+    NegotiateNewRequest,
+    NegotiateNewResponse,
+)
 from market_core.schemas import derive_settlement_option_id
 from market_identity import Eip191Signer
+from market_storefront_kit import TradingPause
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
     MechanismRegistration,
@@ -19,9 +23,10 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.negotiation_service import (
-    BareMetalNegotiationService,
-    NegotiationRequestError,
+from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
+from arkhai_bare_metal_storefront.negotiation_runtime import (
+    BareMetalNegotiationRefusal,
+    build_bare_metal_negotiation_runtime,
 )
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
@@ -29,7 +34,7 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_hosted_settlement import StripeSettlementConfig
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from arkhai_bare_metal_storefront.opening_guard import build_listing_source_guard
+from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
 from source_sites import SourceSites
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
@@ -134,7 +139,31 @@ def _intro_option() -> dict[str, Any]:
     }
 
 
-async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any]]:
+class _Opening:
+    """Opens a negotiation through the bare-metal runtime, as ``negotiate/new`` does."""
+
+    def __init__(self, db: SQLiteClient, runtime: Any) -> None:
+        self.db = db
+        self._runtime = runtime
+
+    async def open(
+        self, *, request: NegotiateNewRequest, buyer_principal: Any
+    ) -> NegotiateNewResponse:
+        result = await self._runtime.start(
+            repository=self.db,
+            listing_id=request.listing_id,
+            buyer_principal=buyer_principal,
+            seller_principal=SELLER_SIGNER.identity,
+            actor_principal=buyer_principal,
+            proposal=request.proposal,
+            terms=request.provision_terms,
+            seller_agent_url="http://seller:8000",
+            buyer_agent_url=request.buyer_agent_url,
+        )
+        return NegotiateNewResponse(**result)
+
+
+async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
     domain = get_market_domain_contract()
     db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     option = _intro_option()
@@ -159,16 +188,16 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         accepted_escrows=[],
         settlement_options=[option],
     )
-    service = BareMetalNegotiationService(
-        db=db,
+    runtime = build_bare_metal_negotiation_runtime(
         domain=domain,
         seller_principal=SELLER_SIGNER.identity,
-        round_hook=None,  # type: ignore[arg-type]
-        build_plan=lambda **kwargs: {},
+        round_hook=default_seller_round_hook(),
+        listing_source_check=build_listing_source_check(db, SourceSites().site),
+        trading_pause=TradingPause(),
+        plan_builder=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
-        source_guard=build_listing_source_guard(db, SourceSites().site),
     )
-    return service, option
+    return _Opening(db, runtime), option
 
 
 def _request(option: dict[str, Any], *, fields: dict[str, Any] | None = None):
@@ -217,7 +246,7 @@ async def test_non_scalar_selection_accepts_without_provisioning_inputs(
 async def test_selection_with_uncomposed_mechanism_is_rejected(tmp_path) -> None:
     service, option = await _service(tmp_path)
     tampered = dict(option, mechanism="unknown.v1")
-    with pytest.raises(NegotiationRequestError, match="unsupported mechanism"):
+    with pytest.raises(BareMetalNegotiationRefusal, match="unsupported mechanism"):
         await service.open(
             request=_request(tampered),
             buyer_principal=BUYER_SIGNER.identity,
@@ -227,7 +256,7 @@ async def test_selection_with_uncomposed_mechanism_is_rejected(tmp_path) -> None
 async def test_non_scalar_selection_rejects_a_proposed_amount(tmp_path) -> None:
     service, option = await _service(tmp_path)
     with pytest.raises(
-        NegotiationRequestError, match="does not negotiate a settlement amount"
+        BareMetalNegotiationRefusal, match="does not negotiate a settlement amount"
     ):
         await service.open(
             request=_request(option, fields={"amount": "100"}),
@@ -238,7 +267,7 @@ async def test_non_scalar_selection_rejects_a_proposed_amount(tmp_path) -> None:
 async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
     service, option = await _service(tmp_path)
     tampered = dict(option, option_id="ee" * 32)
-    with pytest.raises(NegotiationRequestError, match="does not exact-match"):
+    with pytest.raises(BareMetalNegotiationRefusal, match="does not exact-match"):
         await service.open(
             request=_request(tampered),
             buyer_principal=BUYER_SIGNER.identity,
