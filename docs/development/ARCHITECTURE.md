@@ -10,10 +10,10 @@
 | [Composition from above and below](#composition-from-above-and-below) | Core, kit, domain, and composition-root ownership |
 | [Package and dependency layers](#package-and-dependency-layers) | Enforceable one-way package rules |
 | [Runtime service map](#runtime-service-map) | Processes, authorities, and principal calls |
-| [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state |
+| [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state, and how authority is decided |
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
-| [Deployment topology](#deployment-topology) | Local and deployed structure |
+| [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
 | [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
@@ -425,6 +425,41 @@ A domain that contributes routes to a service it does not compose declares their
 | On-chain/mechanism claim state | Settlement servicing engine | Mechanism-neutral core with kit/domain codecs and policies |
 | API keys, credit balances, grants, and consumption | API-credits service | Wallet authorization for purchase is distinct from bearer authorization for use |
 
+### Deciding which party is authoritative
+
+Where two components could each decide something, authority follows what each can
+see and what each controls, judged as if they were separate businesses that
+disagree: the authority is the party that can make its answer stick. Applied across
+the storefront–site boundary:
+
+- **The site never sees commercial terms.** Nothing commercial crosses the
+  provisioning boundary — a capacity claim carries dimensions, offering mode, and
+  placement requirements, never a price — so a site cannot refuse a deal on price.
+  A price a site declares on its pools is a default the storefront may adopt or
+  replace through its own override, and the storefront's resolution decides.
+- **The site sees every dimension a claim reserves and controls admission**, so it
+  prevails on physical capacity, offering mode, and the host requirement. A
+  storefront that has agreed a shape cannot make the site admit it; the storefront
+  mirrors those constraints early, from its projections, only to avoid committing to
+  what admission will refuse.
+- **Either party can refuse more than the other would; neither can make the other
+  accept.**
+
+A rule a site declares but does not enforce at admission is therefore advisory to
+the storefront whatever its wording. A rule that must bind every storefront acting
+for a site belongs in site admission, over what a claim carries.
+
+### Omission states no commitment
+
+A term a declaration leaves out states that nothing is committed on it. It is not a
+default value and not an error: the decision belongs to the party holding the next
+decision, and site admission keeps the last word on whether a deal is scheduled and
+provisioned. Existing terms already behave this way. A dimension a VM shape omits is
+outside the listing's commitment and is supplied by the pool's defaults or downstream
+provisioning; a capacity family with no rate is not charged; a pool that states no
+asking rate publishes none. A term that is present but cannot be read is not an
+omission, and asking rates and family rates never treat it as one.
+
 ### Storefront capacity boundary
 
 The storefront owns capacity offerings and projections used to publish and negotiate listings. It is not the source of truth for physical resources. A projection may be stale; authoritative admission occurs at the site authority.
@@ -732,6 +767,16 @@ Compose is organized by market domain and includes the shared development chain.
 The deployment surfaces support independently selectable registries, VM and bare-metal storefront roles, compute provisioning, and optional development/test components. The umbrella chart uses the schema-opaque registry subchart for its default compute registry and may enable a second aliased API-credits registry. Each registry has its own schema path, authority signer Secret, descriptor, Service, and retained PVC. `helm/charts/bare-metal-storefront` installs the dedicated one-domain role with its own service, persistence boundary, health probes, public URL, external signer Secret, and external site-binding Secret; the umbrella/shared-shell chart may instead select installed domain contributions. Disabling one role creates no wait or reference from another.
 
 Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
+
+### Operators
+
+Sites and storefronts are currently deployed and operated by one business, which
+upgrades them together. Authority boundaries are still drawn as if the two were
+independent parties, because that is what decides where each rule belongs. What a
+single operator does not yet need is upgrade-order guidance between independently
+operated sites and storefronts — for example, a site writing a declaration that a
+storefront release cannot yet read. Designs record where such ordering would matter,
+to be revisited once operators are no longer all known, at the first major release.
 
 ## Build, packaging, and initialization
 
