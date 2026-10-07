@@ -68,6 +68,21 @@ def mandate_policy_for_agreement(
 
     if config.fee_bps is None or config.dispute_authority is None:
         raise MandatePolicyError("payments fee policy and dispute authority are required")
+    return _policy(
+        agreement,
+        fee_bps=config.fee_bps,
+        dispute_authority=config.dispute_authority,
+        expected_payer=expected_payer,
+    )
+
+
+def _policy(
+    agreement: Mapping[str, Any],
+    *,
+    fee_bps: int,
+    dispute_authority: str,
+    expected_payer: str | None = None,
+) -> MandatePolicy:
     payer = agreement_payer_account(agreement)
     if expected_payer is not None and payer != expected_payer:
         raise MandatePolicyError("Agreement names a different payer account")
@@ -80,8 +95,8 @@ def mandate_policy_for_agreement(
             duration_seconds=agreement["duration_seconds"],
             amount=agreement["amount"],
             asset=agreement["asset"],
-            fee_bps=config.fee_bps,
-            dispute_authority=config.dispute_authority,
+            fee_bps=fee_bps,
+            dispute_authority=dispute_authority,
         )
     except (KeyError, ValidationError) as exc:
         raise MandatePolicyError("Agreement lacks the terms a payments mandate needs") from exc
@@ -121,12 +136,31 @@ class PaymentSettlementData(BaseModel):
             "transaction_id": self.transaction_id,
         }
 
-    def require_derived_from(
-        self, agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig
-    ) -> None:
-        """Refuse stored data that the accepted Agreement does not derive exactly."""
+    def require_bound_to(self, agreement: Mapping[str, Any]) -> None:
+        """Refuse stored data that the accepted Agreement does not bind exactly.
 
-        if self.to_wire() != PaymentSettlementData.for_agreement(agreement, config).to_wire():
+        The fee and dispute authority are read from the stored mandate, because
+        they were the trusted policy at acceptance and later configuration must
+        not reinterpret an accepted transaction. Everything the Agreement fixes
+        (deal hash, payer, payee, amount, asset, hold, expiry) is re-derived and
+        compared exactly; the transaction ID already hashes the whole mandate.
+        """
+
+        wire = self.to_wire()["mandate"]
+        payee = selected_payment_option(agreement).payee_account
+        others = [account for account in wire["authorities"]["reverse"] if account != payee]
+        if len(others) > 1:
+            raise MandatePolicyError("stored payment mandate names extra reverse authorities")
+        try:
+            policy = _policy(
+                agreement,
+                fee_bps=int(wire["fee"]["bps"]),
+                dispute_authority=others[0] if others else payee,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MandatePolicyError("stored payment mandate is malformed") from exc
+        derived = derive_mandate(dict(agreement), policy)
+        if derived.model_dump(mode="json", by_alias=True, exclude_none=True) != wire:
             raise MandatePolicyError("stored payment mandate differs from the accepted Agreement")
 
 

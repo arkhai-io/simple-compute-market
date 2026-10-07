@@ -9,6 +9,7 @@ observe exactly whether delivery started.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
     PaymentSellerStage,
     PaymentSettlementData,
+    servicing_stage,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core import ImmutableFulfillmentCapability
@@ -64,9 +66,15 @@ class Delivery:
     def __init__(self) -> None:
         self.starts: list[str] = []
         self.fail = False
+        # When set, delivery pauses after starting until ``release`` is set.
+        self.started: asyncio.Event | None = None
+        self.release: asyncio.Event | None = None
 
     async def __call__(self, *, context):
         self.starts.append(context.negotiation_id)
+        if self.started is not None and self.release is not None:
+            self.started.set()
+            await self.release.wait()
         result = {
             "negotiation_id": context.negotiation_id,
             "escrow_uid": context.escrow_uid,
@@ -407,3 +415,93 @@ async def test_without_the_refund_action_a_failed_deal_keeps_its_payment(make):
     await h.delivered()
     assert h.payments.count("reverse") == 0
     assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "failed"
+
+
+# --- Accepted deals outlive configuration changes -----------------------------
+
+
+def _replace_stage(h, config: ArkhaiPaymentsConfig) -> None:
+    stage = servicing_stage(config, client_for_owner=h.payments)
+    h.coordinator.stage = stage
+    _container.resolved_settlement_composition.arkhai_payments_stage = stage
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_deal_settles_after_fee_and_dispute_policy_change(make):
+    h = await make()
+    _replace_stage(h, _config(fee_bps=0, dispute_authority=PAYER))
+    h.serve()
+    started = await h.settle()
+    assert started.settlement_ref == h.data.transaction_id
+    await h.delivered()
+    assert h.delivery.starts == [NEGOTIATION]
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(make):
+    h = await make()
+    _replace_stage(h, _config(enabled=False))
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    assert h.delivery.starts == [NEGOTIATION]
+    assert (await h.refund()).status == "refunded"
+
+
+# --- Refund and delivery start are totally ordered ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_refund_recorded_before_delivery_start_stops_delivery(make):
+    h = await make()
+    gate = asyncio.Event()
+    claim = h.db.claim_delivery_start
+
+    async def gated_claim(**kwargs):
+        await gate.wait()
+        return await claim(**kwargs)
+
+    h.db.claim_delivery_start = gated_claim
+    h.serve()
+    await h.settle()
+    assert (await h.refund()).status == "refunded"
+    gate.set()
+    await h.delivered()
+    assert h.delivery.starts == []
+    assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "refunded"
+
+
+@pytest.mark.asyncio
+async def test_a_refund_after_delivery_start_records_both(make):
+    h = await make()
+    h.delivery.started, h.delivery.release = asyncio.Event(), asyncio.Event()
+    h.serve()
+    await h.settle()
+    await h.delivery.started.wait()
+    assert (await h.refund()).status == "refunded"
+    h.delivery.release.set()
+    await h.delivered()
+    escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
+    assert h.delivery.starts == [NEGOTIATION]
+    assert escrow["status"] == "refunded"
+    assert escrow["fulfillment_uid"] == "vm-fulfillment-1"
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_refund_completes_on_the_next_call(make):
+    h = await make()
+    h.serve()
+    # State left by a crash after the service reversed but before the local write.
+    await h.db.record_refund_intent(escrow_uid=NEGOTIATION, negotiation_id=NEGOTIATION)
+    h.payments.reversed = True
+    h.payments.reverse_error = "hold_not_reversible"
+    assert (await h.refund()).status == "refunded"
+    assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "refunded"
+
+
+@pytest.mark.asyncio
+async def test_an_operator_fault_is_a_server_error_not_a_retryable_outage(make):
+    h = await make()
+    h.payments.read_error = (401, "authentication_required")
+    assert await _status_code(h.settle) == 500
+    assert h.delivery.starts == []

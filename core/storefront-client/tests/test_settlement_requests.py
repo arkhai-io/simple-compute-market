@@ -208,3 +208,50 @@ def test_a_buyer_client_cannot_refund():
         with pytest.raises(ValueError, match="caller_role"):
             client.refund_settlement("neg-1")
     assert responder.requests == []
+
+
+def _complete_settle_body() -> dict:
+    return {
+        "negotiation_id": "neg-1",
+        "escrow_uid": "neg-1",
+        "settlement_ref": "f" * 64,
+        "status": "pending",
+        "retryable": True,
+        "buyer_principal": _BUYER.identity.model_dump(mode="json"),
+        "seller_principal": _SELLER.identity.model_dump(mode="json"),
+    }
+
+
+@pytest.mark.parametrize("drift", ["missing", "renamed"])
+def test_a_drifted_agreement_settle_response_is_a_client_error(drift):
+    from storefront_client import StorefrontClientError
+
+    body = _complete_settle_body()
+    value = body.pop("settlement_ref")
+    if drift == "renamed":
+        body["settlementRef"] = value
+    responder = _Responder("settle_escrow", "neg-1", body)
+    with SyncStorefrontClient(
+        "http://test",
+        signer=_BUYER,
+        caller_role="buyer",
+        expected_publishers=_publishers(),
+        transport=_Sync(responder),
+    ) as client:
+        with pytest.raises(StorefrontClientError, match="settlement_ref"):
+            client.settle_agreement("neg-1")
+
+
+def test_a_drifted_refund_response_is_a_client_error():
+    from storefront_client import StorefrontClientError
+
+    responder = _Responder("refund_settlement", "neg-1", {"negotiation_id": "neg-1", "status": "refunded"})
+    with SyncStorefrontClient(
+        "http://test",
+        signer=_SELLER,
+        caller_role="seller",
+        expected_publishers=_publishers(),
+        transport=_Sync(responder),
+    ) as client:
+        with pytest.raises(StorefrontClientError, match="settlement_ref"):
+            client.refund_settlement("neg-1")

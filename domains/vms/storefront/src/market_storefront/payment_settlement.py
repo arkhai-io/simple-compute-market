@@ -1,8 +1,10 @@
 """Receipt-gated VM provisioning, negotiation-scoped retry, and seller refunds.
 
-Settlement, refund, and the final provisioning write for one deal serialize on a
-per-negotiation lock, so a recorded ``refunded`` state is never overwritten and
-delivery never starts after a refund.
+Delivery start and refund intent are durable transitions on the deal's escrow
+row, each one serialized write, so exactly one decides whether delivery
+precedes a refund. A refund that wins stops delivery from starting; a delivery
+that wins completes and is recorded beside the refund. The per-negotiation lock
+only keeps one process's settlement and refund calls from interleaving.
 """
 
 from __future__ import annotations
@@ -26,12 +28,15 @@ from market_arkhai_payments import (
     MandatePolicyError,
     NothingToReverse,
     NotPaid,
+    PaymentsBlocked,
     PaymentSellerStage,
     PaymentSettlementData,
     PaymentsUnavailable,
+    ReceiptBlocked,
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    RefundBlocked,
     Refunded,
     SignedReceipt,
 )
@@ -131,9 +136,12 @@ class VmPaymentsCoordinator:
             existing = await self.db.load_escrow(escrow_uid=negotiation_id)
             if existing and existing["negotiation_id"] != negotiation_id:
                 raise PaymentSettlementError(409, "settlement coordinate belongs to another negotiation")
-            if existing and existing["status"] == "refunded":
+            if existing and existing["status"] in ("refunding", "refunded"):
+                if existing["status"] == "refunding":
+                    await self._complete_refund(negotiation_id, agreement, data)
+                row = await self.db.load_escrow(escrow_uid=negotiation_id)
                 return PaymentSettleResult(
-                    200, self._neutral(negotiation_id, data, "refunded", row=existing)
+                    200, self._neutral(negotiation_id, data, "refunded", row=row)
                 )
             digest = hashlib.sha256(raw).hexdigest()
             record = await self.db.load_vm_payment_record(negotiation_id=negotiation_id)
@@ -154,6 +162,13 @@ class VmPaymentsCoordinator:
                     )
                 if isinstance(outcome, ReceiptUnavailable):
                     raise PaymentSettlementError(503, "payments service is unavailable")
+                if isinstance(outcome, ReceiptBlocked):
+                    logger.error(
+                        "payment settlement for %s needs operator action: %s",
+                        negotiation_id,
+                        outcome.reason,
+                    )
+                    raise PaymentSettlementError(500, "payments integration needs operator action")
                 if isinstance(outcome, ReceiptInvalid):
                     logger.error(
                         "payment receipt for %s does not verify: %s", negotiation_id, outcome.reason
@@ -169,6 +184,9 @@ class VmPaymentsCoordinator:
                 await self.stage.deposit_if_advertised(agreement, data)
             except PaymentsUnavailable as exc:
                 raise PaymentSettlementError(503, "payments Agreement deposit is unavailable") from exc
+            except PaymentsBlocked as exc:
+                logger.error("payment deposit for %s needs operator action: %s", negotiation_id, exc)
+                raise PaymentSettlementError(500, "payments integration needs operator action") from exc
             binding = await self.db.load_thread_binding(negotiation_id=negotiation_id)
             if self.db.domain_registry.resolve(binding.binding) is not self.domain:
                 raise PaymentSettlementError(409, "accepted domain binding disagrees with provisioning")
@@ -229,25 +247,47 @@ class VmPaymentsCoordinator:
             return PaymentSettleResult(200, self._refund_payload(negotiation_id, data))
         if require_undelivered and existing and existing["status"] == "ready":
             return PaymentSettleResult(200, self._neutral(negotiation_id, data, "ready"))
+        if not existing or existing["status"] != "refunding":
+            # Refuse before recording intent when there is no payment to reverse,
+            # so an unpaid deal is never left blocked by an abandoned refund.
+            current = await self.stage.check_receipt(agreement, data)
+            if isinstance(current, (ReceiptPending, ReceiptInvalid)):
+                raise PaymentSettlementError(409, "no verified payment exists to refund")
+            if isinstance(current, ReceiptUnavailable):
+                raise PaymentSettlementError(503, "payments service is unavailable")
+            if isinstance(current, ReceiptBlocked):
+                logger.error("refund for %s needs operator action: %s", negotiation_id, current.reason)
+                raise PaymentSettlementError(500, "payments integration needs operator action")
+        await self._complete_refund(negotiation_id, agreement, data)
+        return PaymentSettleResult(200, self._refund_payload(negotiation_id, data))
+
+    async def _complete_refund(
+        self, negotiation_id: str, agreement: dict[str, Any], data: PaymentSettlementData
+    ) -> None:
+        """Record intent, reverse, then record the refund; safe to repeat after a crash."""
+
+        intent = await self.db.record_refund_intent(
+            escrow_uid=negotiation_id, negotiation_id=negotiation_id
+        )
+        if intent["status"] == "refunded":
+            return
         outcome = await self.stage.reverse(agreement, data)
-        if isinstance(outcome, NotPaid):
-            raise PaymentSettlementError(409, "no verified payment exists to refund")
-        if isinstance(outcome, NothingToReverse):
-            raise PaymentSettlementError(409, "nothing left to reverse")
+        if isinstance(outcome, (NotPaid, NothingToReverse)):
+            await self.db.abandon_refund_intent(
+                escrow_uid=negotiation_id, prior_status=intent["status"]
+            )
+            detail = (
+                "no verified payment exists to refund"
+                if isinstance(outcome, NotPaid)
+                else "nothing left to reverse"
+            )
+            raise PaymentSettlementError(409, detail)
+        if isinstance(outcome, RefundBlocked):
+            logger.error("refund for %s needs operator action: %s", negotiation_id, outcome.reason)
+            raise PaymentSettlementError(500, "payments integration needs operator action")
         if not isinstance(outcome, Refunded):
             raise PaymentSettlementError(503, "payments service is unavailable")
-        if existing is None:
-            await self.db.insert_escrow(
-                escrow_uid=negotiation_id,
-                negotiation_id=negotiation_id,
-                chain_name=None,
-                escrow_address=None,
-                is_primary=True,
-                status="refunded",
-            )
-        else:
-            await self.db.update_escrow(escrow_uid=negotiation_id, status="refunded")
-        return PaymentSettleResult(200, self._refund_payload(negotiation_id, data))
+        await self.db.update_escrow(escrow_uid=negotiation_id, status="refunded")
 
     @staticmethod
     def _refund_payload(negotiation_id: str, data: PaymentSettlementData) -> dict[str, Any]:
@@ -272,6 +312,11 @@ class VmPaymentsCoordinator:
             return
         try:
             row = await self.db.load_escrow(escrow_uid=negotiation_id)
+            if row.get("fulfillment_phase") is None and not await self.db.claim_delivery_start(
+                escrow_uid=negotiation_id
+            ):
+                # Refund intent was recorded first; delivery must not start.
+                return
             if row.get("fulfillment_context"):
                 # Resume the durable request instead of allocating a second VM.
                 await self.db.release_escrow_convergence(
@@ -306,12 +351,12 @@ class VmPaymentsCoordinator:
             private = dict(result.domain_result or {})
             async with self._lock(negotiation_id):
                 current = await self.db.load_escrow(escrow_uid=negotiation_id)
-                # A refund recorded while provisioning ran is terminal and stays.
-                if current is not None and current["status"] == "refunded":
-                    return
+                # A refund recorded after delivery started keeps its status; the
+                # delivery's outcome is still recorded beside it.
+                refunded = current is not None and current["status"] in ("refunding", "refunded")
                 await self.db.update_escrow(
                     escrow_uid=negotiation_id,
-                    status="ready" if result.state == "fulfilled" else "failed",
+                    status=None if refunded else ("ready" if result.state == "fulfilled" else "failed"),
                     fulfillment_uid=result.fulfillment_id,
                     connection_details=private.get("connection_details"),
                     tenant_credentials=json.dumps(private["tenant_credentials"])

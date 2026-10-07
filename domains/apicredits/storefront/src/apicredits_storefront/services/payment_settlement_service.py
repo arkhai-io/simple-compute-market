@@ -3,13 +3,13 @@
 Credits are issued only after the exact accepted Agreement has a matching signed
 receipt. The normal deal flow never refunds: a failed issuance is recorded as
 failed, and a refund happens only on the seller's request or through the
-seller's opt-in ``refund`` failure action. Settlement and refund for one deal
-serialize on a per-negotiation lock so a recorded ``refunded`` state is final.
+seller's opt-in ``refund`` failure action. Issuance start and refund intent are
+durable transitions on the deal's escrow row, each one serialized write, so
+exactly one decides whether issuance precedes a refund, across processes.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections.abc import Mapping
@@ -23,12 +23,16 @@ from market_arkhai_payments import (
     NothingToReverse,
     PaymentSellerStage,
     PaymentSettlementData,
+    PaymentsBlocked,
     PaymentsUnavailable,
+    ReceiptBlocked,
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    RefundBlocked,
     Refunded,
 )
+from core_storefront.models.settle_models import RefundSettlementResponse
 from market_core.schemas import Agreement
 from market_identity import Identity
 
@@ -42,9 +46,6 @@ from apicredits_storefront.services.payment_selection import (
 )
 
 logger = logging.getLogger(__name__)
-
-_locks: dict[str, asyncio.Lock] = {}
-
 
 class PaymentSettlementError(RuntimeError):
     """A settlement or refund refusal carrying the HTTP status the route returns."""
@@ -125,122 +126,138 @@ class ApiCreditPaymentSettlementService:
     async def settle(
         self, negotiation_id: str, *, buyer_principal: Identity, seller_principal: Identity
     ) -> PaymentSettleResult:
-        async with _locks.setdefault(negotiation_id, asyncio.Lock()):
-            thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
-            agreement, data, buyer, seller = self._accepted(negotiation_id, thread)
-            if buyer != buyer_principal or seller != seller_principal:
-                raise PaymentSettlementError(403, "settlement parties do not match negotiation")
+        thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        agreement, data, buyer, seller = self._accepted(negotiation_id, thread)
+        if buyer != buyer_principal or seller != seller_principal:
+            raise PaymentSettlementError(403, "settlement parties do not match negotiation")
 
-            def payload(row, **kwargs):
-                return self._payload(
-                    row, negotiation_id=negotiation_id, data=data, buyer=buyer,
-                    seller=seller, **kwargs,
-                )
+        def payload(row, **kwargs):
+            return self._payload(
+                row, negotiation_id=negotiation_id, data=data, buyer=buyer,
+                seller=seller, **kwargs,
+            )
 
-            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
-            if existing is not None and existing.get("status") == "refunded":
-                return PaymentSettleResult(200, payload(existing, status="refunded"))
-            if existing is not None and existing.get("status") in ("ready", "failed"):
-                return PaymentSettleResult(200, payload(existing))
-
-            outcome = await self.stage.check_receipt(agreement, data)
-            if isinstance(outcome, ReceiptPending):
-                return PaymentSettleResult(
-                    202, payload(None, status="pending", retryable=True, start=True)
-                )
-            if isinstance(outcome, ReceiptUnavailable):
-                raise PaymentSettlementError(503, "payments service is unavailable")
-            if isinstance(outcome, ReceiptInvalid):
-                logger.error(
-                    "payment receipt for %s does not verify: %s", negotiation_id, outcome.reason
-                )
-                raise PaymentSettlementError(409, "payments receipt does not prove this Agreement")
-            try:
-                await self.stage.deposit_if_advertised(agreement, data)
-            except PaymentsUnavailable as exc:
-                raise PaymentSettlementError(503, "payments Agreement deposit is unavailable") from exc
-
-            terms = await self.db.load_credit_terms(negotiation_id=negotiation_id)
-            listing_id = thread.get("our_listing_id")
-            order = await self.db.load_listing(listing_id=listing_id) if listing_id else None
-            if not terms or not order:
-                raise PaymentSettlementError(409, "credit provisioning terms are unavailable")
-            fulfillment = self.composition.domain.fulfillment
-            if fulfillment is None:
-                raise PaymentSettlementError(503, "API-credit fulfillment is unavailable")
-            if existing is None:
-                await self.db.insert_escrow(
-                    escrow_uid=negotiation_id,
-                    negotiation_id=negotiation_id,
-                    chain_name=None,
-                    escrow_address=None,
-                    is_primary=True,
-                    status="provisioning",
-                )
-            try:
-                result = await fulfillment.fulfill(
-                    client=None,
-                    escrow_uid=negotiation_id,
-                    order=order,
-                    quantity=int(terms["quantity"]),
-                    key_mode=str(terms.get("key_mode") or "new"),
-                    key_id=terms.get("key_id"),
-                    buyer_principal=buyer,
-                    listing_id=listing_id,
-                    negotiation_id=negotiation_id,
-                    mechanism=ARKHAI_PAYMENTS_MECHANISM,
-                    authoritative_gate="payments_receipt_verified",
-                )
-            except Exception as exc:
-                # An unknown issuance outcome stays retryable under the same
-                # grant identity; it must not be recorded as a failure.
-                logger.warning(
-                    "API-credit issuance for payment %s is retryable after error: %s",
-                    negotiation_id,
-                    exc,
-                )
-                result = {"status": "pending", "message": f"Credit issuance outcome is uncertain: {exc}"}
-
-            current = await self.db.load_escrow(escrow_uid=negotiation_id)
-            if current is not None and current.get("status") == "refunded":
-                return PaymentSettleResult(200, payload(current, status="refunded"))
-            if result.get("status") == "fulfilled":
-                await self.db.update_escrow(
-                    escrow_uid=negotiation_id,
-                    status="ready",
-                    fulfillment_uid=result.get("fulfillment_uid"),
-                    connection_details=result.get("connection_details"),
-                    tenant_credentials=(
-                        json.dumps(result["tenant_credentials"])
-                        if isinstance(result.get("tenant_credentials"), Mapping)
-                        else None
-                    ),
-                )
-            elif result.get("status") == "pending":
-                pending = payload(current, status="provisioning", retryable=True, start=True)
-                pending["reason"] = result.get("message")
-                return PaymentSettleResult(202, pending)
-            else:
-                await self.db.update_escrow(
-                    escrow_uid=negotiation_id,
-                    status="failed",
-                    reason=str(result.get("message") or "credit issuance failed"),
-                )
+        existing = await self.db.load_escrow(escrow_uid=negotiation_id)
+        status = existing.get("status") if existing is not None else None
+        if status in ("refunding", "refunded"):
+            if status == "refunding":
+                await self._complete_refund(negotiation_id, agreement, data)
             row = await self.db.load_escrow(escrow_uid=negotiation_id)
-            return PaymentSettleResult(200, payload(row))
+            return PaymentSettleResult(200, payload(row, status="refunded"))
+        if status in ("ready", "failed"):
+            return PaymentSettleResult(200, payload(existing))
+
+        outcome = await self.stage.check_receipt(agreement, data)
+        if isinstance(outcome, ReceiptPending):
+            return PaymentSettleResult(
+                202, payload(None, status="pending", retryable=True, start=True)
+            )
+        self._raise_for_unverified(negotiation_id, outcome)
+        try:
+            await self.stage.deposit_if_advertised(agreement, data)
+        except PaymentsUnavailable as exc:
+            raise PaymentSettlementError(503, "payments Agreement deposit is unavailable") from exc
+        except PaymentsBlocked as exc:
+            logger.error("payment deposit for %s needs operator action: %s", negotiation_id, exc)
+            raise PaymentSettlementError(500, "payments integration needs operator action") from exc
+
+        terms = await self.db.load_credit_terms(negotiation_id=negotiation_id)
+        listing_id = thread.get("our_listing_id")
+        order = await self.db.load_listing(listing_id=listing_id) if listing_id else None
+        if not terms or not order:
+            raise PaymentSettlementError(409, "credit provisioning terms are unavailable")
+        fulfillment = self.composition.domain.fulfillment
+        if fulfillment is None:
+            raise PaymentSettlementError(503, "API-credit fulfillment is unavailable")
+        if existing is None:
+            await self.db.insert_escrow(
+                escrow_uid=negotiation_id,
+                negotiation_id=negotiation_id,
+                chain_name=None,
+                escrow_address=None,
+                is_primary=True,
+                status="provisioning",
+            )
+        if not await self.db.claim_delivery_start(escrow_uid=negotiation_id):
+            # Refund intent was recorded first; issuance must not start.
+            row = await self.db.load_escrow(escrow_uid=negotiation_id)
+            return PaymentSettleResult(200, payload(row, status="refunded"))
+        try:
+            result = await fulfillment.fulfill(
+                client=None,
+                escrow_uid=negotiation_id,
+                order=order,
+                quantity=int(terms["quantity"]),
+                key_mode=str(terms.get("key_mode") or "new"),
+                key_id=terms.get("key_id"),
+                buyer_principal=buyer,
+                listing_id=listing_id,
+                negotiation_id=negotiation_id,
+                mechanism=ARKHAI_PAYMENTS_MECHANISM,
+                authoritative_gate="payments_receipt_verified",
+            )
+        except Exception as exc:
+            # An unknown issuance outcome stays retryable under the same grant
+            # identity; it must not be recorded as a failure.
+            logger.warning(
+                "API-credit issuance for payment %s is retryable after error: %s",
+                negotiation_id,
+                exc,
+            )
+            result = {"status": "pending", "message": f"Credit issuance outcome is uncertain: {exc}"}
+
+        current = await self.db.load_escrow(escrow_uid=negotiation_id)
+        refunded = current is not None and current.get("status") in ("refunding", "refunded")
+        if result.get("status") == "fulfilled":
+            # Credits issued before a refund are recorded beside it.
+            await self.db.update_escrow(
+                escrow_uid=negotiation_id,
+                status=None if refunded else "ready",
+                fulfillment_uid=result.get("fulfillment_uid"),
+                connection_details=result.get("connection_details"),
+                tenant_credentials=(
+                    json.dumps(result["tenant_credentials"])
+                    if isinstance(result.get("tenant_credentials"), Mapping)
+                    else None
+                ),
+            )
+        elif result.get("status") == "pending" and not refunded:
+            pending = payload(current, status="provisioning", retryable=True, start=True)
+            pending["reason"] = result.get("message")
+            return PaymentSettleResult(202, pending)
+        elif not refunded:
+            await self.db.update_escrow(
+                escrow_uid=negotiation_id,
+                status="failed",
+                reason=str(result.get("message") or "credit issuance failed"),
+            )
+        row = await self.db.load_escrow(escrow_uid=negotiation_id)
+        return PaymentSettleResult(
+            200, payload(row, status="refunded") if refunded else payload(row)
+        )
+
+    @staticmethod
+    def _raise_for_unverified(negotiation_id: str, outcome: Any) -> None:
+        if isinstance(outcome, ReceiptUnavailable):
+            raise PaymentSettlementError(503, "payments service is unavailable")
+        if isinstance(outcome, ReceiptInvalid):
+            logger.error(
+                "payment receipt for %s does not verify: %s", negotiation_id, outcome.reason
+            )
+            raise PaymentSettlementError(409, "payments receipt does not prove this Agreement")
+        if isinstance(outcome, ReceiptBlocked):
+            logger.error(
+                "payment settlement for %s needs operator action: %s", negotiation_id, outcome.reason
+            )
+            raise PaymentSettlementError(500, "payments integration needs operator action")
 
     async def refund(self, negotiation_id: str) -> PaymentSettleResult:
         """Reverse the deal's held payment at the seller operator's request."""
 
-        async with _locks.setdefault(negotiation_id, asyncio.Lock()):
-            return await self._refund(negotiation_id, require_undelivered=False)
+        return await self._refund(negotiation_id, require_undelivered=False)
 
     async def refund_before_delivery(self, negotiation_id: str) -> dict[str, Any]:
-        """Reverse a payment deal that failed before delivery, for the refund failure action.
-
-        Issuance failure runs this from inside ``settle``, which already holds the
-        deal's lock, so it must not take the lock again.
-        """
+        """Reverse a payment deal that failed before any issuance, for the refund failure action."""
 
         try:
             result = await self._refund(negotiation_id, require_undelivered=True)
@@ -267,29 +284,49 @@ class ApiCreditPaymentSettlementService:
             "status": "refunded",
         }
         existing = await self.db.load_escrow(escrow_uid=negotiation_id)
-        if existing is not None and existing.get("status") == "refunded":
+        status = existing.get("status") if existing is not None else None
+        if status == "refunded":
             return PaymentSettleResult(200, refunded)
-        if require_undelivered and existing is not None and existing.get("status") == "ready":
+        if require_undelivered and status == "ready":
             return PaymentSettleResult(200, dict(refunded, status="ready"))
+        if status != "refunding":
+            # Refuse before recording intent when there is no payment to reverse,
+            # so an unpaid deal is never left blocked by an abandoned refund.
+            current = await self.stage.check_receipt(agreement, data)
+            if isinstance(current, (ReceiptPending, ReceiptInvalid)):
+                raise PaymentSettlementError(409, "no verified payment exists to refund")
+            self._raise_for_unverified(negotiation_id, current)
+        await self._complete_refund(negotiation_id, agreement, data)
+        RefundSettlementResponse.model_validate(refunded)
+        return PaymentSettleResult(200, refunded)
+
+    async def _complete_refund(
+        self, negotiation_id: str, agreement: Mapping[str, Any], data: PaymentSettlementData
+    ) -> None:
+        """Record intent, reverse, then record the refund; safe to repeat after a crash."""
+
+        intent = await self.db.record_refund_intent(
+            escrow_uid=negotiation_id, negotiation_id=negotiation_id
+        )
+        if intent["status"] == "refunded":
+            return
         outcome = await self.stage.reverse(agreement, data)
-        if isinstance(outcome, NotPaid):
-            raise PaymentSettlementError(409, "no verified payment exists to refund")
-        if isinstance(outcome, NothingToReverse):
-            raise PaymentSettlementError(409, "nothing left to reverse")
+        if isinstance(outcome, (NotPaid, NothingToReverse)):
+            await self.db.abandon_refund_intent(
+                escrow_uid=negotiation_id, prior_status=intent["status"]
+            )
+            raise PaymentSettlementError(
+                409,
+                "no verified payment exists to refund"
+                if isinstance(outcome, NotPaid)
+                else "nothing left to reverse",
+            )
+        if isinstance(outcome, RefundBlocked):
+            logger.error("refund for %s needs operator action: %s", negotiation_id, outcome.reason)
+            raise PaymentSettlementError(500, "payments integration needs operator action")
         if not isinstance(outcome, Refunded):
             raise PaymentSettlementError(503, "payments service is unavailable")
-        if existing is None:
-            await self.db.insert_escrow(
-                escrow_uid=negotiation_id,
-                negotiation_id=negotiation_id,
-                chain_name=None,
-                escrow_address=None,
-                is_primary=True,
-                status="refunded",
-            )
-        else:
-            await self.db.update_escrow(escrow_uid=negotiation_id, status="refunded")
-        return PaymentSettleResult(200, refunded)
+        await self.db.update_escrow(escrow_uid=negotiation_id, status="refunded")
 
 
 __all__ = [

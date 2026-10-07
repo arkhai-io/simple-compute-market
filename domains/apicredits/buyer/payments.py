@@ -161,12 +161,12 @@ def settle_api_credit_payment(
     if config is None or not getattr(config, "enabled", False):
         raise ValueError("buyer Arkhai payments is not enabled")
     # The kit re-derives the mandate under this buyer's policy, checks the
-    # seller's transaction ID and the advertised option, attaches only under
-    # the buyer's own attach_agreement, and verifies every receipt.
+    # seller's transaction ID, attaches only under the buyer's own
+    # attach_agreement, and verifies every receipt. Acceptance already bound
+    # the Agreement to the advertised option.
     expected_transaction = PaymentApproval(config, payer_account).approve(
         raw_agreement,
         settlement_data,
-        advertised_option=advertised,
         confirm=confirm_payment,
         timeout=total_timeout,
         interval=poll_interval,

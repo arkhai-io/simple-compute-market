@@ -218,17 +218,6 @@ dev = [
 ]
 
 [[package]]
-name = "arkhai-compute"
-version = "0.1.0"
-source = { registry = "../../../../.dist" }
-dependencies = [
-    { name = "arkhai-kit-capability-shape" },
-]
-wheels = [
-    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
 name = "arkhai-compute-provisioning"
 version = "0.6.0"
 source = { editable = "../../../../provisioning/compute" }
@@ -325,13 +314,13 @@ dev = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.0"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -344,25 +333,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core_storefront_client-0.18.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "arkhai-kit-capability-pricing"
-version = "0.1.0"
-source = { registry = "../../../../.dist" }
-dependencies = [
-    { name = "arkhai-kit-capability-shape" },
-]
-wheels = [
-    { path = "arkhai_kit_capability_pricing-0.1.0-py3-none-any.whl" },
-]
-
-[[package]]
-name = "arkhai-kit-capability-shape"
-version = "0.2.0"
-source = { registry = "../../../../.dist" }
-wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -443,17 +413,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.6.0"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
-    { name = "arkhai-compute" },
     { name = "arkhai-core" },
-    { name = "arkhai-kit-capability-pricing" },
-    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

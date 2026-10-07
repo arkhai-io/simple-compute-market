@@ -83,6 +83,10 @@ class FakeDb:
         assert listing_id == "listing-a"
         return self.listing
 
+    async def load_bare_metal_settlement_record(self, *, negotiation_id):
+        # These deals settle through escrow, so they carry no payment record.
+        return None
+
     async def ensure_bare_metal_fulfillment_lifecycle(self, **identity):
         if self.lifecycle is None:
             self.lifecycle = {**identity, "state": "planning"}

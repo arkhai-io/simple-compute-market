@@ -177,6 +177,11 @@ def test_settlement_re_driven_from_the_run_log_is_idempotent(
     payment_deal_state: DomainDealState,
     payment_run: dict,
 ) -> None:
+    """A second buyer settlement from the run log returns the same delivery.
+
+    This proves idempotent re-drive from the buyer's run log; it does not
+    restart the storefront or the payments service.
+    """
     require_state(payment_deal_state, "settlement_id", "fulfillment_ref")
     again = payment_buyer_cli.run(
         ["credits", "settle", "--from", payment_run["run_id"], "--settlement-timeout", "60"],

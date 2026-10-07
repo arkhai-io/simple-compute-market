@@ -15,6 +15,7 @@ from compute_provisioning import (
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_fulfillment import VersionedEnvelope
 from market_identity import Identity
 
@@ -165,12 +166,24 @@ class BareMetalFulfillmentService:
                 "accepted terms conflict with the trusted resource binding"
             )
 
-        lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
-            negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
-            site_id=str(context["site_id"]),
-            physical_resource_id=str(context["physical_resource_id"]),
-        )
+        identity = {
+            "negotiation_id": negotiation_id,
+            "escrow_uid": escrow_uid,
+            "site_id": str(context["site_id"]),
+            "physical_resource_id": str(context["physical_resource_id"]),
+        }
+        payment = await self.db.load_bare_metal_settlement_record(negotiation_id=negotiation_id)
+        if payment is not None and payment.get("mechanism") == ARKHAI_PAYMENTS_MECHANISM:
+            # Starting delivery is ordered against refund intent in one
+            # transaction, so a refund recorded first stops delivery here.
+            started = await self.db.start_bare_metal_payment_lifecycle(**identity)
+            if started is None:
+                raise BareMetalFulfillmentError(
+                    "the payment was refunded; delivery cannot start", status_code=409
+                )
+            lifecycle = started
+        else:
+            lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(**identity)
         if lifecycle.get("fulfillment_id"):
             return lifecycle
 

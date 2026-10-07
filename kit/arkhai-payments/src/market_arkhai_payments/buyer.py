@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from market_core.schemas import Agreement, SettlementOption
+from market_core.schemas import Agreement
 from pydantic import ValidationError
 
 from market_arkhai_payments.agreement import (
@@ -65,24 +65,20 @@ class PaymentApproval:
         self,
         agreement_bytes: bytes | str,
         settlement_data: Any,
-        *,
-        advertised_option: SettlementOption | Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], PaymentSettlementData]:
-        """Validate the seller's artifacts against the Agreement and this buyer's policy."""
+        """Validate the seller's artifacts against the Agreement and this buyer's policy.
+
+        That the Agreement selected the advertised option is established when the
+        buyer accepts the negotiation, for every mechanism; this checks only the
+        payment-specific facts.
+        """
 
         agreement = agreement_from_bytes(agreement_bytes)
         try:
-            accepted = Agreement.model_validate(agreement)
+            Agreement.model_validate(agreement)
         except ValidationError as exc:
             raise MandatePolicyError("accepted Agreement is malformed") from exc
         selected_payment_option(agreement)
-        if advertised_option is not None:
-            try:
-                advertised = SettlementOption.model_validate(advertised_option)
-            except ValidationError as exc:
-                raise MandatePolicyError("advertised payments option is malformed") from exc
-            if accepted.settlement != advertised:
-                raise MandatePolicyError("accepted Agreement differs from the advertised option")
         data = PaymentSettlementData.parse(settlement_data)
         policy = mandate_policy_for_agreement(
             agreement, self.config, expected_payer=self.payer_account
@@ -95,16 +91,13 @@ class PaymentApproval:
         agreement_bytes: bytes | str,
         settlement_data: Any,
         *,
-        advertised_option: SettlementOption | Mapping[str, Any] | None = None,
         confirm: ConfirmPayment | None = None,
         timeout: float = 300.0,
         interval: float = 1.0,
     ) -> str:
         """Approve an identical mandate, then wait for its verified receipt; return its ID."""
 
-        agreement, data = self.check(
-            agreement_bytes, settlement_data, advertised_option=advertised_option
-        )
+        agreement, data = self.check(agreement_bytes, settlement_data)
         if confirm is not None and not confirm(data.mandate, data.transaction_id):
             raise PaymentApprovalDeclined("buyer declined payment approval")
         assert self.config.service_identity is not None

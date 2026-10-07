@@ -2880,6 +2880,107 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_insert)
 
+    async def claim_delivery_start(self, *, escrow_uid: str) -> bool:
+        """Claim the right to start delivery for a deal, before any external effect.
+
+        Succeeds only while the row is ``provisioning``, so once refund intent is
+        recorded no delivery can start. Claiming again for a delivery already
+        under way succeeds, which lets an interrupted delivery resume. This and
+        ``record_refund_intent`` are each one serialized write, so exactly one
+        of them decides whether delivery precedes a refund.
+        """
+
+        def _claim() -> bool:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    cursor = conn.execute(
+                        "UPDATE escrows SET fulfillment_phase = "
+                        "COALESCE(fulfillment_phase, 'delivery_started'), updated_at = ? "
+                        "WHERE escrow_uid = ? AND status = 'provisioning'",
+                        (datetime.now().isoformat(), escrow_uid),
+                    )
+                return cursor.rowcount == 1
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_claim)
+
+    async def record_refund_intent(
+        self, *, escrow_uid: str, negotiation_id: str
+    ) -> dict[str, Any]:
+        """Record that a refund is under way, before the reversal is requested.
+
+        Returns the prior ``status`` (``None`` when no row existed) and whether
+        delivery had already started. A deal already ``refunded`` is left as is.
+        """
+
+        def _record() -> dict[str, Any]:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute(
+                        "SELECT status, fulfillment_phase FROM escrows WHERE escrow_uid = ?",
+                        (escrow_uid,),
+                    ).fetchone()
+                    if row is None:
+                        conn.execute(
+                            "INSERT INTO escrows (escrow_uid, negotiation_id, status, "
+                            "is_primary, created_at, updated_at) "
+                            "VALUES (?, ?, 'refunding', 1, ?, ?)",
+                            (escrow_uid, negotiation_id, now, now),
+                        )
+                        conn.execute("COMMIT")
+                        return {"status": None, "delivery_started": False}
+                    status, phase = row
+                    started = phase is not None or status == "ready"
+                    if status != "refunded":
+                        conn.execute(
+                            "UPDATE escrows SET status = 'refunding', updated_at = ? "
+                            "WHERE escrow_uid = ?",
+                            (now, escrow_uid),
+                        )
+                    conn.execute("COMMIT")
+                    return {"status": status, "delivery_started": started}
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_record)
+
+    async def abandon_refund_intent(
+        self, *, escrow_uid: str, prior_status: str | None
+    ) -> None:
+        """Undo refund intent when the reversal proved impossible.
+
+        Restores the status recorded before the intent, or removes the row the
+        intent created, so a deal with nothing to reverse is not left blocked.
+        """
+
+        def _abandon() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    if prior_status is None:
+                        conn.execute(
+                            "DELETE FROM escrows WHERE escrow_uid = ? AND status = 'refunding'",
+                            (escrow_uid,),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE escrows SET status = ?, updated_at = ? "
+                            "WHERE escrow_uid = ? AND status = 'refunding'",
+                            (prior_status, datetime.now().isoformat(), escrow_uid),
+                        )
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_abandon)
+
     async def update_escrow(
         self,
         *,

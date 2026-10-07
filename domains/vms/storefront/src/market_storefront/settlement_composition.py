@@ -23,9 +23,9 @@ from core_storefront.domain_lifecycle import (
 from core_storefront.stage_log import stage_event
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import (
-    ArkhaiPaymentsConfig,
     PaymentSellerStage,
     create_arkhai_payments_registration,
+    servicing_stage,
 )
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -839,13 +839,9 @@ def build_vm_settlement_composition(
         wake_servicing=wake_servicing,
     )
     payments_config = settlement_config.mechanism_config("arkhai_payments")
-    # An enabled payments mechanism with incomplete trusted policy fails here, at
-    # startup, rather than on every settlement request.
-    payments_stage = (
-        PaymentSellerStage(ArkhaiPaymentsConfig.model_validate(payments_config))
-        if payments_config is not None and getattr(payments_config, "enabled", False)
-        else None
-    )
+    # Accepted payment deals are serviced whether or not new payment options
+    # are published, so the stage follows the servicing fields, not `enabled`.
+    payments_stage = servicing_stage(payments_config)
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,

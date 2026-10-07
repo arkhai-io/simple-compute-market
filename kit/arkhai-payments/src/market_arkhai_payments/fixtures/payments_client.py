@@ -15,7 +15,11 @@ from typing import Any
 from market_identity import Signer
 
 from market_arkhai_payments.canonical import jcs_bytes
-from market_arkhai_payments.errors import PaymentsAPIError, PaymentsTransportError
+from market_arkhai_payments.errors import (
+    PaymentsAPIError,
+    PaymentsProtocolError,
+    PaymentsTransportError,
+)
 from market_arkhai_payments.fixtures.receipts import build_signed_receipt
 from market_arkhai_payments.mandates import PaymentsOptionParams
 from market_arkhai_payments.models import (
@@ -44,6 +48,7 @@ class FakePaymentsClient:
         self.unavailable = False
         self.attach_unavailable = False
         self.reverse_error: str | None = None
+        self.read_error: tuple[int, str] | None = None
         self.reversed = False
 
     # ``client_for_owner`` factory and context-manager protocol -----------------
@@ -90,6 +95,8 @@ class FakePaymentsClient:
     def get_transaction(self, transaction: str) -> SignedTransactionSnapshot:
         self.calls.append(("get_transaction", transaction))
         self._require_available()
+        if self.read_error is not None:
+            raise PaymentsAPIError(*self.read_error)
         if self.receipt is None:
             raise PaymentsAPIError(404, "transaction_not_found")
         return self._snapshot(transaction)
@@ -116,10 +123,13 @@ class FakePaymentsClient:
             raise PaymentsTransportError("payments service request failed")
         if not option.deposit_agreement:
             return None
+        # Same rule as the real client: any attachment with another hash breaks
+        # the service contract, wherever it appears.
         digest = hashlib.sha256(jcs_bytes(agreement_json)).hexdigest()
-        for stored in self.attachments:
-            if stored["sha256"] == digest:
-                return StoredDealAttachment.model_validate(stored)
+        if any(stored["sha256"] != digest for stored in self.attachments):
+            raise PaymentsProtocolError("transaction contains an unexpected deal attachment")
+        if self.attachments:
+            return StoredDealAttachment.model_validate(self.attachments[0])
         return self._store_attachment(agreement_json)
 
     def reverse(self, transaction: str) -> StoredEvent:

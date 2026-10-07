@@ -13,6 +13,10 @@ from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import SettlementRuntime
 
+from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
+    RefundSettlementResponse,
+)
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
     MandatePolicyError,
@@ -20,10 +24,13 @@ from market_arkhai_payments import (
     NothingToReverse,
     PaymentSellerStage,
     PaymentSettlementData,
+    PaymentsBlocked,
     PaymentsUnavailable,
+    ReceiptBlocked,
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    RefundBlocked,
     Refunded,
     SignedReceipt,
 )
@@ -192,7 +199,9 @@ class BareMetalSettlementService:
                 ),
             )
 
-        if record.get("status") == "refunded":
+        if record.get("status") in ("refunding", "refunded"):
+            if record.get("status") == "refunding":
+                await self._complete_refund(negotiation_id, stage, agreement, data)
             return result(200, "refunded")
         if record.get("status") == "settlement_verified":
             try:
@@ -210,6 +219,9 @@ class BareMetalSettlementService:
                 return result(202, "pending", retryable=True)
             if isinstance(outcome, ReceiptUnavailable):
                 raise SettlementRequestError("payments service is unavailable", status_code=503)
+            if isinstance(outcome, ReceiptBlocked):
+                logger.error("payment settlement for %s needs operator action: %s", negotiation_id, outcome.reason)
+                raise SettlementRequestError("payments integration needs operator action", status_code=500)
             if isinstance(outcome, ReceiptInvalid):
                 logger.error("payment receipt for %s does not verify: %s", negotiation_id, outcome.reason)
                 raise SettlementRequestError("payments receipt does not prove this Agreement")
@@ -231,6 +243,11 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "payments Agreement deposit is unavailable", status_code=503
             ) from exc
+        except PaymentsBlocked as exc:
+            logger.error("payment deposit for %s needs operator action: %s", negotiation_id, exc)
+            raise SettlementRequestError(
+                "payments integration needs operator action", status_code=500
+            ) from exc
         if self.begin_fulfillment is None:
             raise SettlementRequestError(
                 "bare-metal fulfillment authorities are unavailable", status_code=503
@@ -241,7 +258,11 @@ class BareMetalSettlementService:
             )
         except BareMetalFulfillmentError as exc:
             raise SettlementRequestError(exc.detail, status_code=exc.status_code) from exc
-        return result(200, str(lifecycle.get("state") or "fulfillment_started"), lifecycle=lifecycle)
+        settled = result(200, str(lifecycle.get("state") or "fulfillment_started"), lifecycle=lifecycle)
+        # The neutral fields are a cross-domain contract; refuse to emit a
+        # payload that would not parse as one.
+        AgreementSettleResponse.model_validate(settled.payload)
+        return settled
 
     async def refund_payment(self, *, negotiation_id: str) -> PaymentSettleResult:
         """Reverse an accepted payment deal's held funds at the seller operator's request."""
@@ -269,19 +290,55 @@ class BareMetalSettlementService:
             "status": "refunded",
         }
         assert record is not None
-        if record.get("status") == "refunded":
-            return PaymentSettleResult(200, payload)
+        if record.get("status") != "refunding" and record.get("status") != "refunded":
+            # Refuse before recording intent when there is no payment to reverse,
+            # so an unpaid deal is never left blocked by an abandoned refund.
+            current = await stage.check_receipt(agreement, data)
+            if isinstance(current, (ReceiptPending, ReceiptInvalid)):
+                raise SettlementRequestError("no verified payment exists to refund")
+            if isinstance(current, ReceiptUnavailable):
+                raise SettlementRequestError("payments service is unavailable", status_code=503)
+            if isinstance(current, ReceiptBlocked):
+                logger.error("refund for %s needs operator action: %s", negotiation_id, current.reason)
+                raise SettlementRequestError(
+                    "payments integration needs operator action", status_code=500
+                )
+        await self._complete_refund(negotiation_id, stage, agreement, data)
+        RefundSettlementResponse.model_validate(payload)
+        return PaymentSettleResult(200, payload)
+
+    async def _complete_refund(
+        self,
+        negotiation_id: str,
+        stage: PaymentSellerStage,
+        agreement: Mapping[str, Any],
+        data: PaymentSettlementData,
+    ) -> None:
+        """Record intent, reverse, then record the refund; safe to repeat after a crash."""
+
+        intent = await self.db.record_bare_metal_refund_intent(negotiation_id=negotiation_id)
+        if intent["status"] == "refunded":
+            return
         outcome = await stage.reverse(agreement, data)
-        if isinstance(outcome, NotPaid):
-            raise SettlementRequestError("no verified payment exists to refund")
-        if isinstance(outcome, NothingToReverse):
-            raise SettlementRequestError("nothing left to reverse")
+        if isinstance(outcome, (NotPaid, NothingToReverse)):
+            await self.db.abandon_bare_metal_refund_intent(
+                negotiation_id=negotiation_id, prior_status=intent["status"]
+            )
+            raise SettlementRequestError(
+                "no verified payment exists to refund"
+                if isinstance(outcome, NotPaid)
+                else "nothing left to reverse"
+            )
+        if isinstance(outcome, RefundBlocked):
+            logger.error("refund for %s needs operator action: %s", negotiation_id, outcome.reason)
+            raise SettlementRequestError(
+                "payments integration needs operator action", status_code=500
+            )
         if not isinstance(outcome, Refunded):
             raise SettlementRequestError("payments service is unavailable", status_code=503)
         await self.db.mark_bare_metal_settlement_refunded(
             negotiation_id=negotiation_id, settlement_ref=data.transaction_id
         )
-        return PaymentSettleResult(200, payload)
 
     async def verify(
         self,

@@ -24,7 +24,6 @@ from payment_terms import (
     agreement,
     agreement_bytes,
     config,
-    option,
 )
 
 
@@ -74,15 +73,10 @@ def test_a_mandate_the_buyer_policy_does_not_derive_is_refused():
         _approval(FakePaymentsClient(signer=SERVICE)).check(agreement_bytes(terms), data)
 
 
-def test_another_payer_or_advertised_option_is_refused():
+def test_another_payer_is_refused():
     terms = agreement(payer=OTHER)
     with pytest.raises(MandatePolicyError):
         _approval(FakePaymentsClient()).check(agreement_bytes(terms), _seller_data(terms))
-    terms = agreement()
-    with pytest.raises(MandatePolicyError):
-        _approval(FakePaymentsClient()).check(
-            agreement_bytes(terms), _seller_data(terms), advertised_option=option(deposit=True)
-        )
 
 
 def test_a_declined_confirmation_approves_nothing():

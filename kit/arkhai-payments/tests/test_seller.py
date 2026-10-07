@@ -6,6 +6,10 @@ import pytest
 
 from market_arkhai_payments import (
     ArkhaiPaymentsConfigurationError,
+    MandatePolicyError,
+    PaymentsBlocked,
+    ReceiptBlocked,
+    RefundBlocked,
     NotPaid,
     NothingToReverse,
     PaymentSellerStage,
@@ -32,10 +36,21 @@ def _accepted(**terms):
     return value, PaymentSettlementData.for_agreement(value, config())
 
 
-def test_stage_requires_complete_trusted_policy():
-    for missing in ("fee_bps", "dispute_authority", "service_identity"):
+def test_stage_needs_only_servicing_configuration():
+    for missing in ("service_url", "service_identity"):
         with pytest.raises(ArkhaiPaymentsConfigurationError):
             PaymentSellerStage(config(**{missing: None}))
+    stage = PaymentSellerStage(config(fee_bps=None, dispute_authority=None))
+    with pytest.raises(MandatePolicyError):
+        stage.settlement_data(agreement())
+
+
+def test_a_disabled_mechanism_still_services_accepted_deals():
+    fake = FakePaymentsClient()
+    terms, data = _accepted()
+    fake.serve(build_signed_receipt(signer=SERVICE, mandate=data.mandate))
+    stage = PaymentSellerStage(config(enabled=False), client_for_owner=fake)
+    assert isinstance(stage.check_receipt_now(terms, data), ReceiptVerified)
 
 
 def test_no_transaction_yet_is_pending_and_reads_once_as_the_payee():
@@ -65,17 +80,48 @@ def test_impostor_and_wrong_mandate_receipts_are_invalid():
     assert isinstance(_stage(wrong).check_receipt_now(terms, data), ReceiptInvalid)
 
 
-def test_transport_failure_and_unexpected_codes_are_unavailable():
+@pytest.mark.parametrize(
+    "status,code",
+    [(503, "ledger_unavailable"), (503, "account_directory_unavailable"),
+     (500, "internal_error"), (429, "rate_limited"), (502, "bad_gateway")],
+)
+def test_transient_failures_are_unavailable(status, code):
     terms, data = _accepted()
+    fake = FakePaymentsClient()
+    fake.read_error = (status, code)
+    assert isinstance(_stage(fake).check_receipt_now(terms, data), ReceiptUnavailable)
     down = FakePaymentsClient()
     down.unavailable = True
     assert isinstance(_stage(down).check_receipt_now(terms, data), ReceiptUnavailable)
+
+
+@pytest.mark.parametrize(
+    "status,code",
+    [(401, "authentication_required"), (403, "caller_not_authorized"), (404, "account_not_found")],
+)
+def test_operator_failures_are_blocked(status, code):
+    terms, data = _accepted()
+    fake = FakePaymentsClient()
+    fake.read_error = (status, code)
+    assert isinstance(_stage(fake).check_receipt_now(terms, data), ReceiptBlocked)
+
+
+def test_missing_credentials_and_contract_violations_are_blocked():
+    terms, data = _accepted()
 
     def missing_credential(_owner):
         raise ArkhaiPaymentsConfigurationError("credential unavailable")
 
     stage = PaymentSellerStage(config(), client_for_owner=missing_credential)
-    assert isinstance(stage.check_receipt_now(terms, data), ReceiptUnavailable)
+    assert isinstance(stage.check_receipt_now(terms, data), ReceiptBlocked)
+
+    class OtherTransaction(FakePaymentsClient):
+        def get_transaction(self, transaction):
+            return super().get_transaction("0" * 64)
+
+    other = OtherTransaction()
+    other.serve(build_signed_receipt(signer=SERVICE, mandate=data.mandate))
+    assert isinstance(_stage(other).check_receipt_now(terms, data), ReceiptBlocked)
 
 
 def test_deposit_runs_only_when_advertised_and_is_idempotent():
@@ -91,12 +137,35 @@ def test_deposit_runs_only_when_advertised_and_is_idempotent():
     assert len(fake.attachments) == 1
 
 
-def test_a_failed_deposit_is_unavailable():
+def test_a_failed_deposit_is_unavailable_or_blocked():
     fake = FakePaymentsClient()
     fake.attach_unavailable = True
     terms, data = _accepted(deposit=True)
     with pytest.raises(PaymentsUnavailable):
         _stage(fake).deposit_now(terms, data)
+
+    stray = FakePaymentsClient()
+    stray.attachments.append({"sha256": "f" * 64})
+    with pytest.raises(PaymentsBlocked):
+        _stage(stray).deposit_now(terms, data)
+
+
+def test_a_repeated_reversal_completes_after_an_earlier_one():
+    terms, data = _accepted()
+    fake = FakePaymentsClient()
+    fake.serve(build_signed_receipt(signer=SERVICE, mandate=data.mandate))
+    fake.reversed = True
+    fake.reverse_error = "hold_not_reversible"
+    outcome = _stage(fake).reverse_now(terms, data)
+    assert isinstance(outcome, Refunded) and outcome.event is None
+
+
+def test_reversal_operator_failures_are_blocked():
+    terms, data = _accepted()
+    fake = FakePaymentsClient()
+    fake.serve(build_signed_receipt(signer=SERVICE, mandate=data.mandate))
+    fake.reverse_error = "caller_not_authorized"
+    assert isinstance(_stage(fake).reverse_now(terms, data), RefundBlocked)
 
 
 def test_reversal_requires_a_verified_payment_first():
@@ -131,9 +200,7 @@ def test_reversal_outcomes_follow_service_codes():
     assert isinstance(_stage(failing).reverse_now(terms, data), RefundUnavailable)
 
 
-def test_accepted_state_must_derive_its_stored_settlement_data():
-    from market_arkhai_payments import MandatePolicyError
-
+def test_accepted_state_must_bind_its_stored_settlement_data():
     from payment_terms import agreement_bytes
 
     terms, data = _accepted()
@@ -142,3 +209,11 @@ def test_accepted_state_must_derive_its_stored_settlement_data():
     assert decoded == terms and parsed == data
     with pytest.raises(MandatePolicyError):
         stage.accepted(agreement_bytes(agreement(amount="20000")), data.to_wire())
+
+
+def test_servicing_stage_follows_servicing_fields_not_enabled():
+    from market_arkhai_payments import servicing_stage
+
+    assert servicing_stage(None) is None
+    assert servicing_stage(config(enabled=False)) is not None
+    assert servicing_stage(config(enabled=False, service_identity=None)) is None

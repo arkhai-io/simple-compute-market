@@ -14,10 +14,10 @@ from market_alkahest import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
-    ArkhaiPaymentsConfig,
     ClientForOwner,
     PaymentSellerStage,
     create_arkhai_payments_registration,
+    servicing_stage,
 )
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer, TrustedIdentitySet
@@ -317,10 +317,9 @@ def build_api_credit_settlement_composition(
 def _payments_stage(
     settlement_config: Any, client_for_owner: ClientForOwner | None
 ) -> PaymentSellerStage | None:
-    section = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
-    if section is None or not getattr(section, "enabled", False):
-        return None
-    # Incomplete trusted policy for an enabled mechanism fails at startup.
-    return PaymentSellerStage(
-        ArkhaiPaymentsConfig.model_validate(section), client_for_owner=client_for_owner
+    # Accepted payment deals are serviced whether or not new payment options are
+    # published, so the stage follows the servicing fields, not `enabled`.
+    return servicing_stage(
+        settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY),
+        client_for_owner=client_for_owner,
     )

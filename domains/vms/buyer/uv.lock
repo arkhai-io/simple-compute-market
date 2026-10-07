@@ -153,7 +153,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.3.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -162,7 +162,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -224,7 +224,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.3.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -232,7 +232,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
 ]
 
 [[package]]

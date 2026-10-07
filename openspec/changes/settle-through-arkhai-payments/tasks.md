@@ -181,7 +181,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
   - Validation: API-credit domain, storefront, buyer, and service `make test`.
 
 - [x] 5.6 **API-credit payment system scenario** (R3, R7).
-  - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py` (new), on `DomainDealState` and the profiled buyer CLI. Stages: publication, discovery, negotiation selecting `arkhai.payments.v1`, approval, receipt-gated issuance, consumption, status, restart recovery, then a seller refund through `StorefrontClient.refund_settlement` with the transaction observed reversed.
+  - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py` (new), on `DomainDealState` and the profiled buyer CLI. Stages: publication, discovery, negotiation selecting `arkhai.payments.v1`, approval, receipt-gated issuance, consumption, status, idempotent re-drive from the buyer's run log, then a seller refund through `StorefrontClient.refund_settlement` with the transaction observed reversed.
   - `e2e-tests/src/settings.py` and `e2e-tests/config/config.yml`: optional payments target settings (service URL, receipt identity, buyer and payee accounts, credential environment names). `require_state` reports the scenario blocked when they are absent or the target is not ready.
   - Register marker `e2e_credits_payment_deal` in `e2e-tests/pyproject.toml` and the API-credit lane expression in `e2e-tests/Makefile`.
   - Validation: e2e unit suite; the scenario runs here only if a payments target is reachable, otherwise its blocked result is disclosed.
@@ -197,6 +197,59 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
     - `make check-comment-hygiene`.
 
     Disclose that `make check-packaging` is not available on this tree (P2).
+
+### Implementation review round
+
+Decisions: `design.md#implementation-review-decisions` (R11–R17). Every package touched here was already bumped in this unmerged change, so no further version bumps. Order: 5.8–5.10 (kit) first; 5.11 (core) before the domains; 5.12–5.14 (domains) are independent of each other; 5.15–5.16 last.
+
+- [x] 5.8 **Kit: servicing from the accepted artifact** (R11).
+  - `kit/arkhai-payments/src/market_arkhai_payments/agreement.py`: `PaymentSettlementData.require_bound_to(agreement)` re-derives with the fee and dispute authority recorded in the stored mandate and compares exactly; it replaces `require_derived_from`.
+  - `.../seller.py`: `PaymentSellerStage` needs only the service URL and receipt identity at construction; `settlement_data()` requires the fee policy and dispute authority and refuses without them; `accepted()` uses `require_bound_to`.
+  - `.../settlement_config.py`: `payments_client_for_owner` no longer refuses a disabled configuration.
+  - Tests: `kit/arkhai-payments/tests/test_agreement.py` (accepted data survives fee and dispute-authority changes; tampered Agreement-bound fields are refused), `test_seller.py` (a stage from a disabled section services an accepted deal), `test_settlement_config.py`.
+
+- [x] 5.9 **Kit: operator-action outcomes and reversal completion** (R12, R13).
+  - `.../seller.py`: `ReceiptBlocked` and `RefundBlocked`; classify service codes, transport, status and protocol errors as R13's table lists; `reverse` treats "nothing left to reverse" as `Refunded` when the snapshot shows every part reversed.
+  - `.../fixtures/payments_client.py`: settable service error code for reads and reverses; reversed snapshots after a reverse.
+  - Tests: `test_seller.py` (one case per R13 row, including a missing credential and another transaction ID; reverse completion after a prior reverse).
+
+- [x] 5.10 **Kit: attachments and approval** (R15, R16).
+  - `.../client.py`: `ensure_agreement_attached` examines every attachment, returns the matching one, refuses any mismatch.
+  - `.../fixtures/payments_client.py`: the same rule.
+  - `.../buyer.py`: drop `advertised_option` from `check` and `approve`.
+  - Tests: `test_client.py` (a mismatched attachment before a matching one is refused; duplicate matching attachments succeed), `test_buyer.py`.
+
+- [x] 5.11 **Core: ordered transitions and strict responses** (R12, R14).
+  - `core/storefront/src/core_storefront/sqlite_client.py`: `claim_delivery_start(escrow_uid)` (`fulfillment_phase` from `NULL` to `delivery_started` only while the status is `provisioning`; reports whether this call owns delivery) and `record_refund_intent(escrow_uid, negotiation_id)` (inserts or moves the row to `refunding` and reports whether delivery had started), each one conditional statement.
+  - `core/storefront/tests/unit/test_sqlite_client_escrow_fulfillment_identity.py`: both orders of the two transitions, and repetition of each.
+  - `core/storefront-client/src/storefront_client/models.py`: `AgreementSettleResponse.from_dict` and `RefundSettlementResponse.from_dict` raise on a missing required field; `client.py` surfaces that as `StorefrontClientError`.
+  - `core/storefront-client/tests/test_settlement_requests.py`: missing and renamed required fields raise.
+
+- [x] 5.12 **VM** (R11–R14).
+  - `domains/vms/storefront/src/market_storefront/settlement_composition.py`: build the stage whenever the payments section has a service URL and receipt identity.
+  - `.../payment_settlement.py`: map `ReceiptBlocked`/`RefundBlocked` to 500; `_provision` claims delivery start before `fulfill_domain` and stops if it does not own it; refund records intent before reversing; a `refunding` deal completes its reversal on any later settle or refund; the final provisioning write records delivery details beside a refund; validate payloads through the core response models; correct the module docstring.
+  - `.../failure_actions.py`: the payments refund guard reads the delivery-start marker and `ready`.
+  - `.../services/fulfillment_resume_runtime.py`: servicing uses the stage regardless of `enabled`.
+  - `domains/vms/storefront/tests/integration/test_payment_settlement.py`: fee and dispute-authority change after acceptance; payments disabled after acceptance (settle and refund); priority change; refund winning the race (no dispatch); delivery winning the race (refund recorded with the delivery); crash after `reverse` before the refunded write completes on retry; one `ReceiptBlocked` case.
+
+- [x] 5.13 **Bare metal** (R11–R14).
+  - `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`: build the stage from servicing configuration.
+  - `.../sqlite_client.py`: start a payment deal's lifecycle only while its record is `settlement_verified`, in one transaction; `record_bare_metal_refund_intent` moves the record to `refunding` and reports whether a lifecycle exists.
+  - `.../migrations.py`: migration 0008's CHECK also admits `refunding` (P3).
+  - `.../fulfillment_service.py`: `begin` uses the conditional lifecycle start for payment deals.
+  - `.../settlement_service.py`: Blocked outcomes as 500; refund intent before reversing; completion of a `refunding` deal; payload validation through the core models.
+  - Move `domains/bare_metal/storefront/tests/test_payment_settlement_client.py` to `domains/bare_metal/storefront/tests/integration/test_payment_settlement_client.py` (with `tests/integration/__init__.py`) and add: payments disabled after acceptance; refund winning the race (no lifecycle, no reservation); delivery winning the race; reversal completion after a crash.
+
+- [x] 5.14 **API credits** (R11–R14, R16).
+  - `domains/apicredits/storefront/src/apicredits_storefront/settlement_composition.py`: build the stage from servicing configuration.
+  - `.../services/payment_settlement_service.py`: replace the in-process lock with `claim_delivery_start` and `record_refund_intent`; Blocked outcomes as 500; reversal completion; payload validation through the core models.
+  - `.../services/fulfillment_service.py`: the refund guard reads the delivery-start marker.
+  - `domains/apicredits/buyer/payments.py`: stop passing `advertised_option`.
+  - `domains/apicredits/storefront/tests/integration/test_payment_settlement.py`: payments disabled after acceptance; refund winning the race; delivery winning the race.
+
+- [x] 5.15 **Scenario wording** (review finding 8). `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py`: the second stage is idempotent re-drive from the buyer's run log, named and documented as such; task 5.6's text says the same.
+
+- [x] 5.16 **Gate.** Rerun every suite from 5.1–5.7 plus the new cases in fresh environments, `make dist`, the packaging comparison against the baseline (P2), pyflakes over changed source plus the VM storefront and e2e ruff configurations, and `make check-comment-hygiene`.
 
 ### §5 evidence
 
@@ -224,6 +277,38 @@ Deviations from the task text:
 - **`examples/local_e2e.py` kept as a client smoke.** It exercises the `PaymentsClient` primitives against a live service with a minimal deal object; the README states that scope.
 - **Smaller additions.** `services/payment_selection.py` in the API-credit storefront breaks an import cycle. API-credit seller authentication now accepts empty bodies. A sync/async parity test removed redundant annotation quoting from seven async client methods. The VM refund route uses the existing `settlements_router`. `e2e-tests` declares its direct payments-kit dependency.
 
+### Implementation review evidence
+
+Every suite ran in a fresh environment against a wheelhouse rebuilt from the final tree.
+
+| Suite | Result |
+|---|---|
+| `kit/arkhai-payments` (`make test`) | 81 passed |
+| `core/storefront-client` / `core/storefront` / `kit/capacity-publication` | 37 / 154 (2 skipped) / 8 passed |
+| VM storefront / VM buyer | 1,064 passed (the same 3 deselected) / 180 passed |
+| Bare-metal storefront / buyer | 99 / 9 passed |
+| API-credit domain / storefront / buyer / credits service | 35 / 78 / 17 / 32 passed |
+| e2e unit, and the payment scenario without a target | 19 passed; 3 stages blocked |
+
+New cases cover:
+- each R13 outcome;
+- servicing after fee, dispute-authority and priority changes and after payments is disabled (the bare-metal case also drops payments from priority);
+- both race orders in all three domains;
+- an interrupted reversal completing (VM, bare metal);
+- missing and renamed client response fields;
+- attachments for another deal in either position.
+
+Packaging matches P2: `check-locks` reports 15 problems against the baseline's 36, the 6 beyond the baseline still being the two VM locks, and the other three checks report nothing new. Lint adds no finding beyond the unmodified tree; `make check-comment-hygiene` finds nothing in source.
+
+Deviations from the task text:
+
+- **`servicing_stage` in the kit.** The three compositions share one kit helper that builds the stage from servicing fields, rather than each repeating that rule.
+- **R8 guard.** The refund failure action's guard reads `ready`, not the delivery-start marker, which is always set once a started delivery has failed; `design.md` R12 is corrected.
+- **Abandoned refund intent.** `abandon_refund_intent` (core) and `abandon_bare_metal_refund_intent` restore the prior state when a reversal finds nothing to reverse, and a refund confirms a verified payment before recording intent, so no deal is left in `refunding`.
+- **VM settle payload.** Job serialization dropped `settlement_ref` and `retryable` from VM settle responses for deals with an escrow row; the server-side validation from R14 exposed it, and the controller now carries the neutral fields through.
+- **No separate VM priority test.** VM servicing never reads priority, so the case is covered by the kit's `servicing_stage` test and the bare-metal disabled-and-deprioritized case.
+- **Test support.** `domains/bare_metal/storefront/tests/test_fulfillment_service.py`'s fake database answers the payment-record lookup with no record, as the real one does for escrow deals.
+
 ## 6. Merge with the development branch
 
 Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; the decisions are taken with the reviewer.
@@ -236,7 +321,7 @@ Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; 
 
 - [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match; read touched comments for review or migration provenance the target cannot catch.
 - [ ] 7.2 **Import placement.** Review each function-level import added or touched by §5–§6 and move it to module scope where safe, verifying with the relevant suites.
-- [ ] 7.3 **Documentation compliance.** Re-check R1–R10, P1–P6 and the merge outcomes against `openspec/README.md` placement. Reconcile the delta specs once: remove deferred §1 statements, add deltas for R1–R9, address the >500-character warnings, and pass `openspec validate settle-through-arkhai-payments --strict` (R10).
+- [ ] 7.3 **Documentation compliance.** Re-check R1–R10, P1–P6 and the merge outcomes against `openspec/README.md` placement. Reconcile the delta specs: align the eight reworded deltas with the merged permanent text, add deltas for R1–R16, address the >500-character warnings, and pass `openspec validate settle-through-arkhai-payments --strict` (R10, R17; the deferred §1 statements were removed in review).
 - [ ] 7.4 **Narrative compression.** Compress §5–§6 notes to final behavior, validation evidence, unresolved work, and destinations; move any debugging narrative into `design.md` first.
 - [ ] 7.5 **Roadmap currency.** Goal 6 current state names agreement settlement, owned attachment policies, and seller-initiated refunds in `docs/development/ROADMAP.md`; the live-qualification row stays until a live run. Name the update in the promotion record.
 - [ ] 7.6 **Promotion.** Apply `design.md#accepted-permanent-wording` and every row of `design.md#planned-promotion`, then move each row into the design promotion record.

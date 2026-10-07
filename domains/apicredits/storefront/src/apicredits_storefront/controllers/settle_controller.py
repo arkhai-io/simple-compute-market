@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
     RefundSettlementResponse,
     SettleResponse,
     SettleStatusResponse,
@@ -123,6 +124,9 @@ class SettleController:
                 )
             except PaymentSettlementError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            # The neutral fields are a cross-domain contract; refuse to emit a
+            # payload that would not parse as one.
+            AgreementSettleResponse.model_validate(result.payload)
             return JSONResponse(content=result.payload, status_code=result.status_code)
         if mechanism != "alkahest.v1":
             raise HTTPException(

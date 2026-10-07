@@ -21,10 +21,10 @@ from market_settlement_runtime import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
-    ArkhaiPaymentsConfig,
     ClientForOwner,
     PaymentSellerStage,
     create_arkhai_payments_registration,
+    servicing_stage,
 )
 
 ALKAHEST_MECHANISM = "alkahest.v1"
@@ -55,14 +55,11 @@ class BareMetalStorefrontSettlementComposition:
     def __post_init__(self) -> None:
         self.registry.validate(self.config, role="seller")
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
-        section = self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY)
-        config = ArkhaiPaymentsConfig.model_validate(section) if section is not None else None
-        # An enabled payments mechanism with incomplete trusted policy fails here,
-        # at startup, rather than on every settlement request.
-        stage = (
-            PaymentSellerStage(config, client_for_owner=self.payments_client_for_owner)
-            if config is not None and config.enabled
-            else None
+        # Accepted payment deals are serviced whether or not new payment options
+        # are published, so the stage follows the servicing fields, not `enabled`.
+        stage = servicing_stage(
+            self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
+            client_for_owner=self.payments_client_for_owner,
         )
         object.__setattr__(self, "payments_stage", stage)
 

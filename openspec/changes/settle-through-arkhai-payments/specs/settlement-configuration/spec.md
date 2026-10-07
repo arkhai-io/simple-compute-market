@@ -171,12 +171,12 @@ Run logs MAY record configuration-schema version, the public resolved mechanism 
 
 ### Requirement: Settlement options keep mechanism-owned parameters opaque
 
-A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option. The core MUST NOT interpret mechanism-specific values in `params`. Alkahest's option parameters MUST carry its accepted escrow forms, arbiter demands, and oracle address rather than listing-level `accepted_escrows`, `demands`, or `oracle_address` fields. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
+A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option. The core MUST NOT interpret mechanism-specific values in `params`. Alkahest options carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
 
 #### Scenario: Alkahest option is published
 
 - **WHEN** a seller publishes an Alkahest settlement choice
-- **THEN** its escrow forms, demands, and oracle address are carried by that option's `params`, not by parallel core listing fields
+- **THEN** its escrow policy is interpreted by the Alkahest kit, not by Arkhai payments
 
 #### Scenario: Arkhai payment option is published
 

@@ -101,6 +101,14 @@ class StorefrontClientError(Exception):
         self.status_code = status_code
 
 
+def _strict(model: Any, payload: Any) -> Any:
+    """Parse a strict response model, reporting contract breaks as client errors."""
+    try:
+        return model.from_dict(payload)
+    except ValueError as exc:
+        raise StorefrontClientError(f"storefront response broke its contract: {exc}") from exc
+
+
 def _validate_provision_terms_envelope(
     provision_terms: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1503,7 +1511,7 @@ class StorefrontClient(_StorefrontClientBase):
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
         }
-        return AgreementSettleResponse.from_dict(
+        return _strict(AgreementSettleResponse,
             await self._authenticated_post(
                 f"/api/v1/settle/{negotiation_id}",
                 body,
@@ -1525,7 +1533,7 @@ class StorefrontClient(_StorefrontClientBase):
         Reverses the deal's still-held payment and records it refunded so
         delivery cannot start. Only the seller may refund.
         """
-        return RefundSettlementResponse.from_dict(
+        return _strict(RefundSettlementResponse,
             await self._authenticated_post(
                 f"/api/v1/settlements/{negotiation_id}/refund",
                 EMPTY_BODY,
@@ -2797,7 +2805,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
         }
-        return AgreementSettleResponse.from_dict(
+        return _strict(AgreementSettleResponse,
             self._authenticated_post(
                 f"/api/v1/settle/{negotiation_id}",
                 body,
@@ -2819,7 +2827,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         Reverses the deal's still-held payment and records it refunded so
         delivery cannot start. Only the seller may refund.
         """
-        return RefundSettlementResponse.from_dict(
+        return _strict(RefundSettlementResponse,
             self._authenticated_post(
                 f"/api/v1/settlements/{negotiation_id}/refund",
                 EMPTY_BODY,

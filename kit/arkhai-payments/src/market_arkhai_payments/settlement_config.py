@@ -142,9 +142,11 @@ def payments_client_for_owner(
     timeout: float = 10.0,
     transport: httpx.BaseTransport | None = None,
 ) -> PaymentsClient:
-    """Build an authenticated service client without persisting credentials."""
-    if not config.enabled:
-        raise ArkhaiPaymentsConfigurationError("Arkhai payments is disabled")
+    """Build an authenticated service client without persisting credentials.
+
+    Works whether or not the mechanism is enabled for new deals: accepted deals
+    keep being serviced after operators stop publishing payment options.
+    """
     if config.service_url is None:
         raise ArkhaiPaymentsConfigurationError("payments service_url is not configured")
     owner = AccountId.model_validate(owner_account).root

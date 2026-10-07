@@ -30,7 +30,7 @@ On acceptance, negotiation MUST produce exactly one Agreement object containing 
 
 ### Requirement: Additive settlement option carriers
 
-Listings and proposals MAY carry ordered `SettlementOption` envelopes containing stable option ID, mechanism, asset, rates, and opaque mechanism parameters. Accepted terms MUST carry one exact `SettlementSelection` containing mechanism, option ID, and the selected option's parameters. These fields MUST be optional, MUST omit absent or empty values, and MUST NOT reinterpret or replace mechanism-owned values in `params` with universal escrow fields.
+Listings and proposals MAY carry ordered `SettlementOption` envelopes containing stable option ID, mechanism, asset, rates, and opaque mechanism parameters. Accepted terms MUST pin the exact advertised option through `SettlementSelection`. Buyer-supplied mechanism inputs such as `payer_account` remain in the selection's opaque `params` and the Agreement's `settlement_params`; they MUST NOT replace seller-owned option parameters. Legacy Alkahest-only acceptance MAY omit a selection. These fields MUST be optional, MUST omit absent or empty values, and MUST NOT reinterpret or replace mechanism-owned values in `params` with universal escrow fields.
 
 #### Scenario: Legacy Alkahest negotiation is serialized
 
@@ -39,9 +39,8 @@ Listings and proposals MAY carry ordered `SettlementOption` envelopes containing
 
 #### Scenario: Arkhai payment option is advertised
 
-- **WHEN** a listing supports hosted charge-first settlement through `arkhai.payments.v1`
-- **THEN** its option is carried in `settlement_options` and any Alkahest escrow parameters remain inside the Alkahest option rather than beside shared listing fields
-
+- **WHEN** a listing supports charge-first settlement through `arkhai.payments.v1`
+- **THEN** its option is carried in `settlement_options` without rewriting legacy Alkahest escrow fields
 
 ### Requirement: Deterministic option identity
 

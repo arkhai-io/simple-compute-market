@@ -739,6 +739,129 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_save)
 
+    async def start_bare_metal_payment_lifecycle(
+        self,
+        *,
+        negotiation_id: str,
+        escrow_uid: str,
+        site_id: str,
+        physical_resource_id: str,
+    ) -> dict[str, Any] | None:
+        """Start a payment deal's delivery only while its settlement is verified.
+
+        The lifecycle row is the delivery-start marker: it is inserted in the same
+        transaction that checks the settlement record, so refund intent recorded
+        first prevents delivery, and an existing row (an interrupted delivery)
+        is returned as is. Returns ``None`` when a refund already owns the deal.
+        """
+
+        def _start() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute(
+                        "SELECT * FROM bare_metal_fulfillment_lifecycle WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if row is None:
+                        record = conn.execute(
+                            "SELECT status FROM bare_metal_settlement_records "
+                            "WHERE negotiation_id = ?",
+                            (negotiation_id,),
+                        ).fetchone()
+                        if record is None or record["status"] != "settlement_verified":
+                            conn.execute("ROLLBACK")
+                            return None
+                        conn.execute(
+                            "INSERT INTO bare_metal_fulfillment_lifecycle("
+                            "negotiation_id, escrow_uid, site_id, physical_resource_id, state"
+                            ") VALUES (?, ?, ?, ?, 'planning')",
+                            (negotiation_id, escrow_uid, site_id, physical_resource_id),
+                        )
+                        row = conn.execute(
+                            "SELECT * FROM bare_metal_fulfillment_lifecycle "
+                            "WHERE negotiation_id = ?",
+                            (negotiation_id,),
+                        ).fetchone()
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+                result = dict(row)
+                expected = {
+                    "escrow_uid": escrow_uid,
+                    "site_id": site_id,
+                    "physical_resource_id": physical_resource_id,
+                }
+                if any(result[key] != value for key, value in expected.items()):
+                    raise RuntimeError("bare-metal fulfillment lifecycle identity conflict")
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_start)
+
+    async def record_bare_metal_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
+        """Record refund intent before reversing; report whether delivery had started.
+
+        Serialized against ``start_bare_metal_payment_lifecycle``: whichever
+        commits first decides whether delivery precedes the refund.
+        """
+
+        def _record() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    record = conn.execute(
+                        "SELECT status FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if record is None:
+                        raise RuntimeError("accepted settlement record is missing")
+                    started = conn.execute(
+                        "SELECT 1 FROM bare_metal_fulfillment_lifecycle WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone() is not None
+                    if record[0] != "refunded":
+                        conn.execute(
+                            "UPDATE bare_metal_settlement_records SET status = 'refunding', "
+                            "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                            "WHERE negotiation_id = ?",
+                            (negotiation_id,),
+                        )
+                    conn.execute("COMMIT")
+                    return {"status": record[0], "delivery_started": started}
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_record)
+
+    async def abandon_bare_metal_refund_intent(
+        self, *, negotiation_id: str, prior_status: str
+    ) -> None:
+        """Restore the settlement record when the reversal proved impossible."""
+
+        def _abandon() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE bare_metal_settlement_records SET status = ?, "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ? AND status = 'refunding'",
+                        (prior_status, negotiation_id),
+                    )
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_abandon)
+
     async def load_bare_metal_fulfillment_lifecycle(
         self,
         *,
@@ -881,7 +1004,7 @@ class SQLiteClient(CoreSQLiteClient):
                         "status = 'refunded', "
                         "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
                         "WHERE negotiation_id = ? "
-                        "AND status IN ('accepted', 'settlement_verified', 'refunded')",
+                        "AND status IN ('accepted', 'settlement_verified', 'refunding', 'refunded')",
                         (settlement_ref, negotiation_id),
                     )
                 row = conn.execute(

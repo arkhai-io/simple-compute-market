@@ -132,3 +132,35 @@ def _stored(terms):
         "size": len(canonical),
         "uploader": BUYER,
     }
+
+
+def _attachment(content):
+    return {"kind": "deal", "content": content, **_stored(content)}
+
+
+@pytest.mark.parametrize("order", ["foreign_first", "foreign_last"])
+def test_deposit_refuses_an_attachment_for_another_deal_in_any_position(order):
+    terms = agreement(deposit=True)
+    foreign, mine = _attachment({"other": "deal"}), _attachment(terms)
+    attachments = [foreign, mine] if order == "foreign_first" else [mine, foreign]
+    data, snapshot = _snapshot_json(terms, attachments=attachments)
+    client = _client(lambda request: httpx.Response(200, json=snapshot))
+    with pytest.raises(PaymentsProtocolError):
+        client.ensure_agreement_attached(
+            data.transaction_id, terms, PaymentsOptionParams.model_validate(option(deposit=True).params)
+        )
+
+
+def test_deposit_accepts_duplicate_matching_attachments_without_posting():
+    terms = agreement(deposit=True)
+    data, snapshot = _snapshot_json(terms, attachments=[_attachment(terms), _attachment(terms)])
+    methods = []
+
+    def handler(request):
+        methods.append(request.method)
+        return httpx.Response(200, json=snapshot)
+
+    stored = _client(handler).ensure_agreement_attached(
+        data.transaction_id, terms, PaymentsOptionParams.model_validate(option(deposit=True).params)
+    )
+    assert stored is not None and methods == ["GET"]

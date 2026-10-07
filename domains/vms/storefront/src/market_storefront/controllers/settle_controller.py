@@ -10,6 +10,7 @@ from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
     EvaluateSettleRequest,
     EvaluateSettleResponse,
     RefundSettlementResponse,
@@ -93,8 +94,20 @@ class SettleController:
             except PaymentSettlementError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
             payload = serialize_settlement_job(result.payload) if "created_at" in result.payload else dict(result.payload)
+            # Job serialization emits a fixed shape; the neutral settlement
+            # fields come from the coordinator's result.
+            payload.update(
+                {
+                    key: result.payload[key]
+                    for key in ("negotiation_id", "escrow_uid", "settlement_ref", "status", "retryable")
+                    if key in result.payload
+                }
+            )
             payload["buyer_principal"] = Identity.model_validate(thread["buyer_principal"]).model_dump(mode="json")
             payload["seller_principal"] = composition.local_principal.model_dump(mode="json")
+            # The neutral fields are a cross-domain contract; refuse to emit a
+            # payload that would not parse as one.
+            AgreementSettleResponse.model_validate(payload)
             return JSONResponse(content=payload, status_code=result.status_code)
         if not isinstance(body, VmSettleRequest):
             raise HTTPException(status_code=400, detail="Alkahest settlement requires EVM inputs")
@@ -370,4 +383,5 @@ async def refund_settlement(negotiation_id: str) -> Any:
         result = await coordinator.refund(negotiation_id, thread)
     except PaymentSettlementError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    RefundSettlementResponse.model_validate(result.payload)
     return JSONResponse(content=result.payload, status_code=result.status_code)

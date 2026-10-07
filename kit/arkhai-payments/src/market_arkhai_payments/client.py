@@ -179,10 +179,15 @@ class PaymentsClient:
         snapshot = self.get_transaction(identifier).snapshot
         if snapshot.transaction.root != identifier or snapshot.receipt.receipt.deal.root.root != expected_deal:
             raise PaymentsProtocolError("transaction does not commit to the supplied Agreement")
+        # Every attachment is a deal attachment the service checked against the
+        # deal hash, so any other hash means the service broke its contract.
+        existing = None
         for attachment in snapshot.attachments:
-            if attachment.sha256.root == expected_deal:
-                return attachment
-            raise PaymentsProtocolError("transaction contains an unexpected deal attachment")
+            if attachment.sha256.root != expected_deal:
+                raise PaymentsProtocolError("transaction contains an unexpected deal attachment")
+            existing = existing or attachment
+        if existing is not None:
+            return existing
         return self.attach_agreement(identifier, agreement_json)
 
     def reverse(self, transaction: str) -> StoredEvent:

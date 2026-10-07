@@ -36,11 +36,38 @@ def test_the_bare_mandate_shape_is_refused():
         PaymentSettlementData.parse(wire["mandate"])
 
 
-def test_stored_data_must_be_derived_from_the_exact_agreement():
+def test_stored_data_is_bound_to_the_exact_agreement():
     stored = PaymentSettlementData.for_agreement(agreement(), config())
-    stored.require_derived_from(agreement(), config())
+    stored.require_bound_to(agreement())
     with pytest.raises(MandatePolicyError):
-        stored.require_derived_from(agreement(amount="20000"), config())
+        stored.require_bound_to(agreement(amount="20000"))
+    with pytest.raises(MandatePolicyError):
+        stored.require_bound_to(agreement(payer=OTHER))
+
+
+def test_accepted_data_survives_later_policy_changes():
+    """Fee and dispute authority are read from the accepted mandate, not current config."""
+    stored = PaymentSettlementData.for_agreement(agreement(), config(fee_bps=250))
+    # A later configuration with another fee and dispute authority derives a
+    # different mandate for new deals, yet the accepted one stays valid.
+    later = PaymentSettlementData.for_agreement(
+        agreement(), config(fee_bps=0, dispute_authority=OTHER)
+    )
+    assert later.transaction_id != stored.transaction_id
+    stored.require_bound_to(agreement())
+
+
+def test_extra_reverse_authorities_are_refused():
+    stored = PaymentSettlementData.for_agreement(agreement(), config())
+    wire = stored.to_wire()
+    wire["mandate"]["authorities"]["reverse"].append(OTHER)
+    from market_arkhai_payments import transaction_id
+
+    tampered = PaymentSettlementData.parse(
+        {"mandate": wire["mandate"], "transaction_id": transaction_id(wire["mandate"])}
+    )
+    with pytest.raises(MandatePolicyError):
+        tampered.require_bound_to(agreement())
 
 
 def test_policy_requires_payments_selection_payer_and_trusted_policy():

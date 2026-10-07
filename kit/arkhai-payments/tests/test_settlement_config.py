@@ -232,3 +232,13 @@ def test_attach_agreement_is_a_buyer_setting(monkeypatch: pytest.MonkeyPatch) ->
     buyer = asyncio.run(arkhai_payments_preflight(config, {}, "buyer"))
     assert buyer.ready
     assert not _config().attach_agreement
+
+
+def test_client_factory_serves_a_disabled_mechanism() -> None:
+    from market_arkhai_payments import payments_client_for_owner
+
+    config = _config(
+        enabled=False, development_auth=True, service_url="http://127.0.0.1:9", api_key_env=None
+    )
+    with payments_client_for_owner(config, "11111111-1111-4111-8111-111111111111") as client:
+        assert client is not None

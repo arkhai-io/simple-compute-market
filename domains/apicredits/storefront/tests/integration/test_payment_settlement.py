@@ -8,6 +8,7 @@ injected at ``PaymentsClient`` through the seller stage.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi import FastAPI
-from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentSellerStage
+from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentSellerStage, servicing_stage
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -49,8 +50,14 @@ class Issuer:
         self.db = db
         self.issued: list[str] = []
         self.fail = False
+        # When set, issuance pauses after starting until ``release`` is set.
+        self.started: asyncio.Event | None = None
+        self.release: asyncio.Event | None = None
 
     async def fulfill(self, **request):
+        if self.started is not None and self.release is not None:
+            self.started.set()
+            await self.release.wait()
         if self.fail:
             await build_api_credit_failure_policy().apply(
                 self.db,
@@ -129,18 +136,18 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
 
 @pytest.fixture
 async def harness(tmp_path):
-    async def build(*, actions=("emit_event",)):
+    async def build(*, actions=("emit_event",), enabled=True):
         db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
         payments = FakePaymentsClient()
         config = ArkhaiPaymentsConfig(
-            enabled=True,
+            enabled=enabled,
             service_url="http://127.0.0.1:9",
             service_identity=SERVICE.identity,
             fee_bps=250,
             dispute_authority=DISPUTE,
             development_auth=True,
         )
-        stage = PaymentSellerStage(config, client_for_owner=payments)
+        stage = servicing_stage(config, client_for_owner=payments)
         data = await _seed(db, stage)
         issuer = Issuer(db)
         composition = SimpleNamespace(domain=SimpleNamespace(fulfillment=issuer))
@@ -244,3 +251,43 @@ async def test_the_refund_action_reverses_a_failed_issuance(harness):
         result = await h.buyer.settle_agreement(NEGOTIATION)
     assert result.status == "refunded"
     assert h.payments.count("reverse") == 1
+
+
+async def test_an_accepted_deal_issues_and_refunds_after_payments_is_disabled(harness):
+    h = await harness(enabled=False)
+    h.serve()
+    assert (await h.buyer.settle_agreement(NEGOTIATION)).status == "ready"
+    assert (await h.seller.refund_settlement(NEGOTIATION)).status == "refunded"
+
+
+async def test_a_refund_recorded_before_issuance_start_stops_issuance(harness):
+    h = await harness()
+    gate = asyncio.Event()
+    claim = h.db.claim_delivery_start
+
+    async def gated_claim(**kwargs):
+        await gate.wait()
+        return await claim(**kwargs)
+
+    h.db.claim_delivery_start = gated_claim
+    h.serve()
+    settling = asyncio.create_task(h.buyer.settle_agreement(NEGOTIATION))
+    await asyncio.sleep(0.05)
+    assert (await h.seller.refund_settlement(NEGOTIATION)).status == "refunded"
+    gate.set()
+    assert (await settling).status == "refunded"
+    assert h.issuer.issued == []
+
+
+async def test_a_refund_after_issuance_start_records_both(harness):
+    h = await harness()
+    h.issuer.started, h.issuer.release = asyncio.Event(), asyncio.Event()
+    h.serve()
+    settling = asyncio.create_task(h.buyer.settle_agreement(NEGOTIATION))
+    await h.issuer.started.wait()
+    assert (await h.seller.refund_settlement(NEGOTIATION)).status == "refunded"
+    h.issuer.release.set()
+    assert (await settling).status == "refunded"
+    escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
+    assert h.issuer.issued == [NEGOTIATION]
+    assert escrow["status"] == "refunded" and escrow["fulfillment_uid"] == "grant-1"

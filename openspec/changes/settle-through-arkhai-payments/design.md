@@ -96,11 +96,11 @@ The kit's seller receipt check returns one of four outcomes, and each domain map
 | `Pending` | The service has no transaction for the mandate yet | 202, `status: "pending"`, `retryable: true` | None |
 | `Verified` | Signature, issuer, transaction, deal, from and to all match | Continue to deposit and delivery | Receipt recorded |
 | `Invalid` | A receipt exists but does not prove the Agreement | 409, non-retryable, logged as an error | **None persisted** |
-| `Unavailable` | The service cannot be reached or answers outside its contract | 503, `retryable: true` | None |
+| `Unavailable` | The service cannot be reached or reports a transient failure | 503, `retryable: true` | None |
 
 An invalid receipt is never the buyer's fault: the transaction ID is the hash of a mandate the seller derived, and the buyer cannot produce a different signed receipt under it. It means a stale seller trust pin, a service fault, or tampering. Persisting nothing lets the same deal recover once an operator fixes the pin.
 
-Incomplete seller payment configuration (no fee policy, dispute authority, or service identity) fails registration preflight and startup rather than surfacing per request. The seller makes one `GET /transactions/{id}` per settle request and does not poll inside it; the buyer's settle retries are the polling loop.
+Operator-action failures are a fifth outcome, `Blocked` ([R13](#r13-operator-action-failures-are-their-own-outcome)). Incomplete publication policy blocks publication in preflight; servicing accepted deals needs only the service URL and receipt identity ([R11](#r11-accepted-deals-are-serviced-from-their-accepted-artifact)). The seller makes one `GET /transactions/{id}` per settle request and does not poll inside it; the buyer's settle retries are the polling loop.
 
 Rejected: 400 for an invalid receipt (blames the buyer), 502 (commonly retried by clients), and continuing to infer outcomes from `ValueError` versus other exceptions.
 
@@ -125,7 +125,7 @@ No test can build a receipt over its own Agreement without signing it. The publi
 - one Agreement → `MandatePolicy` builder, replacing four copies;
 - `PaymentSettlementData` `{mandate, transaction_id}`, the single acceptance wire shape;
 - a seller stage that builds settlement data at acceptance, validates stored data against the exact Agreement bytes, checks receipts with the R2 outcome, re-checks stored receipts, deposits the Agreement (R5), and reverses (R7);
-- a buyer approval that validates the Agreement bytes, the seller's settlement data including its transaction ID, and optionally the advertised option binding. It then applies the buyer's attachment policy, approves, and verifies the approval receipt and polled snapshot. API credits' stricter checks become everyone's.
+- a buyer approval that validates the Agreement bytes and the seller's settlement data including its transaction ID; the advertised option is bound at acceptance ([R16](#r16-the-advertised-option-is-bound-at-acceptance-not-in-the-payments-kit)). It then applies the buyer's attachment policy, approves, and verifies the approval receipt and polled snapshot. API credits' stricter checks become everyone's.
 
 Domains keep payer-account sourcing, confirmation UX, HTTP binding, delivery, journals, run logs, and recovery. API credits' payment orchestration moves from its settle controller into a domain service so the controller stays a thin binding.
 
@@ -137,7 +137,7 @@ The kit exposes framework-free operations and outcomes; this change does not bui
 
 The Agreement discloses both marketplace principals, the listing, amount and timing, and provision terms such as the buyer's SSH public key, requested shape, or an API key ID. Neither the published contract nor the kit offers a way to withdraw an attachment.
 
-- **Buyer:** `attach_agreement` on the shared `[Settlement.arkhai_payments]` configuration, default `false`. When true, the buyer attaches the exact Agreement at approval. The seller role rejects `true` in preflight and composition. A separate buyer configuration model was rejected as premature.
+- **Buyer:** `attach_agreement` on the shared `[Settlement.arkhai_payments]` configuration, default `false`. When true, the buyer attaches the exact Agreement at approval. A seller configuration that sets it is a publication blocker in preflight; the seller never reads it, so composition does not reject it. A separate buyer configuration model was rejected as premature.
 - **Seller:** when the selected option sets `deposit_agreement` and the transaction has no Agreement attachment, the seller attaches it after recording the verified receipt and before any delivery effect. A failed deposit is `Unavailable` (503, retryable); a retry re-checks the stored receipt and repeats the idempotent deposit. Delivering first and depositing later was rejected: it needs durable background retry, and it lets a seller deliver without honoring a term the buyer may have filtered on.
 - **The buyer never runs the seller's deposit.** It is only in the seller's interest.
 
@@ -168,7 +168,7 @@ A seller operator refunds through `POST /api/v1/settlements/{negotiation_id}/ref
 
 - It is a full reversal of still-held parts through the kit's idempotent `reverse`.
 - It requires a verified receipt; otherwise it returns 409.
-- It records `refunded` as a terminal settlement state, after which `settle` never starts delivery.
+- It records refund intent before reversing and `refunded` after, ordered against delivery start ([R12](#r12-delivery-start-and-refund-intent-are-durable-totally-ordered-transitions)): delivery that had not started can no longer start, and delivery that had started is recorded as delivered before the refund.
 - A repeat returns `refunded` without a second reversal.
 - An elapsed hold or collected funds return 409, "nothing left to reverse".
 - It does not tear down anything already delivered; teardown stays a separate operator decision.
@@ -198,7 +198,7 @@ The kit owns the reversal operation and outcome classification. Each domain adds
   - add deltas for R1–R9;
   - address the seven >500-character warnings that current `@latest` strict validation reports.
 
-  Reconciling now would churn the deltas twice.
+  Reconciling now would churn the deltas twice. *Amended by [R17](#r17-false-delta-requirements-are-removed-now): the deferred §1 statements were removed during implementation review; the rest waits for the merge.*
 
 ## Accepted permanent wording
 
@@ -317,8 +317,16 @@ Replace the scenarios "Buyer approves with an optional Agreement attachment" and
 
 - **WHEN** a seller-authenticated refund request names an accepted payment deal
   with a verified receipt and still-held funds
-- **THEN** the storefront requests `reverse` for that transaction once, records the
-  deal refunded so delivery cannot start, and repeats return the same result
+- **THEN** the storefront records refund intent, requests `reverse` for that
+  transaction, and records the deal refunded; repeats return the same result
+  without a second reversal
+
+#### Scenario: Refund and delivery start race
+
+- **WHEN** a refund request and the start of delivery for the same deal overlap
+- **THEN** exactly one transition wins: if refund intent was recorded first,
+  delivery does not start; if delivery started first, the refund proceeds and
+  the deal records both the delivery and the refund
 
 #### Scenario: Only the seller initiates a refund
 
@@ -373,6 +381,67 @@ Found while implementing §5; each is a correction within an accepted decision.
 - **API-credit seller authentication failed on empty-body requests.** It parsed every POST body as JSON, so the refund route and the existing `close_listing` route returned 500 through the typed client, which sends no bytes for an empty body. An empty body now authenticates as the empty-body hash.
 - **Version bumps reach exact pins outside `pyproject.toml`.** The storefront Dockerfiles install their own wheel by exact version, and the VM storefront pins the bare-metal storefront exactly, so the bumps cascaded into Dockerfiles, two READMEs, and the bare-metal storefront version.
 
+## Implementation review decisions
+
+A review of the §5 implementation confirmed the kit-owned mechanism, the typed client and the integration levels, and found that accepted deals were still bound to current configuration, that refund did not serialize against delivery, and that the receipt outcomes still mixed operator faults with outages. These decisions were accepted in design review and govern where they amend R2, R4, R5, R7 and R10.
+
+### R11. Accepted deals are serviced from their accepted artifact
+
+The permanent specs already require it: configuration and readiness govern new publication and admission, while recovery uses the accepted Agreement's exact mechanism and operation identity even after the mechanism is disabled or deprioritized. Three concerns separate:
+
+| Concern | Needs | Governs |
+|---|---|---|
+| Publication and admission readiness (preflight) | `enabled`, fee policy, dispute authority, service URL, receipt identity, credential | Whether new options publish and new deals derive mandates |
+| Servicing accepted deals | Service URL and receipt identity; the credential is resolved per call | Settlement, refund and recovery of existing deals, whatever `enabled` and priority say |
+| Construction invariants | Typed validity only | Startup |
+
+- Stored settlement data is checked against the Agreement using the policy recorded in the stored mandate: the fee and dispute authority are read from the mandate, and everything Agreement-bound (deal hash, payer, payee, amount, asset, hold, expiry) is re-derived and compared exactly. The transaction ID still hashes the whole mandate.
+- The receipt identity pin stays current operational configuration, so repinning recovers from a stale pin.
+- `payments_client_for_owner` no longer refuses a disabled configuration; deriving settlement data for a new acceptance still requires the fee policy and dispute authority.
+- Each composition builds the seller stage whenever the payments section carries a service URL and receipt identity, whether or not it is enabled. Without them, an accepted payment deal returns the R13 operator-action outcome.
+
+### R12. Delivery start and refund intent are durable, totally ordered transitions
+
+R7 permits refunding after delivery, so the race between refund and delivery is a state-truth failure rather than a money-safety one: a deal recorded `refunded` while a resource was delivered, with the delivery's details suppressed. A crash between `reverse` and the local write could also strand a refund. Each domain therefore orders two transitions with single-statement compare-and-set writes in its own tables:
+
+- **Delivery start**, before any external effect, succeeds only while the deal is verified and carries no refund intent.
+  - VM and API credits: the escrow row's `fulfillment_phase` is claimed (`NULL` becomes `delivery_started`) only while its status is `provisioning`.
+  - Bare metal: the fulfillment lifecycle row is inserted only while the settlement record is `settlement_verified`, in the same transaction.
+- **Refund intent** records `refunding` before `reverse` is called.
+  - If delivery had not started, delivery start can no longer succeed and nothing is dispatched.
+  - If delivery had started, the refund proceeds as a refund after delivery: the delivery completes and its details are recorded beside the `refunded` status.
+- **Completion**: any later settle or refund call on a `refunding` deal repeats the idempotent `reverse`; the kit treats "nothing left to reverse" as done only when the transaction snapshot shows every part reversed.
+- API credits' in-process lock is replaced by the same transitions.
+- The R8 failure action's "nothing delivered" guard reads the `ready` status, not the delivery-start marker: the action runs after a delivery that started has failed, and such a delivery delivered nothing.
+- Before recording intent, a refund confirms a verified payment exists, so an unpaid deal never acquires refund intent. If the reversal then finds nothing left to reverse, the intent is abandoned and the prior state restored, so the deal is not left blocked.
+
+### R13. Operator-action failures are their own outcome
+
+| Case | Receipt outcome | Response |
+|---|---|---|
+| `transaction_not_found` | Pending | 202, retryable |
+| Transport error, timeout, 429, 5xx, `ledger_unavailable`, `account_directory_unavailable`, `internal_error` | Unavailable | 503, retryable |
+| Signed receipt does not prove the Agreement | Invalid | 409, nothing persisted |
+| `authentication_required`, `caller_not_authorized`, `account_not_found`, missing credential or servicing configuration, protocol or schema violation, another transaction ID, a non-matching attachment | **Blocked** | **500**, logged as an error |
+
+Refund gains the matching `RefundBlocked`. The fault is the seller's integration, not the buyer's request and not a transient outage.
+
+### R14. Agreement-settlement responses are strict on both sides
+
+The client's `AgreementSettleResponse` and `RefundSettlementResponse` raise `StorefrontClientError` when a required field is missing, as `TESTING.md`'s typed-client rule requires. Each storefront validates its payment payload through the core response models before returning it, so a server cannot emit a drifted shape. The lenient `SettleResponse` used by the EVM path is unchanged.
+
+### R15. Every Agreement attachment must match the deal
+
+By schema every attachment is `kind: "deal"`, and the service validates deal attachments against the transaction's deal hash, so a stored attachment with another hash is a contract violation. The real client and the fake both examine every attachment, return the matching one, and refuse any mismatch (Blocked under R13). The fake had been more permissive than production.
+
+### R16. The advertised option is bound at acceptance, not in the payments kit
+
+`core_buyer`'s acceptance validation already requires the Agreement's `option_id` and mechanism to equal the buyer's selection for every mechanism, and `SettlementOption` rejects any option whose ID is not the hash of its own content, so a matching ID proves the option is the advertised one. `PaymentApproval` drops its `advertised_option` parameter and checks only the mechanism-specific facts: the mandate against the Agreement bytes, the buyer's trusted policy, the payer account and the seller's transaction ID.
+
+### R17. False delta requirements are removed now
+
+The five deltas that asserted deferred §1 behavior now carry the current permanent text ("Mechanism-neutral plan carrier", "Mechanism clients own mechanism vocabulary", "Settlement options keep mechanism-owned parameters opaque", "Additive settlement option carriers"), and "Alkahest owns escrow semantics" is removed from the delta. Eight deltas still differ from the permanent text only in wording; they, the R1–R17 deltas and the over-length warnings are reconciled after the merge (task 7.3).
+
 ## Merge with the development branch
 
 This change lands after `bare-metal-mock-provisioned-deal` on the development branch, whose tree has moved since this change branched. The merge will be resolved from a conflicted snapshot. These are the decisions it raises that are already known:
@@ -402,6 +471,12 @@ This change lands after `bare-metal-mock-provisioned-deal` on the development br
 | R7 seller-initiated refunds | `openspec/specs/settlement-servicing/spec.md` (wording above) |
 | R8 mechanism-dispatched refund failure action | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
 | R9 snapshot proofs not trusted | `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` (current limitation) |
+| R11 accepted deals serviced from their accepted artifact | `openspec/specs/settlement-servicing/spec.md#requirement-mechanism-configuration-cannot-reinterpret-durable-plans` (requirement already present; servicing-capability wording) and `openspec/specs/settlement-configuration/spec.md#requirement-recovery-follows-the-accepted-settlement-option` |
+| R12 durable delivery-start and refund-intent ordering | `openspec/specs/settlement-servicing/spec.md` (wording above) and companion `architecture.md#charge-first-payment-settlement` |
+| R13 operator-action outcome | `openspec/specs/settlement-servicing/spec.md#requirement-negotiation-scoped-payment-settlement-converges`, with R2 |
+| R14 strict agreement-settlement responses | `openspec/specs/buyer-orchestration/spec.md#requirement-payment-buyers-preserve-accepted-state` |
+| R15 attachment contract | `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` |
+| R16 advertised option bound at acceptance | `openspec/specs/buyer-orchestration/spec.md` (acceptance validation binds the Agreement to the advertised option for every mechanism) |
 | R10 core carrier description | `core/src/market_core/schemas.py` docstrings, consistent with `openspec/specs/settlement-servicing/spec.md#requirement-mechanism-neutral-plan-carrier` |
 
 These rows move into the design promotion record as each promotion lands.

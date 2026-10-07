@@ -46,3 +46,12 @@ class ReceiptVerificationError(PaymentsError, ValueError):
 
 class PaymentApprovalDeclined(PaymentsError):
     """The buyer declined a mandate that otherwise passed every check."""
+
+
+class PaymentsBlocked(PaymentsError):
+    """A payments call failed in a way only the seller's operator can repair.
+
+    Authentication, authorization, missing configuration, and responses outside
+    the published contract are not transient: retrying cannot succeed until the
+    integration is fixed.
+    """

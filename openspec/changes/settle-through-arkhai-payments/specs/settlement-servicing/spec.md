@@ -100,12 +100,7 @@
 
 ### Requirement: Mechanism-neutral plan carrier
 
-Core settlement carriers MUST retain only mechanism-neutral participant and value fields plus a tagged `{mechanism, params}` envelope. They MUST NOT define `claimant`, `claimant_principal`, `expiration_unix`, or `conditions` as universal lifecycle fields. Core MUST treat mechanism-specific values in `params` as opaque.
-
-#### Scenario: New settlement mechanism is added
-
-- **WHEN** a composition registers a client for a new mechanism
-- **THEN** the shared carrier transports its opaque parameters without importing the mechanism kit or imposing escrow lifecycle fields
+Settlement plans MUST carry stable participant/value fields and tagged `{mechanism, params}` envelopes for mechanisms using the obligation runtime. Existing carriers retain escrow claimant, expiration, and condition fields; Arkhai payments MUST consume the Agreement without constructing a `SettlementPlan` or `SettlementObligation` or implementing the conditional-escrow client port.
 
 #### Scenario: Charge-first settlement is selected
 
@@ -128,12 +123,14 @@ The Alkahest servicing path MUST bind one immutable fulfillment reference, persi
 
 ### Requirement: Mechanism clients own mechanism vocabulary
 
-Each settlement mechanism MUST own the schema and API for its state and effects. Alkahest-specific plan, status, arbiter, collection, and reclaim encoding MUST live inside the Alkahest kit. `ConditionalEscrowClient` MUST NOT be a shared mechanism adapter contract.
+Alkahest-specific plan, status, arbiter, collection, and reclaim encoding MUST
+live in the Alkahest kit behind the shared conditional-escrow client port.
 
 #### Scenario: Runtime evaluates an Alkahest obligation
-
-- **WHEN** Alkahest needs mechanism-specific status, readiness, collection, or reclaim behavior
-- **THEN** its own client handles the escrow operations with the stable operation reference and prior durable mechanism state
+- **WHEN** it needs mechanism-specific status, readiness, collection, or
+  reclaim behavior
+- **THEN** it dispatches through the registered Alkahest client with the stable
+  operation reference and prior durable mechanism state
 
 ### Requirement: Durable independent obligation lifecycle
 
@@ -229,20 +226,6 @@ A settlement mechanism MAY require an EVM address, wallet, RPC endpoint, chain I
 
 - **WHEN** an Alkahest obligation selects a condition whose contract requires an EVM subject or transaction
 - **THEN** the Alkahest kit validates the explicitly tagged EVM input without reinterpreting an Ed25519 principal
-### Requirement: Alkahest owns escrow semantics
-
-For `alkahest.v1`, escrow claimant, claimant principal, expiration, and condition semantics MUST be carried in Alkahest-owned option and obligation parameters. The Alkahest kit MUST own interpretation and servicing of those fields, including its `ConditionalEscrowClient`; core carriers and other settlement mechanisms MUST NOT depend on that escrow API.
-
-#### Scenario: Core transports an Alkahest obligation
-
-- **WHEN** a core settlement carrier contains an Alkahest obligation
-- **THEN** the claimant, claimant principal, expiration, and conditions are encoded in `alkahest.v1` parameters and core does not interpret them
-
-#### Scenario: A charge-first mechanism is composed
-
-- **WHEN** a domain composes `arkhai.payments.v1`
-- **THEN** it uses that mechanism's mandate, transaction, receipt, and refund API without implementing Alkahest collect or reclaim verbs
-
 ### Requirement: Arkhai payments settles charge-first from an agreement
 
 The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepted Agreement. Its `deal` MUST be `sha256(JCS(agreement))`, and its transaction ID MUST be `sha256(JCS(mandate))`. The mandate MUST identify the buyer's Arkhai account as `from`, the payee account declared by the selected option as `to`, and one `once` part for the agreed amount and asset. The hold MUST cover `(start_utc - accepted_at) + duration_seconds +` the option's declared window. The mandate MUST use the service's published fee policy, authorize `start` and `stop` for the buyer and seller and `reverse` for the seller and Arkhai dispute authority (never the buyer), and use the fixed nonce defined by the design. The seller MUST return the mandate and Agreement so both parties know the transaction ID before approval.
