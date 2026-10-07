@@ -15,7 +15,7 @@ shape and pricing kits rather than being rebuilt per domain.
 The interface matters more than the first implementation. A static minimum and maximum
 per dimension is a box, but a seller's real policy can couple dimensions — at most
 64 GiB of memory per GPU requested — and buyer and seller are expected to negotiate
-dimensions with counter-proposals. An interface that returns readable bounds would make
+dimensions with counter-proposals. An interface that returns unconditional bounds would make
 either a rewrite of every caller; one that takes the whole shape and answers questions
 about it makes them new implementations.
 
@@ -27,18 +27,25 @@ about it makes them new implementations.
   evaluates it with a whole-shape check returning structured problems and a query for
   the values one dimension may take given a partial shape, such that a counter-proposal
   can be built one dimension at a time without search. `min` and `max` are the only
-  constraints. No operation exposes readable bounds.
+  constraints. No operation gives a range for a dimension independent of the rest of
+  the shape; the values one dimension may take are answered only for a given partial
+  shape. A stated list is split as a whole, so a base shape stated twice with different
+  constraints is found without a schema.
 - Stated listing shapes — the pool's `listing_shapes` hint and a storefront override's
   `listing_shapes` — may give a quantity field `{offer, min, max}` in place of its
   scalar. A plain scalar is shorthand for an offer. An offer alone says nothing about
   negotiability. Unknown keys make the constraint unreadable, so later forms fail
   closed on older readers.
 - A listing's constraints merge per field with the VM storefront's configured default,
-  which adds values where the listing omits them and states no offer. An override that
+  `[admissibility.defaults.vm]`, which adds values where the listing omits them and
+  states no offer. An override that
   states shapes replaces the hint's list whole, as it does today.
 - VM publication never advertises an inadmissible offer; a listing whose policy cannot
-  be computed closes, alone, and is reported. The VM default generator generates only
-  counts the configured default admits. Override writes and pool writes are checked.
+  be computed — unusable constraints, an empty range, or its base shape stated twice
+  with different constraints — closes, alone, and is reported; a list with an unreadable
+  base shape holds the pool, as today. The VM default generator generates only counts
+  the configured default admits. Override writes and pool writes are checked, and both
+  refuse a list that states one base shape with different constraints.
 
 ## Capabilities
 
@@ -51,7 +58,8 @@ None.
 Provisional; planning and review confirm the destinations (`design.md`, D11).
 
 - `market-composition`: the admissibility kit's contract and the inline constraint form.
-- `resource-pool-management`: listing-shape hint validation accepting constraints.
+- `resource-pool-management`: listing-shape hint validation accepting constraints and
+  refusing a base shape stated twice with different constraints.
 - `storefront-publication`: listing shapes carrying constraints, per-listing resolution,
   publication and generator behavior, the override write check, and the reports.
 
@@ -94,13 +102,14 @@ Provisional; planning and review confirm the destinations (`design.md`, D11).
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — the foundation kit list; the
-      close-rather-than-hold principle with an example; "Omission states no commitment"
+      test for whether a storefront holds or closes a listing it cannot fully derive,
+      as a framework with brief examples; "Omission states no commitment"
       extended to an offer without a range; the VM listing shapes authority row.
 - [x] Existing subsystem specification — provisional: `market-composition`,
       `resource-pool-management`, `storefront-publication`.
 - [ ] New subsystem specification — none.
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the inline constraint form and the
-      configured default.
+      configured default, `[admissibility.defaults.vm]`.
 
 ### Knowledge to promote
 
@@ -108,25 +117,30 @@ Destinations are provisional (D11).
 
 - The admissibility contract: the kit is the only reader of a constraint; splitting,
   parsing, labelled resolution with per-form merge rules, and evaluation; whole shape
-  in, structured problems out, never readable bounds; `admissible_values`, its invalid
-  requests, and its one-dimension-at-a-time guarantee; the opaque value set; omitted
-  dimensions are free; constraints intersect; unknown keys are unreadable; the inline
+  in, structured problems out, never unconditional bounds; the base shape read before
+  the constraints; the list-level split and conflicting duplicates;
+  `admissible_values`, its invalid requests, and its one-dimension-at-a-time guarantee;
+  the opaque value set; omitted dimensions are free; constraints intersect; unknown keys are unreadable; the inline
   form — `openspec/specs/market-composition/spec.md`.
 - Why the interface is shaped for coupled declared constraints and counter-proposals,
   why occupancy is excluded, why constraints sit inline on the listing, and why a
   requirement that a dimension be stated is not a constraint —
   `openspec/specs/market-composition/architecture.md`.
-- Listing-shape validation accepting constraints —
+- Listing-shape validation accepting constraints and refusing conflicting duplicates —
   `openspec/specs/resource-pool-management/spec.md`.
-- Per-listing resolution with the configured default; a listing whose policy cannot be
-  computed closes alone; inadmissible offers are not published; the generator; the
-  override check; identity over the base shape; the reports —
+- Per-listing resolution with the configured default; the base shape read first, an
+  unreadable base holding the pool; a listing whose policy cannot be computed, including
+  a base shape stated twice with different constraints, closes alone; inadmissible
+  offers are not published; the generator; the override check; identity over the base
+  shape; the reports —
   `openspec/specs/storefront-publication/spec.md`.
 - Admissibility is the storefront's policy and a site's constraint an advisory input;
   why constraints close where pricing holds —
   `openspec/specs/storefront-publication/architecture.md`.
-- The foundation kit; storefront policy that cannot be reconciled with the site closes
-  rather than holds, with an example; an offer without a range commits nothing about
+- The foundation kit; the test for whether a storefront holds or closes a listing it
+  cannot fully derive, as a framework with brief examples (pricing and an unreadable
+  shape list hold, uncomputable admissibility closes), each term's own rule staying in
+  `storefront-publication`; an offer without a range commits nothing about
   negotiability — `docs/development/ARCHITECTURE.md`.
 - The inline form and the configured default — `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - The negotiation invariant and the omitted-dimension policy —

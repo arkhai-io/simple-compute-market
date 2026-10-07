@@ -17,7 +17,14 @@ every problem resolution later returns about it, SHALL carry:
 - splitting a stated listing shape into its base shape and either its declaration or its
   constraint problems. Without a schema it SHALL check structure only; given a domain's
   capability schema it SHALL also check that every constrained path is a quantity field
-  the schema defines. The kit SHALL know no family or field name.
+  the schema defines. The kit SHALL know no family or field name. It SHALL read the base
+  shape first: a constraint that leaves the base shape unreadable under the schema SHALL
+  be reported as a base-shape problem with no declaration, and only a constraint error
+  on a readable base shape SHALL be a constraint problem.
+- splitting a stated list of listing shapes entry by entry, and reporting each base shape
+  that two entries state with different constraints, naming each conflicting entry,
+  without needing a schema. Entries identical in base shape and constraints SHALL
+  collapse to one. No caller SHALL compare two entries itself.
 - parsing a constraint-only declaration, which states no offer.
 - resolving declarations given highest tier first, with a schema, into a resolved policy
   or every problem found. Each constraint form SHALL own its merge rule. An empty range
@@ -38,8 +45,10 @@ every problem resolution later returns about it, SHALL carry:
 
 The returned values SHALL be an opaque set answering membership, emptiness, the greatest
 admissible value not above a given value, the least not below it, and its minimum and
-maximum, where an absent maximum means unbounded and every accessor of an empty set
-answers nothing. An answer SHALL be valid only for the partial shape it was computed
+maximum, where an absent maximum means unbounded. An empty set SHALL report itself
+empty and contain no value, and each of its value-returning accessors SHALL answer
+nothing. No operation SHALL return a range for a dimension independent of the rest of a
+shape. An answer SHALL be valid only for the partial shape it was computed
 from. Fixing dimensions one at a time, in any order, each to a value from the current
 answer SHALL never leave a later answer empty and SHALL end at an admissible shape.
 
@@ -164,3 +173,21 @@ unreadable rather than be ignored.
 - **WHEN** a shape states `cpu.count` as a plain scalar and no tier bounds it
 - **THEN** the base shape states that count, and a shape stating any other count is
   admissible on that field
+
+#### Scenario: A constraint removes a required field from the base shape
+
+- **WHEN** a shape is split with a schema that requires a field, and the shape gives that
+  field a constraint mapping with no `offer`
+- **THEN** splitting returns a base-shape problem naming the field as required, and no
+  declaration
+
+#### Scenario: A list states one base shape with different constraints
+
+- **WHEN** a stated list is split, with or without a schema, and two entries share a base
+  shape but differ in their constraints
+- **THEN** the split reports that base shape as conflicting, naming both entries
+
+#### Scenario: A list repeats an identical entry
+
+- **WHEN** a stated list holds two entries identical in base shape and constraints
+- **THEN** the split yields that entry once and reports no problem

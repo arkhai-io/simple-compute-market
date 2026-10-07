@@ -99,7 +99,9 @@ unit").
 
 The VM storefront SHALL resolve each listing's admissibility policy from two tiers, highest
 first: the constraints its stated shape carries, from whichever source stated it, and the
-storefront's configured default for the VM mode, which states no offer. It SHALL split each
+storefront's configured default for the VM mode, `[admissibility.defaults.vm]` in the
+listing shape's family nesting and field syntax, which states no offer. Absent and empty
+both mean no default. It SHALL split each
 stated shape and resolve the tiers through the admissibility kit with the VM domain's
 schema, labelling each tier, and SHALL NOT read a constraint itself. Under the `min`/`max`
 merge a listing MAY replace a configured default's value, including with a wider one, and
@@ -107,7 +109,9 @@ SHALL NOT remove it. A generated shape's policy SHALL be the configured default 
 field no tier constrains SHALL NOT be constrained by admissibility. An override's shapes
 SHALL NOT merge with the hint's constraints. The resolved policy is the storefront's own;
 site admission is not changed by it. A malformed configured default SHALL prevent the
-storefront from starting.
+storefront from starting. The storefront SHALL parse the configured default once and
+supply the same declaration to publication, the default generator, and the override
+write check.
 
 #### Scenario: A listing narrows the configured default
 
@@ -138,14 +142,19 @@ storefront from starting.
 
 ### Requirement: A VM listing whose admissibility cannot be computed closes
 
-Where a listing's constraints cannot be read with the VM domain's schema — a constraint on
-an attribute or an undefined field, or a key the storefront's kit does not define — or its
-tiers resolve to an empty range, the storefront cannot compute its own policy for that
+The storefront SHALL read a stated list's base shapes before its constraints. Where any
+entry's base shape cannot be read with the VM domain's schema, including because a
+constraint mapping without an offer removed a required field, the list is unreadable and
+the pool SHALL keep the existing hold. Where every base shape can be read but a listing's
+constraints cannot — a constraint on an attribute or an undefined field, or a key the
+storefront's kit does not define — or its tiers resolve to an empty range, or its base
+shape is stated twice with different constraints, the storefront cannot compute its own policy for that
 listing and SHALL fail closed for it alone: it SHALL NOT publish the listing, SHALL close
 an open listing for it, and SHALL continue to publish the pool's other listings. A pool
 whose base shapes cannot be read SHALL keep the existing hold. The storefront SHALL report
-the tier, the path, and the problem, or each tier's conflicting value, per site in its
-derivation report served by system status.
+the tier, the path, and the problem, each tier's conflicting value, or each conflicting
+entry, per site in its derivation report served by system status. Entries identical in
+base shape and constraints SHALL collapse to one listing and SHALL NOT be reported.
 
 #### Scenario: A listing's range merges empty
 
@@ -161,10 +170,31 @@ derivation report served by system status.
 - **THEN** that listing closes, the pool's other listings are published, and the report
   names the path and the key
 
-#### Scenario: A listing constrains an attribute
+#### Scenario: A listing constrains a required attribute
 
 - **WHEN** a stated shape gives `gpu.model` a constraint mapping
-- **THEN** that listing closes and the report names `gpu.model`
+- **THEN** the base shape lacks its required model, no new listing is derived from the
+  pool, its existing listings are held, and the report names `gpu.model`
+
+#### Scenario: A listing constrains a required quantity without offering it
+
+- **WHEN** a stated shape gives `gpu.count` `{min: 2, max: 8}` with no `offer`
+- **THEN** no new listing is derived from the pool, its existing listings are held, and
+  the report names `gpu.count` as required
+
+#### Scenario: A listing constrains a field the VM domain does not define
+
+- **WHEN** a stated shape with a readable base shape gives `memory.foo` a constraint
+  mapping with no `offer`
+- **THEN** that listing closes, the pool's other listings are published, and the report
+  names `memory.foo`
+
+#### Scenario: A list states one base shape with different constraints
+
+- **WHEN** a stored list holds `gpu.count` `{offer: 1, max: 4}` and `{offer: 1, max: 8}`
+  for the same model
+- **THEN** that listing closes, the pool's other listings are published, and the report
+  names both entries
 
 #### Scenario: A pool's base shapes cannot be read
 
@@ -181,9 +211,10 @@ derivation identity SHALL be taken over its base shape, so a change to its const
 alone SHALL NOT change its identity; reconciliation SHALL re-evaluate the listing against
 its current policy. Asking rates SHALL be matched against the base shape. A storefront pool
 override write for the VM mode SHALL be refused, before the site is called and without
-changing the stored override, when one of its shapes' constraints cannot be read with the
-VM domain's schema, resolves to an empty range against the configured default, or leaves
-the shape's offer inadmissible.
+changing the stored override, when one of its shapes' base shape or constraints cannot be
+read with the VM domain's schema, its list states one base shape twice with different
+constraints, or one of its shapes resolves to an empty range against the configured
+default or leaves its offer inadmissible.
 
 #### Scenario: A configured default excludes a stated offer
 
@@ -207,6 +238,13 @@ the shape's offer inadmissible.
 - **WHEN** a storefront administrator writes an override whose shape gives `gpu.count` a
   maximum below the configured default's minimum
 - **THEN** the write is refused, the site is not called, and the stored override is
+  unchanged
+
+#### Scenario: An override states one base shape with different constraints
+
+- **WHEN** a storefront administrator writes an override whose list states one base shape
+  twice with different constraints
+- **THEN** the write is refused naming both entries, and the stored override is
   unchanged
 
 #### Scenario: An override states a shape with an unreadable constraint

@@ -29,6 +29,11 @@ Verified against the tree on 2026-10-07.
   implementation, selected by the domain at composition.
 - **`kit/site` reading pool state is a recorded exception.** `ARCHITECTURE.md`'s kit
   layers say no new site read of pool state may be added while it stands.
+- **A stated list is deduplicated by digest, keeping the first entry**
+  (`_deduplicated` in `arkhai_vms_listings.listing_shapes`); the digest is the shape
+  kit's `shape_digest` over the canonical form and needs no schema. An unreadable entry
+  makes the whole list unreadable and holds the pool; reconciliation closes any open
+  listing a pass does not derive again unless the pool is held.
 - **Omission already states no commitment** (`ARCHITECTURE.md`, "Omission states no
   commitment"): a dimension a VM shape omits is outside the listing's commitment.
 - **Negotiation cannot yet carry a shape.** `negotiation-driven-capacity-resize` §2 adds
@@ -94,10 +99,12 @@ free of commercial evaluation as pricing was); extending `kit/capability-pricing
 two change for independent reasons, share no code, and are reused apart); domain only (a
 second domain would copy it).
 
-### D3. Whole shape in, problems out, never readable bounds
+### D3. Whole shape in, problems out, never unconditional bounds
 
 Callers hold a `Declaration` and a `ResolvedPolicy` as opaque values; only the kit reads
-their contents.
+their contents. No operation gives a caller a policy-level range for a dimension
+independent of the rest of a shape; the values one dimension may take are answered only
+for a particular partial shape (D4).
 
 **Declaration handling.** Each takes a `tier` label that every problem it returns, and
 every problem resolution later returns about it, carries:
@@ -109,7 +116,18 @@ every problem resolution later returns about it, carries:
   the shape kit's problems, with no declaration. Without a schema it checks structure
   only, which is what the domain-neutral pool-write surfaces can know; with the
   domain's schema it also checks that every constrained path is a quantity the schema
-  defines.
+  defines. The base shape is read first: a constraint error that leaves the base shape
+  unreadable under the schema — a constraint-only mapping on a required field, such as
+  `gpu.model: {max: 4}` or `gpu.count: {min: 2}` under the compute schema — is reported
+  as a base-shape problem, with no declaration. Only a constraint error on a readable
+  base shape is a constraint problem.
+- **`split_listing_shapes(raw_list, *, tier, schema=None)`** splits a stated list,
+  entry by entry as `split_listing_shape` does, and also reports each base shape that two
+  entries state with different constraints, naming each conflicting entry. Entries with
+  identical base shapes and identical constraints collapse to one. The base identity is
+  the shape kit's `shape_digest`, which needs no schema, so the domain-neutral pool-write
+  surfaces detect a conflict as the domain does. Every reader of a stated list calls this
+  operation; none compares two entries itself.
 - **`parse_declaration(raw, *, tier, schema=None)`** parses a constraint-only document,
   the form the configured default takes: the same field syntax with no `offer`.
 - **`resolve(declarations, schema)`**, given declarations highest tier first, returns a
@@ -141,8 +159,8 @@ leaves a later answer empty and always ends at an admissible shape. A policy can
 counter-shape in whatever priority it chooses without search and without assuming the
 region is a box.
 
-What protects callers from a later rewrite is that the whole shape goes in and no bounds
-come out. A problem naming one path, or a range for one dimension ignoring the rest,
+What protects callers from a later rewrite is that the whole shape goes in and no unconditional
+bounds come out. A problem naming one path, or a range for one dimension ignoring the rest,
 would encode the box in the return type.
 
 Rejected: a readable `(min, max)` per dimension (every caller comparing locally encodes
@@ -162,8 +180,10 @@ counter-proposal change will use.
 `admissible_values` returns an `AdmissibleValues` answering questions rather than
 exposing its representation: `is_empty`, `contains(v)`, `at_most(v)` (the greatest
 admissible value not above `v`), `at_least(v)`, `minimum`, and `maximum`. `maximum` is
-`None` when unbounded; every accessor returns `None` on an empty set, so a caller checks
-`is_empty` first. The static implementation backs it with an interval. An answer is
+`None` when unbounded. On an empty set `is_empty` is true, `contains(v)` is false, and
+every value-returning accessor (`at_most`, `at_least`, `minimum`, `maximum`) returns
+`None`, so a caller checks `is_empty` first. These are bounds conditional on one partial
+shape, which D3 permits; an unconditional range per dimension is what it forbids. The static implementation backs it with an interval. An answer is
 valid only for the partial shape it was computed from; a caller that caches an
 unconditional answer as "the bounds" reads bounds directly.
 
@@ -254,34 +274,48 @@ pricing, not a permissive default awaiting a fail-closed alternative.
 
 ### D8. A listing whose policy cannot be computed closes
 
-A listing's policy is the merge of its tiers (D9). When the storefront cannot compute
-it, it fails closed for that listing alone:
+A listing's policy is the merge of its tiers (D9). The stated list is read base shape
+first (D3). When any entry's base shape cannot be read — including because a
+constraint-only mapping removed a required field — the list is unreadable and the
+existing rule applies: no new listing from the pool, its existing listings held, each
+problem reported. When every base shape can be read but a listing's policy cannot be
+computed, the storefront fails closed for that listing alone:
 
 - **Its constraints cannot be read** — a constraint on an attribute or an undefined
-  field, or a key newer than the storefront's kit — in the pool hint or a stored
-  override.
+  field that leaves the base shape readable, or a key newer than the storefront's kit —
+  in the pool hint or a stored override.
 - **Its merged range is empty** — for example, the listing states `max: 4` and the
   configured default `min: 8`.
+- **Its base shape is stated twice with different constraints** — for example,
+  `gpu.count {offer: 1, max: 4}` and `gpu.count {offer: 1, max: 8}` for the same model.
+  Identical entries collapse and are not a conflict.
 
 That listing is not published and an open listing for it closes; the pool's other
-listings are unaffected. The report names the tier, the path, and the problem, or each
-tier's conflicting value. A malformed configured default prevents the storefront from
-starting, the same rule applied to its own input. A pool whose base shapes cannot be
-read keeps the existing rule: no new listing, existing listings held.
+listings are unaffected. The report names the tier, the path, and the problem, each
+tier's conflicting value, or each conflicting entry. A malformed configured default
+prevents the storefront from starting, the same rule applied to its own input.
 
-Storefront policy that cannot be reconciled with what the site declared closes the
-listing rather than holding it, so it is never silently ignored. The site cannot be
-refused a projection; closing is the signal that reaches the site's administrator, who
-then reconciles with the storefront's administrator. A hold remains right where nothing
-the storefront stated is at stake: an override that states shapes replaces the hint, so
-an unreadable hint concerns only the site. Pricing holds where this closes because a
-last-published price is still an offer the storefront made; here the storefront cannot
-say what it would sell.
+Whether to hold or close follows one test. A hold keeps the last-published offer
+standing while a declaration cannot be read, and is right when that offer is still one
+the storefront made: an unreadable price holds because the last price was the
+storefront's own offer, and an unreadable shape list holds because an unreadable
+declaration is not a withdrawn one. A close is right when every declaration can be read
+but the storefront can no longer say what its own policy would sell: keeping the listing
+open would advertise what that policy may exclude, and the site cannot be refused a
+projection, so closing is the signal that reaches the site's administrator, who then
+reconciles with the storefront's administrator.
 
-Rejected: holding listings and refusing revised shapes (ignores the storefront's policy
-while the listing stays open); closing every listing of the pool (punishes listings
-whose policy is computable); ignoring the unusable constraint (sells beyond a stated
-policy).
+Rejected: holding listings and refusing revised shapes when the policy cannot be computed
+(ignores the storefront's policy while the listing stays open); closing every listing of
+the pool (punishes listings whose policy is computable); ignoring the unusable
+constraint (sells beyond a stated policy); reading each entry on its own so that an
+unreadable base shape closes only its entry (reverses the existing hold for every
+malformed shape, constrained or not); closing an entry only when its unreadable base is
+caused by a constraint (every edge, such as `{offer: 0}`, becomes a classification an
+implementer guesses); for duplicates, keeping the first entry (order-dependent and
+silent), intersecting their constraints (silently combines two statements of which the
+author meant one), and treating the list as unreadable (holds a readable list, and
+blocks every listing of the pool for one duplicate).
 
 ### D9. A listing's constraints merge per field with the configured default
 
@@ -306,6 +340,32 @@ hint's constraints: without a way to name the listing it adjusts, an override's 
 a listing of its own. A generated shape has no constraints of its own, so its policy is
 the configured default alone.
 
+**The configured default is `[admissibility.defaults.vm]`** in the VM storefront's
+settings, keyed by offering mode as `listing_shapes` is, in the listing shape's family
+nesting and field syntax without `offer`:
+
+```toml
+[admissibility.defaults.vm.gpu]
+count = { min = 1, max = 16 }
+
+[admissibility.defaults.vm.memory]
+gib = { max = 512 }
+```
+
+`settings.toml` ships none, because a higher configuration layer cannot remove a table a
+lower one set. Absent and an empty table both mean no default: nothing is constrained
+and the generator generates what it does today. A malformed table — an unknown key,
+`min` above `max`, an `offer`, a constraint on an attribute or an undefined field —
+stops startup, as an unreadable `[pricing.defaults]` family rate does. Startup parses it
+once, with `parse_declaration(tier="configured_default", schema=VM)`, and the same
+`Declaration` reaches the publication loop, the default generator's composition, and the
+VM override contribution.
+
+Rejected for the carrier: `[admissibility.defaults]` without a mode key, as
+`[pricing.defaults]` is (D9 defines a default per mode, and a later mode would move the
+keys); `[listing_shapes.defaults.vm]` (names it by where it applies and suggests it
+supplies shapes, which the generator does).
+
 Rejected: an override block merged per field onto every listing of a pool (the
 pool-level form rejected in D5, and superseded once an override can select listings);
 no storefront tiers (undoes D1); whole-declaration replacement between a listing and the
@@ -322,19 +382,25 @@ default (drops the default's values the listing does not restate); intersection
   `admissible_values("gpu.count", {"gpu": {"model": m}})` contains, rather than
   generating and filtering. With no configured default it generates what it does
   today. Generated shapes are nobody's statement, so none is reported.
-- **An override write is refused** when one of its shapes' constraints cannot be read
-  with the domain's schema, resolves to an empty range against the configured default,
-  or leaves its offer inadmissible. The check needs no site call: an override's shapes
-  never merge with the live hint. It is the VM contribution's vocabulary check.
+- **An override write is refused** when one of its shapes' base shapes or constraints
+  cannot be read with the domain's schema, two of its shapes state one base shape with
+  different constraints, or a shape resolves to an empty range against the configured
+  default or leaves its offer inadmissible. The check needs no site call: an override's
+  shapes never merge with the live hint. It is the VM contribution's vocabulary check.
 - **A pool write is refused** when a stated shape's constraints are structurally
-  invalid; whether a constrained path is a quantity is the domain's to judge.
+  invalid, or when two stated shapes for one mode state one base shape with different
+  constraints; whether a constrained path is a quantity is the domain's to judge. A
+  list that contradicts itself is a fault in the site's own document whichever
+  storefront reads it, and detecting it needs no domain vocabulary. It is not a
+  judgement against any storefront's configured default. Identical entries are accepted,
+  as today.
 - **A listing's identity is its base shape.** The derivation digest is taken over the
   base shape, so changing a range does not change which listing it is; reconciliation
   re-evaluates the listing and closes it if its offer becomes inadmissible.
 - **Asking rates match the base shape**, as they match a shape today.
 - **Reports.** The per-site derivation report gains inadmissible listing shapes (tier,
-  shape, problems) and unusable constraints (tier, path, problem, or each tier's
-  conflicting value), served by system status beside `unreadable_asking_rates` and
+  shape, problems) and unusable constraints (tier, path, problem, each tier's
+  conflicting value, or each conflicting entry for a base shape stated twice), served by system status beside `unreadable_asking_rates` and
   logged once per change.
 - **Every shape the storefront agrees to is admissible** under the policy in force when
   it agrees; enforcing that in negotiation is `negotiation-driven-capacity-resize`'s
@@ -346,8 +412,11 @@ default (drops the default's values the listing does not restate); intersection
 `Knowledge to promote` names a provisional destination for each decision; planning and
 review confirm or move them. Fixed: every negotiation rule belongs to
 `negotiation-driven-capacity-resize`, because nothing here enforces them;
-`docs/development/ARCHITECTURE.md` gains the foundation kit, the close-rather-than-hold
-principle with an example, and, in "Omission states no commitment", that an offer
+`docs/development/ARCHITECTURE.md` gains the foundation kit, the test for whether a
+storefront holds or closes a listing it cannot fully derive (D8), stated as a framework
+with brief examples — pricing and an unreadable shape list hold, uncomputable
+admissibility closes — while each term's own rule stays normative in
+`storefront-publication`, and, in "Omission states no commitment", that an offer
 without a range commits nothing about negotiability.
 
 ### D12. VM only
@@ -380,7 +449,10 @@ To `negotiation-driven-capacity-resize`, for its own design:
 
 - Every shape the storefront agrees to is admissible under the listing's policy in force
   when it agrees, whether the listing's own shape or a revised one; the policy is
-  re-derived from the listing's source shape and the configured default.
+  re-derived by splitting the listing's source shape list through
+  `split_listing_shapes`, finding its entry by base shape, and resolving it with the
+  configured default, so a base shape stated twice with different constraints is
+  refused as it is at publication.
 - By default, a revised shape that states a dimension the listing's shape neither states
   nor constrains is refused: under shape pricing an unrated family contributes nothing,
   so accepting it would give the dimension away. Whether a revision may drop a stated
@@ -463,6 +535,12 @@ Each is checked at closeout against `openspec/changes/` for a change that owns i
   rather than by site, pool, and mode alone, or by an invented listing identifier. It
   would let an override adjust one listing's constraints per field.
 - A family with one quantity could omit its field name in a shape.
+- The pool's `pricing` hint carries no offering-mode key, while `listing_shapes` and
+  `asking_rates` do, so a pool offering VM and bare metal gives both storefronts the
+  same family rates although bare metal sells at a premium over a VM on the same
+  hardware. A storefront override is per mode and can correct it; the site's own
+  advisory price cannot differ by mode. `[pricing.defaults]` has the same gap if one
+  storefront ever serves two modes.
 - A site-visible report of why a storefront closed a pool's listings; the storefront can
   already call the site.
 - The compute schema requires `gpu.count` and `gpu.model`, so a VM or bare-metal listing
