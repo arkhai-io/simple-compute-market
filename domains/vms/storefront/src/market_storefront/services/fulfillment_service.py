@@ -22,7 +22,6 @@ from compute_provisioning_contracts import (
     AccessDelivery,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
-    LeaseRegistration,
     LeaseTermination,
 )
 from arkhai_vms import VmConnectionDetails
@@ -61,7 +60,6 @@ async def _do_provision(
     sqlite_client: Any,
     *,
     vm_host: str | None,
-    vm_target: str,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
     capacity_reservation_id: str,
     escrow_uid: str,
@@ -141,10 +139,10 @@ async def _do_provision(
     # fact depend on a caller's configuration, and would let two requests
     # against one host disagree about how that host is reached. The buyer's
     # address and port come back in the fulfillment result instead.
-    request_payload: dict[str, Any] = {
-        "vm_target": vm_target,
-        "ssh_pubkey": ssh_public_key,
-    }
+    #
+    # No guest name either: provisioning names the guest from the capacity
+    # reservation, and refuses a request that names one.
+    request_payload: dict[str, Any] = {"ssh_pubkey": ssh_public_key}
 
     accepted = await fulfillment_client.begin_fulfillment(
         FulfillmentRequestBody(
@@ -343,38 +341,6 @@ def _recorded_utc(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-async def _register_vm_lease_with_settings(
-    *,
-    resource_id: str | None = None,
-    capacity_reservation_id: str | None,
-    escrow_uid: str,
-    vm_host: str | None = None,
-    vm_target: str,
-    lease_end_utc: str,
-    lease_start_utc: str | None = None,
-) -> None:
-    # resource_id/vm_host are accepted for call-site compatibility with
-    # fulfill_vm_obligation's opaque reservation result, but LeaseRegistration
-    # never reads either: the reservation's executor_ref/vm_host is already
-    # written independently at capacity-commit/rebind time and self-heals
-    # from that value when not explicitly supplied. Requiring a caller to
-    # have a physical resource identity in hand before it can register a
-    # lease at all would reintroduce physical-node pinning into what is
-    # meant to be a pool-scoped capacity negotiation.
-    async with _provisioning_client(timeout=10) as client:
-        await client.register_lease(
-            LeaseRegistration(
-                capacity_reservation_id=capacity_reservation_id or resource_id,
-                deal_ref={"escrow_uid": escrow_uid},
-                executor_target=vm_target,
-                lease_start_utc=(
-                    _recorded_utc(lease_start_utc) if lease_start_utc else None
-                ),
-                lease_end_utc=_recorded_utc(lease_end_utc),
-            )
-        )
-
-
 async def terminate_vm_lease(
     *,
     capacity_reservation_id: str,
@@ -458,7 +424,6 @@ async def fulfill_compute_obligation(
         capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
         provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
-        register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=partial(
             _apply_fulfillment_failure_policy_adapter,
             sqlite_client=sqlite_client,

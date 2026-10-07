@@ -400,6 +400,7 @@ class AggregateCapacityClient:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
         site_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Commit at the owning site (cache-first, then the rest).
@@ -417,6 +418,7 @@ class AggregateCapacityClient:
                 lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
                 idempotency_ref=idempotency_ref,
+                deal_ref=deal_ref,
             )
             return None if committed is None else _tagged(site_id, committed)
         last_error: Exception | None = None
@@ -428,6 +430,7 @@ class AggregateCapacityClient:
                     lease_start_utc=lease_start_utc,
                     lease_end_utc=lease_end_utc,
                     idempotency_ref=idempotency_ref,
+                    deal_ref=deal_ref,
                 )
                 return None if committed is None else _tagged(name, committed)
             except Exception as exc:

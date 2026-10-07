@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Ed25519Signer
 
 from market_core import VersionedEnvelope
@@ -157,8 +156,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     await _seed_compute_pool(client)
     await _seed_bound_listing(client, listing_id="listing-1", gpu_count=1)
@@ -225,8 +222,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     await _seed_compute_pool(client)
     await client.upsert_resource(
@@ -295,69 +290,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         3: "closed",
         4: "closed",
     }
-
-
-@pytest.mark.asyncio
-async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
-    """Moved from the now-removed test_compute_provisioning_orchestration.py:
-    _register_vm_lease_with_settings is unrelated to
-    the direct-executor-dispatch path removed alongside that file, and stays
-    in production use (removed only once the legacy teardown path it feeds
-    no longer needs it)."""
-    captured = {}
-
-    class FakeComputeClient:
-        def __init__(self, *args, **kwargs):
-            captured["client_args"] = args
-            captured["client_kwargs"] = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def register_lease(self, registration):
-            captured["registration"] = registration
-
-    monkeypatch.setattr(
-        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
-    )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "settings",
-        SimpleNamespace(
-            provisioning=SimpleNamespace(service_url="http://provisioning"),
-            admin_api_key="admin",
-        ),
-    )
-
-    await fulfillment_service._register_vm_lease_with_settings(
-        resource_id="resource-1",
-        escrow_uid="escrow-1",
-        vm_host="kvm1",
-        vm_target="tenant-1",
-        lease_start_utc="2026-07-13T12:00:00+00:00",
-        lease_end_utc="2026-07-13 13:00",
-        capacity_reservation_id="reservation-1",
-    )
-
-    registration = captured["registration"]
-    assert (
-            registration.contract_version
-            == COMPUTE_PROVISIONING_CONTRACT_VERSION
-        )
-    assert registration.capacity_reservation_id == "reservation-1"
-    assert registration.deal_ref == {"escrow_uid": "escrow-1"}
-    # The mode is the reservation's, recorded at claim; registration names none.
-    assert "offering_mode" not in type(registration).model_fields
-    assert registration.executor_target == "tenant-1"
-    assert captured["client_kwargs"]["caller_role"] == "seller"
-    assert captured["client_kwargs"]["signer"] is _TEST_STOREFRONT_SIGNER
-    assert (
-        captured["client_kwargs"]["expected_authorities"]
-        == _TEST_PROVISIONING_AUTHORITIES
-    )
 
 
 @pytest.mark.asyncio
@@ -476,8 +408,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
@@ -605,8 +535,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client

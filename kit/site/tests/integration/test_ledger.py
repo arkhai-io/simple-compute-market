@@ -684,130 +684,89 @@ def test_truncate_lease_refuses_an_uncommitted_hold_and_the_lifecycle_states(
     assert (row["state"], row["release_job_id"]) == ("releasing", "fulfillment-1")
 
 
-def test_a_first_registration_records_the_tail_on_a_committed_lease(
+def _record_target(seeded: CapacityLedgerService, reservation_id: str, target: str):
+    """The write a fulfillment's activation makes, in a transaction of its own."""
+    with seeded._session_factory() as db:
+        recorded = seeded.record_executor_target_in_session(db, reservation_id, target)
+        db.commit()
+    return recorded
+
+
+def test_the_activation_records_the_target_once_and_moves_nothing(
     seeded: CapacityLedgerService,
 ):
-    """``commit`` leaves a reservation ``leased`` before any storefront
-    registers, so a first registration applies to it. Registration emits no
-    capacity event: availability moved at commit."""
+    """The target is recorded on a committed lease without moving its state or
+    window and without a capacity event; a recorded target is never replaced."""
     reservation_id = _committed(seeded, "0xl")
+    before = seeded.get_reservation(reservation_id)
     events_before, _ = seeded.events_after(0)
 
-    attached = seeded.attach_lease(
-        capacity_reservation_id=reservation_id,
-        executor_target="tenant-abcd",
-        executor_ref={"host_id": "kvm1"},
-        lease_start_utc="2026-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01 00:00",
+    recorded = _record_target(seeded, reservation_id, "tenant-abcd")
+    again = _record_target(seeded, reservation_id, "tenant-other")
+
+    assert recorded["executor_target"] == again["executor_target"] == "tenant-abcd"
+    after = seeded.get_reservation(reservation_id)
+    assert (after["state"], after["lease_start_utc"], after["lease_end_utc"]) == (
+        "leased",
+        before["lease_start_utc"],
+        before["lease_end_utc"],
     )
-
-    assert attached["state"] == "leased"
-    assert attached["vm_target"] == "tenant-abcd"  # payload key, sourced from executor_target
-    assert attached["offering_mode"] == "vm"
-    assert attached["executor_target"] == "tenant-abcd"
-    assert attached["executor_ref"] == {"host_id": "kvm1"}
-    assert attached["create_job_id"] is None
-    events_after, _ = seeded.events_after(0)
-    assert len(events_after) == len(events_before)
-    assert seeded.attach_lease(
-        capacity_reservation_id="missing", executor_target="tenant-abcd"
-    ) is None
+    assert after["create_job_id"] is None
+    assert len(seeded.events_after(0)[0]) == len(events_before)
+    assert _record_target(seeded, "missing", "tenant-abcd") is None
 
 
-def test_a_first_registration_on_an_uncommitted_hold_leases_it(
+def test_the_activation_records_no_target_on_a_terminal_reservation(
     seeded: CapacityLedgerService,
 ):
-    reserved = seeded.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"escrow_uid": "0xr"}
-    )
+    reservation_id = _committed(seeded, "0xterminal")
+    seeded.release(capacity_reservation_id=reservation_id)
 
-    attached = seeded.attach_lease(
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        executor_target="tenant-r",
-        lease_end_utc="2099-01-01 00:00",
-    )
-
-    assert (attached["state"], attached["executor_target"]) == ("leased", "tenant-r")
+    assert _record_target(seeded, reservation_id, "tenant-late") is None
+    assert seeded.get_reservation(reservation_id)["executor_target"] is None
 
 
-def test_a_repeated_registration_never_moves_the_end(seeded: CapacityLedgerService):
-    """A storefront re-registering with the deal's original window after a
-    truncation gets the truncated lease back."""
-    reservation_id = _committed(seeded, "0xrepeat")
-    first = dict(
-        capacity_reservation_id=reservation_id,
-        executor_target="tenant-x",
-        lease_start_utc="2026-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01 00:00",
-    )
-    seeded.attach_lease(**first)
-    seeded.truncate_lease(capacity_reservation_id=reservation_id, lease_end_utc="2027-01-01 00:00")
-
-    again = seeded.attach_lease(**first)
-
-    assert again["lease_end_utc"] == "2027-01-01 00:00"
-
-
-def test_a_late_first_registration_cannot_restore_a_truncated_end(
+def test_the_activation_write_leaves_the_commit_to_the_caller(
     seeded: CapacityLedgerService,
 ):
-    """The committed window is the site's: a first registration arriving after
-    a truncation, naming the deal's original end, leaves the truncated one."""
-    reservation_id = _committed(seeded, "0xlate", end="2099-01-01 00:00")
-    seeded.truncate_lease(capacity_reservation_id=reservation_id, lease_end_utc="2027-01-01 00:00")
+    reservation_id = _committed(seeded, "0xrollback")
 
-    registered = seeded.attach_lease(
-        capacity_reservation_id=reservation_id,
-        executor_target="tenant-late",
-        lease_start_utc="2026-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01 00:00",
-    )
+    with seeded._session_factory() as db:
+        seeded.record_executor_target_in_session(db, reservation_id, "tenant-x")
+        db.rollback()
 
-    assert registered["lease_end_utc"] == "2027-01-01 00:00"
-    assert registered["executor_target"] == "tenant-late"
+    assert seeded.get_reservation(reservation_id)["executor_target"] is None
 
 
-def test_a_first_registration_writes_a_window_only_where_none_is_recorded(
-    seeded: CapacityLedgerService,
-):
-    reserved = seeded.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"listing_id": "l-open"}
-    )
-
-    registered = seeded.attach_lease(
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        executor_target="tenant-open",
-        lease_start_utc="2026-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01 00:00",
-    )
-
-    assert registered["lease_end_utc"] == "2099-01-01 00:00"
-
-
-def test_a_registration_records_the_deal_s_escrow_once(seeded: CapacityLedgerService):
+def test_a_commit_records_the_deal_s_escrow_once(seeded: CapacityLedgerService):
     """A hold placed before the deal had an escrow is correlated with it at
-    registration, as ``reserve`` would have; a recorded escrow is never
-    replaced."""
+    commit, as ``reserve`` would have; a repeat commit records it too, and a
+    recorded escrow is never replaced."""
     held = seeded.reserve(
         claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"listing_id": "l-hold"}
     )
     reservation_id = held["capacity_reservation_id"]
-    seeded.commit(capacity_reservation_id=reservation_id, lease_end_utc="2099-01-01 00:00")
+    late = seeded.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"listing_id": "l-late"}
+    )["capacity_reservation_id"]
+    seeded.commit(capacity_reservation_id=late, lease_end_utc="2099-01-01 00:00")
 
-    seeded.attach_lease(
+    seeded.commit(
         capacity_reservation_id=reservation_id,
-        executor_target="tenant-esc",
+        lease_end_utc="2099-01-01 00:00",
         deal_ref={"escrow_uid": "0xlate-escrow"},
     )
-    seeded.attach_lease(
+    seeded.commit(
         capacity_reservation_id=reservation_id,
-        executor_target="tenant-esc",
+        lease_end_utc="2099-01-01 00:00",
         deal_ref={"escrow_uid": "0xother"},
     )
+    seeded.commit(capacity_reservation_id=late, deal_ref={"escrow_uid": "0xrepeat-escrow"})
 
     found = seeded.get_reservation_by_escrow("0xlate-escrow")
     assert found["capacity_reservation_id"] == reservation_id
     assert seeded.get_reservation(reservation_id)["escrow_uid"] == "0xlate-escrow"
+    assert seeded.get_reservation_by_escrow("0xrepeat-escrow")["capacity_reservation_id"] == late
 
 
 def test_entering_releasing_records_when_the_release_began(seeded: CapacityLedgerService):
@@ -828,69 +787,29 @@ def test_entering_releasing_records_when_the_release_began(seeded: CapacityLedge
     assert retried["state"] == "releasing"
 
 
-@pytest.mark.parametrize(
-    "change",
-    [{"executor_target": "tenant-other"}, {"lease_start_utc": "2026-02-01T00:00:00+00:00"}],
-    ids=["target", "start"],
-)
-def test_a_registration_naming_another_target_or_start_is_refused(
-    seeded: CapacityLedgerService, change
-):
-    reservation_id = _committed(seeded, f"0xchange-{sorted(change)[0]}")
-    registration = dict(
-        capacity_reservation_id=reservation_id,
-        executor_target="tenant-x",
-        lease_start_utc="2026-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01 00:00",
-    )
-    seeded.attach_lease(**registration)
-
-    with pytest.raises(CapacityConflictError):
-        seeded.attach_lease(**{**registration, **change})
-
-    assert seeded.get_reservation(reservation_id)["executor_target"] == "tenant-x"
-
-
-def test_a_registration_on_a_releasing_lease_is_refused_and_changes_nothing(
-    seeded: CapacityLedgerService,
-):
-    reservation_id = _committed(seeded, "0xrel")
-    seeded.begin_releasing(reservation_id, release_job_id="fulfillment-1")
-
-    with pytest.raises(CapacityConflictError):
-        seeded.attach_lease(capacity_reservation_id=reservation_id, executor_target="tenant-x")
-
-    assert seeded.get_reservation(reservation_id)["state"] == "releasing"
-
-
-def test_a_commit_moves_an_unregistered_window_and_leaves_a_registered_one(
-    seeded: CapacityLedgerService,
-):
-    """Before registration the window is the commit's, so a storefront may move
-    it to provision-complete plus the duration; once registered, only
-    truncation moves it."""
+def test_a_repeat_commit_never_moves_the_window(seeded: CapacityLedgerService):
+    """A lease begins at commit and its window is the first commit's: a retried
+    or late commit naming another window, including one after a truncation,
+    returns the lease unchanged. Only truncation moves it."""
     reservation_id = _committed(seeded, "0xwindow")
 
-    moved = seeded.commit(
+    kept = seeded.commit(
         capacity_reservation_id=reservation_id,
         lease_start_utc="2026-01-02T00:00:00+00:00",
         lease_end_utc="2099-01-02 00:00",
     )
-    assert (moved["lease_start_utc"], moved["lease_end_utc"]) == (
-        "2026-01-02T00:00:00+00:00",
-        "2099-01-02 00:00",
+    assert (kept["lease_start_utc"], kept["lease_end_utc"]) == (
+        "2026-01-01T00:00:00+00:00",
+        "2099-01-01 00:00",
     )
 
-    seeded.attach_lease(capacity_reservation_id=reservation_id, executor_target="tenant-w")
-    kept = seeded.commit(
+    seeded.truncate_lease(capacity_reservation_id=reservation_id, lease_end_utc="2027-01-01 00:00")
+    again = seeded.commit(
         capacity_reservation_id=reservation_id,
-        lease_start_utc="2026-03-01T00:00:00+00:00",
-        lease_end_utc="2099-03-01 00:00",
+        lease_start_utc="2026-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01 00:00",
     )
-    assert (kept["lease_start_utc"], kept["lease_end_utc"]) == (
-        "2026-01-02T00:00:00+00:00",
-        "2099-01-02 00:00",
-    )
+    assert again["lease_end_utc"] == "2027-01-01 00:00"
 
 
 def test_a_commit_of_a_releasing_lease_is_refused_and_changes_nothing(
@@ -936,12 +855,15 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
     is a dedicated column. Previously untested -- this is new coverage,
     not just a migration of an existing test."""
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xm"})
-    seeded.attach_lease(
+    seeded.commit(
         capacity_reservation_id=reserved["capacity_reservation_id"],
-        executor_target="tenant-find-me",
-        executor_ref={"host_id": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
     )
+    with seeded._session_factory() as db:
+        reservation = db.get(CapacityReservation, reserved["capacity_reservation_id"])
+        reservation.executor_ref = {"host_id": "kvm1"}
+        db.commit()
+    _record_target(seeded, reserved["capacity_reservation_id"], "tenant-find-me")
 
     found = seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me")
     assert found is not None

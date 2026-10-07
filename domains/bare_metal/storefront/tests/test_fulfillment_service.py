@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -147,6 +148,8 @@ class FakeCapacity:
         self.site_client = FakeSite()
         self.reservation_sites = {}
         self.reserves = []
+        self.commits = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -158,6 +161,20 @@ class FakeCapacity:
         return {
             "capacity_reservation_id": "reservation-a",
             "site": self.returned_site,
+        }
+
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commits.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
         }
 
 
@@ -363,6 +380,18 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
     assert len(capacity.reserves) == 1
     assert len(fulfillment.schedules) == 1
     assert len(fulfillment.begins) == 2
+    # The lease begins at commit: each attempt commits with the deal's escrow
+    # before beginning, and the materialization states the window the first
+    # commit recorded, not a clock of the storefront's own.
+    assert [commit["deal_ref"] for commit in capacity.commits] == [
+        {"escrow_uid": "escrow-a"},
+        {"escrow_uid": "escrow-a"},
+    ]
+    start, end = capacity.committed_window
+    assert (recorded.lease_start_utc, recorded.lease_end_utc) == (
+        datetime.fromisoformat(start),
+        datetime.fromisoformat(end),
+    )
 
 
 @pytest.mark.asyncio

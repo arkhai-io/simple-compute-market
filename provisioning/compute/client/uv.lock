@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -44,7 +44,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.6.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -59,7 +59,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.7.0"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -67,7 +67,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]

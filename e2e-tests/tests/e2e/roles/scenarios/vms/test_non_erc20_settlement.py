@@ -443,11 +443,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     host_id = evaluate.get("host_id")
     assert host_id
 
-    job_eval = provisioning_test_client.evaluate_job(
-        host_id,
-        vm_target=evaluate.get("vm_target") or "eval-target",
-        vm_action="create",
-    )
+    job_eval = provisioning_test_client.evaluate_job(host_id, vm_action="create")
     assert job_eval.get("params_valid") is True, job_eval
     assert job_eval.get("rule_matched") == case.rule_id, job_eval
     assert job_eval.get("would_pause") is True, job_eval

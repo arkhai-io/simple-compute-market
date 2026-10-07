@@ -97,17 +97,9 @@ def test_every_fulfillment_route_is_a_family_route():
         assert operation.startswith("provisioning_fulfillment")
 
 
-def test_a_registration_cannot_assert_lifecycle_evidence():
-    """The create and release handles are written by fulfillment and the lease
-    lifecycle alone: a registration naming either is invalid, not ignored."""
-    from pydantic import ValidationError
+def test_no_contract_registers_a_lease():
+    """No route writes a lease: commit records its window, provisioning its
+    target at activation, and the lease lifecycle its release."""
+    import compute_provisioning_contracts as contracts
 
-    from compute_provisioning_contracts import LeaseRegistration, LeaseView
-
-    base = {"capacity_reservation_id": "r-1", "deal_ref": {}, "executor_target": "t-1"}
-    for evidence in ({"create_job_id": "job-1"}, {"release_job_id": "f-1"}):
-        with pytest.raises(ValidationError):
-            LeaseRegistration.model_validate({**base, **evidence})
-    # The window is optional: a committed reservation's window is the site's.
-    assert LeaseRegistration.model_validate(base).lease_end_utc is None
-    assert not issubclass(LeaseView, LeaseRegistration)
+    assert not hasattr(contracts, "LeaseRegistration")

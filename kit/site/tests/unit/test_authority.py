@@ -1,4 +1,3 @@
-import inspect
 from datetime import datetime, timezone
 
 from market_site.authority import LedgerSiteAuthority
@@ -20,10 +19,6 @@ class FakeLedger:
     def get_reservation(self, capacity_reservation_id):
         self.calls.append(("get_reservation", {"capacity_reservation_id": capacity_reservation_id}))
         return self.reservation
-
-    def attach_lease(self, **kwargs):
-        self.calls.append(("attach_lease", kwargs))
-        return {**self.reservation, **kwargs}
 
     def begin_releasing(self, capacity_reservation_id, **kwargs):
         self.calls.append(("begin_releasing", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
@@ -61,24 +56,12 @@ def test_authority_delegates_reservation_queries_and_anonymous_events():
     assert "deal_ref" not in events[0]
 
 
-def test_registration_passes_the_executor_identity_through_and_names_no_mode():
-    """The adapter passes executor_target/executor_ref straight through, with
-    no host_id/vm_target synthesis. A registration names no offering mode: the
-    mode is the reservation's, recorded when its capacity was claimed. No port
-    operation rewrites lease fields after registration."""
-    ledger = FakeLedger()
-    authority = LedgerSiteAuthority(ledger)
+def test_no_port_operation_writes_a_lease():
+    """No caller writes a lease through the authority: commit records its
+    window, and provisioning its target in the activation's transaction."""
+    authority = LedgerSiteAuthority(FakeLedger())
 
-    attached = authority.attach_lease_reservation(
-        capacity_reservation_id="alloc-1",
-        executor_target="tenant-vm",
-        executor_ref={"host_id": "kvm-1"},
-    )
-
-    assert attached["executor_ref"]["host_id"] == "kvm-1"
-    assert attached["executor_target"] == "tenant-vm"
-    parameters = inspect.signature(authority.attach_lease_reservation).parameters
-    assert not {"host_id", "offering_mode", "escrow_uid"} & set(parameters)
+    assert not hasattr(authority, "attach_lease_reservation")
     assert not hasattr(authority, "update_reservation_fields")
 
 

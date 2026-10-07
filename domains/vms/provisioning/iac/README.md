@@ -386,7 +386,7 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 **Parameter Explanations**:
 - `@inventory/management-vars.yaml`: Variables file containing Golden Image Management configuration (Image Name, Bucket and Image Path, Root SSH details)
 - `host_id`: The host where the VM will be created (from your inventory)
-- `vm_target`: Name of the VM to create
+- `vm_target`: Name of the VM, which must satisfy every use the playbooks make of it (see [Guest names](#guest-names))
 - `vm_action`: Action to perform (create, start, stop, etc.)
 - `vm_ram`: RAM allocation in MB (4096 = 4GB)
 - `vm_vcpus`: Number of virtual CPUs to allocate
@@ -1223,7 +1223,7 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 
 **Parameter Reference for VM Creation**:
 - `host_id`: Host where VM will be created (from inventory, e.g., `kvm1`)
-- `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`)
+- `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`), which must satisfy every use the playbooks make of it (see [Guest names](#guest-names))
 - `vm_action`: Operation to perform (`create`, `start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `list`, `check`, `reset_password`, `lease_end`, `lease_remove`)
 - `vm_ram`: RAM allocation in MB (e.g., `4096` = 4GB, `8192` = 8GB)
 - `vm_vcpus`: Number of virtual CPUs (e.g., `2`, `4`, `8`)
@@ -1236,6 +1236,26 @@ ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
 - `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
+
+#### Guest names
+
+The playbooks use `vm_target` four ways, and a name must satisfy all of them:
+
+- **Hostname.** cloud-init's `local-hostname` and `hostnamectl` set it as the
+  guest's hostname, so it is a hostname label: lowercase letters, digits, and
+  hyphens, starting and ending with a letter or digit, at most 63 characters.
+- **Shell text.** It appears unquoted in shell commands, so nothing outside that
+  character set.
+- **The tenant's login.** `vm-create.yml` strips it to letters and digits,
+  lowercases it, and creates the tenant with `useradd`, which refuses a login
+  over 32 characters or one not starting with a letter.
+- **A substring.** Every create ends by deleting each `/tmp` file whose name
+  contains the guest's, so no guest's name on a host may contain another's.
+
+A fulfillment's guest is named by the provisioning service from its capacity
+reservation, `tenant-` and 24 hex characters, which satisfies all four by
+construction (`vm_provisioning_adapter.guest_names`). A name an operator chooses
+for a direct VM operation is not checked; it must satisfy the same rules.
 
 **Available Actions**:
 - `create`: Create new VM with specified resources

@@ -589,6 +589,7 @@ class Container(containers.DeclarativeContainer):
         repository=settlement_repository,
         provider_registry=provider_registry,
         settings=config,
+        capacity_ledger=capacity_ledger_service,
     )
 
     status_components = providers.Singleton(

@@ -854,6 +854,7 @@ async def client_and_queue(
         repository=SettlementRepository(),
         provider_registry=composed_adapters.provider_registry,
         settings=mock_settings,
+        capacity_ledger=capacity_ledger_service,
     )
     # Status composed as production composes it: the composed executor table,
     # the lease lifecycle, and the readiness components the container builds.

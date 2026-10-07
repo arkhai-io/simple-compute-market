@@ -2,7 +2,8 @@
 
 Every offering mode's leases are served here, as the neutral ``LeaseView``. A
 lease is addressed by its capacity reservation id; the list is the operator's
-view of every lease at the site.
+view of every lease at the site. No route writes a lease: commit records its
+window, and provisioning its target when the fulfillment becomes active.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning_contracts import (
     LeaseForceRelease,
     LeaseListResponse,
-    LeaseRegistration,
     LeaseReleaseOversight,
     LeaseRetryRelease,
     LeaseState,
@@ -31,14 +31,6 @@ def _service() -> LeaseRouteService:
     if service is None:
         raise RuntimeError("lease route service is not initialised")
     return service
-
-
-@router.post("", response_model=LeaseView, summary="Register a lease on its reservation")
-def register_lease(
-    body: LeaseRegistration, service: LeaseRouteService = Depends(_service)
-) -> LeaseView:
-    """Record the lease's tail once; a repeat naming another target or start is 409."""
-    return routed(lambda: service.register(body))
 
 
 @router.get("", response_model=LeaseListResponse, summary="List leases")

@@ -39,7 +39,6 @@ from compute_provisioning_contracts import (
     JobStatusResponse,
     LeaseForceRelease,
     LeaseListResponse,
-    LeaseRegistration,
     LeaseReleaseOversight,
     LeaseRetryRelease,
     LeaseState,
@@ -123,10 +122,6 @@ def _result(fulfillment_id: str) -> _Call:
 
 
 # Leases.
-
-
-def _register_lease(registration: LeaseRegistration) -> _Call:
-    return _Call("POST", "/api/v1/contract/leases", registration, parse=_model(LeaseView))
 
 
 def _get_lease(capacity_reservation_id: str) -> _Call:
@@ -283,7 +278,6 @@ def _job_outcome(job: JobStatusResponse, job_id: str) -> bool:
 class ComputeProvisioningClientProtocol(Protocol):
     """What a storefront calls on the family client."""
 
-    async def register_lease(self, registration: LeaseRegistration, *, request_id: str | None = None) -> LeaseView: ...
     async def get_lease(self, capacity_reservation_id: str, *, request_id: str | None = None) -> LeaseView: ...
     async def list_leases(
         self,
@@ -448,11 +442,6 @@ class ComputeProvisioningClient(SigningBase):
         return await self._run(_result(fulfillment_id), request_id)
 
     # Leases.
-
-    async def register_lease(
-        self, registration: LeaseRegistration, *, request_id: str | None = None
-    ) -> LeaseView:
-        return await self._run(_register_lease(registration), request_id)
 
     async def get_lease(
         self, capacity_reservation_id: str, *, request_id: str | None = None
@@ -728,11 +717,6 @@ class SyncComputeProvisioningClient(SigningBase):
         return self._run(_result(fulfillment_id), request_id)
 
     # Leases.
-
-    def register_lease(
-        self, registration: LeaseRegistration, *, request_id: str | None = None
-    ) -> LeaseView:
-        return self._run(_register_lease(registration), request_id)
 
     def get_lease(self, capacity_reservation_id: str, *, request_id: str | None = None) -> LeaseView:
         return self._run(_get_lease(capacity_reservation_id), request_id)

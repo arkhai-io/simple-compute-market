@@ -320,11 +320,13 @@ class CapacityRuntime:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Commit directly at the recorded site, including after restart.
 
-        Returns the reservation as the site recorded it, whose window a lease
-        registered afterwards repeats.
+        Returns the reservation as the site recorded it; a repeat commit
+        returns the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal.
         """
         binding = self.require_binding(binding)
         committed = await self.site_client(binding.site_id).commit(
@@ -333,6 +335,7 @@ class CapacityRuntime:
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=idempotency_ref,
+            deal_ref=deal_ref,
         )
         if committed is None:
             return None

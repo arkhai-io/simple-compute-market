@@ -60,6 +60,10 @@
   no_log: true
   when: vm_action == "create"
 
+# The tenant's login is the guest's name stripped to letters and digits.
+# useradd refuses a login over 32 characters or one not starting with a letter,
+# so every guest name must satisfy both; the provisioning service's names do
+# (domains/vms/provisioning/iac/README.md, "Guest names").
 - name: Set tenant user Name
   set_fact:
     tenant_user: "{{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}"

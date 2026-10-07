@@ -1,11 +1,12 @@
 """The compute family's lease surface, over the real API and the canonical client.
 
 One surface serves every offering mode's leases as the neutral ``LeaseView``:
-register, get, list, terminate, release-oversight, retry-release, and
-force-release. A lease is the tail of a capacity reservation and is addressed
-by its reservation id; registration writes the tail once, and there is no
-lease update. A storefront registers, reads, and terminates its own leases as
-the seller; the list and the release controls are the administrator's.
+get, list, terminate, release-oversight, retry-release, and force-release. A
+lease is the tail of a capacity reservation and is addressed by its reservation
+id. No route writes one: commit records its window and the deal's escrow, and
+provisioning records its target when the fulfillment becomes active. A
+storefront reads and terminates its own leases as the seller; the list and the
+release controls are the administrator's.
 
 The ledger's write-once and truncation rules are proven in ``kit/site``; the
 lifecycle's paths by aggregate state in the service's unit suite and in
@@ -29,7 +30,6 @@ from compute_provisioning_client import (
 )
 from compute_provisioning_contracts import (
     LeaseForceRelease,
-    LeaseRegistration,
     LeaseReleaseOversight,
     LeaseRetryRelease,
     LeaseState,
@@ -44,8 +44,8 @@ _END = datetime(2099, 1, 1, tzinfo=timezone.utc)
 _START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def _committed(escrow_uid: str, *, offering_mode: str = "vm", end: datetime = _END) -> str:
-    """A storefront's committed reservation, as commit leaves it before registration."""
+def _seeded():
+    """The site ledger, with the KVM host the lease tests reserve on."""
     ledger = _container_module.resolved_capacity_ledger_service
     if "compute-kvm1-001" not in {r["resource_id"] for r in ledger.list_resources()}:
         ledger.register_resource(
@@ -55,6 +55,12 @@ def _committed(escrow_uid: str, *, offering_mode: str = "vm", end: datetime = _E
             attributes={},
             pool_id="default",
         )
+    return ledger
+
+
+def _committed(escrow_uid: str, *, offering_mode: str = "vm", end: datetime = _END) -> str:
+    """A storefront's committed reservation: commit begins its lease."""
+    ledger = _seeded()
     reserved = ledger.reserve(
         claim={"offering_mode": offering_mode, "gpu_count": 1, "host_id": "kvm1"},
         deal_ref={"escrow_uid": escrow_uid},
@@ -68,17 +74,13 @@ def _committed(escrow_uid: str, *, offering_mode: str = "vm", end: datetime = _E
     return reserved["capacity_reservation_id"]
 
 
-def _registration(capacity_reservation_id: str, *, target: str = "tenant-1", end=_END):
-    return LeaseRegistration(
-        capacity_reservation_id=capacity_reservation_id,
-        deal_ref={"escrow_uid": "0x1"},
-        executor_target=target,
-        lease_start_utc=_START,
-        lease_end_utc=end,
-    )
-
-
-def _aggregate(capacity_reservation_id: str, state: str, fulfillment_id: str) -> None:
+def _aggregate(
+    capacity_reservation_id: str,
+    state: str,
+    fulfillment_id: str,
+    *,
+    metadata: dict | None = None,
+) -> None:
     """A fulfillment aggregate as convergence would leave it."""
     with _container_module.resolved_session_factory() as db, db.begin():
         db.add(
@@ -97,7 +99,7 @@ def _aggregate(capacity_reservation_id: str, state: str, fulfillment_id: str) ->
                     "schema_version": 1,
                     "payload": {},
                 },
-                provider_metadata={},
+                provider_metadata=metadata or {},
                 state=state,
             )
         )
@@ -126,78 +128,50 @@ async def seller(client_and_queue):
         yield client
 
 
-class TestRegistration:
-    async def test_a_registration_on_a_committed_reservation_reports_the_lease(
+class TestWrites:
+    def test_no_route_writes_a_lease(self):
+        """A lease's window is its commit's, moved only by the site's
+        truncation, and its target is recorded at activation."""
+        for method in ("POST", "PATCH"):
+            for path in ("/api/v1/contract/leases", "/api/v1/contract/leases/r-1"):
+                with pytest.raises(ValueError):
+                    provisioning_route_table.resolve(method, path, {})
+
+    async def test_a_lease_reports_the_target_its_activation_recorded(
         self, client_and_queue, seller
     ):
-        reservation_id = _committed("0xreg")
+        reservation_id = _committed("0xactivated")
+        ledger = _container_module.resolved_capacity_ledger_service
+        with _container_module.resolved_session_factory() as db:
+            ledger.record_executor_target_in_session(db, reservation_id, "tenant-guest-1")
+            db.commit()
 
-        lease = await seller.register_lease(_registration(reservation_id))
+        lease = await seller.get_lease(reservation_id)
 
-        assert lease.capacity_reservation_id == reservation_id
         assert (lease.offering_mode, lease.status, lease.executor_target) == (
             "vm",
             LeaseState.ACTIVE,
-            "tenant-1",
+            "tenant-guest-1",
         )
 
-    async def test_a_registration_on_no_live_reservation_is_not_found(self, seller):
-        with pytest.raises(ComputeProvisioningError) as refused:
-            await seller.register_lease(_registration("missing"))
-
-        assert refused.value.status_code == 404
-
-    async def test_a_repeated_registration_is_returned_and_never_moves_the_end(
-        self, client_and_queue, seller
+    async def test_a_hold_placed_before_the_escrow_is_found_by_it_once_committed(
+        self, client_and_queue
     ):
-        """A storefront re-registering after a truncation, as a resume pass does,
-        gets the truncated lease back."""
+        """An acceptance hold is reserved before the deal has an escrow; the
+        commit that makes it the deal's lease records the escrow, so the
+        site's escrow filter finds it."""
         clients, _ = client_and_queue
-        reservation_id = _committed("0xrepeat")
-        await seller.register_lease(_registration(reservation_id))
-        truncated_end = datetime(2030, 1, 1, tzinfo=timezone.utc)
-        await clients.site.truncate_lease(
-            capacity_reservation_id=reservation_id, lease_end_utc=truncated_end.isoformat()
-        )
-
-        again = await seller.register_lease(_registration(reservation_id))
-
-        assert again.lease_end_utc == truncated_end
-
-    async def test_a_registration_naming_another_target_is_a_conflict(
-        self, client_and_queue, seller
-    ):
-        reservation_id = _committed("0xother")
-        await seller.register_lease(_registration(reservation_id))
-
-        with pytest.raises(ComputeProvisioningError) as refused:
-            await seller.register_lease(_registration(reservation_id, target="tenant-2"))
-
-        assert refused.value.status_code == 409
-        assert (await seller.get_lease(reservation_id)).executor_target == "tenant-1"
-
-    async def test_a_hold_placed_before_the_escrow_is_found_by_it_once_registered(
-        self, client_and_queue, seller
-    ):
-        """A storefront's acceptance hold is reserved before the deal has an
-        escrow; registration records the escrow its ``deal_ref`` names, so an
-        operator finds the lease through the site's escrow filter."""
-        clients, _ = client_and_queue
-        ledger = _container_module.resolved_capacity_ledger_service
-        _committed("0xdeclares-the-resource")  # declares the resource the hold claims
+        ledger = _seeded()
         hold = ledger.reserve(
             claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
             deal_ref={"listing_id": "listing-hold"},
         )
         reservation_id = hold["capacity_reservation_id"]
-        ledger.commit(capacity_reservation_id=reservation_id, lease_end_utc=_END.isoformat())
 
-        await seller.register_lease(
-            LeaseRegistration(
-                capacity_reservation_id=reservation_id,
-                deal_ref={"escrow_uid": "0xlate-escrow"},
-                executor_target="tenant-hold",
-            )
+        ledger.commit(
+            capacity_reservation_id=reservation_id,
+            lease_end_utc=_END.isoformat(),
+            deal_ref={"escrow_uid": "0xlate-escrow"},
         )
 
         found = await clients.site.list_reservations(escrow_uid="0xlate-escrow")
@@ -205,7 +179,7 @@ class TestRegistration:
 
     def test_there_is_no_lease_update_route(self):
         """A lease's end moves only through the site's truncation, and its
-        executor identity and handles are fixed at registration."""
+        executor identity and handles are fixed once recorded."""
         for path in ("/api/v1/contract/leases/r-1", "/api/v1/leases/r-1"):
             with pytest.raises(ValueError):
                 provisioning_route_table.resolve("PATCH", path, {})
@@ -216,7 +190,6 @@ class TestReads:
         self, client_and_queue, seller
     ):
         reservation_id = _committed("0xget")
-        await seller.register_lease(_registration(reservation_id))
         ledger = _container_module.resolved_capacity_ledger_service
         hold = ledger.reserve(
             claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
@@ -251,7 +224,6 @@ class TestRelease:
         self, client_and_queue, seller
     ):
         reservation_id = _committed("0xterm")
-        await seller.register_lease(_registration(reservation_id))
         _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-term")
 
         lease = await seller.terminate_lease(reservation_id, LeaseTermination())

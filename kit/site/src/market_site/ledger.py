@@ -581,14 +581,6 @@ class CapacityReleaseGuard(Protocol):
     def __call__(self, db: Session, capacity_reservation_id: str) -> bool: ...
 
 
-# Lease registration's states: a first registration on these records the tail.
-_REGISTRABLE_STATES = frozenset(
-    {
-        ReservationState.reserved.value,
-        ReservationState.provisioning.value,
-        ReservationState.leased.value,
-    }
-)
 # The lease lifecycle's conditional transitions: the states each may leave.
 _BEGIN_RELEASING_FROM = frozenset(
     {
@@ -606,8 +598,8 @@ _RECORD_RELEASE_FAILED_FROM = frozenset(
         ReservationState.releasing.value,
     }
 )
-# The lifecycle's own states, which neither registration nor a commit may undo.
-_REGISTRATION_REFUSED_STATES = frozenset(
+# The lifecycle's own states, which a commit may not undo.
+_COMMIT_REFUSED_STATES = frozenset(
     {
         ReservationState.releasing.value,
         ReservationState.release_failed.value,
@@ -1411,18 +1403,26 @@ class CapacityLedgerService:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Confirm a reservation into an active lease.
+        """Confirm a reservation into an active lease, once.
 
-        Idempotent: committing an already-leased reservation records the
-        derived lease window and clears any TTL hold, until a lease is
-        registered on it. Once registered (an executor target is recorded), a
-        commit returns the reservation unchanged, whatever window it names: the
-        lease's window then moves only through ``truncate_lease``. A
-        reservation the lease lifecycle is releasing, has failed to release, or
-        has handed to an operator is refused, so a commit cannot undo what the
-        lifecycle recorded. ``lease_end_utc=None`` commits an open-ended hold
-        (no lease tail — the watchdog never sees it).
+        The first commit leaves the reservation ``leased`` with its window: the
+        start named, else now, and the end named. A lease with no negotiated
+        start begins at commit, because capacity reserved for a deal's
+        exclusive use is consumed from then. A repeat on a ``leased``
+        reservation returns it unchanged, whatever window it names, so a
+        retried or late commit cannot move a window the lease lifecycle has
+        since truncated; a lease's window moves only through
+        ``truncate_lease``. A reservation the lease lifecycle is releasing, has
+        failed to release, or has handed to an operator is refused, so a commit
+        cannot undo what the lifecycle recorded. ``lease_end_utc=None`` commits
+        an open-ended hold (no lease tail — the watchdog never sees it).
+
+        ``deal_ref`` correlates the reservation with the deal it now serves:
+        an escrow it names is recorded where the reservation has none, as
+        ``reserve`` records it, so a hold placed before the deal had an escrow
+        is found by that escrow from commit on. A repeat commit records it too.
 
         ``resource_id`` is used only when ``capacity_reservation_id`` is
         omitted — it selects which currently-held reservation to commit by
@@ -1450,16 +1450,17 @@ class CapacityLedgerService:
                 return None
             if (
                 reservation.state not in HELD_RESERVATION_STATES
-                or reservation.state in _REGISTRATION_REFUSED_STATES
+                or reservation.state in _COMMIT_REFUSED_STATES
             ):
                 raise CapacityConflictError(
                     f"reservation {reservation.capacity_reservation_id} is "
                     f"{reservation.state}; cannot commit"
                 )
-            if (
-                reservation.state == ReservationState.leased.value
-                and reservation.executor_target is not None
-            ):
+            escrow_uid = dict(deal_ref or {}).get("escrow_uid")
+            if escrow_uid and not reservation.escrow_uid:
+                reservation.escrow_uid = str(escrow_uid)
+            if reservation.state == ReservationState.leased.value:
+                db.commit()
                 return self._reservation_payload(reservation)
             reservation.state = ReservationState.leased.value
             if window_end is not None:
@@ -1747,82 +1748,6 @@ class CapacityLedgerService:
     # Lease tail (the merged vm_leases half of the reservation row)
     # ------------------------------------------------------------------
 
-    def attach_lease(
-        self,
-        *,
-        capacity_reservation_id: str,
-        executor_target: str,
-        executor_ref: Mapping[str, Any] | None = None,
-        deal_ref: Mapping[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Record a reservation's lease tail once.
-
-        The tail is the executor target and reference. Commit already leaves a
-        reservation ``leased`` with its window, and that window is the site's:
-        registration is recorded by its executor target, and never moves a
-        recorded window.
-
-        - The first registration on a ``reserved``, ``provisioning``, or
-          ``leased`` reservation records the target and reference and leaves
-          the reservation ``leased``. It writes the window it names only where
-          none is recorded, so a late registration cannot restore an end that
-          was since truncated. It records the escrow the caller's ``deal_ref``
-          names when the reservation records none, as ``reserve`` does: a hold
-          placed before the deal had an escrow is correlated with it here.
-        - A repeat naming the same target and start returns the record
-          unchanged.
-        - A repeat naming a different target or start is refused, because
-          changing the executor identity could redirect teardown.
-        - A ``releasing``, ``release_failed``, or ``unmanaged`` reservation is
-          refused, so registration cannot undo what the lifecycle recorded.
-
-        The create and release handles are lifecycle evidence, written only by
-        fulfillment and the lease lifecycle, never by a registration.
-
-        Refusals raise ``CapacityConflictError``; ``None`` means no such live
-        reservation. Emits no capacity event: availability moved at commit.
-        """
-        with self.serialized(), self._session_factory() as db:
-            reservation = self._find_reservation(
-                db, capacity_reservation_id=capacity_reservation_id
-            )
-            if reservation is None:
-                return None
-            if reservation.state in _REGISTRATION_REFUSED_STATES:
-                raise CapacityConflictError(
-                    f"reservation {capacity_reservation_id!r} is {reservation.state!r}; "
-                    "its lease cannot be registered"
-                )
-            if reservation.state not in _REGISTRABLE_STATES:
-                return None
-            if reservation.executor_target is not None:
-                same_start = lease_start_utc is None or parse_utc(
-                    str(lease_start_utc)
-                ) == parse_utc(reservation.lease_start_utc)
-                if reservation.executor_target != executor_target or not same_start:
-                    raise CapacityConflictError(
-                        f"reservation {capacity_reservation_id!r} already has a lease "
-                        "registered with another target or start"
-                    )
-                return self._reservation_payload(reservation)
-            self._sync_executor_fields(
-                reservation,
-                executor_target=executor_target,
-                executor_ref=executor_ref,
-            )
-            if lease_start_utc and not reservation.lease_start_utc:
-                reservation.lease_start_utc = str(lease_start_utc)
-            if lease_end_utc and not reservation.lease_end_utc:
-                reservation.lease_end_utc = str(lease_end_utc)
-            escrow_uid = dict(deal_ref or {}).get("escrow_uid")
-            if escrow_uid and not reservation.escrow_uid:
-                reservation.escrow_uid = str(escrow_uid)
-            reservation.state = ReservationState.leased.value
-            db.commit()
-            return self._reservation_payload(reservation)
-
     def list_lease_due(self, now: datetime) -> list[dict[str, Any]]:
         """Leased reservations whose lease_end_utc has passed."""
         if now.tzinfo is None:
@@ -1970,6 +1895,38 @@ class CapacityLedgerService:
             return None
         if not reservation.create_job_id:
             reservation.create_job_id = create_job_id
+        return self._reservation_payload(reservation)
+
+    def record_executor_target_in_session(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        executor_target: str,
+    ) -> dict[str, Any] | None:
+        """Record what a reservation's fulfillment acts on, once.
+
+        Written when the fulfillment becomes active, from what it provisioned,
+        so the lease reports the target its teardown removes. A recorded target
+        is never replaced: changing it could misreport what teardown addresses,
+        so a different one is left in place and the caller is told by the
+        returned payload. Changes no state and no window: commit already left
+        the reservation ``leased`` with its window. Returns ``None`` when the
+        reservation does not exist or is terminal.
+
+        Does not commit and does not take the ledger lock: the caller owns the
+        transaction, as for ``record_create_handle_in_session``. Nothing here
+        raises after a write.
+        """
+        reservation = db.get(CapacityReservation, capacity_reservation_id)
+        terminal = {
+            ReservationState.released.value,
+            ReservationState.force_released.value,
+            ReservationState.provisioning_failed.value,
+        }
+        if reservation is None or reservation.state in terminal:
+            return None
+        if reservation.executor_target is None:
+            self._sync_executor_fields(reservation, executor_target=executor_target)
         return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(

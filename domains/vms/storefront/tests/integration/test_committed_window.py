@@ -1,11 +1,12 @@
-"""The window a lease is registered with is the one the site recorded.
+"""A lease's window is its first commit's, and the commit carries the deal.
 
-A registered lease keeps its window, and a registration naming another start is
-refused, so the storefront registers the window its commit answers with, never
-one it computed. These commit through the real capacity runtime and aggregate
-client against the fake site, whose commit keeps a registered lease's window as
-the site does: the window reaches the storefront only if every layer passes the
-site's answer through.
+A lease begins at commit: the first commit records the window and a repeat
+answers with it unchanged, so a resumed deal never moves its lease. The commit
+also carries the deal's escrow, which a hold placed at negotiation lacks. These
+commit through the real capacity runtime and aggregate client against the fake
+site, whose commit is write-once as the site's is: the window and the escrow
+reach the site, and the answer the storefront, only if every layer passes them
+through.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ from __future__ import annotations
 import pytest
 from market_capacity_publication import CapacityBinding
 
-from market_storefront.services.fulfillment_resume_runtime import _refresh_capacity_lease
-from market_storefront.services.vm_fulfillment_service import committed_lease_window
+from market_storefront.services.fulfillment_resume_runtime import (
+    _commit_recovered_reservation,
+)
 from tests.fake_site import FakeSite, capacity_runtime_over
 
 _POOL = "pool-window"
@@ -33,38 +35,39 @@ async def _committed(capacity, fake) -> str:
         capacity_reservation_id=reservation_id,
         lease_start_utc=_START,
         lease_end_utc=_END,
+        deal_ref={"escrow_uid": "0xwindow"},
     )
-    assert committed_lease_window(committed) == (_START, _END)
+    assert (committed["lease_start_utc"], committed["lease_end_utc"]) == (_START, _END)
     return reservation_id
 
 
 @pytest.mark.asyncio
-async def test_a_commit_through_the_capacity_runtime_answers_with_the_recorded_window():
+async def test_a_commit_through_the_capacity_runtime_records_the_window_and_escrow():
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(_POOL, 2, attributes={"vm_host": "kvm1"})
 
-    await _committed(capacity_runtime_over(fake), fake)
+    reservation_id = await _committed(capacity_runtime_over(fake), fake)
+
+    assert fake.reservations[reservation_id]["escrow_uid"] == "0xwindow"
 
 
 @pytest.mark.asyncio
-async def test_a_resume_pass_registers_the_recorded_window_not_its_own():
-    """After registration the site keeps the lease's window, so the resume
-    pass, which recomputes a window from the current time when the deal records
-    no start, still registers the window the site holds."""
+async def test_a_resumed_deal_never_moves_its_lease():
+    """The resume pass commits before beginning a recovered deal's
+    fulfillment, computing a window from the current time when the deal
+    records no start; a reservation committed earlier keeps its first window."""
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(_POOL, 2, attributes={"vm_host": "kvm1"})
     capacity = capacity_runtime_over(fake)
     reservation_id = await _committed(capacity, fake)
-    fake.registered.add(reservation_id)
 
-    window = await _refresh_capacity_lease(
+    await _commit_recovered_reservation(
         escrow_uid="0xwindow",
         reservation_id=reservation_id,
-        resource_id="resource-window",
-        lease_start_utc="2099-03-01T00:00:00+00:00",
-        lease_end_utc="2099-03-01 01:00",
+        context={"duration_seconds": 3600},
         capacity_client=capacity.client(),
         site_id="default",
     )
 
-    assert window == (_START, _END)
+    recorded = fake.reservations[reservation_id]
+    assert (recorded["lease_start_utc"], recorded["lease_end_utc"]) == (_START, _END)

@@ -58,9 +58,8 @@ def _resolve(method, path, body):
 
 
 _MUTATIONS = (
-    ("/api/v1/contract/leases", {"capacity_reservation_id": "reservation-1"}),
-    ("/api/v1/contract/leases/reservation-1/terminate", {}),
     ("/api/v1/fulfillment/schedule", {"capacity_reservation_id": "reservation-1"}),
+    ("/api/v1/contract/leases/reservation-1/terminate", {}),
     ("/api/v1/fulfillment/begin", {"capacity_reservation_id": "reservation-1"}),
     ("/api/v1/fulfillment/fulfillment-1/begin-teardown", {}),
 )
@@ -119,7 +118,6 @@ def _app(storefront, authority, route_table=_ROUTE_TABLE):
         calls["count"] += 1
         return {"ok": True, "count": calls["count"]}
 
-    app.add_api_route("/api/v1/contract/leases", mutation, methods=["POST"])
     for suffix in ("terminate", "retry-release", "force-release"):
         app.add_api_route(
             f"/api/v1/contract/leases/{{reservation_id}}/{suffix}",

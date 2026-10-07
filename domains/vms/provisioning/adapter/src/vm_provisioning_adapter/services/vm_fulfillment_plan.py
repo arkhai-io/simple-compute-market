@@ -1,9 +1,9 @@
 """VM's contribution to the compute family's job-backed fulfillment.
 
-A create builds a VM, named by the fulfillment's ``vm_target``, on the KVM host
-the settled resource is delivered through: the guest is the job's
-``executor_target`` and the KVM host its ``host_id``. A teardown removes that
-guest from that host, as the fulfillment recorded them.
+A create builds a VM on the KVM host the settled resource is delivered through,
+naming the guest from the capacity reservation (``guest_names``): the guest is
+the job's ``executor_target`` and the KVM host its ``host_id``. A teardown
+removes that guest from that host, as the fulfillment recorded them.
 
 What is VM's here: sizing from the reservation's committed dimensions through
 the pool's requirement delegate, the pool's playbook and extra variables, and
@@ -23,6 +23,7 @@ from compute_provisioning.job_fulfillment import PreparedJob
 from market_core import VersionedEnvelope
 from market_fulfillment import ProviderConfigInvalidError, SettlementResource
 
+from vm_provisioning_adapter.guest_names import fulfillment_guest_name
 from vm_provisioning_adapter.models.fulfillment_model import (
     AnsiblePoolConfig,
     VmFulfillmentRequirements,
@@ -144,6 +145,13 @@ class VmFulfillmentPlan:
         return lease.remote_port
 
     @staticmethod
+    def _guest_name(capacity_reservation_id: str) -> str:
+        try:
+            return fulfillment_guest_name(capacity_reservation_id)
+        except ValueError as exc:
+            raise ProviderConfigInvalidError(str(exc)) from exc
+
+    @staticmethod
     def _pool_config(pool_config: dict[str, Any]) -> AnsiblePoolConfig:
         try:
             return AnsiblePoolConfig.model_validate(pool_config)
@@ -231,7 +239,7 @@ class VmFulfillmentPlan:
             host_id=host_id,
             vm_action="create",
             offering_mode=resource.offering_mode,
-            vm_target=requirements.vm_target,
+            vm_target=self._guest_name(capacity_reservation_id),
             image_setup_type=requirements.image_setup_type,
             vm_ram=derived.get("vm_ram", config.default_vm_ram),
             vm_vcpus=derived.get("vm_vcpus", config.default_vm_vcpus),

@@ -24,7 +24,7 @@ B2  Publish listing:  create paused → resume → confirm present in registry
 B3  Arm provisioning: non-pausing mock create rule that returns tenant creds
 B4  market buy:       discovery-driven one-shot reaches status=ready, exit 0
 B5  Seller + lease:   listing closes while capacity is held, primary escrow ready with a
-                      fulfillment_uid, provisioning lease registered
+                      fulfillment_uid, provisioning lease recorded
 """
 
 from __future__ import annotations
@@ -624,7 +624,7 @@ class TestStageB4c_CapacityEventCycle:
 
 
 class TestStageB5_SellerAndLease:
-    def test_b5_seller_state_and_lease_registered(
+    def test_b5_seller_state_and_lease_recorded(
         self, storefront_admin_client, provisioning_client, deal_state: DealState
     ):
         """Seller closes the listing while provisioning owns the lease.
@@ -633,7 +633,8 @@ class TestStageB5_SellerAndLease:
         state on the seller side: the listing is ``closed`` while the 1x
         capacity is held, the per-deal
         primary escrow is ``ready`` with a fulfillment_uid, and the
-        provisioning service registered a lease for the escrow.
+        provisioning service holds a lease for the escrow: commit recorded its
+        window and the escrow, and activation its target.
         """
         require_state(
             deal_state,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -95,20 +94,6 @@ def _parse_start_utc(start_utc: str | None) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def committed_lease_window(
-    committed: dict[str, Any] | None,
-) -> tuple[str | None, str] | None:
-    """The lease window a site commit recorded, as ``(start, end)``.
-
-    ``None`` when the commit returned no reservation or no lease end, in which
-    case there is no recorded window to register.
-    """
-    if not isinstance(committed, dict) or not committed.get("lease_end_utc"):
-        return None
-    start = committed.get("lease_start_utc")
-    return (str(start) if start else None, str(committed["lease_end_utc"]))
-
-
 def _lease_window_strings(
     *,
     start_utc: str | None,
@@ -131,10 +116,12 @@ async def _commit_capacity_hold(
 ) -> dict[str, Any] | None:
     """Secure an acceptance-time hold for this deal, or None to reserve fresh.
 
-    Committing before provisioning turns the soft hold into a lease
-    immediately, so it cannot lapse mid-provision; the lease window set
-    here starts at settlement and is refreshed to provision-complete +
-    duration by the normal post-provision commit.
+    Committing before provisioning turns the soft hold into the deal's lease
+    immediately, so it cannot lapse mid-provision. The window set here is the
+    lease's: a lease with no negotiated start begins at settlement, because
+    the capacity is reserved for the deal's exclusive use from then. The
+    commit also records the deal's escrow, which a hold placed at negotiation
+    lacks.
     """
     if not held_reservation or not held_reservation.get("capacity_reservation_id"):
         return None
@@ -158,6 +145,7 @@ async def _commit_capacity_hold(
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=escrow_uid,
+            deal_ref={"escrow_uid": escrow_uid},
         )
     except Exception as exc:
         logger.warning(
@@ -188,7 +176,10 @@ async def _commit_fresh_reservation(
     stage_event: StageEventFn,
     start_utc: str | None = None,
 ) -> None:
-    """Promote a settlement-time fallback reservation before provisioning."""
+    """Promote a settlement-time fallback reservation before provisioning.
+
+    The window committed here is the lease's, as for an acceptance hold.
+    """
     capacity_reservation_id = reserved.get("capacity_reservation_id")
     resource_id = reserved.get("resource_id")
     if not capacity_reservation_id:
@@ -204,6 +195,7 @@ async def _commit_fresh_reservation(
         lease_start_utc=lease_start_utc,
         lease_end_utc=lease_end_utc,
         idempotency_ref=escrow_uid,
+        deal_ref={"escrow_uid": escrow_uid},
     )
     stage_event(
         "provision",
@@ -219,14 +211,12 @@ async def _commit_fresh_reservation(
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
-RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
 async def _build_vm_fulfillment_context(
     *,
     escrow_uid: str,
-    vm_target: str,
     ssh_public_key: str,
     order: str | dict[str, Any] | None,
     duration_seconds: int,
@@ -243,14 +233,11 @@ async def _build_vm_fulfillment_context(
         settlement_mechanism=settlement_mechanism,
         chain_configs=chain_configs,
     )
-    # No connectivity terms; see the sibling builder in fulfillment_service for
-    # why a storefront names no relay. The two payloads must stay identical:
-    # a VM reached differently depending on which path requested it is a defect
-    # visible on only one of them.
-    request_payload: dict[str, Any] = {
-        "vm_target": vm_target,
-        "ssh_pubkey": ssh_public_key,
-    }
+    # No connectivity terms and no guest name; see the sibling builder in
+    # fulfillment_service for why a storefront names neither. The two payloads
+    # must stay identical: a VM reached differently depending on which path
+    # requested it is a defect visible on only one of them.
+    request_payload: dict[str, Any] = {"ssh_pubkey": ssh_public_key}
     context = {
         "kind": "vm.storefront.fulfillment-context",
         "schema_version": 1,
@@ -345,7 +332,6 @@ async def fulfill_vm_obligation(
     capacity: CapacityClientLike,
     stage_event: StageEventFn,
     provision_vm: ProvisionVmFn,
-    register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
     site_id: str | None = None,
@@ -353,11 +339,13 @@ async def fulfill_vm_obligation(
     """Provision VM capacity and submit settlement fulfillment.
 
     ``held_reservation`` is the TTL soft hold the negotiation's
-    acceptance placed (two-phase reserve). It is committed into a lease
-    *before* provisioning starts — that removes the
-    hold-expires-during-provisioning race entirely, and the post-provision
-    commit below simply refreshes the lease window. A hold that already
-    lapsed falls back to the plain atomic reserve.
+    acceptance placed (two-phase reserve). It is committed into the deal's
+    lease *before* provisioning starts, which removes the
+    hold-expires-during-provisioning race entirely; that commit records the
+    lease's window. A hold that already lapsed falls back to the plain atomic
+    reserve, committed the same way. Provisioning records the lease's target
+    when the fulfillment becomes active, so nothing after provisioning writes
+    the lease.
     """
     fulfillment_uid = None
     connection_details: str | None = None
@@ -365,7 +353,6 @@ async def fulfill_vm_obligation(
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
     order_id: str | None = None
-    vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(
         "[SETTLEMENT] Order for fulfillment: type=%s keys=%s",
@@ -376,7 +363,6 @@ async def fulfill_vm_obligation(
     try:
         plan, recovery_context = await _build_vm_fulfillment_context(
             escrow_uid=escrow_uid,
-            vm_target=vm_target,
             ssh_public_key=ssh_public_key,
             order=order,
             duration_seconds=duration_seconds,
@@ -441,11 +427,8 @@ async def fulfill_vm_obligation(
         # response (kit/site's opaque-reservation boundary -- see
         # openspec/specs/site-capacity/spec.md); reserved.get("vm_host")
         # is therefore always None. Kept as a variable, not deleted,
-        # because provision_vm and register_lease already
-        # treat it as an accepted-but-unused compatibility parameter
-        # (documented on _do_provision and _register_vm_lease_with_settings)
-        # -- removing it from every call site is a larger signature change
-        # than stripping it from the API response requires.
+        # because provision_vm treats it as an accepted-but-unused
+        # compatibility parameter (documented on _do_provision).
         reserved_vm_host = reserved.get("vm_host")
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
@@ -517,7 +500,6 @@ async def fulfill_vm_obligation(
         provision_result = await provision_vm(
             ssh_public_key,
             vm_host=reserved_vm_host,
-            vm_target=vm_target,
             capacity_reservation_id=reserved_capacity_reservation_id,
             escrow_uid=escrow_uid,
             on_job_submitted=_record_fulfillment_id,
@@ -566,43 +548,6 @@ async def fulfill_vm_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    lease_start_utc, lease_end_utc = _lease_window_strings(
-        start_utc=start_utc,
-        duration_seconds=duration_seconds,
-    )
-
-    # The window the lease is registered with is the one the site recorded at
-    # this commit: once a lease is registered, a commit leaves its window alone
-    # and a registration naming another start is refused, so registering a
-    # window the site never recorded could only be refused later.
-    committed_window: tuple[str | None, str] | None = None
-    if reserved_capacity_reservation_id:
-        # capacity_reservation_id is the durable identity commit() actually
-        # needs; resource_id is accepted only for a resource-id-only lookup
-        # path with no current caller (see CapacityLedgerService.commit's
-        # docstring) and is never guaranteed present -- the opaque
-        # capacity-reservation boundary negotiates on pooled capacity, not a
-        # specific physical resource, so a real reservation response
-        # legitimately omits it. Gating this refresh on resource_id would
-        # skip the lease-window refresh for every ordinary pool-scoped
-        # reservation, which is the common case, not an edge case.
-        try:
-            committed = await capacity.commit(
-                binding,
-                resource_id=reserved_resource_id,
-                capacity_reservation_id=reserved_capacity_reservation_id,
-                lease_start_utc=lease_start_utc,
-                lease_end_utc=lease_end_utc,
-                idempotency_ref=escrow_uid,
-            )
-            committed_window = committed_lease_window(committed)
-        except Exception as lease_err:
-            logger.warning(
-                "[LOCAL DB] Failed to mark reservation %s as leased after provisioning: %s",
-                reserved_capacity_reservation_id,
-                lease_err,
-            )
-
     cred_order_id = seller_order_id or order_id
     if authentication and cred_order_id:
         try:
@@ -647,8 +592,7 @@ async def fulfill_vm_obligation(
 
         Settlement leaves the deal open rather than failing it with a running
         VM; the fulfillment resume pass finishes it from the recorded
-        fulfillment, re-committing, registering, and submitting the evidence,
-        without provisioning again.
+        fulfillment, submitting the evidence, without provisioning again.
         """
         logger.warning(
             "[SETTLEMENT] Escrow %s deferred after provisioning: %s did not "
@@ -674,36 +618,6 @@ async def fulfill_vm_obligation(
             "connection_details": None,
             "ssh_public_key": ssh_public_key,
         }
-
-    if reserved_capacity_reservation_id and vm_target and escrow_uid:
-        # The lease is the family's: registering it records its executor
-        # target and correlates the reservation with the deal's escrow. It is
-        # an obligation of a delivered deal, so a deal whose lease is not
-        # registered is not complete.
-        if committed_window is None:
-            return _deferred(
-                "lease registration",
-                "the reservation's commit recorded no lease window",
-            )
-        try:
-            await register_lease(
-                resource_id=reserved_resource_id,
-                capacity_reservation_id=reserved_capacity_reservation_id,
-                escrow_uid=escrow_uid,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-                lease_start_utc=committed_window[0],
-                lease_end_utc=committed_window[1],
-            )
-        except Exception as lease_err:
-            return _deferred("lease registration", lease_err)
-        logger.info(
-            "[LEASE] Registered lease with provisioning service "
-            "(reservation=%s escrow=%s expires=%s)",
-            reserved_capacity_reservation_id,
-            escrow_uid,
-            committed_window[1],
-        )
 
     try:
         fulfillment_uid = await submit_compute_fulfillment(
@@ -751,7 +665,6 @@ async def fulfill_vm_obligation(
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
         capacity_reservation_id=reserved_capacity_reservation_id,
-        lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,
         order_id=order_id,
     )

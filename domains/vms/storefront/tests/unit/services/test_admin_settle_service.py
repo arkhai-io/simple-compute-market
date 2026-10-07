@@ -188,7 +188,6 @@ class TestEvaluateSettleDryRun:
         fake_spec = {
             "resource_id": "r-1",
             "host_id": "host-1",
-            "vm_target": "tenant-abcd",
             "required_attributes": {"gpu_model": "H200"},
             "ssh_public_key": "ssh-ed25519 test",
             "duration_seconds": 3600,
@@ -206,7 +205,9 @@ class TestEvaluateSettleDryRun:
         assert result["would_submit"] is True
         assert result["escrow_uid"] == _ESCROW_UID
         assert result["host_id"] == "host-1"
-        assert result["vm_target"] == "tenant-abcd"
+        # A preview cannot know the guest's name, which provisioning derives
+        # from the reservation settle commits.
+        assert "vm_target" not in result
         assert result["required_attributes"] == {"gpu_model": "H200"}
 
     async def test_a_held_negotiation_previews_its_held_resource(self, svc, db):

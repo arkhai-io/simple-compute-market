@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import pytest
 from compute_provisioning_contracts import (
-    LeaseRegistration,
     LeaseReleaseOversight,
     LeaseState,
     LeaseTermination,
 )
-from market_site.ledger import CapacityConflictError
 
 from compute_provisioning.lease_lifecycle import InvalidLeaseStateError, LeaseNotFoundError
 from compute_provisioning.leases import LeaseRouteService
@@ -30,9 +28,8 @@ def _reservation(reservation_id: str, mode: str, state: str = "leased") -> dict:
 
 
 class FakeLeases:
-    def __init__(self, *reservations: dict, refuse: Exception | None = None) -> None:
+    def __init__(self, *reservations: dict) -> None:
         self.reservations = {r["capacity_reservation_id"]: r for r in reservations}
-        self.refuse = refuse
 
     def list_leases(self):
         return list(self.reservations.values())
@@ -41,11 +38,6 @@ class FakeLeases:
         if lease_id not in self.reservations:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found")
         return self.reservations[lease_id]
-
-    def register_lease(self, registration):
-        if self.refuse is not None:
-            raise self.refuse
-        return self.get_lease(registration.capacity_reservation_id)
 
 
 class FakeLifecycle:
@@ -61,43 +53,6 @@ class FakeLifecycle:
         if self.refuse is not None:
             raise self.refuse
         return _reservation(lease_id, "vm", "unmanaged")
-
-
-def _registration() -> LeaseRegistration:
-    return LeaseRegistration(
-        capacity_reservation_id="vm-1",
-        deal_ref={"escrow_uid": "0x1"},
-        executor_target="target-vm-1",
-        lease_end_utc="2099-01-01T00:00:00+00:00",
-    )
-
-
-def test_a_registration_reports_the_reservation_s_mode():
-    service = LeaseRouteService(FakeLeases(_reservation("vm-1", "vm")), FakeLifecycle())
-
-    view = service.register(_registration())
-
-    assert (view.offering_mode, view.status, view.executor_target) == (
-        "vm",
-        LeaseState.ACTIVE,
-        "target-vm-1",
-    )
-
-
-@pytest.mark.parametrize(
-    ("refusal", "status"),
-    [
-        (CapacityConflictError("already registered with another target"), 409),
-        (LeaseNotFoundError("no live reservation"), 404),
-    ],
-)
-def test_a_refused_registration_answers_conflict_or_not_found(refusal, status):
-    service = LeaseRouteService(FakeLeases(refuse=refusal), FakeLifecycle())
-
-    with pytest.raises(ProvisioningRouteError) as refused:
-        service.register(_registration())
-
-    assert refused.value.status_code == status
 
 
 def test_the_list_filters_by_status_and_offering_mode():

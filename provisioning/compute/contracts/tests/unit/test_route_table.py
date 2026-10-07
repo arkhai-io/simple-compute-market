@@ -43,7 +43,6 @@ def test_every_family_route_admits_the_administrator() -> None:
 @pytest.mark.parametrize(
     ("method", "path", "roles"),
     [
-        ("POST", "/api/v1/contract/leases", ("seller", "admin")),
         ("GET", "/api/v1/contract/leases/r-1", ("seller", "admin")),
         ("POST", "/api/v1/contract/leases/r-1/terminate", ("seller", "admin")),
         ("GET", "/api/v1/contract/leases", ("admin",)),
@@ -53,10 +52,9 @@ def test_every_family_route_admits_the_administrator() -> None:
     ],
 )
 def test_the_lease_routes_admit_their_roles(method, path, roles) -> None:
-    """A storefront registers, reads, and terminates its own leases by
-    reservation id; the list and the release controls are the operator's."""
-    body = {"capacity_reservation_id": "r-1"} if path.endswith("/leases") and method == "POST" else {}
-    contract, _ = PROVISIONING_ROUTE_TABLE.resolve(method, path, body)
+    """A storefront reads and terminates its own leases by reservation id; the
+    list and the release controls are the operator's. No route writes a lease."""
+    contract, _ = PROVISIONING_ROUTE_TABLE.resolve(method, path, {})
 
     assert contract.allowed_roles == roles
 
@@ -162,3 +160,12 @@ def test_a_list_of_path_resources_joins_its_groups() -> None:
     )
 
     assert contract.match("POST", "/api/v1/example/h1/units/u1/start", {}) == "h1/u1"
+
+
+def test_no_route_registers_a_lease() -> None:
+    """Commit begins a lease and provisioning records its target when the
+    fulfillment becomes active, so the lease collection takes no write."""
+    with pytest.raises(ValueError):
+        PROVISIONING_ROUTE_TABLE.resolve(
+            "POST", "/api/v1/contract/leases", {"capacity_reservation_id": "r-1"}
+        )

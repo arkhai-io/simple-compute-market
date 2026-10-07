@@ -162,7 +162,6 @@ class TestDoProvision:
             "ssh-ed25519 AAAA",
             sqlite_client=sqlite_client,
             vm_host="kvm1",
-            vm_target="tenant-abcd",
             on_job_submitted=_on_job_submitted,
             capacity_reservation_id="res-1",
             escrow_uid="escrow-1",
@@ -196,10 +195,9 @@ class TestDoProvision:
         fulfillment_client.begin_fulfillment.assert_awaited_once()
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
         assert begin_body.capacity_reservation_id == "res-1"
-        assert begin_body.fulfillment_request.payload["vm_target"] == "tenant-abcd"
         assert begin_body.market == "vms"
-        assert begin_body.fulfillment_request.payload["ssh_pubkey"] == "ssh-ed25519 AAAA"
-        assert "connectivity" not in begin_body.fulfillment_request.payload
+        # Provisioning names the guest; the storefront names nothing else.
+        assert begin_body.fulfillment_request.payload == {"ssh_pubkey": "ssh-ed25519 AAAA"}
         assert fulfillment_client.begin_fulfillment.await_args.kwargs == {
             "site_id": "site-1"
         }
@@ -243,7 +241,7 @@ class TestDoProvision:
         )
 
         await fs._do_provision(
-            "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+            "ssh-ed25519 AAAA", vm_host="kvm1",
             sqlite_client=sqlite_client,
             capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
@@ -274,7 +272,7 @@ class TestDoProvision:
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
-                "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+                "ssh-ed25519 AAAA", vm_host="kvm1",
                 sqlite_client=sqlite_client,
                 capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
@@ -388,17 +386,13 @@ class TestPersistEscrowFieldsWithRetry:
 
 
 @pytest.mark.asyncio
-async def test_generated_vm_target_survives_context_fulfillment_and_lease_registration(
+async def test_the_storefront_names_no_guest_and_writes_the_lease_only_at_commit(
     monkeypatch,
     tmp_path,
 ):
-    """Exercise target generation across context, fulfillment, and lease seams.
-
-    The storefront project deliberately does not depend on the provider adapter,
-    so this test validates the shared wire invariant directly rather than importing
-    the adapter's private Pydantic model. Provider-model validation remains covered
-    in the provisioning-adapter suite.
-    """
+    """Provisioning names the guest from the capacity reservation, so the
+    storefront records, sends, and registers without one; it learns the
+    delivery afterwards."""
 
     plan = SimpleNamespace(
         order_id="listing-1",
@@ -406,7 +400,7 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
     )
     monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
 
-    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "target-survival.db")
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "no-guest-name.db")
     sqlite_client = lifecycle.db
 
     async def capacity_binding_for_listing(repository, listing_id):
@@ -422,11 +416,8 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             "resource_id": "resource-1",
-            "vm_host": "host-1",
             "site": "site-1",
         }),
-        # Commit returns the reservation with the window the site recorded,
-        # which the lease is then registered with.
         commit=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             "state": "leased",
@@ -434,25 +425,13 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
             "lease_end_utc": "2026-01-01 01:00",
         }),
     )
-    observed: dict[str, str] = {}
+    observed: dict[str, dict] = {}
 
-    async def validating_provision_vm(
-        ssh_public_key: str,
-        *,
-        vm_target: str,
-        on_job_submitted,
-        **_: object,
-    ) -> dict[str, object]:
-        assert isinstance(vm_target, str)
-        assert vm_target.startswith("tenant-")
-        assert len(vm_target) > len("tenant-")
-        assert ssh_public_key
-        observed["provision"] = vm_target
+    async def provision_vm(ssh_public_key: str, *, on_job_submitted, **kwargs) -> dict:
+        observed["provision"] = kwargs
+        observed["commits_before_provisioning"] = capacity.commit.await_count
         await on_job_submitted("fulfillment-1")
-        return {"vm_name": vm_target, "authentication": {}}
-
-    async def register_lease(*, vm_target: str, **_: object) -> None:
-        observed["lease"] = vm_target
+        return {"authentication": {}}
 
     result = await vfs.fulfill_vm_obligation(
         client=None,
@@ -464,33 +443,31 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         get_sqlite_client=lambda: sqlite_client,
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
-        provision_vm=validating_provision_vm,
-        register_lease=register_lease,
+        provision_vm=provision_vm,
     )
     await asyncio.sleep(0)
 
     persisted = await sqlite_client.load_escrow(escrow_uid="escrow-1")
     assert persisted is not None
     context = json.loads(persisted["fulfillment_context"])
-    payload = context["payload"]["fulfillment_request"]["payload"]
-    persisted_vm_target = payload["vm_target"]
-    assert isinstance(persisted_vm_target, str)
-    assert persisted_vm_target.startswith("tenant-")
-    assert payload["ssh_pubkey"] == "ssh-ed25519 test"
-    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
-    assert observed == {
-        "provision": persisted_vm_target,
-        "lease": persisted_vm_target,
+    assert context["payload"]["fulfillment_request"]["payload"] == {
+        "ssh_pubkey": "ssh-ed25519 test"
     }
+    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
+    assert "vm_target" not in observed["provision"]
+    # The lease begins at the one commit before provisioning, which records
+    # the deal's escrow; nothing writes the lease afterwards.
+    assert observed["commits_before_provisioning"] == capacity.commit.await_count == 1
+    assert capacity.commit.await_args.kwargs["deal_ref"] == {"escrow_uid": "escrow-1"}
     assert result["status"] == "fulfilled"
 
 
 @pytest.mark.asyncio
-async def test_post_provision_commit_and_lease_registration_do_not_require_resource_id(
+async def test_the_commit_does_not_require_resource_id(
     monkeypatch,
     tmp_path,
 ):
-    """Regression test for the opaque-reservation post-provision gap.
+    """Regression test for the opaque-reservation gap.
 
     ``kit/site``'s ``/reservations`` endpoint strips ``resource_id``,
     ``capacity_bucket_id``, and ``backing_resource_id`` from every
@@ -498,9 +475,9 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     capacity, not a pinned physical resource, so ``reserve()`` legitimately
     returns without them. The previous test above exercises a ``reserve()``
     double that (unrealistically) still supplies ``resource_id``/``vm_host``,
-    so it cannot catch a regression where the post-provision lease-window
-    refresh or lease registration is gated on those fields being present.
-    This test uses the real, opaque shape and asserts both calls still fire.
+    so it cannot catch a regression where the commit that begins the lease is
+    gated on those fields being present. This test uses the real, opaque
+    shape and asserts the commit still fires.
     """
     plan = SimpleNamespace(
         order_id="listing-1",
@@ -526,8 +503,6 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
             # No resource_id/vm_host -- the real opaque-reservation shape.
             "site": "site-1",
         }),
-        # Commit returns the reservation with the window the site recorded,
-        # which the lease is then registered with.
         commit=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             "state": "leased",
@@ -537,12 +512,10 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     )
 
     async def provision_vm(
-        ssh_public_key: str, *, vm_target: str, on_job_submitted, **_: object,
+        ssh_public_key: str, *, on_job_submitted, **_: object,
     ) -> dict[str, object]:
         await on_job_submitted("fulfillment-1")
-        return {"vm_name": vm_target, "authentication": {}}
-
-    register_lease = AsyncMock()
+        return {"authentication": {}}
 
     result = await vfs.fulfill_vm_obligation(
         client=None,
@@ -555,25 +528,15 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        register_lease=register_lease,
     )
     await asyncio.sleep(0)
 
     assert result["status"] == "fulfilled"
     assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
-    # `commit()` is also called earlier, atomically, when there is no
-    # pre-existing TTL hold to refresh (`_reserve_capacity_for_obligation` ->
-    # `_commit_fresh_reservation`); this test only asserts the *post-provision*
-    # lease-window-refresh call this regression targets is not skipped.
-    assert capacity.commit.await_count >= 1
-    post_provision_commit = capacity.commit.await_args
-    assert post_provision_commit.kwargs["capacity_reservation_id"] == "reservation-1"
-    assert post_provision_commit.kwargs["resource_id"] is None
-
-    register_lease.assert_awaited_once()
-    assert register_lease.await_args.kwargs["capacity_reservation_id"] == "reservation-1"
-    assert register_lease.await_args.kwargs["resource_id"] is None
-    assert register_lease.await_args.kwargs["vm_host"] is None
+    capacity.commit.assert_awaited_once()
+    commit = capacity.commit.await_args
+    assert commit.kwargs["capacity_reservation_id"] == "reservation-1"
+    assert commit.kwargs["resource_id"] is None
 
 
 _RECORDED_WINDOW = {
@@ -584,9 +547,9 @@ _RECORDED_WINDOW = {
 }
 
 
-async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_lease):
-    """Run the VM main path to past provisioning with the given commit and
-    registration; the VM itself is always provisioned."""
+async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit):
+    """Run the VM main path to past provisioning with the given commit; the VM
+    itself is always provisioned."""
     plan = SimpleNamespace(order_id="listing-1", required_attributes={"vcpu_count": 2})
     monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
     lifecycle = await make_vm_lifecycle_fixture(tmp_path / "deferral.db")
@@ -605,10 +568,10 @@ async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_
     )
     provisioned: list[str] = []
 
-    async def provision_vm(ssh_public_key, *, vm_target, on_job_submitted, **_):
+    async def provision_vm(ssh_public_key, *, on_job_submitted, **_):
         await on_job_submitted("fulfillment-1")
-        provisioned.append(vm_target)
-        return {"vm_name": vm_target, "authentication": {}}
+        provisioned.append(ssh_public_key)
+        return {"authentication": {}}
 
     result = await vfs.fulfill_vm_obligation(
         client=None,
@@ -621,37 +584,10 @@ async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        register_lease=register_lease,
     )
     await asyncio.sleep(0)
     assert provisioned, "the VM was provisioned"
     return result
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("commit", "register_lease"),
-    [
-        (AsyncMock(return_value={"capacity_reservation_id": "reservation-1"}), AsyncMock()),
-        (AsyncMock(return_value=_RECORDED_WINDOW), AsyncMock(side_effect=RuntimeError("down"))),
-    ],
-    ids=["commit records no window", "registration fails"],
-)
-async def test_a_deal_whose_lease_is_not_registered_is_deferred_not_published(
-    monkeypatch, tmp_path, commit, register_lease
-):
-    """The VM is running but its lease is not registered: the deal is deferred
-    for the resume pass, and its evidence is not published yet."""
-    submit = AsyncMock(return_value="fulfillment-uid")
-    monkeypatch.setattr(vfs, "submit_compute_fulfillment", submit)
-
-    result = await _fulfil_after_provisioning(
-        monkeypatch, tmp_path, commit=commit, register_lease=register_lease
-    )
-
-    assert result["status"] == "deferred"
-    assert "lease registration" in result["message"]
-    submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -668,7 +604,6 @@ async def test_a_failed_evidence_publication_after_provisioning_is_deferred(
         monkeypatch,
         tmp_path,
         commit=AsyncMock(return_value=_RECORDED_WINDOW),
-        register_lease=AsyncMock(),
     )
 
     assert result["status"] == "deferred"

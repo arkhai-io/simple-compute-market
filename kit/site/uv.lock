@@ -85,7 +85,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -126,7 +126,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -134,7 +134,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]

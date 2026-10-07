@@ -2972,48 +2972,326 @@ re-verifies them by grep before each move.
             restored;
           - `make check-locks`, `make check-packaging`, comment hygiene, the change's
             documentation citations, and OpenSpec strict validation (1.14.0) pass.
+        - End-to-end: run 37471339897, on this checkpoint, installed
+          compute-provisioning-service 0.15.1, vms-provisioning-adapter 0.12.1,
+          bare-metal-provisioning-adapter 0.9.1, vms-storefront 0.12.1,
+          compute-provisioning 0.17.0, contracts 0.7.0, vms-buyer 0.6.0, arkhai-vms 0.6.0,
+          and e2e-tests 0.1.6. The VM lane passed 135 and the bare-metal lane 16; nothing
+          failed or was skipped. Neither lane's logs show a traceback, a 5xx, a 401, or a
+          403, or a create failed for want of delivery evidence; the only 4xx responses are
+          the API-credit lane's 402s on an exhausted grant and the scenarios' 404 host checks
+          before registering a host. Expired leases were released. The lanes run no active
+          VM fulfillment across the provisioning migration, so its refusal of an unreadable
+          active delivery is proven by the integration suite only.
+  - [x] 5B.12.C Provisioning names the guest. Amended 2026-10-06 by the 5B.12.C
+        implementation audit (`design.md`, "5B.12.C implementation audit (2026-10-06)").
+        - VM adapter (`domains/vms/provisioning/adapter/`):
+          - `services/vm_fulfillment_plan.py` names the guest: `tenant-` and the first 24
+            hex characters of a UUIDv5 of the capacity reservation id, under a namespace
+            the module fixes. `prepare_create` sets it as `VmJobParams.vm_target` and so
+            the prepared job's `executor_target`, on the validation path too. Teardown is
+            unchanged: it takes the target from the metadata.
+          - `models/fulfillment_model.py`: `VmFulfillmentRequirements` loses `vm_target` and
+            refuses unknown fields, so a request naming a guest is refused. Every producer
+            of the request (both VM storefront builders, the e2e harness, the tests) sends
+            only declared fields.
+          - The name's derivation and its validation are one VM-owned helper the plan
+            calls, refusing a name that breaks any rule below.
+          - `iac/README.md`: `vm_target`'s description states what the name must satisfy
+            (hostname label, a login of at most 32 characters once stripped to letters and
+            digits, shell-safe, and not contained in another guest's name).
+            `iac/ansible/roles/vm-management/tasks/vm-create.yml`: a comment at the tenant
+            login's derivation states that constraint.
+        - Contracts (`provisioning/compute/contracts/`): `contracts.py`'s `LeaseRegistration`
+          loses `executor_target`, and its docstring says the target is the fulfillment's.
+        - Family kit (`provisioning/compute/`):
+          - `job_fulfillment.py` decodes a job-backed fulfillment's executor target from
+            its provider metadata, over `JobFulfillmentMetadata`, refusing empty or foreign
+            metadata;
+          - one family operation, `executor_target_for(capacity_reservation_id)`, over the
+            fulfillment kit's settlement repository and a session factory, returning the
+            target of an `active` job-backed fulfillment and refusing otherwise (a module
+            of its own beside `leases.py`, since 5B.12.D reuses it);
+          - `leases.py`: `LeaseRouteService` takes it, and `register` records that target;
+            no fulfillment, one not `active`, or no job-backed target is a 409.
+            `executor_leases.py` is unchanged: the site still records a target.
+        - Service (`provisioning/compute/service/`):
+          - `container.py` builds the resolver over the settlement repository and session
+            factory it already holds, and passes it to `LeaseRouteService`;
+          - `db/migrations.py`: a migration removing `vm_target` from every VM settlement
+            record's stored `fulfillment_request`, in every state, idempotent. Prepared
+            operations and metadata are untouched: they keep the name a create was
+            prepared with.
+        - VM storefront (`domains/vms/storefront/src/market_storefront/`):
+          - the three generators go: `services/vm_fulfillment_service.py` (its fulfillment
+            context and request carry no target), `services/vm_job_spec_service.py` (the
+            factory and the spec's target), and `services/admin_settle_service.py` (the dry
+            run reports none);
+          - `services/fulfillment_service.py`: `_do_provision`'s request carries no target,
+            and `_register_vm_lease_with_settings` loses its target, host, and resource
+            parameters;
+          - the registration gates in `services/vm_fulfillment_service.py` and
+            `services/fulfillment_resume_runtime.py` test the reservation and the settlement
+            resource only;
+          - `models/capacity_admin_models.py`'s usage-started request loses `vm_target`, and
+            `controllers/admin_controller.py` stops passing it and the host, with the comment
+            claiming the host is recorded;
+          - `utils/migrations.py`: a data migration removing `vm_target` from every escrow's
+            stored fulfillment request (`fulfillment_context`), idempotent, so a replay
+            still equals provisioning's migrated copy;
+          - the `compute_allocations.vm_target` column is left as it is (no code writes or
+            reads it); `remove-dead-storefront-physical-surfaces` freezes that table.
+        - Core: `core/storefront-client/src/storefront_client/client.py`'s
+          `notify_usage_started`, async and sync, loses `vm_target`, and `evaluate_settle`'s
+          docstrings stop promising one; `core/storefront/src/core_storefront/models/settle_models.py`'s
+          `EvaluateSettleResponse` loses `vm_target`.
+        - Bare-metal storefront: `hosted_lifecycle.py` registers without a target; it still
+          loads its materialization for the evidence's `expires_at`.
+        - e2e (`e2e-tests/`): stage 08a of `tests/e2e/roles/scenarios/vms/test_full_deal.py`
+          and `test_non_erc20_settlement.py` stop carrying the dry run's target into the
+          evaluate-job call; `tests/e2e/roles/scenarios/vms/conftest.py` loses
+          `_evaluate_settle_vm_target`.
+        - Spec deltas, written with the audit: `physical-provisioning`'s "Provisioning names
+          what it provisions" states the name's derivation, its constraints, and the
+          refusal of a request naming a guest; its "A lease's executor identity and evidence are fixed at
+          registration" takes the target from the fulfillment. `vm-storefront-fulfillment`
+          removes the permanent "Versioned fulfillment context", whose scenario has the
+          storefront generate the target and register with it, and adds "The fulfillment
+          context records the exact request, naming no guest" in its place (the validator
+          refuses a modification that drops a scenario). At promotion,
+          `pools-7-storefront-fulfillment-cutover`'s `design.md` promotion record links to
+          the removed requirement's anchor; repoint it to the replacement.
+        - Tests:
+          - VM adapter, `tests/unit/test_vm_fulfillment_plan.py`: the name is stable per
+            reservation and distinct across reservations, is 31 characters, is a valid
+            hostname label, gives a login of at most 32 characters starting with a letter,
+            and uses only shell-safe characters; a create prepared with or without
+            allocation carries it; a request naming a guest is refused;
+          - family kit: `tests/unit/test_lease_route_service.py` (the target from the
+            resolver), `test_job_fulfillment.py` (the decoding), and the resolver against a
+            real embedded database under `tests/integration/` (active, not active, no
+            fulfillment, foreign metadata);
+          - contracts: `tests/unit/test_contracts.py`, a registration naming a target
+            refused;
+          - service integration:
+            - registration over a real active fulfillment records exactly its target, for
+              VM and bare metal; no fulfillment, and one not yet active, are refused; a body
+              naming a target is refused at the route (a rejection-path test, status only)
+              (`test_leases_api.py`, `test_lease_release_api.py`,
+              `test_compute_contract_api.py`); tests that only need a lease take it from
+              commit;
+            - the request migration (a new `integration/` test): every state's stored
+              request loses `vm_target` and nothing else changes; a replayed migrated
+              request for an accepted fulfillment returns it with its prepared name; a
+              migrated request provisioning never accepted takes the derived name; a second
+              run changes nothing;
+          - VM storefront: the request the storefront sends and records names no guest;
+            the context migration (integration), idempotent;
+            `unit/test_fulfillment_provisioning.py`,
+            `unit/test_fulfillment_resume_runtime.py` (registration with a delivery naming no
+            host), `unit/test_fulfillment_service.py`,
+            `unit/test_fulfill_vm_obligation_error_handling.py`,
+            `unit/services/test_admin_settle_service.py`, `integration/test_settle_controller.py`,
+            and `integration/test_admin_api.py`;
+          - core: the storefront client's and storefront's suites run; `notify_usage_started`
+            has no core test, and is exercised through the VM storefront's
+            `integration/test_admin_api.py`;
+          - bare-metal storefront: `tests/test_hosted_lifecycle.py`;
+          - e2e: the unit suite, collection, and both lanes.
+        - Versions: contracts 0.8.0, family kit 0.18.0, service 0.16.0, VM adapter 0.13.0,
+          core storefront 0.9.0, core storefront client 0.24.0, VM storefront 0.13.0,
+          bare-metal storefront 0.9.1, e2e-tests 0.1.7; by exact pins,
+          kit-capacity-publication 0.5.1 and apicredits-storefront 0.6.2; floors on the
+          contracts raised to 0.8.0 wherever a package builds or serves
+          `LeaseRegistration`, and a package whose only change is a floor takes a patch
+          bump. Every bump logged.
+        - The wire break is accepted (audit row 8): both storefronts and provisioning move
+          in this slice, and the completion note records the end-to-end run as the evidence
+          that both sides moved together.
+        Done 2026-10-06, as amended:
+        - Naming: `vm_provisioning_adapter.guest_names` derives `tenant-` and 24 hex
+          characters of a UUIDv5 of the reservation id and checks the hostname, login, and
+          shell rules; the plan names every create's guest with it. VM's requirement model
+          has no `vm_target` and refuses unknown fields.
+        - Registration: `LeaseRegistration` has no `executor_target`.
+          `FulfillmentTargets.executor_target_for` (`fulfillment_targets.py`) reads the
+          target of an `active` job-backed fulfillment, through `fulfillment_executor_target`
+          in `job_fulfillment.py`. `LeaseRouteService` records it, answering 404 for no
+          reservation (a reservation read added to `ExecutorLeaseService`, so the 404 is not
+          lost to the resolver's 409) and 409 for no target. The service's container and its
+          integration harness compose the resolver.
+        - Migrations: provisioning `20261006_003_vm_fulfillment_request_names_no_guest` and
+          VM storefront `20261006_012_fulfillment_context_names_no_guest`.
+        - Storefronts: the VM storefront's three generators are gone, its requests carry
+          only `ssh_pubkey`, and registration names no target or host and is gated on the
+          reservation and resource; usage-started and the settle dry run name no guest; bare
+          metal registers without a target. Core's client and settle model follow.
+        - e2e: stages 08a and 08c and the non-ERC-20 scenario carry no guest name, 08a
+          asserting the preview names none; the scenarios' lease row reader takes the target
+          from the neutral lease view rather than the ledger's stray `vm_target` key.
+        - Knowledge: `domains/vms/provisioning/iac/README.md` gains "Guest names", and
+          `vm-create.yml` a comment at the login's derivation.
+        - Tests:
+          - new: `TestGuestName` (VM adapter); `TestExecutorTarget` and
+            `integration/test_fulfillment_targets.py` (family kit);
+            `integration/test_vm_fulfillment_request_migration.py` (service);
+            `integration/test_fulfillment_context_migration.py` (VM storefront);
+          - registration over an active job-backed fulfillment, refused before activation,
+            with a body naming a target refused at the route (422), and a recorded target
+            other than the fulfillment's refused (409); bare metal's registration records its
+            real grant's host;
+          - a fresh VM acceptance takes the derived name, and a request naming a guest is
+            invalid (`test_fulfillment_api.py`);
+          - the storefront records, sends, and registers no guest name; resume registers a
+            delivery naming no host;
+          - the service's migration chain lists the new migration (`test_database.py`).
+        - Versions: as planned; logged with every bump.
+        - Relocking: by `uv_project.py`, except the VM storefront, the bare-metal storefront,
+          and the API-credit storefront, which were hand-locked from their snapshot form.
+          A relock flips the API-credit storefront's platform markers as it does the
+          bare-metal storefront's; it joins the hand-locked set. Every lock's markers were
+          checked against the snapshot before packaging.
+        - Validation:
+          - contracts 61; family kit 238; compute client 50; VM adapter 27; bare-metal
+            adapter 40;
+          - provisioning service 682 unit and 451 integration;
+          - bare-metal storefront 230; core storefront 182; core storefront client 44;
+            capacity publication 66;
+          - VM storefront by frozen sync 1110 unit and 353 integration (the two known
+            `test_alkahest` failures);
+          - e2e unit 236 (the known 10.1 failure), and 178 e2e and smoke tests collect;
+          - the root `make -k test` aggregate passes its 44 suites, failing only where this
+            environment cannot run a suite; the three locks its reinit rewrote were restored;
+          - `make check-locks`, `make check-packaging`, comment hygiene, the change's
+            documentation citations, and OpenSpec strict validation (1.14.0) pass.
         - Not yet run end to end.
-  - [ ] 5B.12.C Provisioning names the guest.
-        - VM's plan derives `executor_target` from the capacity reservation, checked
-          against libvirt's name rules; `models/fulfillment_model.py`'s requirement loses
-          `vm_target`.
-        - Contracts: `LeaseRegistration` loses `executor_target`, the minimum guest naming
-          forces (5B.12.D removes registration); the family lease service
-          (`provisioning/compute/src/compute_provisioning/leases.py`) takes it from the
-          reservation's fulfillment record.
-        - VM storefront: the three generators go (`services/vm_fulfillment_service.py`,
-          `services/admin_settle_service.py`, `services/vm_job_spec_service.py`); its
-          `vm_target` column is filled from the fulfillment; `models/capacity_admin_models.py`
-          and `controllers/admin_controller.py` drop the field; admin settle's evaluate
-          response stops returning it. Bare-metal storefront: `hosted_lifecycle.py` stops
-          passing a target.
-        - Tests: the derivation (stable per reservation, distinct across reservations,
-          valid libvirt names); lease registration without a target, for both domains,
-          through the real stack; the VM storefront's suites naming `vm_target`; e2e
-          stage 08a, `test_non_erc20_settlement.py`, and the VM scenarios' conftest row
-          reader.
-  - [ ] 5B.12.D **Decision gate**, then lease registration removed. Decide when a lease
-        with no negotiated start begins (`design.md`, "5B.12 implementation audit
-        (2026-10-06)", row 11): (a) at commit, for every domain; (b) when its fulfillment
-        becomes active, for every domain, the site moving the window to the activation,
-        keeping its committed duration, and marking it final, with storefronts reading the
-        window back; (c) VM's post-delivery commit finalizes the window. The maintainer
-        leans to (b). Before deciding, read through: how commit says a deal has no
-        negotiated start; how each storefront reads the final window (bare metal's
-        evidence `expires_at` included); whether any reservation lookup still needs the
-        escrow that registration records on a negotiation-time hold, given the jobs now
-        correlate on the reservation (5B.8.B's end-to-end escrow lookups failed for want of
-        it: `design.md`, "Controls and routes (5B.8)", slice B's implementation review,
-        finding 3); and VM's settlement outcome that defers a deal until registration
-        succeeds. Bring the options back with the code read through, then record the
-        decision and amend this task with the files.
-        After the decision, the direction already agreed: the registration route, its
-        contract, `LeaseRegistration`, and the client methods go; VM's
-        `_register_vm_lease_with_settings` and its resume-runtime step and bare metal's
-        call in `hosted_lifecycle.py` go; provisioning records the target on the
-        reservation from the fulfillment record; the permanent requirements describing
-        registration are modified by the spec delta. If (b), the closeout finding about a
-        commit re-recording a truncated window is retired.
+  - [x] 5B.12.D Lease registration removed. The gate was decided on 2026-10-06
+        (`design.md`, "5B.12.D decision gate (2026-10-06)"): a lease with no negotiated
+        start begins at commit, for every domain; the storefront owns the rule as policy,
+        and only "at commit" is built; commit records the deal's escrow where a hold lacks
+        one; provisioning records the target when a fulfillment becomes active.
+        - Site (`kit/site/src/market_site/`):
+          - `ledger.py`: `commit` is write-once (a repeat on a leased reservation returns it
+            unchanged, whatever window it names) and takes the deal's correlation,
+            recording an escrow the reservation lacks; `attach_lease` and the registration
+            refusal set give way to an in-session write of the executor target, like
+            `record_create_handle_in_session`, refused on a releasing, release-failed, or
+            unmanaged reservation and on a different recorded target;
+          - `authority.py`: the registration port goes; `router.py` and `http_models.py`:
+            commit's request carries the deal's correlation.
+        - Commit's other layers carry the correlation: `kit/site-client`,
+          `kit/capacity-publication` (`capacity.py`), and `core/storefront` (`capacity.py`,
+          `aggregation.py`), and the bare-metal storefront's `site_clients.py`.
+        - Contracts and client: `LeaseRegistration` and its exports go;
+          `ComputeProvisioningClient.register_lease` goes.
+        - Family kit (`provisioning/compute/src/compute_provisioning/`): `leases.py` loses
+          `register`; `executor_leases.py` loses `ExecutorLeaseRegistration` and
+          `register_lease`; `fulfillment_targets.py` goes, its decoder
+          (`job_fulfillment.fulfillment_executor_target`) staying.
+        - Service (`provisioning/compute/service/`): `controllers/leases_controller.py`
+          loses the registration route; `services/fulfillment_convergence.py`'s
+          `_apply_create_success` records the target in its transaction; `container.py`
+          and the integration harness drop the resolver; `db/migrations.py` records the
+          target for every active job-backed fulfillment whose reservation has none.
+        - VM storefront: `services/fulfillment_service.py` loses
+          `_register_vm_lease_with_settings`; `services/vm_fulfillment_service.py` loses
+          the post-provision commit, the registration step and its deferral, passing the
+          escrow at its pre-provision commits; `services/fulfillment_resume_runtime.py`
+          loses its re-commit and registration steps, keeping evidence publication.
+        - Bare-metal storefront: `hosted_lifecycle.py` loses its registration and takes its
+          materialization's window from the reservation commit returned;
+          `fulfillment_service.py`'s evidence `expires_at` follows.
+        - e2e: scenarios that waited on registration read the lease the activation recorded.
+        - Specs: the permanent requirements describing registration, commit's refresh, and
+          VM's post-delivery commit are modified or removed by the deltas; `grep` finds them
+          in `compute-provisioning-contract`, `physical-provisioning`, `site-capacity`,
+          `vm-storefront-fulfillment`, and `storefront-publication`, and in the companions
+          of `physical-provisioning`, `fulfillment`, and `settlement-servicing`. Each
+          match is read, since several capabilities use "register" in other senses.
+        - Tests: commit write-once and its escrow rule (site); the target recorded at
+          activation, in the same transaction, refused where a different target is recorded
+          (service integration); the migration; both storefronts with no registration, VM's
+          window from settlement, bare metal's evidence carrying the site's window; the
+          registration route's absence.
+        - Closeout: the 2.6 finding about a commit re-recording a truncated window is
+          retired; 2.6 records the deferred "on activation" start rule, as storefront policy
+          with an optional pool listing hint, as an open gap.
+        - The exact file list is re-read against the code when D starts, as for every slice.
+        Done 2026-10-06, as planned, with these findings from re-reading the code:
+        - The VM resume pass never committed a recovered deal's reservation before its
+          fulfillment began; the post-delivery refresh committed it first. Under the
+          decision that commit is now made before the fulfillment begins
+          (`_commit_recovered_reservation`), and a reservation committed earlier keeps
+          its first window.
+        - Bare metal's escrow-based path (`fulfillment_service.py`) reserved but never
+          committed, leaving a `reserved` reservation the watchdog never expires. It now
+          commits with the deal's escrow before the fulfillment begins. Both bare-metal
+          paths commit until the fulfillment begins and take their window from what
+          commit returns (`lease_window.py`); a saved materialization keeps its window,
+          since it is the fulfillment request and a retry repeats it exactly.
+        - The activation write is best-effort, as the create handle is, not a refusal: it
+          records a target where none is, skips terminal reservations, and keeps a
+          different recorded target with a warning, because activation must not fail a
+          running workload and teardown addresses the fulfillment's own metadata.
+          Convergence takes the ledger as an optional collaborator, as the fulfillment
+          kit's transaction does; production and the integration harness pass it.
+        - The family's route-contract table (`routes.py`) declared the registration route
+          and goes with it.
+        - Two closeout findings routed to 2.6: no production path writes `executor_ref`
+          any more; an authenticated request matching no route contract answers 500.
+        - Files beyond the plan's list: the contracts' `routes.py`; bare metal's
+          `site_clients.py` and new `lease_window.py`; the VM storefront's test fake site,
+          now write-once; e2e's lease checks, renamed from "registered" to "recorded".
+        - Tests:
+          - site: the activation write (once, moving nothing, none on a terminal
+            reservation, rolled back with its caller); commit records the escrow once,
+            on a repeat too; a repeat commit never moves the window, even after a
+            truncation;
+          - service: convergence records the target through the activation's own session
+            (the record already reads `active` through it), and a ledger error, foreign
+            metadata, or a different recorded target never fails activation; bare metal's
+            lease reports its machine after real convergence; no route writes a lease; a
+            hold is found by the escrow its commit recorded, over the wire; the migration;
+          - VM storefront: the foreground path commits once, before provisioning, with
+            the escrow, and writes nothing after; the resume pass commits before beginning
+            a recovered fulfillment; a resumed deal never moves its lease, through the
+            real capacity runtime;
+          - bare metal: the escrow path's retry commits with the escrow and states the
+            first commit's window; access readiness writes no lease. The hosted path's
+            commit-then-materialize has no unit test, the existing tests stubbing its
+            physical steps: the bare-metal end-to-end lane proves it;
+          - core: the aggregate passes the deal to the owning site.
+        - Spec deltas: `physical-provisioning` rewrites the lease-tail requirement ("fixed
+          once recorded"), adds "A committed allocation's lease records its executor
+          target" in place of the removed "Allocation-backed executor registration", and
+          removes "Lease registration tolerates omitted identity hints";
+          `site-capacity` rewrites both of its lease requirements ("Commit begins a lease
+          once and never resurrects one"); `compute-provisioning-contract` modifies
+          "Allocation-backed lease control"; `vm-storefront-fulfillment` rewrites its
+          deferral requirement and modifies "Full settlement convergence ownership";
+          `storefront-publication`'s bare-metal lifecycle scenario says the commit begins
+          the lease. The proposal and the promotion record follow.
+        - Versions: kit-site 0.10.0, kit-site-client 0.9.0, core storefront 0.10.0,
+          capacity publication 0.6.0, contracts 0.9.0, compute client 0.6.0, family kit
+          0.19.0, service 0.17.0, VM storefront 0.14.0, bare-metal storefront 0.10.0,
+          e2e-tests 0.1.8; by exact pins, apicredits-storefront 0.6.3. Every bump logged.
+        - Validation:
+          - kit-site 281; site client 48; core storefront 182; capacity publication 66;
+            contracts 60; family kit 222; compute client 46;
+          - provisioning service 677 unit and 451 integration;
+          - bare-metal storefront 230;
+          - VM storefront by frozen sync 1102 unit and 353 integration (the two known
+            `test_alkahest` failures);
+          - e2e unit 236 (the known 10.1 failure), and 178 e2e and smoke tests collect;
+          - the root `make -k test` aggregate passes its 44 suites, failing only where this
+            environment cannot run a suite; its run caught the compute client's signing
+            test still listing the registration route, fixed and rerun (46); the locks its
+            reinit rewrote were restored, and the bare-metal and API-credit storefronts
+            re-hand-locked from their snapshot form;
+          - `make check-locks`, `make check-packaging`, comment hygiene, the change's
+            documentation citations, and OpenSpec strict validation (1.14.0) pass.
+        - Not yet run end to end. The wire break is accepted: both storefronts and
+          provisioning move in this slice, and the end-to-end run is the evidence.
   - Each slice's gate: the provisioning-family suites, both adapters, both storefronts (the
     VM storefront by frozen sync), the e2e unit suite and collection, the root aggregate,
     `make check-packaging`, comment hygiene, documentation citations, OpenSpec strict
@@ -3280,11 +3558,23 @@ service code.
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
       state, path templates in the family contracts, the uncalled
-      `find_active_lease_by_vm_target`, a commit before registration still able to
-      re-record a truncated window). The VM storefront's dead `schedule_shutdown` hook,
+      `find_active_lease_by_vm_target` and the `vm_target` key the site ledger's
+      reservation payload still emits for VM reservations). The VM storefront's dead `schedule_shutdown` hook,
       first recorded here, was routed on 2026-10-05 to
       `remove-dead-storefront-physical-surfaces` task 3.8, and removed by 5B.8.C.6 on the
       maintainer's ruling at the slice C design review; that task is marked delivered.
+      Found in 5B.12.D: no production path writes a reservation's `executor_ref` any
+      more (only registration did, and since 5B.12.C no storefront sent one), so the
+      column and `find_active_lease_by_vm_target`'s match on it are dead; and the
+      provisioning service's authentication middleware raises on an authenticated
+      request whose method and path match no route contract, so such a request answers
+      500 rather than 404 or 405.
+      Found at 5B.12.D's gate: a storefront's rule for when a lease with no negotiated
+      start begins, set as storefront policy like its service agreements, with an optional
+      pool listing hint taking second place; only "at commit" exists, and "on activation"
+      would be carried out by provisioning in the activation transaction (`design.md`,
+      "5B.12.D decision gate (2026-10-06)", row 2). Record it as an open gap tied to
+      capacity-reservation pricing.
       Found in 5B.10.D: the relay administration, port allocator, port lease, and
       pool-configuration suites are integration tests in the service's suite; they test
       VM-owned behavior and belong in VM's adapter, with schema fixtures of VM's own
@@ -3305,6 +3595,11 @@ service code.
       Alkahest fulfillment, while bare metal serves it live through `/access`. Open a
       change at closeout, under Goal 4 ("Make a domain a composition of kit"), to make it
       one kit mechanism.
+      Found in 5B.12.C's audit (rows 6 and 10): the VM storefront's admin usage-started
+      event has no production sender and records nothing of its `host_id`; decide whether
+      the route stays, and drop the field either way. VM's operator `create_vm` route checks
+      no guest name against the rules provisioning's own names satisfy, so an operator's
+      name whose login exceeds 32 characters fails at `useradd`; check it at the route.
       Found in 5B.12.B's audit (row 7): no end-to-end lane runs a relay-backed pool, which
       is why a relay-backed VM's wrong delivered address went unnoticed; add a VM lane
       scenario with a relay.
@@ -3367,7 +3662,7 @@ service code.
 | Compute provisioning owns jobs and hosts; executors are complete; adapters contribute preparation and meaning and import neither each other nor the deployed service | `openspec/specs/physical-provisioning/spec.md` — "Adapter-owned compute execution", "Compute-owned caller contract", "Compute provisioning owns the job and host authorities", "Provisioning adapters import neither each other nor the deployed service"; `docs/development/ARCHITECTURE.md` |
 | A capability's HTTP surface is five pieces (wire models, route contract, typed client, route service, HTTP binding), the binding owned by whatever composes the process | `docs/development/ARCHITECTURE.md` — "Route contracts and their HTTP binding" (promoted 2026-10-04, during design, at the maintainer's request) |
 | Leases have one family surface that records and releases and never delivers; leases are keyed by reservation id; the lease routes' roles | `openspec/specs/physical-provisioning/spec.md` — "Leases have one family surface that records and releases" |
-| A lease's executor identity and evidence are fixed at registration, which is keyed on the executor target; once registered, its end moves only through site truncation; `commit` refuses the lifecycle's states and leaves a registered lease's window alone; a storefront registers with the committed window | `openspec/specs/physical-provisioning/spec.md` — "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/site-capacity/spec.md` — "A reservation's lease tail is written once", "Commit neither resurrects a lease nor moves a registered lease's window", "Lease truncation neither resurrects nor extends a lease" |
+| No caller writes a lease: commit begins it, once, recording its window and the deal's escrow; provisioning records its executor target when the fulfillment becomes active, in that transaction; its end moves only through site truncation; `commit` refuses the lifecycle's states | `openspec/specs/physical-provisioning/spec.md` — "A lease's executor identity and evidence are fixed once recorded", "A committed allocation's lease records its executor target"; `openspec/specs/site-capacity/spec.md` — "A reservation's lease tail is written once", "Commit begins a lease once and never resurrects one", "Lease truncation neither resurrects nor extends a lease"; `openspec/specs/compute-provisioning-contract/spec.md` — "Allocation-backed lease control"; `openspec/specs/vm-storefront-fulfillment/spec.md` — "Full settlement convergence ownership" |
 | The lease lifecycle is mode-agnostic: one provider-neutral release executor and status port | `openspec/specs/physical-provisioning/spec.md` — "Executor-dispatched lifecycle", "Site-backed release lifecycle", "Lease release delegates to durable fulfillment teardown"; `docs/development/ARCHITECTURE.md` "Release" |
 | Every provisioning route admits the administrator (a repository-wide stance applied to this service) | `openspec/specs/physical-provisioning/spec.md` — "Every provisioning route admits the administrator"; `docs/development/ROADMAP.md` (the repository-wide gap) |
 | The composition root builds the one job authority and the one host authority | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities"; `docs/development/ARCHITECTURE.md` "Family kits" |
@@ -3379,5 +3674,6 @@ service code.
 | Release follows every fulfillment aggregate state; capacity is freed only behind a composition-supplied release guard, which replaces the settlement-abandonment hook | `openspec/specs/physical-provisioning/spec.md` — "An undelivered lease is released by what its fulfillment proves"; `openspec/specs/site-capacity/spec.md` — "Reservation supersede and the release guard"; `docs/development/ARCHITECTURE.md` "Release" |
 | Host import belongs to the implementation that reads its format | `openspec/specs/physical-provisioning/spec.md` — "Host import belongs to the execution implementation that reads its format" |
 | Resource pools and capacity definitions keep thin surfaces of their own | `openspec/specs/resource-pool-management/spec.md` — "The pool wire contract and client are thin distributions"; `openspec/specs/site-capacity/spec.md` — "Capacity-definition import has a thin typed client"; `docs/development/ARCHITECTURE.md` kit layers |
+| Provisioning names the VM guest from the capacity reservation, a name the playbooks can use as hostname, tenant login (at most 32 characters), and `/tmp` match; the lease's target is the one the fulfillment recorded | `openspec/specs/physical-provisioning/spec.md` — "Provisioning names what it provisions", "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/physical-provisioning/architecture.md` — the guest-name constraints and why they bind (at promotion); `openspec/specs/vm-storefront-fulfillment/spec.md` — "The fulfillment context records the exact request, naming no guest"; `domains/vms/provisioning/iac/README.md` (with 5B.12.C) |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

@@ -24,7 +24,7 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
     FulfillmentServiceTeardownPort,
 )
-from compute_provisioning_contracts import LeaseRegistration, LeaseState, LeaseTermination
+from compute_provisioning_contracts import LeaseState, LeaseTermination
 from market_fulfillment import FulfillmentOrchestrator, SettlementRepository
 from compute_provisioning_service import container as _container_module
 
@@ -231,24 +231,28 @@ async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
     )
 
 
-async def test_a_bare_metal_lease_is_registered_on_the_family_surface(client_and_queue):
-    """Bare metal registers its lease as VM does: the machine as the target,
-    with the site keeping the committed window, read back through the family
-    client as a bare-metal lease."""
+async def test_a_bare_metal_lease_reports_the_machine_its_activation_recorded(
+    client_and_queue,
+):
+    """Nothing registers a lease: convergence, finding the grant succeeded,
+    makes the fulfillment active and records the machine it acted on as the
+    lease's target in the same transaction. The lease reads back through the
+    family client as a bare-metal lease with its committed window."""
     clients, _ = client_and_queue
-    capacity_reservation_id, _ = await _granted(clients, "escrow-bm-register")
+    capacity_reservation_id, _ = await begun_bare_metal_deal(clients, "escrow-bm-activated")
+    finished = await _container_module.resolved_job_engine.wait_for_terminal(
+        create_job_id(capacity_reservation_id), timeout=5.0
+    )
+    assert finished.status == "succeeded", finished.error
     committed = _container_module.resolved_capacity_ledger_service.get_reservation(
         capacity_reservation_id
     )
+    assert committed["executor_target"] is None
 
-    lease = await clients.family.register_lease(
-        LeaseRegistration(
-            capacity_reservation_id=capacity_reservation_id,
-            deal_ref={"negotiation_id": "negotiation-bm-register"},
-            executor_target=HOST_ID,
-        )
-    )
+    await _container_module.resolved_fulfillment_convergence_watchdog.converge_creates()
 
+    assert _aggregate_state(capacity_reservation_id) == _State.active.value
+    lease = await clients.family.get_lease(capacity_reservation_id)
     assert lease.executor_target == HOST_ID
     assert lease.offering_mode == "bare_metal"
     assert lease.lease_end_utc == datetime.fromisoformat(committed["lease_end_utc"])

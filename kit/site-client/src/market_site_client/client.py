@@ -631,12 +631,15 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Commit a reservation; the reservation as the site recorded it.
 
-        The site may record a window other than the one named: once a lease
-        is registered on the reservation, a commit leaves its window alone.
+        The site may record a window other than the one named: a repeat commit
+        leaves the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal; an escrow it names is recorded where the
+        reservation has none.
         """
         if not capacity_reservation_id:
             raise ValueError(
@@ -654,6 +657,7 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
                     str(lease_end_utc) if lease_end_utc is not None else None
                 ),
                 "idempotency_ref": idempotency_ref,
+                "deal_ref": dict(deal_ref) if deal_ref else None,
             }.items()
             if value is not None
         }

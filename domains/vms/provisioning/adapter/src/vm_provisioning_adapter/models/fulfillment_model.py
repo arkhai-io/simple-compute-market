@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VmConnectivitySettings(BaseModel):
@@ -30,7 +30,16 @@ class VmConnectivitySettings(BaseModel):
 
 
 class VmFulfillmentRequirements(BaseModel):
-    vm_target: str = Field(min_length=1)
+    """What a storefront asks of a VM fulfillment.
+
+    It never names the guest: provisioning names it from the capacity
+    reservation (see ``vm_provisioning_adapter.guest_names``). Unknown fields
+    are refused rather than ignored, so a request naming a guest fails loudly
+    instead of being provisioned under a name its sender did not choose.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     image_setup_type: str = "scratch"
     vm_ram: int | None = Field(default=None, gt=0)
     vm_vcpus: int | None = Field(default=None, gt=0)

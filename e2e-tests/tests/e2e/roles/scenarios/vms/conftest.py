@@ -103,7 +103,6 @@ class DealState(DomainDealState):
     # dry-run capture; the buyer-CLI scenario reads host_id from the
     # lease instead (see below).
     _evaluate_settle_host_id: Optional[str] = None
-    _evaluate_settle_vm_target: Optional[str] = None
     _evaluate_settle_passed: bool = False
     # Synthetic-buyer only: phase 09a evaluate-provisioning-job dry-run
     _provision_job_evaluated: bool = False
@@ -1007,7 +1006,7 @@ class DealLease:
         live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
             f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the lease registered after fulfillment?"
+            f"{escrow_uid!r} — was the deal's reservation committed with its escrow?"
         )
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
@@ -1021,7 +1020,7 @@ class DealLease:
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "host_id": row.get("host_id"),
-            "vm_target": row.get("vm_target"),
+            "executor_target": data.get("executor_target"),
             "status": data.get("status"),
             "fulfillment_id": data.get("release_job_id"),
             "create_job_id": data.get("create_job_id"),
@@ -1031,7 +1030,7 @@ class DealLease:
         """Move the lease end into the past so the next watchdog cycle fires.
 
         Truncates the lease at the site, signed as admin: truncation is the
-        only operation that moves a registered lease's end, and only earlier.
+        only operation that moves a lease's end, and only earlier.
         Returns the refreshed normalized lease view.
         """
         truncated = self._site.truncate_lease(self.lease_id, lease_end_utc)

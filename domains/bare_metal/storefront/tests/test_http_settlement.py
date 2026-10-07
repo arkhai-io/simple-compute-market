@@ -469,6 +469,8 @@ class _CapacityClient:
         self.site_client = _FulfillmentSite()
         self.reservation_sites = {}
         self.reserve_calls = []
+        self.commit_calls = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -480,6 +482,20 @@ class _CapacityClient:
         return {
             "capacity_reservation_id": "reservation-a",
             "site": request["site"],
+        }
+
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commit_calls.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
         }
 
 

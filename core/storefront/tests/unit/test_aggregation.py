@@ -23,6 +23,7 @@ class FakeSite:
         self.broken = broken
         self.reservations: dict[str, int] = {}
         self.committed: list[str] = []
+        self.committed_deals: list[dict | None] = []
         self.reserve_call_count = 0
         self._seq = 0
 
@@ -82,11 +83,12 @@ class FakeSite:
 
     async def commit(self, *, resource_id, capacity_reservation_id=None,
                      lease_start_utc=None, lease_duration_seconds=None,
-                     lease_end_utc=None, idempotency_ref=None) -> dict:
+                     lease_end_utc=None, idempotency_ref=None, deal_ref=None) -> dict:
         self._check()
         if capacity_reservation_id not in self.reservations:
             raise LookupError(f"unknown reservation {capacity_reservation_id}")
         self.committed.append(capacity_reservation_id)
+        self.committed_deals.append(deal_ref)
         return {
             "capacity_reservation_id": capacity_reservation_id,
             "state": "leased",
@@ -211,8 +213,11 @@ async def test_writes_route_to_the_owning_site():
         capacity_reservation_id=capacity_reservation_id,
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 01:00",
+        deal_ref={"escrow_uid": "0xdeal"},
     )
     assert a.committed == [capacity_reservation_id]
+    # The deal reaches the owning site, which records its escrow.
+    assert a.committed_deals == [{"escrow_uid": "0xdeal"}]
     # The owning site's recorded reservation, tagged with the site.
     assert (committed["site"], committed["lease_end_utc"]) == ("dc-a", "2099-01-01 01:00")
 

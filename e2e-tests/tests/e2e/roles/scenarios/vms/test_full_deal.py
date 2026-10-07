@@ -65,7 +65,7 @@ Phase 9 — Provisioning completion
          GET /api/v1/listings/{id} → status=closed
          GET .../negotiations/{neg_id} → primary escrow status=ready,
                                           fulfillment_uid populated
-  09c  Lease registered:
+  09c  Lease recorded:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
@@ -1141,11 +1141,12 @@ class TestStage08a_EvaluateSettle:
             "storefront's resource inventory with state='available' and a "
             "host_id matching the listing's region/gpu_model requirements."
         )
+        # The preview names no guest: provisioning names it from the
+        # reservation settle commits.
+        assert "vm_target" not in result, result
         deal_state._evaluate_settle_host_id = result.get("host_id")
-        deal_state._evaluate_settle_vm_target = result.get("vm_target")
         deal_state._evaluate_settle_passed = True
-        log.info("[08a] Evaluate settle: host_id=%s vm_target=%s",
-                 result.get("host_id"), result.get("vm_target"))
+        log.info("[08a] Evaluate settle: host_id=%s", result.get("host_id"))
 
 
 # ===========================================================================
@@ -1169,11 +1170,7 @@ class TestStage08c_EvaluateProvisioningJob:
             "host_id not captured from stage 08a — cannot evaluate provisioning job."
         )
 
-        result = provisioning_test_client.evaluate_job(
-            host_id,
-            vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
-            vm_action="create",
-        )
+        result = provisioning_test_client.evaluate_job(host_id, vm_action="create")
         assert result.get("params_valid") is True, (
             f"Provisioning job params invalid. errors={result.get('errors')!r}"
         )
@@ -1531,8 +1528,8 @@ class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
         deal_state._claims_swept = True
 
 
-class TestStage09c_LeaseRegistered:
-    def test_09c_provisioning_lease_registered(
+class TestStage09c_LeaseRecorded:
+    def test_09c_provisioning_lease_recorded(
         self, provisioning_client, deal_state: DealState
     ):
         """Provisioning owns the happy-path lease row after fulfillment.
@@ -1586,7 +1583,7 @@ class TestStage09c_LeaseRegistered:
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         log.info(
-            "[09c] Lease %s registered for escrow %s (resource=%s status=%s mode=%s)",
+            "[09c] Lease %s recorded for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,
             deal_state.real_escrow_uid,
             deal_state.reserved_resource_id,

@@ -8,6 +8,7 @@ own rules.
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -15,12 +16,16 @@ from market_core import VersionedEnvelope
 from market_fulfillment import ProviderConfigInvalidError, SettlementResource
 
 from vm_provisioning_adapter.codec import VmAnsibleCodec
+from vm_provisioning_adapter.guest_names import (
+    GUEST_NAME_LENGTH,
+    fulfillment_guest_name,
+    guest_login,
+)
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 
 
 def _request(**overrides) -> VersionedEnvelope:
     payload = {
-        "vm_target": "vm-alloc-1",
         "vm_ram": 4096,
         "vm_vcpus": 2,
         "vm_disk_size": "40G",
@@ -79,9 +84,14 @@ def _plan(allocator=None) -> VmFulfillmentPlan:
     )
 
 
-def _create(plan, *, resource=None, pool_config=None, request=None, allocate=True):
+GUEST = fulfillment_guest_name("alloc-1")
+
+
+def _create(
+    plan, *, resource=None, pool_config=None, request=None, allocate=True, reservation="alloc-1"
+):
     return plan.prepare_create(
-        capacity_reservation_id="alloc-1",
+        capacity_reservation_id=reservation,
         request=request or _request(),
         resource=resource or _resource(),
         pool_config=pool_config if pool_config is not None else _pool_config(),
@@ -94,7 +104,7 @@ def _teardown(plan, *, pool_config=None):
         capacity_reservation_id="alloc-1",
         resource=_resource(),
         host_id="kvm1",
-        executor_target="vm-alloc-1",
+        executor_target=GUEST,
         create_parameters={},
         pool_config=pool_config if pool_config is not None else _pool_config(),
     )
@@ -105,7 +115,7 @@ class TestCreate:
         prepared = _create(_plan())
 
         assert (prepared.offering_mode, prepared.action) == ("vm", "create")
-        assert (prepared.host_id, prepared.executor_target) == ("kvm1", "vm-alloc-1")
+        assert (prepared.host_id, prepared.executor_target) == ("kvm1", GUEST)
         assert prepared.parameters["playbook_path"] == "playbooks/vm-operations.yaml"
         assert prepared.parameters["escrow_uid"] == "alloc-1"
         json.dumps(prepared.parameters)  # stored as the job's parameters
@@ -196,6 +206,41 @@ class TestRelayAccessPath:
         assert prepared.parameters["relay_id"] is None
 
 
+class TestGuestName:
+    """Provisioning names the guest; every playbook use of the name accepts it."""
+
+    def test_the_name_is_stable_per_reservation_and_distinct_across_them(self):
+        assert fulfillment_guest_name("alloc-1") == fulfillment_guest_name("alloc-1")
+        names = {fulfillment_guest_name(f"reservation-{index}") for index in range(1000)}
+        assert len(names) == 1000
+
+    def test_the_name_satisfies_the_hostname_login_and_shell_rules(self):
+        for reservation in ("alloc-1", "01890a5d-ac96-774b-bcce-b302099a8057", "x" * 200):
+            name = fulfillment_guest_name(reservation)
+            assert len(name) == GUEST_NAME_LENGTH == 31
+            # A hostname label, in characters the shell takes literally.
+            assert re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", name)
+            # The tenant login the playbook derives: useradd's limit is 32.
+            login = guest_login(name)
+            assert len(login) <= 32 and login[0].isalpha()
+
+    def test_no_name_contains_another(self):
+        # Every create deletes each /tmp file whose name contains its guest's.
+        names = [fulfillment_guest_name(f"reservation-{index}") for index in range(200)]
+        assert not any(a != b and a in b for a in names for b in names)
+
+    def test_a_create_names_the_guest_from_its_reservation(self):
+        assert _create(_plan()).executor_target == GUEST
+        assert _create(_plan(), allocate=False).executor_target == GUEST
+        other = _create(_plan(), reservation="alloc-2")
+        assert other.executor_target == fulfillment_guest_name("alloc-2") != GUEST
+        assert other.parameters["vm_target"] == other.executor_target
+
+    def test_a_request_naming_the_guest_is_refused(self):
+        with pytest.raises(ProviderConfigInvalidError, match="vm_target"):
+            _create(_plan(), request=_request(vm_target="tenant-ab12"))
+
+
 class TestExtraVariables:
     def test_a_pool_variable_replacing_a_job_variable_is_refused(self):
         with pytest.raises(ProviderConfigInvalidError, match="vm_target"):
@@ -214,8 +259,8 @@ class TestTeardown:
         prepared = _teardown(_plan())
 
         assert prepared.action == "vm_remove"
-        assert (prepared.host_id, prepared.executor_target) == ("kvm1", "vm-alloc-1")
-        assert prepared.parameters["vm_target"] == "vm-alloc-1"
+        assert (prepared.host_id, prepared.executor_target) == ("kvm1", GUEST)
+        assert prepared.parameters["vm_target"] == GUEST
         assert prepared.parameters["playbook_path"] == "playbooks/vm-operations.yaml"
 
     def test_the_relay_is_the_leases_not_the_pools(self):

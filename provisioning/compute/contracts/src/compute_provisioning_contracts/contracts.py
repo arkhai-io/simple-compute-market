@@ -85,29 +85,15 @@ class ResultEnvelope(BaseModel):
     value: dict[str, Any]
 
 
-class LeaseRegistration(VersionedContractModel):
-    """A lease's tail, registered once on its capacity reservation.
-
-    What a registration may assert: the executor target the lease's teardown
-    addresses; a window, recorded only where the reservation has none, since
-    a committed reservation's window is the site's; and the caller's deal
-    correlation, of which the site records only an escrow the reservation
-    lacks. It names no offering mode, which is the reservation's, and no
-    create or release handle, which are lifecycle evidence written only by
-    fulfillment and the lease lifecycle.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    capacity_reservation_id: str
-    deal_ref: dict[str, Any]
-    executor_target: str
-    lease_start_utc: datetime | None = None
-    lease_end_utc: datetime | None = None
-
-
 class LeaseView(VersionedContractModel):
-    """A lease as the site records it: its tail, window, and lifecycle evidence."""
+    """A lease as the site records it: its tail, window, and lifecycle evidence.
+
+    No route writes a lease. Commit records its window, from the commit on;
+    provisioning records its executor target when the fulfillment becomes
+    active; and the lease lifecycle records release. The create and release
+    handles are lifecycle evidence, written only by fulfillment and the lease
+    lifecycle.
+    """
 
     capacity_reservation_id: str
     deal_ref: dict[str, Any]

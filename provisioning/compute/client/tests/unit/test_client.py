@@ -29,7 +29,6 @@ from compute_provisioning_contracts import (
 
 
 _ROUTES = (
-    ("POST", "/api/v1/contract/leases", {"capacity_reservation_id": "reservation-1"}),
     ("GET", "/api/v1/contract/leases/reservation-1", EMPTY_BODY),
     ("POST", "/api/v1/contract/leases/reservation-1/terminate", {}),
     ("POST", "/api/v1/fulfillment/schedule", {"capacity_reservation_id": "reservation-1"}),

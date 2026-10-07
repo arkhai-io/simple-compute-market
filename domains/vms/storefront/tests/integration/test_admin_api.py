@@ -831,7 +831,6 @@ class TestFulfillmentEvents:
                 provider_lease_id="lease-2x",
                 resource_id="provider-resource-2x",
                 host_id="kvm1",
-                vm_target="tenant-2x",
                 lease_end_utc="2026-01-01T00:00:00Z",
             )
 

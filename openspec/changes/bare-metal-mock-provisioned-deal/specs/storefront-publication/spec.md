@@ -10,7 +10,7 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Accepted bare-metal agreement is fulfilled
 - **WHEN** settlement verifies the escrow
 - **THEN** the storefront wakes the settlement-servicing worker for that obligation, whose ready hook dispatches by mechanism to the bare-metal fulfillment, which reserves at the recorded site, commits the reservation with the agreed lease window, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
-- **AND** once the fulfillment is active the storefront registers the lease at the site, so lease expiry and termination find it
+- **AND** the commit begins the lease with the window the site records, which the materialization and the delivered evidence state, and provisioning records the lease's target when the fulfillment becomes active, so lease expiry and termination find it
 
 #### Scenario: Fulfillment start is interrupted
 - **WHEN** settlement was verified but fulfillment did not start

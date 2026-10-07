@@ -554,6 +554,59 @@ def _migrate_connection_details_to_delivery(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> None:
+    """Remove the guest name from every escrow's stored fulfillment request.
+
+    Provisioning names a VM's guest and refuses a request that names one. A
+    stored request is replayed verbatim when restart convergence resumes a deal,
+    and provisioning accepts a repeat only when it equals its own stored copy,
+    which the provisioning service rewrites the same way, so a replay of a
+    rewritten request still matches.
+
+    Every escrow is rewritten, in every state. Contexts of another kind or
+    version, values that are not JSON, and requests naming no guest are left as
+    they are, so a rerun changes nothing.
+    """
+    if not _table_exists(conn, "escrows") or not _column_exists(
+        conn, "escrows", "fulfillment_context"
+    ):
+        return
+    rows = conn.execute(
+        "SELECT escrow_uid, fulfillment_context FROM escrows "
+        "WHERE fulfillment_context IS NOT NULL"
+    ).fetchall()
+    for escrow_uid, raw in rows:
+        try:
+            context = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(context, dict) or context.get("kind") != (
+            "vm.storefront.fulfillment-context"
+        ):
+            continue
+        payload = context.get("payload")
+        request = payload.get("fulfillment_request") if isinstance(payload, dict) else None
+        fields = request.get("payload") if isinstance(request, dict) else None
+        if not isinstance(fields, dict) or "vm_target" not in fields:
+            continue
+        rewritten = {
+            **context,
+            "payload": {
+                **payload,
+                "fulfillment_request": {
+                    **request,
+                    "payload": {
+                        key: value for key, value in fields.items() if key != "vm_target"
+                    },
+                },
+            },
+        }
+        conn.execute(
+            "UPDATE escrows SET fulfillment_context = ? WHERE escrow_uid = ?",
+            (json.dumps(rewritten, sort_keys=True, separators=(",", ":")), escrow_uid),
+        )
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -590,5 +643,9 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261006_011_connection_details_to_delivery",
         _migrate_connection_details_to_delivery,
+    ),
+    Migration(
+        "20261006_012_fulfillment_context_names_no_guest",
+        _migrate_fulfillment_context_names_no_guest,
     ),
 )

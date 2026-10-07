@@ -2,49 +2,27 @@
 
 ### Requirement: A reservation's lease tail is written once
 
-The site authority MUST record a reservation's lease tail (its executor target and executor
-reference) once. A lease is registered once the reservation records an executor target. A
-first registration on a `reserved`, `provisioning`, or `leased` reservation MUST record the
-tail it names and leave the reservation `leased`. A window already recorded on the
-reservation is the site's: a first registration MUST NOT change it and MAY write a lease
-start or end only where none is recorded. A first registration MUST record the escrow its
-deal reference names when the reservation records none, and MUST NOT replace a recorded one.
-A repeated registration with the same executor target and lease start MUST return the
-reservation unchanged and MUST NOT move its lease end. A registration naming a different
-executor target or lease start MUST be refused. A registration on a `releasing`,
-`release_failed`, or `unmanaged` reservation MUST be refused and MUST NOT change its state.
-The create and release handles are lifecycle evidence: no registration MAY write either, and
-a recorded create handle MUST NOT be replaced.
+The site authority MUST record a reservation's executor target once, written in the
+transaction of the caller that records it, without changing the reservation's state or
+window and without a capacity event. A recorded target MUST NOT be replaced, and none is
+recorded on a `released`, `force_released`, or `provisioning_failed` reservation. The create
+and release handles are lifecycle evidence, and a recorded create handle MUST NOT be
+replaced.
 
-#### Scenario: A lease is registered on a committed reservation
+#### Scenario: A target is recorded on a committed reservation
 
-- **WHEN** a lease is registered on a reservation that `commit` has already made `leased`
-  and that records no executor target
-- **THEN** the tail is recorded and the reservation stays `leased`
+- **WHEN** a target is recorded on a reservation `commit` has made `leased`
+- **THEN** the reservation records it, and its state and window are unchanged
 
-#### Scenario: A lease is registered again after it was truncated
+#### Scenario: A different target is recorded later
 
-- **WHEN** a registration is repeated with the reservation's recorded target and start and
-  its original end after the lease was truncated
-- **THEN** the reservation is returned with its truncated end
+- **WHEN** a target is recorded on a reservation that already records another
+- **THEN** the recorded target is kept
 
-#### Scenario: A late first registration names the original end after a truncation
+#### Scenario: The recording transaction rolls back
 
-- **WHEN** a lease committed until T2 is truncated to T1 and its first registration then
-  arrives naming T2
-- **THEN** the registration is recorded and the lease ends at T1
-
-#### Scenario: A hold placed before the deal had an escrow is registered
-
-- **WHEN** a lease is registered on a reservation that records no escrow, with a deal
-  reference naming one
-- **THEN** the reservation records that escrow, and an operator finds it through the site's
-  escrow filter
-
-#### Scenario: A lease is registered on a releasing reservation
-
-- **WHEN** a registration names a reservation that is `releasing`
-- **THEN** it is refused, and the reservation stays `releasing`
+- **WHEN** the caller's transaction that recorded a target rolls back
+- **THEN** the reservation records no target
 
 ### Requirement: The lease lifecycle's writes are conditional transitions
 
@@ -74,28 +52,35 @@ recorded:
   recorded afterwards
 - **THEN** it is refused, the reservation stays `force_released`, and its capacity stays free
 
-### Requirement: Commit neither resurrects a lease nor moves a registered lease's window
+### Requirement: Commit begins a lease once and never resurrects one
 
-Committing a reservation MUST be refused when the reservation is `releasing`,
-`release_failed`, or `unmanaged`, and MUST NOT change its state. Before a lease is
-registered, a repeated commit of a `leased` reservation MAY record the window it names.
-Once a lease is registered, a commit MUST return the reservation unchanged and MUST NOT move
-its lease start or end. A commit MUST answer with the reservation as the authority recorded
-it, through every client layer between the caller and the authority, and a caller that
-registers a lease after committing MUST register the window that answer carries.
+The first commit of a reservation MUST leave it `leased` with its window: the start named,
+else the time of the commit, and the end named. A lease with no negotiated start therefore
+begins at commit. A repeated commit of a `leased` reservation MUST return it unchanged and
+MUST NOT move its lease start or end, whatever window it names. Committing a reservation
+MUST be refused when the reservation is `releasing`, `release_failed`, or `unmanaged`, and
+MUST NOT change its state. A commit MAY name the deal it serves; an escrow it names MUST be
+recorded where the reservation records none, on a repeated commit too, and MUST NOT replace
+a recorded one. A commit MUST answer with the reservation as the authority recorded it,
+through every client layer between the caller and the authority.
 
-#### Scenario: A storefront refreshes the window after provisioning
+#### Scenario: A resume pass commits a lease again
 
-- **WHEN** a storefront commits a `leased` reservation again with a later window before it
-  registers the lease
-- **THEN** the later window is recorded, and the storefront registers with that window
+- **WHEN** a storefront's resume pass commits a `leased` reservation with a window it
+  computed from the current time
+- **THEN** the reservation is returned unchanged, with the window its first commit recorded
 
-#### Scenario: A resume pass commits a registered lease again
+#### Scenario: A truncated lease is committed again
 
-- **WHEN** a storefront's resume pass commits a registered lease with a window it computed
-  from the current time
-- **THEN** the reservation is returned unchanged, and the pass registers with the recorded
-  window, which the registration accepts as a repeat
+- **WHEN** a lease committed until T2 is truncated to T1 and a commit then names T2
+- **THEN** the reservation is returned unchanged and the lease ends at T1
+
+#### Scenario: A hold placed before the deal had an escrow is committed
+
+- **WHEN** a reservation that records no escrow is committed with a deal reference naming
+  one
+- **THEN** the reservation records that escrow, and an operator finds it through the site's
+  escrow filter
 
 #### Scenario: A releasing lease is committed again
 

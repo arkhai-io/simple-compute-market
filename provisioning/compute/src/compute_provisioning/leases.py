@@ -1,8 +1,10 @@
 """The compute family's lease routes, without a web framework.
 
-A lease records and releases; it never delivers. Its routes register a lease's
-tail on a capacity reservation, read and list leases, and drive release:
-terminate, release-oversight, retry-release, and force-release. Every route
+A lease records and releases; it never delivers. Its routes read and list
+leases and drive release: terminate, release-oversight, retry-release, and
+force-release. No route writes a lease: commit records its window, provisioning
+records its executor target when the fulfillment becomes active, and the lease
+lifecycle records release. Every route
 addresses a lease by its capacity reservation id, and every route reports the
 neutral ``LeaseView``, whatever the reservation's offering mode. A domain extends
 what a lease reports only by contributing a versioned projection, never by
@@ -10,8 +12,8 @@ adding lease routes; delivery happens through fulfillment.
 
 ``LeaseRouteService`` reports a refusal as a ``ProvisioningRouteError`` the
 service's binding turns into a response: a lease that does not exist is 404, and
-a request the lease's current state refuses (a registration naming another
-target, a terminate of a lease being handed to an operator) is 409.
+a request the lease's current state refuses (a terminate of a lease being handed
+to an operator) is 409.
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ from typing import Any
 from compute_provisioning_contracts import (
     LeaseForceRelease,
     LeaseListResponse,
-    LeaseRegistration,
     LeaseReleaseOversight,
     LeaseRetryRelease,
     LeaseState,
@@ -30,12 +31,8 @@ from compute_provisioning_contracts import (
     LeaseView,
     lease_state_for_reservation_state,
 )
-from market_site.ledger import CapacityConflictError
 
-from compute_provisioning.executor_leases import (
-    ExecutorLeaseRegistration,
-    ExecutorLeaseService,
-)
+from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.lease_lifecycle import (
     InvalidLeaseStateError,
     LeaseLifecycleService,
@@ -92,24 +89,6 @@ class LeaseRouteService:
     ) -> None:
         self._leases = leases
         self._lifecycle = lifecycle
-
-    def register(self, body: LeaseRegistration) -> LeaseView:
-        """Record a lease's tail once; a repeat naming the same target and start
-        returns it unchanged, and one naming another is refused. A window the
-        site already recorded is kept."""
-        try:
-            reservation = self._leases.register_lease(
-                ExecutorLeaseRegistration(
-                    capacity_reservation_id=body.capacity_reservation_id,
-                    executor_target=body.executor_target,
-                    deal_ref=dict(body.deal_ref),
-                    lease_start_utc=body.lease_start_utc,
-                    lease_end_utc=body.lease_end_utc,
-                )
-            )
-        except (LeaseNotFoundError, CapacityConflictError) as exc:
-            raise _refusal(exc) from exc
-        return lease_view(reservation)
 
     def get(self, capacity_reservation_id: str) -> LeaseView:
         try:

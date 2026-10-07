@@ -14,6 +14,15 @@ action envelope as each job's contract record. Contract-major refusal remains un
 
 ## MODIFIED Requirements
 
+### Requirement: Allocation-backed lease control
+
+The contract MUST support allocation-backed lease inspection, termination, retry release, and force release while retaining the lease's offering mode, its executor action target, and release evidence. It MUST NOT offer lease registration: commit records a lease's window, and provisioning its executor target when the allocation's fulfillment becomes active.
+
+#### Scenario: Lease expires
+
+- **WHEN** a lease reaches its end and executor release succeeds
+- **THEN** the lease reaches released state and the corresponding site allocation becomes available exactly once
+
 ### Requirement: Idempotent durable jobs
 
 Job submission MUST be idempotent within allocation/action scope, and every submitted job MUST expose durable queued, running, succeeded, failed, or cancelled state with structured result or error evidence. Jobs are submitted by fulfillment providers on behalf of a fulfillment, not by callers of the contract. A job identity — a request's operation identity, or the reservation, action, and idempotency key a fulfillment provider submits under — stands for one job's content: a repeat with the same job parameters MUST return the original job, and a repeat with different parameters MUST be refused. The identity a provider submits under carries no job content of its own.

@@ -92,7 +92,7 @@ async def test_placing_a_declaration_naming_no_host_is_refused_before_any_effect
             fulfillment_request={
                 "kind": "vm.fulfillment.request",
                 "schema_version": 1,
-                "payload": {"vm_target": "vm-host-requirement"},
+                "payload": {"ssh_pubkey": "ssh-ed25519 AAAA"},
             },
         ))
     assert not_scheduled.value.status_code == 404

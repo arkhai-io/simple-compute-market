@@ -135,8 +135,9 @@ None.
   adapter or the deployed service; lease release delegates to durable fulfillment teardown for
   every offering mode; storefront teardown goes through lease termination; job execution
   resolves its executor by offering mode and action from a compute-provisioning table;
-  leases have one family surface that records and releases, with executor identity and
-  evidence fixed at registration; every provisioning route admits the administrator;
+  leases have one family surface that records and releases, with no lease written by a
+  caller: commit begins a lease, and provisioning records its executor target when the
+  fulfillment becomes active; every provisioning route admits the administrator;
   execution readiness is reported in system status; host connectivity is probed by
   connection kind; the family's wire contract and client are thin distributions; delivery
   happens only through fulfillment; an undelivered lease is released by what its
@@ -266,8 +267,9 @@ None.
 - A capability's HTTP surface is five pieces, the binding owned by whatever composes the
   process — `docs/development/ARCHITECTURE.md` ("Route contracts and their HTTP binding",
   promoted during design at the maintainer's request).
-- Leases have one family surface that records and releases; executor identity and
-  evidence are fixed at registration; leases are keyed by reservation id; every
+- Leases have one family surface that records and releases; commit begins a lease, and
+  executor identity and evidence are fixed once recorded; leases are keyed by reservation
+  id; every
   provisioning route admits the administrator; readiness is part of system status;
   connectivity is probed by connection kind; the family's wire contract and client are
   thin distributions — `openspec/specs/physical-provisioning/spec.md`,

@@ -25,6 +25,7 @@ from market_identity import Identity
 
 from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
+from .lease_window import committed_lease_window
 
 if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
@@ -232,21 +233,39 @@ class BareMetalFulfillmentService:
                 settlement_resource_id=settlement_resource_id,
             )
 
+        # The lease begins at commit, and its window is the one commit
+        # returns. Committed until the fulfillment begins: the first commit
+        # records the window and the deal's escrow, and a repeat returns the
+        # window unchanged.
+        lease_start = datetime.now(timezone.utc)
+        committed_window = committed_lease_window(
+            await self.capacity_client.commit(
+                capacity_reservation_id=str(reservation_id),
+                lease_start_utc=lease_start.isoformat(),
+                lease_end_utc=(
+                    lease_start + timedelta(seconds=terms.duration_seconds)
+                ).isoformat(),
+                idempotency_ref=escrow_uid,
+                deal_ref={"escrow_uid": escrow_uid},
+                site_id=str(context["site_id"]),
+            )
+        )
         materialization = await self.db.load_bare_metal_materialization(
             negotiation_id=negotiation_id
         )
-        materialization_start = (
-            materialization.lease_start_utc
+        # A saved materialization keeps its window: it is the fulfillment
+        # request, which a retry must repeat exactly.
+        lease_start_utc, lease_end_utc = (
+            (materialization.lease_start_utc, materialization.lease_end_utc)
             if materialization is not None
-            else datetime.now(timezone.utc)
+            else committed_window
         )
         expected_materialization = BareMetalMaterialization(
             escrow_uid=escrow_uid,
             host_id=terms.host_id,
             physical_host_id=terms.physical_host_id,
-            lease_start_utc=materialization_start,
-            lease_end_utc=materialization_start
-            + timedelta(seconds=terms.duration_seconds),
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
             access_method=terms.access_method,
             ssh_public_key=terms.ssh_public_key,
             access_ref=terms.access_ref,

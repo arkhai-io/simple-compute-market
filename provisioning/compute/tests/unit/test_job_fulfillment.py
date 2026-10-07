@@ -11,6 +11,7 @@ from compute_provisioning.job_fulfillment import (
     JOB_OPERATION_KIND,
     JobFulfillmentProvider,
     PreparedJob,
+    fulfillment_executor_target,
 )
 from compute_provisioning.jobs.db import JobStatus
 from compute_provisioning.jobs.submission import JobSubmissionService, contract_operation_id
@@ -414,3 +415,26 @@ async def test_a_delivery_without_evidence_is_a_credential_fetch_failure():
 
     with pytest.raises(CredentialFetchFailedError):
         await provider.fetch_credentials(metadata, ())
+
+
+class TestExecutorTarget:
+    """What a lease's teardown addresses is read from the fulfillment's metadata."""
+
+    def test_the_target_is_the_one_the_metadata_records(self):
+        metadata = {
+            "create_job_id": "job-1",
+            "current_job_id": "job-1",
+            "operation": "create",
+            "host_id": "kvm1",
+            "executor_target": "tenant-0123456789abcdef01234567",
+        }
+        assert fulfillment_executor_target(metadata) == "tenant-0123456789abcdef01234567"
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [{}, {"vm_target": "tenant-1", "host_id": "kvm1"}],
+        ids=["unacknowledged", "not-job-backed"],
+    )
+    def test_metadata_naming_no_job_backed_target_is_refused(self, metadata):
+        with pytest.raises(ProviderConfigInvalidError):
+            fulfillment_executor_target(metadata)

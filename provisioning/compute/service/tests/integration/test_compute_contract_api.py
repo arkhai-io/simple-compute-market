@@ -70,11 +70,13 @@ def _leased_bare_metal_reservation() -> dict:
         lease_end_utc=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         idempotency_ref="escrow-bare-contract",
     )
-    return ledger.attach_lease(
-        capacity_reservation_id=committed["capacity_reservation_id"],
-        executor_target="bm-contract-1",
-        executor_ref={"physical_host_id": "physical-contract-1"},
-    )
+    # The target is recorded as a fulfillment's activation records it.
+    with _container_module.resolved_session_factory() as db:
+        ledger.record_executor_target_in_session(
+            db, committed["capacity_reservation_id"], "bm-contract-1"
+        )
+        db.commit()
+    return ledger.get_reservation(committed["capacity_reservation_id"])
 
 
 
@@ -83,17 +85,13 @@ def _leased_bare_metal_reservation() -> dict:
 async def test_a_lease_retains_its_action_target_alongside_the_mode(
     client_and_queue,
 ):
-    """The `executor_` compounds are the abstraction's own target and
-    reference, so the selector rename must not have reached them. Asserted on
-    a committed reservation because a silent loss here would only surface at
-    release time."""
+    """The `executor_` target is the abstraction's own, so the selector rename
+    must not have reached it. Asserted on a committed reservation because a
+    silent loss here would only surface at release time."""
     reservation = _leased_bare_metal_reservation()
 
     assert reservation["offering_mode"] == "bare_metal"
     assert reservation["executor_target"] == "bm-contract-1"
-    assert reservation["executor_ref"] == {
-        "physical_host_id": "physical-contract-1"
-    }
 
 
 async def test_the_lease_view_serializes_every_reachable_reservation_state():
@@ -226,34 +224,3 @@ async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_40
     assert exc_info.value.status_code == 409
 
 
-async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heals(
-    client_and_queue,
-):
-    """The generic `/contract/leases` path -- the one
-    `ComputeProvisioningClient.register_lease` and the VM storefront
-    actually use, distinct from the VM-domain-branded `/leases` surface --
-    has no `executor_ref` field on its request contract at all. Confirms
-    that omission is harmless: `executor_ref` is expected to self-heal in
-    `market_site.ledger._sync_executor_fields` from the `host_id` already
-    set on the reservation at commit time, and `executor_target` (backing
-    `vm_target`, which has no independent write path) is retained exactly
-    as sent.
-    """
-    from compute_provisioning_contracts import LeaseRegistration
-
-    reservation = _leased_vm_reservation()
-    transport = ASGITransport(app=app)
-    async with _compute_provisioning_client("http://test", transport=transport) as client:
-        registration = LeaseRegistration(
-            capacity_reservation_id=reservation["capacity_reservation_id"],
-            deal_ref={"escrow_uid": "escrow-contract"},
-            executor_target="tenant-self-heal",
-            lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=1),
-        )
-        assert not hasattr(registration, "executor_ref")
-        await client.register_lease(registration)
-
-    ledger = _container_module.resolved_capacity_ledger_service
-    row = ledger.get_reservation(reservation["capacity_reservation_id"])
-    assert row["vm_target"] == "tenant-self-heal"
-    assert row["executor_ref"] == {"host_id": "kvm1"}

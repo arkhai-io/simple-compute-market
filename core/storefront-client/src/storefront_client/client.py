@@ -1339,7 +1339,6 @@ class StorefrontClient(_StorefrontClientBase):
         provider_lease_id: "str | None" = None,
         resource_id: "str | None" = None,
         host_id: "str | None" = None,
-        vm_target: "str | None" = None,
         gpu_count: "int | None" = None,
         lease_end_utc: "str | None" = None,
         request_id: str | None = None,
@@ -1365,8 +1364,6 @@ class StorefrontClient(_StorefrontClientBase):
             body["resource_id"] = resource_id
         if host_id is not None:
             body["host_id"] = host_id
-        if vm_target is not None:
-            body["vm_target"] = vm_target
         if gpu_count is not None:
             body["gpu_count"] = gpu_count
         if lease_end_utc is not None:
@@ -1834,8 +1831,9 @@ class StorefrontClient(_StorefrontClientBase):
         Previews the fulfillment settle would start, without chain reads, DB
         writes, or provisioning calls. Pass the ``negotiation_id`` settle will
         name: when its acceptance holds capacity, settle commits that hold and
-        the preview reports it. Returns would_submit, host_id, vm_target, and
-        required_attributes.
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,
@@ -2766,7 +2764,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
         provider_lease_id: str | None = None,
         resource_id: str | None = None,
         host_id: str | None = None,
-        vm_target: str | None = None,
         gpu_count: int | None = None,
         lease_end_utc: str | None = None,
         request_id: str | None = None,
@@ -2782,7 +2779,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "provider_lease_id": provider_lease_id,
             "resource_id": resource_id,
             "host_id": host_id,
-            "vm_target": vm_target,
             "gpu_count": gpu_count,
             "lease_end_utc": lease_end_utc,
         }
@@ -3249,8 +3245,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         Previews the fulfillment settle would start, without chain reads, DB
         writes, or provisioning calls. Pass the ``negotiation_id`` settle will
         name: when its acceptance holds capacity, settle commits that hold and
-        the preview reports it. Returns would_submit, host_id, vm_target, and
-        required_attributes.
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,

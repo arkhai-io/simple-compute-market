@@ -14,7 +14,6 @@ implement the evaluate→advance→observe pattern:
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -130,7 +129,10 @@ class AdminSettleService:
         No chain reads, no DB writes, no provisioning.
 
         Returns:
-            {"would_submit": True, "escrow_uid": ..., "host_id": ..., "vm_target": ..., "required_attributes": {...}}
+            {"would_submit": True, "escrow_uid": ..., "host_id": ..., "required_attributes": {...}}
+
+        It names no guest: provisioning names the guest from the capacity
+        reservation settle commits, so a preview cannot know it.
             {"would_submit": False, "escrow_uid": ..., "reason": "<why>"}
 
         Raises:
@@ -147,7 +149,6 @@ class AdminSettleService:
                 "would_submit": True,
                 "escrow_uid": escrow_uid,
                 "host_id": host_id,
-                "vm_target": f"tenant-{uuid.uuid4().hex[:4]}",
                 "required_attributes": compute_capacity_claim_from_order(listing),
                 "capacity_reservation_id": capacity_reservation_id,
             }
@@ -173,7 +174,6 @@ class AdminSettleService:
             "would_submit": True,
             "escrow_uid": escrow_uid,
             "host_id": spec["host_id"],
-            "vm_target": spec["vm_target"],
             "required_attributes": spec["required_attributes"],
         }
 

@@ -74,9 +74,6 @@ class FakeSite:
         #: Reservations fulfillment delivered against: the site's release
         #: guard refuses to free them, as the provisioning service's does.
         self.delivered: set[str] = set()
-        #: Reservations with a registered lease: a commit leaves their window
-        #: alone and answers with the one recorded, as the site does.
-        self.registered: set[str] = set()
 
     def add_resource(
         self,
@@ -290,7 +287,12 @@ class FakeSite:
             reservation = self.reservations.get(capacity_reservation_id)
             if reservation is None:
                 return httpx.Response(404, json={"detail": "not found"})
-            if capacity_reservation_id in self.registered:
+            escrow_uid = dict(body.get("deal_ref") or {}).get("escrow_uid")
+            if escrow_uid and not reservation.get("escrow_uid"):
+                reservation["escrow_uid"] = escrow_uid
+            # A commit is write-once, as the site's: a repeat on a leased
+            # reservation answers with the window the first one recorded.
+            if reservation.get("state") == "leased":
                 return httpx.Response(200, json={"reservation": reservation})
             reservation["state"] = "leased"
             reservation["lease_start_utc"] = body.get("lease_start_utc")

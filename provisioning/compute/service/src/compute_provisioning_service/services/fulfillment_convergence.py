@@ -20,6 +20,8 @@ from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 
+from compute_provisioning.job_fulfillment import fulfillment_executor_target
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,9 +38,12 @@ class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
     def __init__(self, *, session_factory, repository, provider_registry, settings,
-                 worker_id: str | None = None) -> None:
+                 worker_id: str | None = None, capacity_ledger=None) -> None:
         self._session_factory = session_factory
         self._repository = repository
+        # The site ledger the lease's target is recorded on when a fulfillment
+        # becomes active; ``None`` where no site is composed, which records none.
+        self._capacity_ledger = capacity_ledger
         self._providers = provider_registry
         self._settings = settings
         self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
@@ -420,12 +425,48 @@ class FulfillmentConvergenceWatchdog:
             self._repository.transition(
                 db, reservation_id, SettlementRecordState.active.value
             )
+            self._record_executor_target(db, reservation_id, record.provider_metadata)
 
         self._with_owned_record(
             reservation_id,
             SettlementRecordState.dispatching.value,
             apply,
         )
+
+    def _record_executor_target(
+        self, db, reservation_id: str, provider_metadata: dict[str, Any] | None
+    ) -> None:
+        """Record on the lease what the fulfillment that just became active acts on.
+
+        Written in the activation's own transaction and session: that
+        transaction holds SQLite's single writer slot, so a second session
+        would wait out the busy timeout instead. Best-effort, as the create
+        handle is: the fulfillment is active and its workload exists, and
+        teardown addresses the target in the fulfillment's own metadata, so a
+        missing lease target is a reporting gap, never a reason to fail the
+        activation. Neither the decoding nor the ledger raises after a write.
+        """
+        if self._capacity_ledger is None:
+            return
+        try:
+            target = fulfillment_executor_target(dict(provider_metadata or {}))
+            recorded = self._capacity_ledger.record_executor_target_in_session(
+                db, reservation_id, target
+            )
+        except Exception:
+            logger.exception(
+                "[FULFILLMENT] Could not record the executor target of reservation %s",
+                reservation_id,
+            )
+            return
+        if recorded is not None and recorded.get("executor_target") != target:
+            logger.warning(
+                "[FULFILLMENT] Reservation %s already records executor target %r; "
+                "its fulfillment acts on %r, which is left unrecorded",
+                reservation_id,
+                recorded.get("executor_target"),
+                target,
+            )
 
     def _apply_teardown_success(self, reservation_id: str) -> None:
         def apply(db) -> None:

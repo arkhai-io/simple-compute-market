@@ -655,12 +655,11 @@ class _AccessReadyDb(FakeLifecycleDb):
 
 
 class _ActiveFulfillment:
-    """Reports the grant done on machine-1, and records lease registrations
-    with the reservation's state at the time."""
+    """Reports the grant done on machine-1. It offers no lease registration:
+    nothing writes a lease after delivery."""
 
     def __init__(self, db: _AccessReadyDb) -> None:
         self.db = db
-        self.registrations: list[tuple[object, str]] = []
 
     async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
         return SimpleNamespace(state="active", failure_reason=None, failure_message=None)
@@ -690,17 +689,12 @@ class _ActiveFulfillment:
             },
         )
 
-    async def register_lease(self, registration):
-        self.registrations.append((registration, self.db.lifecycle.physical_state))
-        return registration
-
 
 @pytest.mark.asyncio
-async def test_access_readiness_registers_the_lease_on_the_family_surface() -> None:
-    """Once the grant is reported active, the lease is registered with the
-    machine as its target before the deal is recorded access-ready, so a
-    failed registration is retried with the rest of the step. It names no
-    window: the committed window is the site's."""
+async def test_access_readiness_writes_no_lease() -> None:
+    """Once the grant is reported active the deal is recorded access-ready.
+    The lease was written at commit and its target at activation, so this step
+    registers nothing; the evidence states the window the commit recorded."""
     settlement = record(mechanism="fiat.stripe.v1", mechanism_status="succeeded")
     db = _AccessReadyDb(settlement)
     fulfillment = _ActiveFulfillment(db)
@@ -717,16 +711,7 @@ async def test_access_readiness_registers_the_lease_on_the_family_surface() -> N
 
     ready = await lifecycle._ensure_access_ready(settlement)
 
-    ((registration, state_at_registration),) = fulfillment.registrations
-    assert registration.capacity_reservation_id == "reservation-a"
-    assert registration.executor_target == "machine-1"
-    assert (registration.lease_start_utc, registration.lease_end_utc) == (None, None)
-    assert registration.deal_ref == {
-        "negotiation_id": settlement.agreement_ref,
-        "hosted_obligation_ref": settlement.obligation_ref,
-    }
-    assert state_at_registration == "fulfillment_pending"
     assert ready.physical_state == "access_ready"
-    # Readiness is the delivery's; the window is the one the storefront sold.
+    # Readiness is the delivery's; the window is the one commit recorded.
     assert ready.public_result.access_ready_at.isoformat() == "2099-01-01T00:00:05+00:00"
     assert ready.public_result.expires_at.isoformat() == "2099-01-01T01:00:00+00:00"

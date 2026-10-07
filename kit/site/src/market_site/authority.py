@@ -15,17 +15,6 @@ class SiteAuthorityPort(Protocol):
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None: ...
 
-    def attach_lease_reservation(
-        self,
-        *,
-        capacity_reservation_id: str,
-        executor_target: str,
-        executor_ref: dict[str, Any] | None = None,
-        deal_ref: dict[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-    ) -> dict[str, Any] | None: ...
-
     # The lifecycle writes below are conditional transitions: each returns
     # ``None``, having written nothing, when the reservation's current state does
     # not allow it, so a lifecycle acting on a stale read re-reads instead of
@@ -71,8 +60,6 @@ class SiteAuthorityLedger(Protocol):
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None: ...
 
-    def attach_lease(self, **fields: Any) -> dict[str, Any] | None: ...
-
     def begin_releasing(
         self, capacity_reservation_id: str, *, release_job_id: str | None = None
     ) -> dict[str, Any] | None: ...
@@ -114,25 +101,6 @@ class LedgerSiteAuthority:
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
         return self._ledger.get_reservation(capacity_reservation_id)
-
-    def attach_lease_reservation(
-        self,
-        *,
-        capacity_reservation_id: str,
-        executor_target: str,
-        executor_ref: dict[str, Any] | None = None,
-        deal_ref: dict[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-    ) -> dict[str, Any] | None:
-        return self._ledger.attach_lease(
-            capacity_reservation_id=capacity_reservation_id,
-            executor_target=executor_target,
-            executor_ref=executor_ref,
-            deal_ref=deal_ref,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-        )
 
     def begin_release(
         self, capacity_reservation_id: str, *, release_job_id: str

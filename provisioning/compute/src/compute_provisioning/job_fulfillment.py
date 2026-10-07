@@ -228,6 +228,15 @@ def _metadata(provider_metadata: Mapping[str, Any]) -> JobFulfillmentMetadata:
         raise ProviderConfigInvalidError(f"invalid job fulfillment metadata: {exc}") from exc
 
 
+def fulfillment_executor_target(provider_metadata: Mapping[str, Any]) -> str:
+    """What a job-backed fulfillment's jobs act on, as its metadata recorded it.
+
+    ``ProviderConfigInvalidError`` when the metadata is empty, as it is until a
+    create's dispatch is acknowledged, or is not a job-backed fulfillment's.
+    """
+    return _metadata(provider_metadata).executor_target
+
+
 def _operation(prepared: VersionedEnvelope[Any], expected: Operation) -> PreparedJobOperation:
     if prepared.kind != JOB_OPERATION_KIND or prepared.schema_version != JOB_OPERATION_SCHEMA_VERSION:
         raise ProviderConfigInvalidError(
@@ -519,6 +528,7 @@ __all__ = [
     "PreparedJobOperation",
     "delivered_credential",
     "delivery_evidence",
+    "fulfillment_executor_target",
     "job_contract",
     "teardown_operation",
 ]

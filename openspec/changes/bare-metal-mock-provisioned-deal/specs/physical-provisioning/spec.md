@@ -300,13 +300,34 @@ a lease window, or a credential field outside the allowlist.
 ### Requirement: Provisioning names what it provisions
 
 Provisioning MUST name the resource a job creates, deriving the name from the capacity
-reservation so a retry names the same resource. A storefront MUST NOT supply it, and
-lease registration MUST take the lease's target from the reservation's fulfillment.
+reservation so a retry names the same resource, and the name MUST satisfy every use the
+resource's playbooks make of it. A storefront MUST NOT supply it, and a request naming one
+MUST be refused. The lease's target MUST be the one the reservation's fulfillment recorded.
 
-#### Scenario: A lease is registered
+#### Scenario: A lease reports its target
 
-- **WHEN** a storefront registers the lease for a fulfilled reservation
-- **THEN** the lease's target is the one its fulfillment recorded, without the storefront naming it
+- **WHEN** a VM fulfillment becomes active
+- **THEN** the lease reports the guest its fulfillment named, without a storefront naming it
+
+#### Scenario: A VM guest is named
+
+- **WHEN** a VM create is prepared for a capacity reservation
+- **THEN** the guest is named `tenant-` and the first 24 hex characters of a UUIDv5 of the
+  reservation's identifier, the same on every retry
+- **AND** the name is a valid hostname label, contains no other guest's name, and uses only
+  lowercase letters, digits, and a hyphen
+- **AND** stripped to letters and digits it is a login of at most 32 characters starting
+  with a letter, which `useradd` accepts
+
+#### Scenario: A fulfillment request names a guest
+
+- **WHEN** a VM fulfillment request names a guest
+- **THEN** it is refused, and nothing is prepared
+
+#### Scenario: A fulfillment accepted earlier is requested again
+
+- **WHEN** a request is repeated for a fulfillment whose create was already prepared
+- **THEN** the fulfillment keeps the name its create was prepared with
 
 ### Requirement: Every provisioning route admits the administrator
 
@@ -354,31 +375,31 @@ versioned projection.
 - **THEN** access is granted only through the fulfillment aggregate, and the lease is
   registered on the reservation afterwards, recording only
 
-### Requirement: A lease's executor identity and evidence are fixed at registration
+### Requirement: A lease's executor identity and evidence are fixed once recorded
 
-Lease registration MUST write a reservation's lease tail once, through the site authority's
-write-once registration: a lease is registered once its reservation records an executor
-target; a first registration MUST be accepted on a `reserved`, `provisioning`, or `leased`
-reservation; a repeated registration with the same executor target and lease start MUST
-return the lease unchanged and MUST NOT move its end; one naming a different target or start
-MUST be refused; a registration on a `releasing`, `release_failed`, or `unmanaged`
-reservation MUST be refused; a window the site already recorded MUST be kept. A
-registration MAY name the executor target, a window, and the caller's deal reference, and
-MUST NOT name a create or release handle: those are lifecycle evidence, written only by
-fulfillment and the lease lifecycle. No lease route MAY change a lease's executor identity,
-its start, or its create or release handles after registration. Once registered, a lease's
-end MAY move only through the site authority's lease truncation. A storefront that holds the
-window its commit returned MUST register that window, and MAY register without one.
+No caller writes a lease. Commit MUST record a lease's window; provisioning MUST record its
+executor target when the reservation's fulfillment becomes active, in the transaction that
+makes it active, as the target that fulfillment recorded; and the lease lifecycle records
+release. A recorded target MUST NOT be replaced, and a failure to record one MUST NOT fail
+the activation. No route MAY change a lease's executor identity, its start, or its create or
+release handles once recorded, and its end MAY move only through the site authority's lease
+truncation.
 
-#### Scenario: A storefront re-registers after a restart
+#### Scenario: A fulfillment becomes active
 
-- **WHEN** a storefront repeats a registration for a lease that was since truncated
-- **THEN** the lease is returned with its truncated end, and nothing is overwritten
+- **WHEN** a reservation's job-backed fulfillment becomes active
+- **THEN** the reservation records the target that fulfillment acts on, in the same
+  transaction, and its state and window are unchanged
 
-#### Scenario: A registration names a different target
+#### Scenario: A target is already recorded
 
-- **WHEN** a registration names an executor target other than the one recorded
-- **THEN** it is refused, and the recorded target still governs teardown
+- **WHEN** a fulfillment becomes active on a reservation that already records another target
+- **THEN** the recorded target is kept, and the fulfillment still becomes active
+
+#### Scenario: A lease body is posted
+
+- **WHEN** a caller posts a lease to the lease routes
+- **THEN** it is refused, and nothing is recorded
 
 ### Requirement: Execution readiness is reported in system status
 
@@ -498,6 +519,18 @@ For every offering mode, lease release SHALL initiate teardown through a narrow 
 
 - **WHEN** a delivered bare-metal lease passes its end
 - **THEN** release begins the bare-metal fulfillment's teardown, the aggregate leaves `active`, and capacity stays held until it reaches `torn_down`
+
+### Requirement: A committed allocation's lease records its executor target
+Market-managed leases MUST record the executor target on an existing committed site allocation, when the allocation's fulfillment becomes active; the lease window is the one its commit recorded. The allocation's offering mode is the one the site recorded when capacity was claimed, and executor-specific reference data such as a physical-host identity MUST stay with the fulfillment that delivered the workload rather than the lease.
+
+#### Scenario: Bare-metal lease records its machine
+- **WHEN** a bare-metal fulfillment granting access on a committed allocation becomes active
+- **THEN** provisioning records the machine as the lease's target, and the allocation keeps its recorded `bare_metal` offering mode and committed window, with the physical-host identity staying in the fulfillment's metadata
+
+#### Scenario: Teardown cannot begin after the release is recorded
+- **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
+- **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
+
 
 ## MODIFIED Requirements
 
@@ -655,17 +688,6 @@ Service composition MUST reject duplicate job-executor registrations for one `(o
 - **WHEN** service composition registers job executors and fulfillment providers
 - **THEN** each registration remains in its own namespace and provider availability does not select or replace a job executor
 
-### Requirement: Allocation-backed executor registration
-Market-managed leases MUST attach the executor target and the lease window to an existing committed site allocation. The allocation's offering mode is the one the site recorded when capacity was claimed; registration MUST NOT name an offering mode, and executor-specific reference data such as a physical-host identity MUST stay with the fulfillment that delivered the workload rather than the lease.
-
-#### Scenario: Bare-metal lease is registered
-- **WHEN** a bare-metal storefront's fulfillment reports access granted for a committed allocation
-- **THEN** the storefront registers the lease with the machine as its target, and the allocation keeps its recorded `bare_metal` offering mode and committed window, with the physical-host identity staying in the fulfillment's metadata
-
-#### Scenario: Teardown cannot begin after the release is recorded
-- **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
-- **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
-
 ### Requirement: Executor-dispatched lifecycle
 Market-managed release MUST begin the reservation's fulfillment teardown through one provider-neutral release executor, whatever the reservation's offering mode; the fulfillment's provider dispatches the domain's teardown. Direct VM host administration endpoints MAY remain separate operator surfaces.
 
@@ -717,6 +739,27 @@ Lease lifecycle SHALL own the reservation's `releasing` and terminal release sta
 - **AND** capacity SHALL remain unavailable until that aggregate reaches `torn_down`
 
 ## REMOVED Requirements
+
+### Requirement: Allocation-backed executor registration
+
+**Reason**: No caller registers a lease, so a storefront no longer attaches the executor
+target; provisioning records it when the allocation's fulfillment becomes active, and its
+scenario of a storefront registering a bare-metal lease no longer describes the system.
+
+**Migration**: Replaced by "A committed allocation's lease records its executor target",
+which keeps the offering mode, the committed window, the physical-host identity staying
+with the fulfillment, and the teardown scenario.
+
+### Requirement: Lease registration tolerates omitted identity hints
+
+**Reason**: No caller registers a lease. Commit records a lease's window and provisioning
+records its executor target when the fulfillment becomes active, from what the fulfillment
+recorded, so there is no registration to omit a hint from; release addresses the target in
+the fulfillment's own metadata.
+
+**Migration**: Covered by "A lease's executor identity and evidence are fixed once
+recorded" and "Allocation-backed executor registration". A provisioning migration records
+the target of every active job-backed fulfillment whose reservation has none.
 
 ### Requirement: VM release delegates to durable fulfillment teardown
 

@@ -19,7 +19,6 @@ from arkhai_bare_metal import (
 from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
-    LeaseRegistration,
 )
 from market_core.schemas import SettlementObligation
 from market_core import VersionedEnvelope
@@ -35,6 +34,7 @@ from market_settlement_runtime import (
 from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
 from .hosted_binding import build_accepted_hosted_obligation
+from .lease_window import committed_lease_window
 from .models import BareMetalHostedLifecycle
 from .sqlite_client import SQLiteClient
 
@@ -599,21 +599,31 @@ class BareMetalHostedLifecycleCallbacks:
                 capacity_reservation_id=reservation_id,
             )
         self.capacity_client.reservation_sites[reservation_id] = facts.site_id
-        lease_start = datetime.now(timezone.utc)
-        lease_end = lease_start + timedelta(seconds=terms.duration_seconds)
-        if lifecycle.physical_state in {"funded", "capacity_reserved"}:
-            await self.capacity_client.commit(
-                capacity_reservation_id=reservation_id,
-                resource_id=(
-                    facts.physical_resource_id
-                    if facts.resource_selection == "specific"
-                    else None
-                ),
-                lease_start_utc=lease_start.isoformat(),
-                lease_end_utc=lease_end.isoformat(),
-                idempotency_ref=lifecycle.fulfillment_identity,
-                site_id=facts.site_id,
+        committed_window = None
+        if lifecycle.fulfillment_id is None:
+            # The lease begins at commit, and its window is the one commit
+            # returns. Committed until the fulfillment begins: the first commit
+            # records the window and a repeat returns it unchanged, so a
+            # restart before the materialization is saved still states the
+            # site's window.
+            lease_start = datetime.now(timezone.utc)
+            committed_window = committed_lease_window(
+                await self.capacity_client.commit(
+                    capacity_reservation_id=reservation_id,
+                    resource_id=(
+                        facts.physical_resource_id
+                        if facts.resource_selection == "specific"
+                        else None
+                    ),
+                    lease_start_utc=lease_start.isoformat(),
+                    lease_end_utc=(
+                        lease_start + timedelta(seconds=terms.duration_seconds)
+                    ).isoformat(),
+                    idempotency_ref=lifecycle.fulfillment_identity,
+                    site_id=facts.site_id,
+                )
             )
+        if lifecycle.physical_state in {"funded", "capacity_reserved"}:
             lifecycle = await self.db.advance_bare_metal_hosted_lifecycle(
                 obligation_ref=record.obligation_ref,
                 physical_state="capacity_committed",
@@ -686,18 +696,23 @@ class BareMetalHostedLifecycleCallbacks:
             materialization = await self.db.load_bare_metal_materialization(
                 negotiation_id=binding.negotiation_id
             )
-            materialization_start = (
-                materialization.lease_start_utc
-                if materialization is not None
-                else lease_start
-            )
+            # A saved materialization keeps its window: it is the fulfillment
+            # request, which a retry must repeat exactly.
+            if materialization is not None:
+                lease_start_utc = materialization.lease_start_utc
+                lease_end_utc = materialization.lease_end_utc
+            elif committed_window is not None:
+                lease_start_utc, lease_end_utc = committed_window
+            else:
+                raise BareMetalHostedLifecycleError(
+                    "the deal's capacity commit recorded no lease window"
+                )
             expected_materialization = BareMetalMaterialization(
                 settlement_obligation_ref=binding.obligation_ref,
                 host_id=host_id,
                 physical_host_id=physical_host_id,
-                lease_start_utc=materialization_start,
-                lease_end_utc=materialization_start
-                + timedelta(seconds=terms.duration_seconds),
+                lease_start_utc=lease_start_utc,
+                lease_end_utc=lease_end_utc,
                 access_method=terms.access_method,
                 ssh_public_key=terms.ssh_public_key,
                 access_ref=terms.access_ref,
@@ -779,20 +794,6 @@ class BareMetalHostedLifecycleCallbacks:
             raise BareMetalHostedLifecycleError(
                 "access-ready fulfillment has no recorded materialization"
             )
-        # The lease is the family's: register its tail on the reservation, the
-        # machine the access was granted on as the target teardown addresses.
-        # The committed window is the site's and is kept; a repeat after a
-        # restart returns the registered lease unchanged.
-        await self.fulfillment_client.register_lease(
-            LeaseRegistration(
-                capacity_reservation_id=reservation_id,
-                deal_ref={
-                    "negotiation_id": binding.negotiation_id,
-                    "hosted_obligation_ref": binding.obligation_ref,
-                },
-                executor_target=materialization.host_id,
-            )
-        )
         public_result = BareMetalLeaseReadyResult(
             site_id=facts.site_id,
             offering_mode=facts.offering_mode,

@@ -64,7 +64,7 @@ Phase 9 — Provisioning completion
          Popen.wait → returncode 0
          GET /api/v1/listings/{id} → status=closed
          GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
-  09c  Lease registered:
+  09c  Lease recorded:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
@@ -1352,8 +1352,8 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         )
 
 
-class TestStage09c_LeaseRegistered:
-    def test_09c_provisioning_lease_registered(self, provisioning_client, deal_state: DealState):
+class TestStage09c_LeaseRecorded:
+    def test_09c_provisioning_lease_recorded(self, provisioning_client, deal_state: DealState):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Placement is confirmed here, not at stage 08b -- see
@@ -1399,7 +1399,7 @@ class TestStage09c_LeaseRegistered:
         deal_state.lease_status = lease.get("status")
         deal_state.host_id = host_id
         log.info(
-            "[09c] Lease %s registered for escrow %s (resource=%s status=%s mode=%s)",
+            "[09c] Lease %s recorded for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,
             deal_state.real_escrow_uid,
             deal_state.reserved_resource_id,

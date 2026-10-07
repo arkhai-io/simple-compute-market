@@ -251,10 +251,11 @@ def _leased(
         lease_start_utc=(end - timedelta(hours=1)).isoformat(),
         lease_end_utc=end.isoformat(),
     )
-    ledger.attach_lease(
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        executor_target="tenant-x",
-    )
+    with ledger._session_factory() as db:
+        ledger.record_executor_target_in_session(
+            db, reserved["capacity_reservation_id"], "tenant-x"
+        )
+        db.commit()
     return reserved["capacity_reservation_id"]
 
 

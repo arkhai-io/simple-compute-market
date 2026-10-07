@@ -108,7 +108,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.8.0"
+version = "0.10.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -120,7 +120,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]

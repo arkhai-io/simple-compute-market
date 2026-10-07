@@ -101,12 +101,14 @@ class CapacityApi:
         resource_id: str,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
+        deal_ref: dict | None = None,
     ) -> dict | None:
         return await self.site.commit(
             capacity_reservation_id=capacity_reservation_id,
             resource_id=resource_id,
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
+            deal_ref=deal_ref,
         )
 
     async def release(self, **target: Any) -> dict | None:
@@ -348,12 +350,12 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
 
 
 @pytest.mark.asyncio
-async def test_a_commit_of_a_registered_lease_answers_with_its_recorded_window(
+async def test_a_repeat_commit_answers_with_the_recorded_window_and_records_the_escrow(
     capacity: CapacityApi,
 ):
-    """Once a lease is registered, a commit leaves its window alone, and the
-    answer says so: the caller registers what the site recorded, not what it
-    asked for."""
+    """A lease's window is its first commit's: a repeat leaves it alone and the
+    answer says so. A hold placed at negotiation learns the deal's escrow at
+    commit, over the wire."""
     await capacity.register(
         "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1", attributes={}
     )
@@ -367,9 +369,7 @@ async def test_a_commit_of_a_registered_lease_answers_with_its_recorded_window(
         resource_id="compute-kvm1-001",
         lease_start_utc="2099-01-01T00:00:00+00:00",
         lease_end_utc="2099-01-01 01:00",
-    )
-    _container_module.resolved_capacity_ledger_service.attach_lease(
-        capacity_reservation_id=reservation_id, executor_target="tenant-window"
+        deal_ref={"escrow_uid": "0xwindow-escrow"},
     )
 
     again = await capacity.commit(
@@ -383,6 +383,8 @@ async def test_a_commit_of_a_registered_lease_answers_with_its_recorded_window(
         "2099-01-01T00:00:00+00:00",
         "2099-01-01 01:00",
     )
+    found = await capacity.site.list_reservations(escrow_uid="0xwindow-escrow")
+    assert [row["capacity_reservation_id"] for row in found] == [reservation_id]
 
 
 @pytest.mark.asyncio

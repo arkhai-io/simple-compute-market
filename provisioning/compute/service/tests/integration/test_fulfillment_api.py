@@ -58,6 +58,7 @@ from market_fulfillment import (
     SettlementResult,
 )
 from market_core import VersionedEnvelope
+from vm_provisioning_adapter.guest_names import fulfillment_guest_name
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
 from compute_provisioning_contracts import HostCreate
@@ -193,7 +194,6 @@ async def fulfillment(client_and_queue) -> FulfillmentApi:
 
 def _fulfillment_request(**overrides: Any) -> dict:
     payload = {
-        "vm_target": "vm-fulfillment-1",
         "vm_ram": 8192,
         "vm_vcpus": 4,
         "vm_disk_size": "80G",
@@ -310,13 +310,15 @@ class TestBeginPersistsPreparedCreateInput:
             operation = prepared["payload"]
             assert operation["capacity_reservation_id"] == capacity_reservation_id
             assert operation["operation"] == "create"
+            # Provisioning names the guest from the reservation.
+            guest = fulfillment_guest_name(capacity_reservation_id)
             assert (operation["host_id"], operation["executor_target"]) == (
-                "kvm-fulfillment-1", "vm-fulfillment-1",
+                "kvm-fulfillment-1", guest,
             )
 
             params = operation["parameters"]
             assert params["host_id"] == "kvm-fulfillment-1"
-            assert params["vm_target"] == "vm-fulfillment-1"
+            assert params["vm_target"] == guest
             assert params["vm_ram"] == 8192
             assert params["vm_vcpus"] == 4
             assert params["vm_disk_size"] == "80G"
@@ -330,7 +332,7 @@ class TestBeginPersistsPreparedCreateInput:
 
             metadata = record.provider_metadata
             assert metadata["host_id"] == "kvm-fulfillment-1"
-            assert metadata["executor_target"] == "vm-fulfillment-1"
+            assert metadata["executor_target"] == guest
             assert metadata["operation"] == "create"
             assert metadata["create_job_id"]
 
@@ -449,6 +451,18 @@ class TestValidateIsSideEffectFree:
         assert result["valid"] is False
         assert result["issues"]
 
+    async def test_a_request_naming_the_guest_is_invalid(self, fulfillment: FulfillmentApi):
+        """Provisioning names the guest; a storefront naming one is refused."""
+        capacity_reservation_id = await _scheduled_reservation()
+
+        result = await fulfillment.validate(
+            capacity_reservation_id,
+            "vms",
+            _fulfillment_request(vm_target="tenant-chosen-by-storefront"),
+        )
+        assert result["valid"] is False
+        assert "vm_target" in str(result["issues"])
+
 
 class TestTeardownPreparation:
     """AnsibleFulfillmentProvider.prepare_teardown/dispatch_teardown, driven
@@ -502,7 +516,7 @@ class TestTeardownPreparation:
         assert prepared.payload["create_job_id"] == provider_metadata["create_job_id"]
         teardown_params = prepared.payload["parameters"]
         assert teardown_params["host_id"] == "kvm-fulfillment-1"
-        assert teardown_params["vm_target"] == "vm-fulfillment-1"
+        assert teardown_params["vm_target"] == fulfillment_guest_name(capacity_reservation_id)
         assert teardown_params["vm_action"] == "vm_remove"
         assert teardown_params["escrow_uid"] == capacity_reservation_id
         assert teardown_params["playbook_path"] == _PLAYBOOK_PATH
@@ -680,7 +694,7 @@ class TestStatusAndResultQueries:
             pool_id="pool-fulfillment-status"
         )
         begun = await fulfillment.begin(
-            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-status-1")
+            capacity_reservation_id, "vms", _fulfillment_request()
         )
 
         resp = await fulfillment.status(begun["fulfillment_id"])
@@ -703,7 +717,7 @@ class TestStatusAndResultQueries:
             pool_id="pool-fulfillment-result-pending"
         )
         begun = await fulfillment.begin(
-            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-1")
+            capacity_reservation_id, "vms", _fulfillment_request()
         )
         assert begun["state"] == "dispatching"
 
@@ -733,7 +747,7 @@ class TestStatusAndResultQueries:
             pool_id="pool-fulfillment-result-active"
         )
         begun = await fulfillment.begin(
-            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-2")
+            capacity_reservation_id, "vms", _fulfillment_request()
         )
         fulfillment_id = begun["fulfillment_id"]
 
@@ -823,7 +837,7 @@ class TestScheduleEndpoint:
         assert scheduled.status_code == 200, scheduled.text
 
         begun = await fulfillment.begin(
-            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-schedule-1")
+            capacity_reservation_id, "vms", _fulfillment_request()
         )
         assert begun["capacity_reservation_id"] == capacity_reservation_id
         assert begun["state"] == "dispatching"

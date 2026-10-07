@@ -76,12 +76,6 @@ class ProvisioningRouteContract:
 
 PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract(
-        "POST",
-        re.compile(r"/api/v1/contract/leases"),
-        "provisioning_lease_register",
-        body_resource="capacity_reservation_id",
-    ),
-    ProvisioningRouteContract(
         "GET",
         re.compile(r"/api/v1/contract/leases"),
         "provisioning_lease_list",

@@ -3193,6 +3193,98 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
                 )
 
 
+def _migrate_vm_fulfillment_request_names_no_guest(engine: Engine) -> None:
+    """Remove the guest name from every stored VM fulfillment request.
+
+    Provisioning names a VM's guest from its capacity reservation, and VM's
+    fulfillment request refuses a field it does not declare, so a stored request
+    naming the guest could never be prepared again. A storefront replays its
+    stored request verbatim after a restart, and the fulfillment kit accepts a
+    repeat only when it equals the stored copy, so the storefront's stored
+    requests are rewritten the same way by its own migration and a replay still
+    matches.
+
+    Every state is rewritten. A fulfillment whose create was already prepared
+    keeps the name it was prepared with: prepared operations and metadata are
+    not touched, and an accepted request is never prepared again. A rerun
+    changes nothing.
+    """
+    if not _table_exists(engine, "settlement_records"):
+        return
+    with engine.begin() as connection:
+        records = connection.execute(text(
+            "SELECT capacity_reservation_id, fulfillment_request FROM settlement_records "
+            "WHERE fulfillment_request IS NOT NULL"
+        )).mappings().all()
+        for record in records:
+            reservation = record["capacity_reservation_id"]
+            envelope = _json_mapping(
+                record["fulfillment_request"],
+                label=f"settlement record {reservation}'s fulfillment request",
+            )
+            payload = envelope.get("payload")
+            if (
+                envelope.get("kind") != "vm.fulfillment.request"
+                or not isinstance(payload, dict)
+                or "vm_target" not in payload
+            ):
+                continue
+            rewritten = {
+                **envelope,
+                "payload": {key: value for key, value in payload.items() if key != "vm_target"},
+            }
+            connection.execute(
+                text(
+                    "UPDATE settlement_records SET fulfillment_request=:request "
+                    "WHERE capacity_reservation_id=:reservation_id"
+                ),
+                {"request": json.dumps(rewritten), "reservation_id": reservation},
+            )
+
+
+def _migrate_active_fulfillment_targets_on_reservations(engine: Engine) -> None:
+    """Record each active job-backed fulfillment's target on its reservation.
+
+    Provisioning records a lease's executor target when its fulfillment
+    becomes active. A fulfillment that became active before it did so had its
+    target recorded by the storefront's lease registration, or, where that
+    registration had not yet run, has none. Each reservation with no target
+    takes the one its active fulfillment's metadata records; a recorded target
+    is never replaced, terminal reservations are left as they are, and
+    metadata that names no target is skipped. A rerun changes nothing.
+    """
+    if not (
+        _table_exists(engine, "settlement_records")
+        and _table_exists(engine, "capacity_reservations")
+    ):
+        return
+    with engine.begin() as connection:
+        records = connection.execute(text(
+            "SELECT sr.capacity_reservation_id, sr.provider_metadata "
+            "FROM settlement_records sr JOIN capacity_reservations cr "
+            "ON cr.capacity_reservation_id = sr.capacity_reservation_id "
+            "WHERE sr.state = 'active' AND cr.executor_target IS NULL "
+            "AND cr.state NOT IN ('released', 'force_released', 'provisioning_failed')"
+        )).mappings().all()
+        for record in records:
+            reservation = record["capacity_reservation_id"]
+            metadata = _json_mapping(
+                record["provider_metadata"],
+                label=f"settlement record {reservation}'s provider metadata",
+            )
+            target = metadata.get("executor_target")
+            if not isinstance(target, str) or not target:
+                continue
+            connection.execute(
+                text(
+                    "UPDATE capacity_reservations SET executor_target=:target "
+                    "WHERE capacity_reservation_id=:reservation_id "
+                    "AND executor_target IS NULL"
+                ),
+                {"target": target, "reservation_id": reservation},
+            )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3301,5 +3393,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261006_002_vm_job_backed_fulfillment",
         _migrate_vm_job_backed_fulfillment,
+    ),
+    Migration(
+        "20261006_003_vm_fulfillment_request_names_no_guest",
+        _migrate_vm_fulfillment_request_names_no_guest,
+    ),
+    Migration(
+        "20261006_004_active_fulfillment_targets_on_reservations",
+        _migrate_active_fulfillment_targets_on_reservations,
     ),
 )
