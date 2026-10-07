@@ -16,52 +16,99 @@ merge rule; `market-composition` delta requirements "Capability shape admissibil
 owned by one kit" and "Shape constraints are stated inline and strictly". Touches only the
 new package and `kit/Makefile`. No Helm checks owed.
 
-- [ ] 1.1 Create the distribution `arkhai-kit-capability-admissibility` beside
+- [x] 1.1 Create the distribution `arkhai-kit-capability-admissibility` beside
       `kit/capability-pricing`, copying its layout: `pyproject.toml` depending only on
       `arkhai-kit-capability-shape`, `Makefile`, `src/market_capability_admissibility/`
       with `py.typed`, `tests/unit/`, and a lock built through `scripts/uv_project.py`.
       Register `test-capability-admissibility` and `dist-capability-admissibility` in
       `kit/Makefile` (including `test`, `dist`, and `dist-ci`). (D2)
-- [ ] 1.2 Define the public types: opaque `Declaration` and `ResolvedPolicy` (the policy
+      Done. `kit/capability-admissibility` copies `kit/capability-pricing`'s layout,
+      adding `py.typed`; its test target uses `uv run --find-links $(DIST_DIR)` as
+      `BUILD_AND_PACKAGING.md` prescribes (the pricing and shape kits omit it).
+      `scripts/uv_project.py lock` only relocks, so the first lock was created with the
+      `uv lock --find-links ../../.dist` it runs, then relocked through the script
+      unchanged.
+- [x] 1.2 Define the public types: opaque `Declaration` and `ResolvedPolicy` (the policy
       keeps the schema it was resolved with); `AdmissibilityProblem` carrying `paths`
       (tuple), `code`, `message`, and `tier`; the opaque `AdmissibleValues`; and a typed
       request error carrying every problem. Nothing exposes a declaration's or policy's
       contents. (D3, D4)
-- [ ] 1.3 `split_listing_shape(raw, *, tier, schema=None)`: base shape (scalars kept,
+      Done. `AdmissibilityProblem` also carries `entries` (list positions, for
+      conflicting duplicates) and `bounds` (`TierBound`s, each tier's value for an empty
+      range), which section 4's reports need. `tier` is `None` on a problem with an
+      evaluated shape itself. Codes are the `ProblemCode` enum. Results are
+      `ShapeSplit`, `ShapeListSplit`, `DeclarationParse`, and `Resolution`.
+- [x] 1.3 `split_listing_shape(raw, *, tier, schema=None)`: base shape (scalars kept,
       constrained fields reduced to `offer`, constraint-only fields omitted) and either a
       `Declaration` or constraint problems. Structure only without a schema; with one,
       constrained paths must be quantities the schema defines. Read the base shape first:
       a constraint-only mapping on a required field is a base-shape problem with no
       declaration. Constraint rules: positive integers, `min` ≤ `max`, `offer` within its
       own range, at least one key, strict keys. (D3, D5)
-- [ ] 1.4 `split_listing_shapes(raw_list, *, tier, schema=None)`: per-entry split; entries
+      Done. A mapping is a constraint only on a well-named field; anything else stays in
+      the base shape for the shape kit to report. With a schema an unreadable offer
+      (`{offer: 0}`) is a base-shape problem; without one it is a constraint problem. A
+      constraint on an undefined field is a constraint problem only when it states no
+      offer (with one, the base shape names the undefined field).
+- [x] 1.4 `split_listing_shapes(raw_list, *, tier, schema=None)`: per-entry split; entries
       identical in base shape and constraints collapse; a base shape (by the shape kit's
       `shape_digest`) stated with different constraints is reported naming each
       conflicting entry, with or without a schema. (D3, D8's duplicate rule)
-- [ ] 1.5 `parse_declaration(raw, *, tier, schema=None)` for the constraint-only form: the
+      Done. Every entry is split on its own, so an unreadable `offer`-only mapping is
+      reported whatever its position (found by the fresh-context check; regression test
+      added). Constraints compare by a schema-free signature in which an `offer`-only
+      mapping equals its scalar and an empty mapping differs from stating nothing.
+- [x] 1.5 `parse_declaration(raw, *, tier, schema=None)` for the constraint-only form: the
       same field syntax, `offer` refused. (D3, D9)
-- [ ] 1.6 `resolve(declarations, schema)`, highest tier first: per-leaf `min`/`max` merge
+      Done. An empty declaration or empty family states no constraint; a scalar is
+      refused as an offer.
+- [x] 1.6 `resolve(declarations, schema)`, highest tier first: per-leaf `min`/`max` merge
       (the higher tier stating a leaf wins; an unstated leaf keeps the lower value); an
       empty range is a problem naming each tier and its conflicting value; no policy on
       any problem. (D3, D9)
-- [ ] 1.7 `admissibility_problems(shape)` under completion semantics: an omitted field
+      Done. An empty-range problem's `tier` is the higher tier involved; `bounds` names
+      both. `resolve` also refuses a declared path that is not a quantity of its schema
+      (a declaration split without one).
+- [x] 1.7 `admissibility_problems(shape)` under completion semantics: an omitted field
       never violates; a malformed shape under the schema is reported as problems; required
       fields are not checked; each problem names the tier that set the violated leaf.
       (D3, D6, D7)
-- [ ] 1.8 `admissible_values(dimension, partial_shape)` and `AdmissibleValues`
+      Done. Uses the shape kit's `shape_problems` with every field made non-required, so
+      no shape validation is duplicated.
+- [x] 1.8 `admissible_values(dimension, partial_shape)` and `AdmissibleValues`
       (`is_empty`, `contains`, `at_most`, `at_least`, `minimum`, `maximum`; `maximum` is
       `None` when unbounded; every value accessor answers `None` on an empty set). `{}` is
       valid; a dimension that is not a schema quantity, or a malformed partial shape,
       raises the request error. (D3, D4)
-- [ ] 1.9 Unit tests in `tests/unit/` against a synthetic schema with no compute
+      Done. Both evaluations are methods on `ResolvedPolicy`.
+- [x] 1.9 Unit tests in `tests/unit/` against a synthetic schema with no compute
       vocabulary, covering every scenario of both `market-composition` delta
       requirements, plus a property test of the one-dimension-at-a-time guarantee (fixing
       dimensions in every order never empties a later answer and ends admissible).
       `test_import_boundary.py` asserts the kit imports only the shape kit and the
       standard library, at any depth, under `TYPE_CHECKING`, or behind `try`. (D2, D12's
       neutrality proof)
-- [ ] 1.10 Verify: `make -C kit test-capability-admissibility`, `make dist`, and
+      Done. 90 unit tests; the property test runs 200 seeded random policies over every
+      dimension order. The import-boundary test walks the whole AST, including
+      `__import__` calls.
+- [x] 1.10 Verify: `make -C kit test-capability-admissibility`, `make dist`, and
       `make check-packaging`.
+      Done. `make -C kit test-capability-admissibility`: 90 passed.
+      `make check-packaging` (which runs `make dist`): all four checks OK.
+      `make check-comment-hygiene` and
+      `make check-doc-citations CHANGE=capacity-shape-envelope`: OK.
+
+Handoff from section 1:
+
+- The kit's module docstring ends with a bare pointer to `market-composition/spec.md`, which
+  states no admissibility requirement until 7.10 promotes them; add the heading anchor
+  then.
+- `Declaration` is a frozen dataclass and `ResolvedPolicy` has a public constructor, so
+  their opacity holds by the underscore convention, not enforcement. Kept: `Declaration`
+  equality is what makes a scalar and its `offer` mapping compare equal in tests.
+- For sections 2–3: refuse or hold on `ShapeListSplit.base_problems`; per listing, use each
+  `ShapeSplit`'s `declaration` or `constraint_problems`; format positions from
+  `problem.entries`.
 
 ## 2. Pool-write validation of constrained listing shapes
 
