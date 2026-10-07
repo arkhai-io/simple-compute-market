@@ -198,7 +198,7 @@ to repair by hand.
 
 ## 7. Implementation
 
-- [ ] 7.1 Write the `change-implement` skill: one `tasks.md` section per fresh
+- [x] 7.1 Write the `change-implement` skill: one `tasks.md` section per fresh
       session, starting from the guidance documents, the change, and that section;
       preserving completed tasks; comment rules stated locally; a clean stop that
       records why and commits nothing partial when discovered code invalidates the
@@ -212,9 +212,25 @@ to repair by hand.
       section touches. It moves the index row to `in implementation` when the
       first section starts. Decide whether it wraps or replaces
       `openspec-apply-change`.
-- [ ] 7.2 Add a committed Claude Code project hook that, when a session resumes
+      Written at `.agents/skills/change-implement/`. It replaces
+      `openspec-apply-change` for this workflow rather than wrapping it: that
+      generated skill implements every remaining task in one session, the
+      opposite of a section per session, and `openspec update` would overwrite
+      any edit to it; it stays available for changes worked outside this
+      workflow. The skill also refuses to start on a branch that does not carry
+      the change, since several changes are often in flight in one checkout,
+      and stops at a verified point when a section proves larger than planned.
+- [x] 7.2 Add a committed Claude Code project hook that, when a session resumes
       after compaction, re-reads the required guidance documents and restates the
       change and section being worked.
+      `.claude/settings.json` (now un-ignored; `.claude/settings.local.json`
+      stays ignored) runs `scripts/post_compaction_context.py` on `SessionStart`
+      with the `compact` matcher, whose output Claude Code adds to context.
+      Claude Code caps injected context at 10,000 characters and the required
+      documents are about 250 KB, so the hook names them to re-read in full —
+      never a digest — with the branch and the changes in progress. Tests in
+      `scripts/tests/test_post_compaction_context.py`; the hook's firing is
+      proven on the first compaction in a new session.
 - [ ] 7.3 Pilot: implement the first section of `capacity-shape-envelope` in its
       own session, recording what the fresh-context check caught.
 

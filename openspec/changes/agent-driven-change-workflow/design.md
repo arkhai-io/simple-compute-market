@@ -135,10 +135,13 @@ later session needs may live only in the conversation:
 
 Sessions are started by the owner, one per section, until the orchestrator exists;
 a driver that runs sections in sequence is the orchestrator's job. Within a session,
-a Claude Code hook that runs when a session resumes after compaction re-reads the
-required documents and restates the change and section. It is a backstop for a
-section that outgrew its plan, not the mechanism: it re-injects the documents
-themselves, never a digest of their rules, which would be a second copy that drifts.
+a Claude Code hook that runs when a session resumes after compaction sends the
+session back to the required documents, with the branch and the changes in
+progress to orient it. It is a backstop for a section that outgrew its plan, not
+the mechanism. Claude Code caps what a hook may add to context at 10,000
+characters, far below the documents, so the hook tells the session to re-read the
+documents themselves in full; it never injects a digest of their rules, which would
+be a second copy that drifts.
 Codex has no equivalent, so the backstop is Claude Code's alone; the section sizing
 and fresh sessions apply to both harnesses.
 

@@ -227,10 +227,13 @@ provisioning-service/src/config/config-local.yml
 # Per-env deployment scratch dirs (carry keys + per-env configs)
 deploy-base-sepolia/
 
-# Claude Code per-project state; shared skills are repository-owned.
+# Claude Code per-project state; shared skills and the project's committed
+# settings (the post-compaction hook) are repository-owned. Personal overrides
+# belong in .claude/settings.local.json, which stays ignored.
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+!.claude/settings.json
 
 # Local assistant session exports
 omp-session-*.html

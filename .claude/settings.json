@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/post_compaction_context.py\"",
+            "timeout": 30,
+            "statusMessage": "Restoring repository guidance after compaction"
+          }
+        ]
+      }
+    ]
+  }
+}
