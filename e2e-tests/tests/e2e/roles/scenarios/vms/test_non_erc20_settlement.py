@@ -23,14 +23,13 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import (
-    _signer,
-    capacity_source_for,
+from tests.e2e.roles.helpers.compute_deal import (
     delete_mock_rules_if_present,
     pause_storefront,
     wait_for_stage_event,
 )
-from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.conftest import _signer, capacity_source_for
 
 log = logging.getLogger(__name__)
 
@@ -231,7 +230,7 @@ def _create_on_chain_escrow(
     seller_wallet_address: str,
     rpc_url: str,
 ) -> str:
-    rpc_url = _ensure_ws_rpc_url(rpc_url)
+    rpc_url = ensure_ws_rpc_url(rpc_url)
     prewarm_alkahest_address_config_cache(_ALKAHEST_ADDRESSES_PATH)
     network = get_alkahest_network(_CHAIN_NAME)
     address_config = resolve_alkahest_address_config(

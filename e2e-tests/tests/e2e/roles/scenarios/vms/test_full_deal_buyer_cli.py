@@ -103,17 +103,21 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import (
+from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
-    DealState,
-    _signer,
+    advance_fulfillment_to,
     advance_storefront,
-    capacity_site_id,
-    capacity_source_for,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    one_site,
     pause_storefront,
+    wait_for_stage_event,
+)
+from tests.e2e.roles.scenarios.vms.conftest import (
+    DealState,
+    _signer,
+    capacity_site_id,
+    capacity_source_for,
+    one_site,
     require_state,
     signed_listing_read_headers,
 )
@@ -1108,9 +1112,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             "[08b] settle_submitted event body: %s", {k: submitted.get(k) for k in ("ts", "body")}
         )
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(
+        wait_for_stage_event(
             storefront_admin_client,
             "provision",
             "job_submitted",
@@ -1353,7 +1355,9 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
 
 
 class TestStage09c_LeaseRecorded:
-    def test_09c_provisioning_lease_recorded(self, provisioning_client, deal_state: DealState):
+    def test_09c_provisioning_lease_recorded(
+        self, provisioning_client, site_capacity, deal_state: DealState
+    ):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Placement is confirmed here, not at stage 08b -- see
@@ -1374,7 +1378,7 @@ class TestStage09c_LeaseRecorded:
 
         # DealLease resolves where this deal's lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease_view = DealLease(provisioning_client, site_capacity, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
         host_id = lease.get("host_id")
@@ -1541,10 +1545,7 @@ class TestStage11b_TeardownCompletion:
         # Convergence-driven, not one-shot: `drain` returns when the provider
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
-        from tests.e2e.roles.scenarios.vms.conftest import (
-            advance_fulfillment_to as _advance_to,
-        )
-        fulfillment = _advance_to(
+        fulfillment = advance_fulfillment_to(
             provisioning_client, deal_state.fulfillment_id, "torn_down",
         )
 
@@ -1553,9 +1554,9 @@ class TestStage11b_TeardownCompletion:
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0)
+        wait_for_stage_event(
+            storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0
+        )
         assert not deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
         )

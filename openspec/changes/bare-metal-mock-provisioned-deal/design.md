@@ -2655,6 +2655,154 @@ end-to-end gates stay open; this merge does not complete the feature campaign.
 campaign graph is unchanged. `docs/development/ROADMAP.md` retains the outstanding
 full-deal pipeline evidence gap until the remaining scenario work is qualified.
 
+### Section 8 design: the shared stages against the code (2026-10-08)
+
+Re-read against `e2e-tests` on the tree that carries the Arkhai payments merge, before
+planning Section 8; the payments merge changed nothing Section 8 touches. Revised after a
+design review; decided with the maintainer. The two decisions above ("The scenario is
+VM's deal, stage for stage" and "Compute deal stages are shared") stand. This records
+how they meet the code.
+
+| Finding | Consequence |
+|---|---|
+| `test_full_deal.py` has a stage the plan placed nowhere: `TestStage00c2_ProvisioningContractPins`, where both participants report an agreeing provisioning contract pin. The bare-metal storefront speaks the same provisioning wire but reports no `provisioning_contract_version`, though the shared client model already parses it | Decision 1 |
+| `helpers/domain_deal.py` already holds `DomainDealState` and `require_state`, and VM's `DealState` subclasses `DomainDealState` | Decision 2 |
+| VM's `DealState` is shared by the typed-client deal, the buyer-CLI deal, and the one-shot buy, so its field names are those scenarios' contract too. The sentinels where a domain's own stage hands over to a shared stage are named for VM's mechanism: `resume_confirmed` (the listing was resumed into publication), `_capacity_events_advanced` (the capacity-event loop was stepped), and `_executor_host_registered` | Decision 2 |
+| Stages write sentinels the dataclass does not declare (`_executor_host_registered`, `_escrow_expiration_unix`, `_claims_swept`); `require_state` reads through `getattr`, so a misspelled sentinel silently skips every dependent stage. Eight fields are written and never read. Four record nothing a later stage needs (`settlement_submitted`, `tenant_credentials`, `seller_listing_final_status`, `_claims_swept`). Four record a readiness check whose failure should stop the stages that depend on it, and none does: `_contract_pins_agree`, `_negotiation_strategy_viable`, `_provisioning_storefront_ok`, `_executor_host_registered`. So VM's 00f mutates after 00c2 fails, and 02b creates a listing after 00f1 fails to declare supply | Decision 2 |
+| 04a reads the registry with a hand-built signed `httpx` request, though `SyncRegistryClient.get_listing` is the same read and the `registry_client` fixture is buyer-signed and verifies responses; `TESTING.md`'s system level follows the "no raw calls" rule | Decision 3 |
+| 05a reads the buyer's principal from VM's settings | Decision 3 |
+| 00c asserts the `ansible` component, one implementation distribution's; the family's readiness is `checks.execution`, `ok` only when every contributed component is ready | Decision 3 |
+| 07's create rule, 08c's job evaluation (`evaluate_job(host, vm_action=...)`), 10a's teardown rule, 08a's preview arguments and expectations, 09b's credentials, 09c's resource, and 11b's re-reservation claim and callback site are VM's | Decision 3 |
+| `DealLease` and `SiteCapacity` build their site client from VM's settings; the lease contract they read (`get_lease`, the site ledger's reservations and truncation) is the compute family's | Decision 4 |
+| The shared stages fix Alkahest readiness (00g), escrow creation and verification (07, 07b), claim servicing (09bb), and the dev chain's MockERC20; the payments merge already gives compute storefronts another settlement lifecycle | Decision 5 |
+| Helpers live in `scenarios/vms/conftest.py`, and the importer list in 8.1 is stale: `test_vm_introduction.py`, `test_compute_dynamic_listings.py`, and `test_multi_registry.py` import from it too, and `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and `test_buy_oneshot_buyer_cli.py` import moved helpers inside functions | Decision 7 |
+| `escrow_helper.py`'s `_ensure_ws_rpc_url` is private and imported by `test_non_erc20_settlement.py` and a unit test | Decision 7 |
+| The bare-metal storefront's status reports no `registry`, `negotiation_strategy`, or `alkahest` check, which 00b, 00d, and 00g read | Decision 8 |
+
+Decisions:
+
+1. **Stage 00c2 is shared.** Contract skew on the provisioning wire matters as much for
+   bare metal as for VM. Section 9 makes the bare-metal storefront report the pin from
+   its installed `compute_provisioning_contracts` wheel, as VM's does, rather than drop
+   the stage. The shared stages are 00, 00a, 00b, 00c, 00c2, 00d, 00e, 00f1, 00g, 00h,
+   04a, 05a, 05b, 06b, 07, 07b, 08a, 08c, 08b, 09a, 09b, 09bb, 09c, 10a, 10b, 11a, and
+   11b. VM's own are 00f (storefront resource seed), 02b, 03a, 03b (listing creation and
+   resume), and 09a2 (the capacity-event cycle). Bare metal's own, in Section 9, are its
+   publication stages and its listing-close stage in their places.
+2. **`ComputeDealState` extends `DomainDealState`** and declares every field the shared
+   stages read or write; the fields it inherits are not the shared stages' protocol.
+   - The sentinels a domain's own stage produces for a shared stage get domain-neutral
+     names: `listing_published` (VM's 03b, bare metal's publication step),
+     `_listing_reconciled` (VM's 09a2, bare metal's publication close), and
+     `_supply_seeded` (shared 00f1), with `seller_listing_id` unchanged.
+   - Every readiness sentinel gains the consumer its check implies:
+     `_contract_pins_agree` is required by 00f1, the first write over the provisioning
+     wire, and by VM's 00f, VM's first write; `_negotiation_strategy_viable` by 05a;
+     `_provisioning_storefront_ok` by 10a, where release begins, since the
+     capacity-released callback is the first thing in the deal that needs provisioning
+     to reach the storefront (the listing close is pulled from the capacity-event feed
+     and settlement status is polled); and `_supply_seeded` by each domain's first
+     listing stage (VM's 02b). Shared 00f1 requires `_storefront_healthy`,
+     `_provisioning_mock_mode`, and `_contract_pins_agree`, instead of VM's
+     `_resources_seeded`, which 02b still requires. These tighten which stages skip;
+     no assertion changes.
+   - `_escrow_expiration_unix` is declared. The shared stages stop writing the four
+     fields that record nothing a later stage needs.
+   - VM's `DealState` extends `ComputeDealState` and keeps `resume_confirmed`,
+     `_capacity_events_advanced`, `_executor_host_registered`, and the other fields the
+     buyer-CLI and one-shot scenarios use, so those scenarios change only their imports
+     and their lease-view construction (decision 4).
+3. **The driver owns what is a domain's; fixtures own who is calling, through typed
+   clients.** Each compute domain's conftest provides the fixtures the shared stages
+   request under one set of names: `storefront_client` (buyer),
+   `storefront_admin_client`, `storefront_service_client`, `registry_client` (buyer),
+   `provisioning_client`, `provisioning_test_client`, `buyer_config`, `seller_wallet`,
+   `buyer_principal`, `deal_state`, and `deal_driver`. 04a reads the listing through
+   `registry_client.get_listing`; a listing the registry does not hold raises, which
+   fails the stage as the status assertion did. 00c asserts the family's readiness:
+   `checks.execution` is `ok` and every component reported is ready, which still
+   includes Ansible's. The `ComputeDealDriver` protocol carries the per-domain parts the
+   `test-compatibility` delta names:
+   - supply: `seed_supply()` (00f1), and for 11b `reserve_released_capacity(...)`, which
+     re-reserves the released supply through the deal's listing and asserts the domain's
+     reservation, and `site_id`, the site the capacity-released callback names;
+   - provision terms: `provision_terms()` (05a, 05b);
+   - mock rules: `create_rule_id` and `arm_create_gate()` (07, 08c, 09a),
+     `evaluate_create_job(host_id)` returning the job evaluation's `params_valid`,
+     `host_exists`, `rule_matched`, and `would_pause` (08c), and `teardown_rule_id` and
+     `arm_teardown_gate()` (10a, 11b);
+   - settlement preview: `evaluate_settle_arguments()` and
+     `check_evaluate_settle(result)`, which returns the host the preview placed (08a);
+   - result and access: `assert_delivery(settle_status)` (09b);
+   - the lease view: `lease_view(escrow_uid)` and `reserved_resource_id` (09c to 11b).
+
+   The shared stages keep every assertion that is not a domain's: `would_submit`, the
+   rule matched and pausing, `dispatching` then `active`, the listing closed, the primary
+   escrow ready with its `fulfillment_uid`, the claim submitted, and the lease, teardown,
+   and release sequence. The deal's commercial terms are shared constants (the dev
+   chain's MockERC20, an opening bid of 7 and a ceiling of 12 tokens against a 10
+   token/hour asking rate, one hour, a one-hour escrow deadline), so each lane configures
+   its listing's clause to that rate; Section 9's lane configuration does so for bare
+   metal. Negotiation has no driver hook.
+4. **The lease view is the family's.** `DealLease` and `SiteCapacity` move to the shared
+   helpers and take their site client's URL, signer, and trust as arguments; each
+   conftest builds one from its lane settings. The three places that construct a
+   `DealLease` (VM's driver, the buyer-CLI deal's 09c, the one-shot buy's lease check)
+   pass the VM site client.
+5. **What is shared is the canonical compute deal, and only where it removes
+   duplication.** The shared stages are the compute family's canonical complete deal:
+   Alkahest settlement on the dev chain and delivery through the provisioning mock
+   profile. A compute scenario settling another way, or a stage whose body differs
+   between domains, keeps its own stages; sharing follows the kit layer's rule, extracting
+   what two domains run identically rather than forcing every stage into the shared
+   set. A shared stage's body is defined once: a domain subclasses it with an empty
+   body, supplies its differences through fixtures and the driver, and inserts its own
+   stages between shared ones. A domain never replaces a shared stage's body, so a
+   change to one runs in every lane that uses it; a stage that would need replacing is
+   not shared.
+6. **The stage set is checked in a unit test,** `tests/unit/test_compute_deal_stages.py`,
+   reading the modules' source rather than collecting them:
+   - no shared stage is named for collection;
+   - each domain module subclasses every shared stage once, in the shared order, named
+     `Test` plus the base's name, so stage IDs and test names cannot drift, and each
+     subclass body is empty;
+   - every field `ComputeDealState` declares is read by a shared stage or by each
+     domain module (`_supply_seeded` is read by the domains' first listing stages);
+   - every field a shared stage requires is produced by a shared stage or by each
+     domain module;
+   - every field a stage writes or requires is declared on its state class.
+7. **Helpers move to `helpers/compute_deal.py` and `helpers/escrow.py`**, and importers
+   import from there, with no re-export from VM's conftest: `DealLease`, `SiteCapacity`,
+   `advance_fulfillment_to`, `wait_for_stage_event`, `delete_mock_rules_if_present`,
+   `advance_storefront`, `dry_run_storefront`, `pause_storefront`, and the body of
+   `convergence_advanced_explicitly` as `convergence_paused(provisioning_client)`, which
+   each conftest's fixture yields from. VM's conftest keeps what reads VM's settings
+   (`signed_listing_read_headers`, still used by the buyer-CLI deal, `capacity_site_id`,
+   `capacity_source_for`, `_signer`, `_trust`, `_require_setting`) and `one_site`, which
+   reads VM's capacity-event report. The escrow helper's `_ensure_ws_rpc_url` becomes
+   `ensure_ws_rpc_url`, since two modules outside it call it. Function-level imports of
+   moved helpers go to module level; `host_registry.py` stays VM's.
+8. **Readiness checks bare metal does not report are Section 9's.** 00b, 00d, and 00g
+   stay shared as VM runs them. Section 9 decides, before it implements its driver,
+   whether the bare-metal storefront reports `registry`, `negotiation_strategy`, and
+   `alkahest` checks or those stages become each domain's own; the first follows
+   decision 1 and the delta's rule that a domain's difference is resolved in its
+   storefront composition, not in the stage.
+
+Alternatives rejected: keeping 04a's raw request behind a shared signed-header helper,
+which would make every compute domain inherit a request path that can diverge from the
+registry client; a per-stage `requires` attribute a domain subclass extends, because
+`require_state` calls in the stage body already state each prerequisite where it is used
+and decision 6 checks them; keeping VM's sentinel names for bare metal to set, because
+`resume_confirmed` describes VM's listing creation, not publication; a conftest re-export
+of the moved helpers, which would leave two import paths for each; and letting a domain
+replace a shared stage's body, which would make "defined once" untrue for that stage.
+
+The permanent destination is `openspec/specs/test-compatibility/spec.md` through the
+change's "The canonical compute deal's shared stages are defined once" delta, and
+`docs/development/TESTING.md`'s system-test section, which 11.2 updates to name the
+shared stages module beside `domain_deal.py`.
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,

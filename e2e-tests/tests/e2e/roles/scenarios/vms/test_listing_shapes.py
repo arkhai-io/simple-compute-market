@@ -46,12 +46,12 @@ from dataclasses import dataclass
 import pytest
 from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 
-from tests.e2e.roles.scenarios.vms.conftest import (
+from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
     delete_mock_rules_if_present,
     pause_storefront,
-    require_state,
 )
+from tests.e2e.roles.scenarios.vms.conftest import require_state
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_LISTING_SHAPES_HOST,
     E2E_LISTING_SHAPES_POOL_ID,

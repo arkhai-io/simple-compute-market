@@ -1,18 +1,17 @@
 """Create real on-chain ERC20EscrowObligation attestations for e2e tests.
 
-Stage 07 of the full-deal scenario needs an EAS attestation that the
-storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
-placeholder uid would be rejected by alkahest's ``get_obligation``
-call. So we drive alkahest-py against the local Anvil from the
-buyer's wallet, the same way the VM buyer's domain escrow adapter does in
-production — but inlined here because e2e-tests doesn't depend on the buyer
-wheel.
+The canonical compute deal escrows against an EAS attestation that the
+storefront's pre-settlement verifier resolves, so a placeholder uid would be
+rejected by alkahest's ``get_obligation`` call. The helper drives alkahest-py
+against the local Anvil from the buyer's wallet, as a buyer's domain escrow
+adapter does in production, inlined because e2e-tests does not depend on a
+buyer wheel for it.
 
 Token distribution is baked into the chain state (account #1 holds
-MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in production
-the buyer signs and sends this transaction themselves, so the test
-does the same — with the buyer's private key, against the just-
-finalized negotiation terms.
+MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in
+production the buyer signs and sends this transaction themselves, so the test
+does the same, with the buyer's private key, against the just-finalized
+negotiation terms.
 """
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ log = logging.getLogger(__name__)
 _HTTP_TO_WS = {"http": "ws", "https": "wss"}
 
 
-def _ensure_ws_rpc_url(rpc_url: str) -> str:
+def ensure_ws_rpc_url(rpc_url: str) -> str:
     """Coerce an HTTP RPC URL to its WebSocket equivalent and validate it.
 
     ``AlkahestClient`` is backed by the Rust SDK, whose provider factory uses
@@ -118,7 +117,7 @@ def create_buyer_escrow(
     use ``buyer.chain_rpc_url`` in the integration-test config to supply
     the correct scheme directly.
     """
-    rpc_url = _ensure_ws_rpc_url(rpc_url)
+    rpc_url = ensure_ws_rpc_url(rpc_url)
 
     addr_config_path = _alkahest_addresses_path()
     prewarm_alkahest_address_config_cache(addr_config_path)

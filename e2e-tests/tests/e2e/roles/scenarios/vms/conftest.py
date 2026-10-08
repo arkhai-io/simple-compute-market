@@ -1,15 +1,20 @@
-"""Fixtures for the full-deal e2e scenario tests.
+"""Fixtures for the VM lane's deal scenarios.
 
-All fixtures are ``module``-scoped so the ``DealState`` object persists
-across the 16 sequential tests in ``test_full_deal.py``.  Each test reads
-from and writes to ``DealState``; later tests skip automatically if an
-earlier required field was never populated (indicating the earlier test
-failed).
+All fixtures are ``module``-scoped so one ``DealState`` persists across a
+scenario module's sequential stages. Each stage reads from and writes to
+``DealState``; later stages skip automatically if an earlier required field was
+never populated (indicating the earlier stage failed).
+
+The typed-client deal (``test_full_deal.py``) runs the canonical compute deal's
+shared stages, which request the fixtures every compute domain's conftest
+provides under one set of names (see ``helpers/compute_deal_stages.py``), and
+VM's ``deal_driver``.
 
 Clients
 -------
 * ``storefront_client``        — canonical ``SyncStorefrontClient``, buyer key
 * ``storefront_admin_client``  — same, seller key + admin key
+* ``storefront_service_client`` — same, signed as the provisioning peer
 * ``registry_client``          — ``SyncRegistryClient`` from the registry-client wheel
 * ``provisioning_client``      — ``SyncComputeProvisioningClient`` signing as
   the provisioning admin principal
@@ -17,6 +22,7 @@ Clients
 * ``resource_pool_client``     — pool administration over that transport
 * ``site_capacity``            — the site's capacity reads, signed as admin
 * ``provisioning_test_client`` — thin sync wrapper over ``/test/*`` endpoints
+* ``deal_driver``              — VM's part of the shared deal stages
 
 Settings access uses the ``settings.SECTION.KEY`` attribute pattern
 (uppercase, dot-separated) consistent with the rest of the project's conftest.
@@ -24,7 +30,6 @@ Settings access uses the ``settings.SECTION.KEY`` attribute pattern
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -35,7 +40,6 @@ import uuid
 from datetime import datetime, timezone
 
 from market_identity import (
-    EMPTY_BODY,
     Identity,
     RequestEnvelope,
     TrustedIdentitySet,
@@ -45,11 +49,13 @@ from market_identity import (
 )
 from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
 from market_resource_pools_client import SyncResourcePoolClient
-from market_site_client import SiteCapacityClient
 from vm_provisioning_operator import SyncVmOperatorClient
 from e2e_harness.settings import settings
 from e2e_harness.provisioning_test_client import ProvisioningTestClient
-from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
+from tests.e2e.roles.helpers.compute_deal import SiteCapacity, convergence_paused
+from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealState
+from tests.e2e.roles.helpers.domain_deal import require_state
+from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmComputeDealDriver
 
 log = logging.getLogger(__name__)
 
@@ -59,115 +65,39 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DealState(DomainDealState):
-    """VM-specific observations layered over the shared deal lifecycle."""
+class DealState(ComputeDealState):
+    """VM's observations layered over the canonical compute deal's state.
+
+    The typed-client deal uses `ComputeDealState`'s fields plus the few its own
+    VM stages produce. The buyer-CLI deal and the one-shot buy declare their
+    stages here rather than from the shared stages, so the fields they produce
+    and consume stay declared here too.
+    """
     domain_identity: str = "vms.compute"
-    # Phase 0 — service readiness
-    _storefront_healthy: bool = False
-    _registry_reachable: bool = False
-    _provisioning_healthy: bool = False
-    #: Both ends of the storefront-to-provisioning wire reported an
-    #: agreeing contract major. Gated before any mutating stage so a
-    #: later failure cannot be explained away as version skew.
-    _contract_pins_agree: bool = False
-    _provisioning_mock_mode: bool = False
-    _negotiation_strategy_viable: bool = False
+    # VM's own stages of the typed-client deal: 00f imports the storefront
+    # resource row 02b lists, and 03a validates the publish 03b performs.
     _resources_seeded: bool = False
-    _alkahest_configured: bool = False
-    _provisioning_storefront_ok: bool = False
-    # Phase 2 — listing creation (paused)
-    seller_listing_id: Optional[str] = None
-    # Phase 3 — registry publication
     _registry_validate_passed: bool = False
+    # The buyer-CLI and one-shot scenarios' own sentinels: the listing resumed
+    # into publication, the executor host registered, and the capacity-event
+    # loop stepped (`B4c` and the buyer-CLI deal's capacity-event stage).
     resume_confirmed: bool = False
-    # Phase 5 — negotiation
-    _evaluate_negotiate_passed: bool = False
-    negotiation_id: Optional[str] = None
-    negotiation_terminal_state: Optional[str] = None
-    agreed_amount: Optional[int] = None
+    _executor_host_registered: bool = False
+    _capacity_events_advanced: bool = False
     # Buyer-CLI run-log identity from `market negotiate`; consumed by
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.
     buyer_run_id: Optional[str] = None
-    # Phase 7 — provisioning gate (escrow created by `market settle`
-    # in the buyer-CLI flow; created inline in the synthetic-buyer flow)
-    provisioning_gate_armed: bool = False
-    # Phase 8 — settle subprocess + on-chain escrow uid
-    real_escrow_uid: Optional[str] = None
     # Buyer-CLI scenarios only: carries the background `market settle`
     # subprocess handle so phase 09b can wait for its clean exit and the
-    # module teardown can terminate it if leftover. Unused by the
-    # synthetic-buyer scenario.
+    # module teardown can terminate it if leftover.
     settle_run_handle: Optional[Any] = None
-    # Synthetic-buyer (test_full_deal.py) only: 08a evaluate-settle
-    # dry-run capture; the buyer-CLI scenario reads host_id from the
-    # lease instead (see below).
-    _evaluate_settle_host_id: Optional[str] = None
-    _evaluate_settle_passed: bool = False
-    # Synthetic-buyer only: phase 09a evaluate-provisioning-job dry-run
-    _provision_job_evaluated: bool = False
-    # Phase 8 — settlement
-    settlement_submitted: bool = False
-    # Phase 9 — provisioning completion
-    provisioning_result_injected: bool = False
-    lease_id: Optional[str] = None
-    lease_status: Optional[str] = None
-    # host_id captured from the lease in 09c; used by 10a/11b to arm
-    # the check-job mock rule (was previously sourced from the
-    # 08a evaluate-settle dry-run, now dropped from this flow).
+    # Buyer-CLI only: the host captured from the lease.
     host_id: Optional[str] = None
-    settlement_status: Optional[str] = None
+    # Buyer-CLI only: what its settlement stages record.
+    settlement_submitted: bool = False
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
-    # Phase 10-11 — explicit interruption and fulfillment teardown lifecycle
-    _termination_requested: bool = False
-    # Durable fulfillment identity, captured at settlement (stage 08b) from
-    # the settle-status response's ``fulfillment_id`` -- the buyer-facing
-    # path no longer surfaces a raw Ansible ``provisioning_job_id`` (always
-    # None for a fulfillment on the durable path; see
-    # ``core_storefront.models.settle_models.SettleStatusResponse``).
-    # Reused through phases 9-11 for status polling and teardown.
-    fulfillment_id: Optional[str] = None
-    # Reserved resource, captured at stage 09c from the admin-only
-    # DealLease view (``get_capacity_reservation``), never from a
-    # buyer-facing response -- ``resource_id``/``host_id`` are
-    # intentionally opaque across the ordinary reservation boundary (see
-    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
-    # private to the site authority" requirement). Admin introspection is
-    # a legitimate, separate channel from that opacity guarantee.
-    reserved_resource_id: Optional[str] = None
-    # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
-    # row in embedded-capacity mode, a site-ledger reservation in remote
-    # mode. Phases 10-11 drive the expiry lifecycle through it.
-    deal_lease: Optional[Any] = None
-    # Set by whichever stage steps the capacity-event loop (`B4c`, `09a2`),
-    # and required by the stage that asserts a derived listing closed.
-    #
-    # Declared rather than attached ad hoc by those stages. `require_state`
-    # reads through `getattr(..., None)`, so an undeclared sentinel skips its
-    # dependents identically whether the producing stage failed or the name
-    # was simply misspelled on one of the two sides -- a scenario that silently
-    # skips forever looks like a passing run. A declared default of False makes
-    # the absent case a stated precondition instead of a typo's side effect.
-    _capacity_events_advanced: bool = False
-
-
-
-
-def delete_mock_rules_if_present(provisioning_test_client, *rule_ids: str) -> None:
-    """Best-effort cleanup for stateful provisioning mock rules.
-
-    The mock-rule service preserves insertion order. When multiple e2e
-    scenarios run in one pytest process against one compose stack, a stale
-    broad ``{"vm_action": "create"}`` rule can match before the rule that the
-    current scenario just armed. Delete known scenario rule ids before arming
-    a new create rule so each scenario controls its own evaluation order.
-    """
-    for rule_id in rule_ids:
-        try:
-            provisioning_test_client.delete_mock_rule(rule_id)
-        except Exception as exc:
-            log.debug("[conftest] Could not delete mock rule %s: %s", rule_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -355,38 +285,6 @@ def site_capacity_admin_client():
     )
 
 
-def advance_storefront(storefront_admin_client, loop: str) -> dict:
-    """Run one cycle of a paused storefront loop and return what it reports.
-
-    `loop` is the loop's route name: `claims`, `fulfillment-resume`, or
-    `site-projections`. Each calls the operation the timer was already
-    invoking, so a stage advances production behaviour rather than a test-only
-    path.
-
-    This is the other half of `pause_storefront`. Pausing without advancing
-    just stops the system; the pair is what makes ordering assertable -- a
-    stage asks for the work it is about to assert on, instead of racing a timer
-    that may or may not have run.
-    """
-    result = storefront_admin_client.admin_run_lifecycle_cycle(loop)
-    log.info("[lifecycle] advanced %s: %s", loop, result)
-    return result
-
-
-def dry_run_storefront(storefront_admin_client, loop: str) -> dict:
-    """Report what one cycle of a paused loop would do, without doing it.
-
-    The read half of `advance_storefront`. A capacity-event cycle closes and
-    reopens derived listings, so advancing changes what buyers can discover;
-    asking first is what lets a stage assert the cause (the pending events)
-    separately from the effect (the listing's status), instead of asserting
-    the effect and inferring the cause.
-    """
-    result = storefront_admin_client.admin_dry_run_lifecycle_cycle(loop)
-    log.info("[lifecycle] dry-run %s: %s", loop, result)
-    return result
-
-
 def one_site(report: dict) -> dict:
     """The single site in a lifecycle report, refusing an ambiguous one.
 
@@ -400,50 +298,6 @@ def one_site(report: dict) -> dict:
         f"{[site.get('site') for site in sites]!r}"
     )
     return sites[0]
-
-
-def pause_storefront(storefront_admin_client) -> bool:
-    """Hold the storefront's timer loops idle, and prove they are.
-
-    Pauses the loops only -- trading stays open, so a scenario can pause at its
-    readiness stage and still agree a deal.
-
-    Called from a scenario's own stage rather than an autouse fixture: a
-    scenario should name the state it depends on, and pausing a service is a
-    dependency as much as registering a host is. It also keeps the pause with
-    the scenario that wants it -- the API-credits scenario shares this module
-    and drives a different storefront, which has no such control.
-
-    Every side effect a scenario asserts on should be one the scenario asked
-    for. While the timer loops run, a stage's observation races them: a listing
-    reconciled a second later reads differently than one reconciled a second
-    earlier. Waiting for the system to settle instead is what
-    `docs/development/TESTING.md` forbids, and it cannot establish ordering
-    even when it passes.
-
-    Trading is untouched: this holds the loops only, so a scenario can pause
-    at its readiness stage and still agree a deal. The response names each
-    loop's gate state, which is what lets this assert that the loop a scenario
-    depends on actually reached its gate rather than merely that a pause was
-    requested.
-    """
-    result = storefront_admin_client.admin_pause_lifecycle_loops()
-    assert result.get("paused") is True, (
-        f"storefront did not report its loops paused: {result!r}. An "
-        "assertion made now would race the timer loops it was meant to hold."
-    )
-    loops = result.get("loops") or {}
-    not_at_gate = {
-        name: state for name, state in loops.items() if state != "paused"
-    }
-    assert loops and not not_at_gate, (
-        f"these loops had not reached a gate when the pause returned: "
-        f"{not_at_gate or 'none registered'}. `running` means a cycle that "
-        "began before the request is still going, so an assertion made now "
-        "would race it."
-    )
-    log.info("[lifecycle] storefront loops paused; loops=%s", loops)
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -634,47 +488,14 @@ def resource_pool_client(provisioning_client) -> SyncResourcePoolClient:
     return SyncResourcePoolClient(provisioning_client)
 
 
-class SiteCapacity:
-    """The site's capacity reads and lease truncation, from a sync scenario.
-
-    Drives the canonical async ``SiteCapacityClient`` signed as the provisioning
-    admin, one ``asyncio.run`` per call, as the bare-metal scenarios drive the
-    site's admin client. Only call shape lives here.
-    """
-
-    def _client(self) -> SiteCapacityClient:
-        return SiteCapacityClient(
-            _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL"),
-            _provisioning_admin_signer(),
-            _provisioning_authority_trust(),
-            caller_role="admin",
-        )
-
-    def snapshot(self) -> list[dict]:
-        return asyncio.run(self._client().snapshot())
-
-    def list_reservations(self, *, state: str | None = None, escrow_uid: str | None = None) -> list[dict]:
-        return asyncio.run(self._client().list_reservations(state=state, escrow_uid=escrow_uid))
-
-    def get_reservation(self, capacity_reservation_id: str) -> dict:
-        return asyncio.run(self._client().get_reservation(capacity_reservation_id)) or {}
-
-    def reserve(self, *, claim: dict, deal_ref: dict) -> dict | None:
-        return asyncio.run(self._client().reserve(claim=claim, deal_ref=deal_ref))
-
-    def truncate_lease(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
-        """End a leased reservation's lease early; ``None`` if the site refuses."""
-        return asyncio.run(
-            self._client().truncate_lease(
-                capacity_reservation_id=capacity_reservation_id,
-                lease_end_utc=lease_end_utc,
-            )
-        )
-
-
 @pytest.fixture(scope="module")
 def site_capacity() -> SiteCapacity:
-    return SiteCapacity()
+    """The VM site's capacity reads and lease truncation, signed as its admin."""
+    return SiteCapacity(
+        _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL"),
+        _provisioning_admin_signer(),
+        _provisioning_authority_trust(),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -774,6 +595,35 @@ def seller_wallet() -> str:
     return _require_setting(settings.SELLER.WALLET_ADDRESS, "SELLER.WALLET_ADDRESS")
 
 
+@pytest.fixture(scope="module")
+def buyer_principal():
+    """The buyer's marketplace principal, as the buyer clients sign it."""
+    return _signer(
+        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL, "BUYER.MARKETPLACE_CREDENTIAL"
+    ).identity
+
+
+@pytest.fixture(scope="module")
+def deal_driver(
+    provisioning_client,
+    provisioning_test_client,
+    storefront_admin_client,
+    site_capacity_admin_client,
+    site_capacity,
+    buyer_config,
+) -> VmComputeDealDriver:
+    """VM's part of the canonical compute deal's shared stages."""
+    return VmComputeDealDriver(
+        provisioning_client=provisioning_client,
+        provisioning_test_client=provisioning_test_client,
+        storefront_admin_client=storefront_admin_client,
+        site_capacity_admin_client=site_capacity_admin_client,
+        site_capacity=site_capacity,
+        buyer_config=buyer_config,
+        site_id=capacity_site_id(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Teardown — ensure global pause is cleared after each test module run
 # ---------------------------------------------------------------------------
@@ -800,41 +650,11 @@ def ensure_storefront_resumed(storefront_admin_client):
 def convergence_advanced_explicitly(provisioning_client):
     """This module drives fulfillment convergence; the timer does not.
 
-    Opt-in, via ``pytest.mark.usefixtures`` on the modules that actually
-    drive convergence. Deliberately *not* autouse: other scenarios in this
-    directory reach ``active`` on the timer without ever asking for a cycle
-    (``test_buy_oneshot_buyer_cli`` arms an ungated create rule and waits
-    for the lease), and pausing it for them would stall their fulfillment
-    instead of making it deterministic. A module takes this fixture when it
-    has taken responsibility for advancing convergence itself.
-
-    Every convergence transition this scenario asserts is triggered by an
-    explicit advance (09a for the create half, 11a/11b for teardown), so
-    the 30s timer is stopped for the duration. Leaving it running made
-    those stages races rather than steps: a timer cycle that claimed a row
-    while its provider call was still gated would hold the claim lease,
-    and the stage's own cycle would then reach nothing at all.
-
-    Paused here rather than in a stage so the whole module is covered
-    including setup, and resumed in the finaliser so it is restored even
-    when a stage fails. That matters because the provisioning service is
-    shared across scenario modules and the create half of convergence
-    (`dispatching` -> `active`) still relies on the timer elsewhere --
-    leaving it paused would stall the next module's fulfillment rather
-    than this one's.
+    Opt-in, via ``pytest.mark.usefixtures`` on the modules that actually drive
+    convergence; see `convergence_paused` for why it is not autouse and why the
+    timer is resumed in the finaliser.
     """
-    try:
-        paused = provisioning_client.pause_fulfillment_convergence()
-        log.info("[setup] Fulfillment convergence timer paused: %s", paused)
-    except Exception as exc:
-        log.warning("[setup] Could not pause fulfillment convergence: %s", exc)
-    yield
-    try:
-        provisioning_client.resume_fulfillment_convergence()
-    except Exception as exc:
-        log.warning(
-            "[teardown] Could not resume fulfillment convergence: %s", exc
-        )
+    yield from convergence_paused(provisioning_client)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -879,177 +699,3 @@ def release_reserved_resources(storefront_admin_client):
             )
     except Exception as exc:
         log.warning("[teardown] Could not release reserved resources: %s", exc)
-
-
-# ---------------------------------------------------------------------------
-# wait_for_fulfillment_state helper — bounded convergence-driven wait
-# ---------------------------------------------------------------------------
-
-def advance_fulfillment_to(
-    provisioning_client,
-    fulfillment_id: str,
-    expected: str,
-    *,
-    max_advances: int = 4,
-) -> dict:
-    """Advance convergence until a fulfillment reaches ``expected``.
-
-    No sleeps, per `docs/development/TESTING.md`'s async test discipline:
-    each iteration is one *explicit* advance, and the only thing between
-    iterations is a request the test made.
-
-    `advance-cycle` rather than `run-cycle` because `run-cycle` is an
-    advance attempt, not an advance. The pending branches of the
-    convergence watchdog deliberately leave their claim in place so the
-    claim lease spaces the next provider poll, and `claim_pending` skips a
-    row whose lease has not lapsed -- 5s for the first claim, doubling
-    after. So a `run-cycle` issued straight after a pending poll cannot
-    touch the row, and any number of them in that window is still zero
-    advances. `advance-cycle` releases the watchdog's own claims first.
-
-    Requires the convergence watchdog to be paused (see
-    `pause_fulfillment_convergence`), which is also what stops the 30s
-    timer from claiming the same rows mid-scenario.
-
-    ``max_advances`` is small deliberately: with the timer stopped and the
-    provider gate released, each transition needs exactly one advance, so
-    needing several means something is wrong and the failure names the
-    state it stalled in.
-    """
-    last: dict = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
-    for _ in range(max_advances):
-        if last.get("state") == expected:
-            return last
-        provisioning_client.advance_fulfillment_convergence_cycle()
-        last = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
-    if last.get("state") != expected:
-        pytest.fail(
-            f"fulfillment {fulfillment_id} did not reach {expected!r} within "
-            f"{max_advances} explicit convergence advances; last state "
-            f"{last.get('state')!r}: {last}"
-        )
-    return last
-
-
-# ---------------------------------------------------------------------------
-# wait_for_stage_event helper — wraps storefront_admin_client.wait_for_stage_event
-# ---------------------------------------------------------------------------
-
-def wait_for_stage_event(
-    client,
-    stage: str,
-    event: str,
-    *,
-    listing_id: str | None = None,
-    negotiation_id: str | None = None,
-    since_id: int = 0,
-    timeout: float = 30.0,
-):
-    """Block until the matching stage event appears in /api/v1/system/events.
-
-    Wraps ``SyncStorefrontClient.wait_for_stage_event`` with a friendlier
-    pytest-style timeout error message.
-
-    Parameters
-    ----------
-    client:
-        A ``SyncStorefrontClient`` asserting the ``admin`` role.
-    stage, event:
-        Stage and event strings to match (e.g. ``"discovery"``, ``"order_published"``).
-    listing_id, negotiation_id:
-        Optional filters passed through to the events query.
-    since_id:
-        Ignore events older than this id. Use when waiting for the
-        *next* event after triggering an action — snapshot the latest
-        id via ``get_events`` first, then pass it here.
-    timeout:
-        Seconds to wait before raising AssertionError.
-    """
-    try:
-        return client.wait_for_stage_event(
-            stage, event,
-            listing_id=listing_id,
-            negotiation_id=negotiation_id,
-            since_id=since_id,
-            timeout=timeout,
-        )
-    except TimeoutError as exc:
-        pytest.fail(str(exc))
-
-
-# ---------------------------------------------------------------------------
-# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger reservation)
-# ---------------------------------------------------------------------------
-
-class DealLease:
-    """One deal's lease: the temporal tail of its ledger reservation.
-
-    The full-deal scenarios drive the expiry lifecycle through this
-    view — resolve the reservation by escrow, read it back in lease
-    vocabulary, back-date its end, and observe the watchdog release it
-    in the ledger with a deal-scoped capacity-released event to the
-    storefront.
-
-    ``status`` and ``release_job_id`` come from the compute family's lease
-    contract, read through the family client. ``release_job_id`` is the
-    durable fulfillment id: release goes through the fulfillment aggregate.
-    The lease's end moves only through the site's truncation, which is how
-    the scenario back-dates it.
-    """
-
-    def __init__(self, provisioning_client, escrow_uid: str) -> None:
-        self._leases = provisioning_client
-        self._site = SiteCapacity()
-        self.escrow_uid = escrow_uid
-        self.is_ledger = True
-        reservations = self._site.list_reservations(escrow_uid=escrow_uid)
-        live = [a for a in reservations if a.get("lease_end_utc")]
-        assert live, (
-            f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the deal's reservation committed with its escrow?"
-        )
-        self.lease_id = str(live[0]["capacity_reservation_id"])
-
-    def refresh(self) -> dict:
-        """Current lease fields from the public compute lease contract."""
-        lease = self._leases.get_lease(self.lease_id)
-        row = self._site.get_reservation(self.lease_id)
-        data = lease.model_dump(mode="json")
-        return {
-            "id": data.get("capacity_reservation_id") or self.lease_id,
-            "escrow_uid": row.get("escrow_uid"),
-            "resource_id": row.get("resource_id"),
-            "host_id": row.get("host_id"),
-            "executor_target": data.get("executor_target"),
-            "status": data.get("status"),
-            "fulfillment_id": data.get("release_job_id"),
-            "create_job_id": data.get("create_job_id"),
-        }
-
-    def backdate(self, lease_end_utc: str) -> dict:
-        """Move the lease end into the past so the next watchdog cycle fires.
-
-        Truncates the lease at the site, signed as admin: truncation is the
-        only operation that moves a lease's end, and only earlier.
-        Returns the refreshed normalized lease view.
-        """
-        truncated = self._site.truncate_lease(self.lease_id, lease_end_utc)
-        assert truncated is not None, (
-            f"the site refused to truncate lease {self.lease_id!r} to {lease_end_utc!r}"
-        )
-        return self.refresh()
-
-    def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:
-        """Whether the deal's capacity is still held, per the ledger."""
-        for row in self._site.snapshot():
-            if str(row.get("resource_id")) == resource_id:
-                total = int(row.get("value") or 0)
-                return int(row.get("available_units") or 0) < total
-        pytest.fail(
-            f"Resource {resource_id!r} not found in site capacity snapshot"
-        )
-
-    @property
-    def released_stage_event(self) -> tuple[str, str]:
-        """(stage, event) the storefront emits when this lease releases."""
-        return ("fulfillment", "capacity_released")

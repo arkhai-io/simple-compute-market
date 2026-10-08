@@ -33,19 +33,32 @@ remains a separate protected lane.
 - **THEN** the mock-provisioned deal does not satisfy it, and the protected lane's
   requirement stands
 
-### Requirement: Compute-family deal stages are defined once
+### Requirement: The canonical compute deal's shared stages are defined once
 
-Every compute-family domain's complete-deal scenario MUST declare its stages from one
-shared set of compute deal stage definitions, supplying what differs through a
-per-domain driver: supply seeding, provision terms, the mock rules matched, the lease
-view, settlement-preview expectations, and result and access assertions. A domain MAY
-override or insert a stage; it MUST NOT copy a stage's body. Domains outside the compute
-family keep their own deal flows.
+The compute family's canonical complete deal, settled through Alkahest and delivered
+through the provisioning mock profile, MUST take each stage its domains run identically
+from one shared definition. A domain MUST subclass a shared stage without replacing its
+body and MUST supply its differences through fixtures and a per-domain driver. A domain
+MAY insert stages of its own; a stage whose body differs between domains is not shared.
 
-#### Scenario: A stage changes
+#### Scenario: A shared stage changes
 
-- **WHEN** a shared compute deal stage's preview, advance, or assertion changes
-- **THEN** every compute-family lane runs the changed stage without a per-domain edit
+- **WHEN** a shared stage's preview, advance, or assertion changes
+- **THEN** every compute lane that runs the canonical deal runs the changed stage without
+  a per-domain edit
+
+#### Scenario: A domain's part of a shared stage
+
+- **WHEN** a shared stage needs supply seeding, provision terms, mock rules, the lease
+  view, settlement-preview expectations, result and access assertions, or the claim that
+  re-reserves released supply
+- **THEN** the domain's driver supplies it and the stage's body is unchanged
+
+#### Scenario: A deal outside the canonical deal
+
+- **WHEN** a compute scenario settles another way, or a domain outside the compute family
+  runs a complete deal
+- **THEN** it keeps its own stages
 
 #### Scenario: A compute domain differs in negotiation
 

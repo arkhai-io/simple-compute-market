@@ -131,8 +131,9 @@ API-credit deal runs inside the VM lane.
   accessors rather than reaching into the service's module state; report execution
   readiness in system status instead of a route of its own; record the five-piece route
   pattern in `ARCHITECTURE.md`.
-- Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
-  VM's scenario onto them, and add the bare-metal mock-provisioned deal.
+- Share the canonical compute deal's stages that VM and bare metal run identically in
+  `compute_deal_stages.py`, with a per-domain driver, move VM's scenario onto them, and
+  add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.
 - Build pipeline images once and share them across lanes; give API credits its own lane
   (migrated from `apicredits-end-to-end-lane`).
