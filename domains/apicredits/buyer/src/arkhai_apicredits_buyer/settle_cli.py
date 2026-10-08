@@ -1,47 +1,37 @@
-"""`market credits settle` — composite stages 3-5 of a credit deal.
+"""`market credits settle` — resume a selected mechanism from a deal log.
 
-Resumes a buy from the post-negotiation point: creates the on-chain
-escrow if not already created, POSTs `/settle/{escrow_uid}` to the
-seller, polls until terminal, and delivers the issued credentials to
-the run-log. Driven by a buyer run-log produced by `market credits
-negotiate` (or a partially-completed `market credits buy`).
-
-Credit deals are durationless: escrow terms materialize with
-``duration_seconds=0`` and the settle request carries an empty
-``ssh_public_key`` (the VM domain's provisioning payload).
+For Alkahest, create the accepted on-chain escrow if needed before submitting
+the settlement request. For Arkhai payments, recover the exact accepted
+Agreement, approve its deterministic mandate, and submit the resulting
+transaction reference. Both paths poll the seller until credits are issued
+and deliver credentials through the same signed status channel.
 """
 
 from __future__ import annotations
 
-import time
-import webbrowser
 from types import SimpleNamespace
 from typing import Optional
 
 import typer
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from market_identity import Signer
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.action_policy import BuyerActionHandler, resolve_buyer_action_policy
-from core_buyer.hosted_settlement import HostedSettlementTransport
-
-from .deal_helpers import load_deal_context
-from core_buyer.deal_helpers import accepted_settlement_mechanism, open_run_log
+from core_buyer.deal_helpers import open_run_log
 from core_buyer.orchestration import (
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
+    make_publisher_trust_resolver,
     submit_settlement_request,
     wait_for_settlement,
 )
+from core_buyer.orchestrator import BuyConfig
 from core_buyer.run_log import read_run
-from .escrow_client import looks_like_propagation_lag
-from market_core.schemas import SettlementPlan
-from market_hosted_settlement import FundingMode, FundingSelection
-from market_settlement_runtime import derive_obligation_ref
+from market_identity import Signer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
-from .hosted_authorization import prepare_hosted_funding_authorization
+from .deal_helpers import load_deal_context
+from .escrow_client import looks_like_propagation_lag
+from .payments import configured_payer_account, settle_api_credit_payment
 from .settlement_composition import resolve_buyer_settlement_policy
 
 
@@ -105,190 +95,6 @@ def render_credentials(console: Console, credentials: dict) -> None:
     )
 
 
-def _hosted_transport_for_deal(
-    *,
-    identity: ResolvedBuyerIdentity,
-    deal,
-    log,
-) -> HostedSettlementTransport:
-    """Bind the accepted listing publisher trust to one shared transport."""
-    from .common import (
-        resolve_discovery_timeout,
-        resolve_indexer_urls,
-        resolve_registry_api_keys,
-        resolve_registry_authorities,
-    )
-    from core_buyer.orchestration import make_publisher_trust_resolver
-    from core_buyer.orchestrator import BuyConfig
-
-    registry_urls = resolve_indexer_urls()
-    registry_authorities = resolve_registry_authorities(registry_urls)
-    trust = make_publisher_trust_resolver(
-        config=BuyConfig.from_resolved_identity(
-            identity=identity,
-            registry_urls=registry_urls,
-            registry_authorities=registry_authorities,
-            discovery_timeout=resolve_discovery_timeout(),
-            registry_api_keys=resolve_registry_api_keys(),
-        ),
-        listing={
-            "listing_id": deal.listing_id,
-            "publisher_id": deal.publisher_id,
-            "publisher_principals": deal.publisher_principals.model_dump(mode="json"),
-            "storefront_url": deal.seller_url,
-            "source_registry_url": deal.source_registry_url,
-            "source_registry_authority": deal.source_registry_authority,
-        },
-        on_update=lambda event, fields: log.event(event, **fields),
-    )
-    return HostedSettlementTransport(
-        seller_url=deal.seller_url,
-        principal=deal.buyer_principal,
-        signer=identity.signer,
-        resolve_seller_principals=trust,
-    )
-
-
-def _run_hosted_settlement_from_log(
-    *,
-    run_id: str,
-    deal,
-    identity: ResolvedBuyerIdentity,
-    settlement_ref_override: str | None,
-    poll_interval: float,
-    settlement_timeout: float,
-    funding_mode: str,
-    instrument_ref: str | None,
-    action: str | None,
-    automatic_funding: bool,
-    console: Console,
-) -> dict:
-    """Resume only the accepted hosted operation; never resolve EVM state."""
-    plan = SettlementPlan.model_validate(deal.settlement_plan)
-    if len(plan.obligations) != 1 or plan.obligations[0].mechanism != "fiat.stripe.v1":
-        raise typer.BadParameter("accepted hosted plan is not one exact obligation")
-    obligation = plan.obligations[0].model_dump(mode="json")
-    obligation_ref = derive_obligation_ref(deal.negotiation_id, 0, obligation)
-    try:
-        selection = FundingSelection(
-            mode=FundingMode(funding_mode),
-            instrument_ref=instrument_ref,
-        )
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    policy = resolve_buyer_settlement_policy(
-        identity=identity,
-        funding_selection=selection,
-        action_capable=action != "fail",
-    )
-    stripe_config = policy.config.mechanism_config("stripe")
-    if stripe_config is None or not stripe_config.enabled:
-        raise typer.BadParameter(
-            "accepted hosted recovery requires [Settlement.stripe]"
-        )
-    log = open_run_log(
-        run_id,
-        signer=identity.signer,
-        profile_id=identity.profile_id,
-    )
-    log.event("settle_resumed")
-    transport = _hosted_transport_for_deal(
-        identity=identity,
-        deal=deal,
-        log=log,
-    )
-    settlement_ref = settlement_ref_override or deal.settlement_ref
-    authorization_ref = deal.funding_authorization_ref(obligation_ref)
-    if settlement_ref is None:
-        if authorization_ref is None:
-            authorization = prepare_hosted_funding_authorization(
-                buyer_profile_id=str(identity.profile_id),
-                principal=deal.buyer_principal,
-                signer=identity.signer,
-                stripe_config=stripe_config,
-                obligation_ref=obligation_ref,
-                obligation=obligation,
-                selection=selection,
-                automatic=automatic_funding,
-            )
-            authorization_ref = authorization.funding_authorization_ref
-            log.event(
-                "funding_authorized",
-                obligation_ref=obligation_ref,
-                funding_profile=authorization.funding_profile.value,
-                funding_authorization_ref=authorization_ref,
-                expires_at_unix=authorization.expires_at_unix,
-            )
-        started = transport.start(
-            negotiation_id=deal.negotiation_id,
-            obligation_ref=obligation_ref,
-            funding_authorization_ref=authorization_ref,
-        )
-        settlement_ref = started.get("settlement_ref")
-        if not isinstance(settlement_ref, str) or not settlement_ref:
-            raise RuntimeError("storefront returned no hosted settlement reference")
-        action_body = started.get("action")
-        action_metadata = action_body if isinstance(action_body, dict) else {}
-        log.event(
-            "settlement_started",
-            settlement_ref=settlement_ref,
-            obligation_ref=obligation_ref,
-            funding_authorization_ref=authorization_ref,
-            status=started.get("status"),
-            action_kind=action_metadata.get("kind"),
-            action_expires_at_unix=action_metadata.get("expires_at_unix"),
-        )
-    action_policy = resolve_buyer_action_policy(
-        action,
-        interactive=False,
-    )
-    action_handler = BuyerActionHandler(
-        action_policy,
-        open_url=webbrowser.open,
-        print_url=typer.echo,
-        on_required=lambda metadata: log.event(
-            "hosted_checkout_required",
-            settlement_ref=settlement_ref,
-            action_policy=action_policy.value,
-            **metadata.as_event(),
-        ),
-    )
-    try:
-        final = transport.resume(
-            settlement_ref=settlement_ref,
-            poll_interval=poll_interval,
-            total_timeout=settlement_timeout,
-            on_action=action_handler.handle,
-            on_poll=lambda attempt, body: log.event(
-                "hosted_settlement_poll",
-                attempt=attempt,
-                settlement_ref=settlement_ref,
-                status=body.get("status"),
-                action_kind=(body.get("action") or {}).get("kind"),
-                action_expires_at_unix=(body.get("action") or {}).get(
-                    "expires_at_unix"
-                ),
-            ),
-            sleep=time.sleep,
-        )
-    except TimeoutError as exc:
-        log.end("timeout", settlement_ref=settlement_ref, reason=str(exc))
-        raise typer.Exit(7) from exc
-    credentials = final.get("tenant_credentials")
-    if isinstance(credentials, dict) and credentials:
-        log.event("credentials_delivered", credentials=credentials)
-        render_credentials(console, credentials)
-    result = final.get("result") or {}
-    log.end(
-        str(final.get("status") or "unknown"),
-        settlement_ref=settlement_ref,
-        fulfillment_uid=result.get("fulfillment_id"),
-    )
-    if final.get("status") not in {"ready", "collected"}:
-        raise typer.Exit(7)
-    return final
-
-
 def run_settle_from_log(
     *,
     run_id: str,
@@ -300,21 +106,17 @@ def run_settle_from_log(
     poll_interval: float,
     settlement_timeout: float,
     console: Optional[Console] = None,
-    funding_mode: str = "interactive",
-    instrument_ref: str | None = None,
-    action: str | None = None,
-    automatic_funding: bool = False,
 ) -> dict:
-    """Drive stages 3-5 of a credit deal from a buyer run-log.
+    """Resume settlement from a buyer run-log.
 
-    Reusable by both ``market credits settle`` and ``market credits buy
-    --from``. Reads the run-log for ``run_id``, creates the on-chain
-    escrow if not already present, POSTs ``/settle/{escrow_uid}`` to
-    the seller, and polls until terminal. Logs each stage transition —
-    including the issued credentials — back into the same run-log.
+    Reusable by ``market credits settle`` and ``market credits buy --from``.
+    The accepted mechanism decides whether the buyer creates an Alkahest
+    escrow or approves an Arkhai payments mandate. Both paths submit to the
+    seller, poll until terminal, and append any issued credentials to the
+    same run-log.
 
-    Returns the final settle-status body. Raises ``typer.Exit`` on
-    fatal errors.
+    Returns the final settle-status body. Raises ``typer.Exit`` on fatal
+    errors.
     """
     console = console or Console()
     signer = identity.signer
@@ -332,24 +134,101 @@ def run_settle_from_log(
         run_id,
         signer=signer,
         refresh_publisher_principals=make_run_publisher_principals_refresh(
-            run_id,
-            signer=signer,
+            run_id, signer=signer
         ),
     )
-    if accepted_settlement_mechanism(deal) == "fiat.stripe.v1":
-        return _run_hosted_settlement_from_log(
-            run_id=run_id,
-            deal=deal,
+    if (deal.settlement_selection or {}).get("mechanism") == "arkhai.payments.v1":
+        if not deal.agreement or not deal.agreement_bytes:
+            typer.secho(
+                "Run-log is missing the accepted Agreement required for payments.",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+        log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
+        log.event("settle_resumed")
+        registry_urls = resolve_indexer_urls()
+        registry_authorities = resolve_registry_authorities(registry_urls)
+        buy_config = BuyConfig.from_resolved_identity(
             identity=identity,
-            settlement_ref_override=escrow_uid,
-            poll_interval=poll_interval,
-            settlement_timeout=settlement_timeout,
-            funding_mode=funding_mode,
-            instrument_ref=instrument_ref,
-            action=action,
-            automatic_funding=automatic_funding,
-            console=console,
+            registry_urls=registry_urls,
+            registry_authorities=registry_authorities,
+            discovery_timeout=resolve_discovery_timeout(),
+            registry_api_keys=resolve_registry_api_keys(),
         )
+        listing = {
+            "listing_id": deal.listing_id,
+            "publisher_id": deal.publisher_id,
+            "publisher_principals": deal.publisher_principals.model_dump(mode="json"),
+            "storefront_url": deal.seller_url,
+            "source_registry_url": deal.source_registry_url,
+            "source_registry_authority": deal.source_registry_authority,
+        }
+        resolve_seller_principals = make_publisher_trust_resolver(
+            config=buy_config,
+            listing=listing,
+            on_update=lambda event, fields: log.event(event, **fields),
+        )
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Run ID", run_id)
+        header.add_row("Seller", deal.seller_url)
+        header.add_row("Negotiation", deal.negotiation_id)
+        header.add_row("Agreed amount (total)", str(deal.agreed_amount))
+        console.print(Panel(header, title="market credits settle", border_style="cyan"))
+        try:
+            transaction, final = settle_api_credit_payment(
+                seller_url=deal.seller_url,
+                listing=listing,
+                negotiation_id=deal.negotiation_id,
+                buyer=identity,
+                buy_config=buy_config,
+                settlement_config=resolve_buyer_settlement_policy(
+                    identity=identity
+                ).config,
+                payer_account=configured_payer_account(),
+                agreement=deal.agreement,
+                agreement_bytes=deal.agreement_bytes,
+                settlement_selection=deal.settlement_selection,
+                settlement_data=deal.settlement_data,
+                poll_interval=poll_interval,
+                total_timeout=settlement_timeout,
+                on_event=lambda event, body: log.event(event, **body),
+            )
+        except Exception as exc:
+            log.event("settlement_failed", error=str(exc))
+            log.end("error", error=str(exc))
+            typer.secho(
+                f"Payment settlement failed: {exc}", err=True, fg=typer.colors.RED
+            )
+            raise typer.Exit(5) from exc
+        credentials = final.get("tenant_credentials")
+        if isinstance(credentials, dict) and credentials:
+            log.event("credentials_delivered", credentials=credentials)
+        log.end(
+            final.get("status") or "unknown",
+            settlement_ref=transaction,
+            fulfillment_uid=final.get("fulfillment_uid"),
+        )
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", str(final.get("status")))
+        result.add_row("Settlement ref", transaction)
+        if final.get("fulfillment_uid"):
+            result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
+        if final.get("reason"):
+            result.add_row("Reason", str(final["reason"]))
+        border = "green" if final.get("status") == "ready" else "red"
+        console.print(Panel(result, title="Settlement complete", border_style=border))
+        if isinstance(credentials, dict) and credentials:
+            render_credentials(console, credentials)
+        if final.get("status") != "ready":
+            raise typer.Exit(7)
+        return final
+
     chain_cfg_name = (
         chain_name
         or _accepted_proposal_chain(deal)
@@ -357,32 +236,25 @@ def run_settle_from_log(
     )
     if not chain_cfg_name:
         typer.secho(
-            "Could not determine the chain from the run-log or deal context. "
-            "Pass --chain to specify which configured chain to settle on.",
+            "Could not determine the chain from the run-log or deal context. Pass --chain to specify which configured chain to settle on.",
             err=True,
             fg=typer.colors.RED,
         )
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
-
     if deal.accepted_escrow_proposal is None and deal.accepted_escrow_terms is None:
         typer.secho(
-            "Run-log carries no seller-accepted escrow proposal. Re-run "
-            "negotiation so the accepted proposal is captured — token "
-            "settlement always settles the seller-confirmed shape.",
+            "Run-log carries no seller-accepted escrow proposal. Re-run negotiation so the accepted proposal is captured — token settlement always settles the seller-confirmed shape.",
             err=True,
             fg=typer.colors.RED,
         )
         raise typer.Exit(2)
-
     resolved_evm_address, resolved_evm_private_key = resolve_buyer_wallet(
-        override_addr=evm_address,
-        override_pk=evm_private_key,
+        override_addr=evm_address, override_pk=evm_private_key
     )
     if not resolved_evm_address or not resolved_evm_private_key:
         typer.secho(
-            "Missing explicit EVM settlement credentials: wallet.address and "
-            "wallet.private_key are required for Alkahest.",
+            "Missing explicit EVM settlement credentials: wallet.address and wallet.private_key are required for Alkahest.",
             err=True,
             fg=typer.colors.RED,
         )
@@ -394,16 +266,8 @@ def run_settle_from_log(
         chain_name=chain_cfg.name,
         alkahest_addr_config=chain_cfg.alkahest_address_config_path,
     )
-
-    log = open_run_log(
-        run_id,
-        signer=signer,
-        profile_id=identity.profile_id,
-    )
+    log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
     log.event("settle_resumed")
-    from core_buyer.orchestration import make_publisher_trust_resolver
-    from core_buyer.orchestrator import BuyConfig
-
     registry_urls = resolve_indexer_urls()
     registry_authorities = resolve_registry_authorities(registry_urls)
     resolve_seller_principals = make_publisher_trust_resolver(
@@ -424,9 +288,7 @@ def run_settle_from_log(
         },
         on_update=lambda event, fields: log.event(event, **fields),
     )
-
     resolved_uid = escrow_uid or deal.escrow_uid
-
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
@@ -437,10 +299,9 @@ def run_settle_from_log(
     if resolved_uid:
         header.add_row("Escrow UID", resolved_uid + " (skip create)")
     console.print(Panel(header, title="market credits settle", border_style="cyan"))
-
-    # --- Stage 3: escrow.create (skip if uid already known) -------
     if not resolved_uid:
         from market_alkahest.schemas import EscrowProposal, EscrowTerms
+
         from .escrow_client import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
@@ -457,7 +318,6 @@ def run_settle_from_log(
             },
         )
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
-
         if deal.accepted_escrow_terms is not None:
             escrow_terms_list = [
                 EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
@@ -465,16 +325,11 @@ def run_settle_from_log(
         else:
             proposal = EscrowProposal(**deal.accepted_escrow_proposal)
             build_terms = make_buyer_payment_escrow_terms_fn(
-                chain_name=chain.chain_name,
-                addr_config_path=chain.alkahest_addr_config,
+                chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
             )
             escrow_terms_list = build_terms(
-                proposal,
-                deal.seller_wallet_address,
-                float(deal.agreed_amount),
-                0,  # credit deals fund a quantity, not a lease
+                proposal, deal.seller_wallet_address, int(deal.agreed_amount), 0
             )
-
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,
             rpc_url=chain.rpc_url,
@@ -487,9 +342,7 @@ def run_settle_from_log(
             log.event("escrow_create_failed", error=str(exc))
             log.end("error", error=f"escrow_create: {exc}")
             typer.secho(
-                f"escrow.create failed on-chain: {exc}",
-                err=True,
-                fg=typer.colors.RED,
+                f"escrow.create failed on-chain: {exc}", err=True, fg=typer.colors.RED
             )
             raise typer.Exit(4) from exc
         if not uids:
@@ -506,8 +359,6 @@ def run_settle_from_log(
             "escrow_created", escrow_uid=resolved_uid, chain_name=chain.chain_name
         )
         console.print(f"[green]escrow created[/green]  {resolved_uid}")
-
-    # --- Stage 4: submit settlement -------------------------------
     try:
         submit_body = submit_settlement_request(
             seller_url=deal.seller_url,
@@ -531,7 +382,6 @@ def run_settle_from_log(
     log.event("settle_submitted", body=submit_body)
     console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
 
-    # --- Stage 5: poll status until terminal ----------------------
     def _on_poll(attempt: int, body: dict) -> None:
         log.event("settle_status", attempt=attempt, body=body)
 
@@ -553,18 +403,15 @@ def run_settle_from_log(
             f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW
         )
         raise typer.Exit(6) from exc
-
     log.event("settle_terminal", body=final)
     credentials = final.get("tenant_credentials")
     if isinstance(credentials, dict) and credentials:
-        # The durable copy — the seller returns the secret exactly once.
         log.event("credentials_delivered", credentials=credentials)
     log.end(
         final.get("status") or "unknown",
         escrow_uid=resolved_uid,
         fulfillment_uid=final.get("fulfillment_uid"),
     )
-
     result = Table.grid(padding=(0, 2))
     result.add_column(style="bold")
     result.add_column()
@@ -576,115 +423,15 @@ def run_settle_from_log(
         result.add_row("Reason", str(final["reason"]))
     border = "green" if final.get("status") == "ready" else "yellow"
     console.print(Panel(result, title="Settlement complete", border_style=border))
-
     if isinstance(credentials, dict) and credentials:
         render_credentials(console, credentials)
-
     if final.get("status") != "ready":
         raise typer.Exit(7)
-
     return final
-
-
-def _hosted_operation_from_run(
-    *,
-    run_id: str,
-    identity: ResolvedBuyerIdentity,
-    operation: str,
-    settlement_ref: str | None,
-) -> dict:
-    """Run one signed provider-neutral status or reclaim request."""
-    from .common import make_run_publisher_principals_refresh
-
-    deal = load_deal_context(
-        run_id,
-        signer=identity.signer,
-        refresh_publisher_principals=make_run_publisher_principals_refresh(
-            run_id,
-            signer=identity.signer,
-        ),
-    )
-    if accepted_settlement_mechanism(deal) != "fiat.stripe.v1":
-        raise typer.BadParameter("run did not accept hosted settlement")
-    ref = settlement_ref or deal.settlement_ref
-    if not ref:
-        raise typer.BadParameter("run has no started hosted settlement reference")
-    log = open_run_log(
-        run_id,
-        signer=identity.signer,
-        profile_id=identity.profile_id,
-    )
-    transport = _hosted_transport_for_deal(identity=identity, deal=deal, log=log)
-    body = (
-        transport.status(settlement_ref=ref)
-        if operation == "status"
-        else transport.reclaim(settlement_ref=ref)
-    )
-    action = body.get("action") or {}
-    log.event(
-        f"hosted_settlement_{operation}",
-        settlement_ref=ref,
-        status=body.get("status"),
-        action_kind=action.get("kind"),
-        action_expires_at_unix=action.get("expires_at_unix"),
-    )
-    credentials = body.get("tenant_credentials")
-    if isinstance(credentials, dict) and credentials:
-        log.event("credentials_delivered", credentials=credentials)
-    return body
 
 
 def register(credits_app: typer.Typer) -> None:
     """Register `market credits settle`."""
-
-    @credits_app.command("settle-status")
-    def settle_status(
-        run_id: str = typer.Option(..., "--from", "--run", "-r"),
-        settlement_ref: Optional[str] = typer.Option(
-            None,
-            "--settlement-ref",
-            help="Override the opaque reference recorded in the run log.",
-        ),
-    ) -> None:
-        """Fetch the authenticated public hosted state without resuming polls."""
-        from .common import resolve_recovery_buyer_identity
-
-        body = _hosted_operation_from_run(
-            run_id=run_id,
-            identity=resolve_recovery_buyer_identity(run_id),
-            operation="status",
-            settlement_ref=settlement_ref,
-        )
-        typer.echo(
-            f"{body.get('status', 'unknown')} "
-            f"{body.get('settlement_ref', settlement_ref or '')}".rstrip()
-        )
-        credentials = body.get("tenant_credentials")
-        if isinstance(credentials, dict) and credentials:
-            render_credentials(Console(), credentials)
-
-    @credits_app.command("reclaim")
-    def reclaim(
-        run_id: str = typer.Option(..., "--from", "--run", "-r"),
-        settlement_ref: Optional[str] = typer.Option(
-            None,
-            "--settlement-ref",
-            help="Override the opaque reference recorded in the run log.",
-        ),
-    ) -> None:
-        """Request reclaim only for the run's exact unfulfilled obligation."""
-        from .common import resolve_recovery_buyer_identity
-
-        body = _hosted_operation_from_run(
-            run_id=run_id,
-            identity=resolve_recovery_buyer_identity(run_id),
-            operation="reclaim",
-            settlement_ref=settlement_ref,
-        )
-        typer.echo(
-            f"{body.get('status', 'unknown')} "
-            f"{body.get('settlement_ref', settlement_ref or '')}".rstrip()
-        )
 
     @credits_app.command("settle")
     def settle(
@@ -693,15 +440,13 @@ def register(credits_app: typer.Typer) -> None:
             "--from",
             "--run",
             "-r",
-            help="Buyer run-id from a prior `market credits negotiate` to "
-            "resume from (see the buy-runs log directory).",
+            help="Buyer run-id from a prior `market credits negotiate` to resume from (see the buy-runs log directory).",
         ),
         escrow_uid: Optional[str] = typer.Option(
             None,
             "--escrow-uid",
             "-u",
-            help="Skip escrow.create when the on-chain escrow already exists. "
-            "If absent, the run-log is checked for an `escrow_created` event.",
+            help="Skip escrow.create when the on-chain escrow already exists. If absent, the run-log is checked for an `escrow_created` event.",
         ),
         evm_address: Optional[str] = typer.Option(
             None,
@@ -716,9 +461,7 @@ def register(credits_app: typer.Typer) -> None:
         chain_name: Optional[str] = typer.Option(
             None,
             "--chain",
-            help="Override which configured [chains.<name>] entry to settle on. "
-            "When omitted, reads chain_name from the accepted proposal "
-            "or escrow_created event.",
+            help="Override which configured [chains.<name>] entry to settle on. When omitted, reads chain_name from the accepted proposal or escrow_created event.",
         ),
         poll_interval: float = typer.Option(
             DEFAULT_SETTLEMENT_POLL_INTERVAL,
@@ -729,26 +472,6 @@ def register(credits_app: typer.Typer) -> None:
             DEFAULT_SETTLEMENT_TIMEOUT,
             "--settlement-timeout",
             help="Max seconds to wait for issuance before giving up.",
-        ),
-        funding_mode: str = typer.Option(
-            "interactive",
-            "--funding-mode",
-            help="Hosted recovery mode: interactive or saved_instrument.",
-        ),
-        instrument_ref: Optional[str] = typer.Option(
-            None,
-            "--instrument-ref",
-            help="Opaque instrument reference for a not-yet-authorized saved payment.",
-        ),
-        action: Optional[str] = typer.Option(
-            None,
-            "--action",
-            help="Transient hosted-action policy: open, print, or fail.",
-        ),
-        automatic_funding: bool = typer.Option(
-            False,
-            "--automatic-funding",
-            help="Evaluate the exact bounded off-session authorization policy.",
         ),
     ) -> None:
         """Resume a credit buy from the post-negotiation point.
@@ -773,8 +496,4 @@ def register(credits_app: typer.Typer) -> None:
             chain_name=chain_name,
             poll_interval=poll_interval,
             settlement_timeout=settlement_timeout,
-            funding_mode=funding_mode,
-            instrument_ref=instrument_ref,
-            action=action,
-            automatic_funding=automatic_funding,
         )

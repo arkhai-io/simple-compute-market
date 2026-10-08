@@ -12,6 +12,7 @@ from arkhai_bare_metal import (
     SOURCE_ABSENT,
     SOURCE_MATCHES,
     SOURCE_MISMATCH,
+    SOURCE_UNAVAILABLE,
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
@@ -63,9 +64,15 @@ def test_an_unchanged_source_matches():
     assert _check(_generation()).outcome == SOURCE_MATCHES
 
 
-def test_a_leased_machine_still_matches_its_declaration():
-    """Availability is not the guard's question."""
-    assert _check(_generation(available=False)).outcome == SOURCE_MATCHES
+def test_a_leased_machine_matches_its_declaration_but_is_unavailable():
+    check = _check(_generation(available=False))
+    assert check.outcome == SOURCE_UNAVAILABLE
+    assert not check.matches
+
+
+def test_a_declared_mismatch_is_reported_before_availability():
+    check = _check(_generation(available=False, attributes={"gpu_model": "other"}))
+    assert check.outcome == SOURCE_MISMATCH
 
 
 @pytest.mark.parametrize(

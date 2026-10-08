@@ -201,7 +201,7 @@ class Storefront:
         self.terms = Terms()
         self.configured_max: int | None = None
 
-    async def run(self) -> dict[str, Any]:
+    async def run(self, *, dry_run: bool = False) -> dict[str, Any]:
         self.registries.sent.clear()
         cycle = BareMetalPublicationCycle(
             sqlite_client=self.db,
@@ -216,7 +216,7 @@ class Storefront:
             build_payload=self.terms,
             configured_max_duration_seconds=self.configured_max,
         )
-        return await cycle.run()
+        return await cycle.run(dry_run=dry_run)
 
     def listings(self) -> dict[tuple[str, str | None, str], tuple[str, str, str | None]]:
         """``(site, pool, resource) -> (listing_id, status, closed_by)``."""
@@ -948,3 +948,54 @@ async def test_stored_terms_that_are_not_a_mapping_hold_rather_than_read_as_abse
     report = await storefront.run()
 
     assert {item["reason"] for item in actions(report, "hold")} == {"pool_override_unreadable"}
+
+
+# -- dry run ---------------------------------------------------------------
+
+
+def _row_counts(db: SQLiteClient) -> dict[str, int]:
+    with sqlite3.connect(db.db_path) as conn:
+        return {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for (table,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+
+
+async def test_a_dry_run_reports_the_opens_a_pass_would_make_and_writes_nothing(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    before = _row_counts(db)
+
+    preview = await storefront.run(dry_run=True)
+
+    assert preview["dry_run"] is True
+    assert len(actions(preview, "publish")) == 1
+    assert storefront.registries.sent == []
+    assert _row_counts(db) == before
+    report = await storefront.run()
+    assert len(actions(report, "publish")) == 1
+
+
+async def test_a_dry_run_reports_closes_and_refreshes_and_applies_neither(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")), pool("pool-2", member("r2", "pool-2")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    kept = storefront.listing("site-a", "pool-1", "r1")[0]
+    withdrawn = storefront.listing("site-a", "pool-2", "r2")[0]
+
+    site.serve(
+        pool("pool-1", member("r1", "pool-1")),
+        pool("pool-2", member("r2", "pool-2"), enabled=False),
+    )
+    storefront.terms.max_duration_seconds = 7200
+    before = _row_counts(db)
+    preview = await storefront.run(dry_run=True)
+
+    assert closes(preview) == {withdrawn: "source_gone"}
+    assert [item["listing_id"] for item in actions(preview, "refresh")] == [kept]
+    assert storefront.registries.sent == []
+    assert _row_counts(db) == before
+    assert storefront.listing("site-a", "pool-2", "r2")[1] == "open"
+    assert storefront.stored(kept)["max_duration_seconds"] == 3600

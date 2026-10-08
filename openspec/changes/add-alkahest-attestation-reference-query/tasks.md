@@ -12,18 +12,18 @@
 
 - [ ] 2.1 Upgrade the pinned Alkahest dependency after the upstream release is available.
 - [ ] 2.2 Add a repository-owned query protocol and neutral attestation result model in `kit/alkahest`.
-- [ ] 2.3 Persist the chain scan starting block before first submission when it is not already recoverable from accepted-deal state.
-- [ ] 2.4 Replace the absent production query capability in VM storefront composition with the supported adapter.
-- [ ] 2.5 Implement exact candidate matching and canonical duplicate selection.
+- [ ] 2.3 Persist the chain scan starting block before first submission when it is not already recoverable from accepted-deal state; for a fulfillment through `kit/alkahest`'s `AlkahestFulfillmentPublisher`, inside the first-write-wins submission intent `kit/settlement-runtime` records.
+- [ ] 2.4 Replace the absent production query capability with the supported adapter where the publisher's unknown outcome is decided: in VM storefront composition, and in the bare-metal storefront's Alkahest step, so a parked bare-metal submission adopts a matching UID as its recorded reference and completes.
+- [ ] 2.5 Implement exact candidate matching and canonical duplicate selection: VM matches its connection-details data; bare metal matches the evidence digest recorded in its intent.
 - [ ] 2.6 Preserve safe pending behavior for query errors and conflicting matches.
 - [ ] 2.7 Add unit tests for zero, one, duplicate-identical, conflicting, revoked, expired, and query-failure outcomes.
-- [ ] 2.8 Add a real Alkahest integration test for a successful-chain/lost-local-UID recovery.
+- [ ] 2.8 Add a real Alkahest integration test for a successful-chain/lost-local-UID recovery, for VM and for bare metal.
 
 ## 3. Documentation and validation
 
-- [ ] 3.1 Promote the implemented reconciliation contract into `openspec/specs/vm-storefront-fulfillment/spec.md`.
+- [ ] 3.1 Promote the implemented reconciliation contract into `openspec/specs/vm-storefront-fulfillment/spec.md` and, for the shared publisher's unknown outcome, `openspec/specs/settlement-servicing/spec.md` ("A fulfillment submission with an unknown outcome is never repeated").
 - [ ] 3.2 Establish or update permanent `kit/alkahest` documentation for the query abstraction.
-- [ ] 3.3 Run focused VM storefront, Alkahest kit, and root repository tests.
+- [ ] 3.3 Run focused VM storefront, bare-metal storefront, settlement-runtime kit, Alkahest kit, and root repository tests.
 - [ ] 3.4 Run strict OpenSpec validation where the CLI is available.
 
 ## 4. Closeout

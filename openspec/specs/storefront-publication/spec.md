@@ -6,64 +6,6 @@ Define seller storefront ownership, canonical market identity and service trust,
 
 ## Requirements
 
-### Requirement: Hosted publication separates ready funding alternatives
-
-For each VM resource, the storefront MUST build one distinct hosted option for each complete configured clause whose exact funding profile is ready. `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` MUST remain separate alternatives even when rate, currency, and condition are equal. Deterministic option identity and the accepted plan MUST bind profile, rate, currency, account reference, funds flow, parties, expiry policy, and condition. One profile's blocker MUST NOT suppress another ready hosted profile or Alkahest.
-
-#### Scenario: Three hosted profiles are ready
-
-- **WHEN** one VM listing has complete ready clauses for card, US bank transfer, and ACH
-- **THEN** it publishes three distinct hosted options in configured order, each projecting one exact profile
-
-#### Scenario: Push transfer is unready
-
-- **WHEN** bank-transfer readiness fails while card and ACH remain ready
-- **THEN** only the push-transfer option is suppressed and the safe blocker identifies its profile without provider data
-
-### Requirement: Hosted accepted plan carries authorization safely
-
-The accepted hosted obligation MUST pin the exact funding profile and deterministic marketplace operation ID. Before materialization the buyer MUST obtain one exact hosted `funding_authorization_ref`; storefront start MAY accept only negotiation ID, obligation ID, and that safe reference. The storefront MUST reload amount, currency, parties, destination account, profile, expiry, and condition from accepted seller state, verify the reference through the hosted client during ordinary materialization, and persist only the safe reference and fingerprint.
-
-Stable payer-profile or instrument refs, Customer/PaymentMethod/mandate data, provider identifiers, raw actions, and buyer automation policy MUST NOT enter negotiation, accepted terms, start requests, storefront SQLite, logs, or evidence.
-
-#### Scenario: Authorization covers another profile
-
-- **WHEN** a start request supplies a funding authorization that does not bind the accepted profile and obligation
-- **THEN** materialization fails without creating another authorization or selecting another profile
-
-#### Scenario: Start is retried after acknowledgement loss
-
-- **WHEN** the buyer repeats the exact negotiation, obligation, and funding-authorization reference
-- **THEN** storefront and hosted authority converge on the same settlement and operation identities
-
-### Requirement: Legacy hosted card decoding is recovery-only
-
-Already accepted hosted card plans and in-flight marketplace settlement rows MUST retain their immutable option, obligation, operation, and hosted settlement identities through upgrade. A recovery-only decoder MAY interpret their historical `payment_method_types=("card",)` representation, but publication, negotiation, config migration, start, and new plan validation MUST accept only `card.v1` and MUST NOT advertise the legacy representation as an alias.
-
-#### Scenario: Existing card obligation resumes
-
-- **WHEN** restart loads an accepted legacy card plan with a nonterminal hosted operation
-- **THEN** it resumes the same settlement and operation identity without republishing, reauthorizing, or rewriting it as a new `card.v1` purchase
-
-#### Scenario: New listing uses legacy card fields
-
-- **WHEN** publication input contains `payment_method_types` or the recovery-only legacy value
-- **THEN** validation rejects it and identifies the exact `funding_profile` replacement
-
-### Requirement: Delayed funding does not authorize VM fulfillment
-
-Storefront status MAY project awaiting-payment reason, safe deadline, and transient action metadata for card, push transfer, or ACH. It MUST NOT reserve capacity fulfillment, provision a VM, publish fulfillment evidence, or collect until the hosted authority authoritatively reports the accepted profile funded. Expiry/reclaim MUST re-retrieve current hosted state under the same operation before releasing or refunding.
-
-#### Scenario: ACH is processing
-
-- **WHEN** hosted status reports the accepted ACH obligation pending availability
-- **THEN** the storefront persists only safe pending metadata and performs no VM fulfillment or collection
-
-#### Scenario: Funding succeeds at expiry boundary
-
-- **WHEN** a reclaim attempt reaches expiry while provider funding may have completed
-- **THEN** authoritative status under the same operation decides funding versus reclaim before capacity or financial action
-
 ### Requirement: Seller protocol surface
 A storefront MUST expose authenticated listing, negotiation, settlement, identity, health, and operator control surfaces while keeping domain-specific behavior behind injected adapters.
 
@@ -322,56 +264,6 @@ A storefront implementation MAY additionally support deriving publishable listin
 - **WHEN** a storefront's projection-backed listing-candidate derivation has parity with any local-table path it retains
 - **THEN** the projection path is that storefront's default, with the local-table path available only as an explicit, non-default rollback option
 
-### Requirement: Preflighted hosted VM publication
-
-A VM storefront with hosted settlement enabled MUST preflight the exact signed client/manifest/schema, payer/profile/authorization capabilities, listing account, selected condition resolver, currency/country policy, and each configured funding profile before publishing deterministic separate-charge/transfer options. Each ready clause MUST produce one option containing only account reference, `funds_flow="separate_charges_transfers"`, exact `funding_profile`, lowercase currency/rate, interaction capability, and typed condition descriptor. Failure MUST suppress only the affected hosted profile and MUST NOT prevent ready hosted peers or valid Alkahest publication.
-
-#### Scenario: Hosted preflight fails
-
-- **WHEN** readiness, manifest, account, condition, or selected profile capability cannot be verified
-- **THEN** the storefront emits a sanitized profile-specific diagnostic and publishes all independently ready hosted and Alkahest choices
-
-#### Scenario: One bank profile is unsupported
-
-- **WHEN** the verified authority release or policy does not admit one configured bank profile/currency/country combination
-- **THEN** that clause publishes no option while ready card or other exact profiles remain
-
-### Requirement: Dedicated hosted settlement routes
-
-Hosted start, status, and reclaim MUST use `/api/v1/settlements`; the legacy `/api/v1/settle/{escrow_uid}` carrier and behavior remain Alkahest-only. Hosted start accepts accepted negotiation and obligation identifiers plus one safe operation-scoped `funding_authorization_ref` only, and reloads buyer, claimant, money, account, exact funding profile, expiry, condition, and provision input from persisted seller state. Status and reclaim MUST never return or accept stable payer/instrument refs or provider data.
-
-#### Scenario: Buyer starts accepted hosted settlement
-
-- **WHEN** the accepted buyer signs a start request containing the two accepted IDs and exact authorization reference
-- **THEN** the storefront idempotently registers/materializes that exact plan and returns only opaque state plus optional transient action
-
-### Requirement: Server-authoritative settlement start
-
-`POST /api/v1/settlements` MUST accept only negotiation ID, obligation ID, and one safe funding-authorization reference, reload the accepted plan, and resolve payer, claimant, account, money, profile, expiry, and condition server-side. `GET /api/v1/settlements/{settlement_ref}` MUST return public provider-neutral status, safe reason/deadline, and an optional transient buyer action. Buyer-authorized `POST .../{settlement_ref}/reclaim` MUST enter the shared reclaim lifecycle; internal collection MUST run through the shared claims engine. These routes MUST NOT alias or change `/api/v1/settle/{escrow_uid}`.
-
-#### Scenario: Start request supplies provider or money fields
-
-- **WHEN** a caller attempts to override payer profile, instrument, account, amount, currency, funding profile, condition, or provider parameters
-- **THEN** the storefront rejects the request and creates no hosted settlement
-
-#### Scenario: Existing Alkahest settle route is called
-
-- **WHEN** a legacy buyer calls `/api/v1/settle/{escrow_uid}`
-- **THEN** response shape, authorization, persistence, and side effects remain unchanged
-
-#### Scenario: Funding authorization is absent
-
-- **WHEN** a new hosted start request omits the operation-scoped authorization reference
-- **THEN** the storefront rejects it before materialization rather than asking the seller or authority to choose a payer instrument
-
-### Requirement: Fulfillment precedes hosted financial collection
-
-After authoritative funding, the shared obligation lifecycle MUST reserve `funded → fulfilling`, commit immutable VM fulfillment through the existing domain boundary, and only then submit condition evidence for check/collection. A fulfillment failure MUST leave capacity cleanup ordered after the hosted refund reaches a terminal successful reclaim outcome.
-
-#### Scenario: Provisioning fails after payment
-- **WHEN** hosted funding is authoritative but VM fulfillment fails
-- **THEN** no transfer occurs, one reclaim/refund is driven to terminal success, and capacity is released only under the existing failure dispatcher ordering
-
 ### Requirement: Scheme-neutral storefront authorization
 
 A storefront MUST authenticate publisher, buyer, administrator, and configured service-peer requests through `arkhai.market-request-signature.v2` and MUST authorize complete principals against explicit roles and durable subject bindings selected by route, subject, and site context. Each state-changing proof MUST bind the caller role and principal, method, semantic operation, resource, request ID, timestamp, and canonical body hash. The storefront MUST reserve `(principal, request_id)` durably and atomically before route dispatch, reject changed reuse, and return or resume the recorded outcome for an exact retry without executing a conflicting mutation. It MUST NOT fall back from missing or invalid principal headers to an address in the body, configuration, query, listing, negotiation record, administrator key, or private-key field.
@@ -431,18 +323,18 @@ A storefront MUST rotate administrator and service-peer subjects only from a reg
 
 ### Requirement: Storefront principal is reused without exposing its key
 
-Publication, hosted account ownership, negotiation, and hosted settlement calls MAY use one configured seller principal, but each authority MUST receive only a signer operation or signed proof and MUST enforce its own role binding. Storefront persistence and projections MUST NOT contain the seller's private credential or a Stripe provider identity.
+Publication and negotiation MAY use one configured seller principal. Each marketplace authority MUST receive only a signer operation or signed proof and enforce its own role binding. Arkhai payment calls use separate owner-scoped account credentials. Storefront persistence and projections MUST NOT contain the seller's private credential or a Stripe provider identity.
 
-#### Scenario: Storefront publishes a hosted option
+#### Scenario: Storefront publishes a payment option
 
-- **WHEN** the configured seller principal owns the ready hosted account and signs registry publication
-- **THEN** the option contains only the allowed opaque account reference and settlement fields while both authorities bind the same public principal
+- **WHEN** the seller publishes `arkhai.payments.v1`
+- **THEN** the option carries only public payee and payment policy while marketplace proof and payment credentials remain separate
 
 ### Requirement: Storefront identity state migrates atomically
 
 Storefront databases MUST validate and migrate buyer, seller, administrator, service-peer, negotiation-message, heartbeat, claim, settlement, replay, stage-event, and audit identities to canonical principal form in one service-local transaction. Migration MUST preserve listing, negotiation, obligation, fulfillment, service-peer, rotation, and operation identities; prove listing ownership and cross-record party consistency; and retire authoritative address-only identity columns. A malformed or partial principal, ownership conflict, duplicate active binding, missing party relation, or other unsafe population MUST roll back completely.
 
-#### Scenario: Active hosted obligation is migrated
+#### Scenario: Active escrow obligation is migrated
 
 - **WHEN** a storefront with a funded nonterminal obligation upgrades from address-only identity rows
 - **THEN** the obligation retains its authoritative lifecycle and operation journal while its parties become canonical `eip191` principals
@@ -456,10 +348,10 @@ Storefront databases MUST validate and migrate buyer, seller, administrator, ser
 
 A storefront MUST preflight every enabled installed settlement registration and derive deterministic listing options from every ready mechanism in configured priority order and the seller's validated settlement publication clauses. A clause MUST NOT make a disabled or unready mechanism publishable. One unready mechanism MUST be suppressed with an operator-visible sanitized blocker while ready peers remain publishable. If no enabled ready mechanism has a valid publication clause, publication MUST fail without mutating accepted negotiations or active settlement state.
 
-#### Scenario: Stripe is unready and Alkahest is ready
+#### Scenario: Arkhai payments is unready and Alkahest is ready
 
-- **WHEN** both have publication clauses but hosted account readiness is false
-- **THEN** the storefront publishes the Alkahest option, omits the Stripe option, and reports the hosted blocker without provider detail
+- **WHEN** both have publication clauses but payments configuration is unready
+- **THEN** the storefront publishes the Alkahest option, omits the Arkhai payment option, and reports the mechanism blocker without provider detail
 
 #### Scenario: Readiness returns after publication
 
@@ -473,7 +365,7 @@ A storefront MUST preflight every enabled installed settlement registration and 
 
 ### Requirement: Storefront owns seller settlement UX
 
-Seller configuration, readiness, mechanism administration, and publication MUST be exposed through the storefront CLI and generated role config surface. Normal publication MUST derive options from mechanism-neutral settlement clauses and MUST NOT expose provider-, chain-, or escrow-specific flags. Mechanism administration MUST remain under `settlement <mechanism>`. The storefront CLI's publication command MUST run or preview a cycle of the storefront's publication loop through the storefront API rather than deriving or publishing listings itself. A hosted client MAY supply workflow primitives, but a separate provider-specific seller executable or top-level mechanism-specific publication flow MUST NOT be the normal marketplace entry point.
+Seller configuration, readiness, mechanism administration, and publication MUST be exposed through the storefront CLI and generated role config surface. Normal publication MUST derive options from mechanism-neutral settlement clauses and MUST NOT expose provider-, chain-, or escrow-specific flags. Mechanism administration MUST remain under `settlement <mechanism>`. The storefront CLI's publication command MUST run or preview a cycle of the storefront's publication loop through the storefront API rather than deriving or publishing listings itself. A mechanism kit MAY supply workflow primitives, but a separate provider-specific seller executable or top-level mechanism-specific publication flow MUST NOT be the normal marketplace entry point.
 
 #### Scenario: Seller inspects all settlement mechanisms
 
@@ -482,7 +374,7 @@ Seller configuration, readiness, mechanism administration, and publication MUST 
 
 #### Scenario: Seller publishes two mechanisms
 
-- **WHEN** normal publication resolves valid Stripe and Alkahest settlement clauses
+- **WHEN** normal publication resolves valid Arkhai payment and Alkahest settlement clauses
 - **THEN** the storefront derives both through their ready registrations without invoking a mechanism-specific publication command
 
 #### Scenario: Seller runs the publication command
@@ -608,33 +500,28 @@ A capacity-backed listing with a durable site mapping MUST route all capacity cl
 - **WHEN** the origin site recorded on an unbacked listing's binding is unreachable
 - **THEN** no capacity claim is attempted at it or at any other site
 
-### Requirement: Bare-metal hosted publication intersects all authorities
+### Requirement: Payment publication discloses mandate policy
 
-A bare-metal listing MAY publish exact `fiat.stripe.v1` alternatives only from a complete non-stale trusted selected-site projection with exclusive allocation, SSH capability, hosted authority/account/profile readiness, condition resolver readiness, and compatible offer, funding, fulfillment, and capacity windows. Each ready `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1` profile is a separate deterministic option; one unavailable profile MUST NOT suppress ready alternatives or legacy Alkahest escrows. The option's interaction value MUST be exactly `interactive` or `saved_instrument`; `off_session` is policy behavior, not a wire value, and push bank transfer MUST remain interactive.
+VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST publish ready payment clauses as independent `settlement_options` beside supported Alkahest alternatives. Every option MUST bind asset, rates, payee account, hold window, and agreement-deposit setting. No Stripe funding profile or provider object MAY enter an option.
 
-#### Scenario: Pending funding cannot extend capacity
+#### Scenario: A payment clause is ready
 
-- **WHEN** a slow funding profile remains pending at the accepted offer or billable-hold boundary
-- **THEN** the old listing cannot be renewed or rebound
-- **AND** later availability requires a fresh signed listing and negotiation
+- **WHEN** a resource has a complete ready Arkhai payment clause and supported Alkahest terms
+- **THEN** publication exposes distinct choices with independent rates and deterministic option IDs
 
-### Requirement: API-credit publication composes independent settlement alternatives
+#### Scenario: Payment policy is incomplete
 
-A quota-backed `api_credits.v1` listing MUST publish `settlement_options` from
-each complete ready hosted clause and `accepted_escrows` from valid Alkahest
-entries as independent alternatives. Every hosted option MUST bind the exact
-service, quantity pricing basis, canonical seller/claimant, condition,
-currency, profile, interaction, account, expiry policy, and rate. One unready
-profile MUST suppress only its own option, and hosted-only publication MUST
-remain valid with an empty escrow list.
+- **WHEN** a clause lacks required payee, asset, window, or deposit policy
+- **THEN** publication rejects it without inferring values from an Alkahest price or mutating accepted deals
 
-#### Scenario: Quota and three hosted profiles are ready
-- **WHEN** card, US bank transfer, and ACH clauses pass readiness for one sellable API-credit resource
-- **THEN** the listing exposes three distinct deterministic hosted options alongside any Alkahest escrows
+### Requirement: Domain payment publication respects domain capacity
 
-#### Scenario: Hosted clause is incomplete
-- **WHEN** its profile, authority, account, condition, or currency readiness fails
-- **THEN** only that hosted alternative is omitted and publication emits a safe clause-scoped blocker
+Bare-metal payment publication MUST require a non-stale selected-site projection with exclusive allocation and supported SSH access; API-credit publication MUST use sellable quota for the named service. Pending payment MUST NOT renew an accepted capacity hold or select another site.
+
+#### Scenario: A bare-metal site projection is stale
+
+- **WHEN** a bare-metal storefront's selected-site projection is stale
+- **THEN** it publishes no payment option for that site until a fresh projection shows exclusive allocation and supported SSH access
 
 ### Requirement: A listing's origin site is not its admission authority
 
@@ -2181,7 +2068,7 @@ registry keeping any listing field it does not already keep.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
 - Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
 - Complete bare-metal seller composition, immutable listing/thread binding, selected-site lifecycle, result redaction, restart, and contribution wiring: `domains/bare_metal/storefront/tests/test_http_negotiation.py`, `test_persistence.py`, `test_fulfillment_service.py`, `test_site_clients.py`, `test_domain_runtime.py`, and `test_app_composition.py`.
-- Every VM listing is a listing shape — the override, hint, and default-generator sources, per-model default shapes, and publishing exactly the declared quantities: `domains/vms/storefront/tests/unit/test_reconciler.py` (`TestListingShapes`, `TestStorefrontOverrideTier`), `domains/vms/domain/tests/test_shape_generation.py`, `test_storefront_adapter.py`, and `domains/vms/storefront/tests/integration/test_publication_loop.py`. A shape's declared quantities, not pool defaults, size the VM: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py`.
+- Every VM listing is a listing shape — the override, hint, and default-generator sources, per-model default shapes, and publishing exactly the declared quantities: `domains/vms/storefront/tests/unit/test_reconciler.py` (`TestListingShapes`, `TestStorefrontOverrideTier`), `domains/vms/domain/tests/test_shape_generation.py`, `test_storefront_adapter.py`, and `domains/vms/storefront/tests/integration/test_publication_loop.py`. A shape's declared quantities, not pool defaults, size the VM: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`).
 - Shape feasibility agrees with the site ledger on declared and available capacity, members, and buckets: `domains/vms/storefront/tests/integration/test_shape_feasibility.py`.
 - Shape-bearing derivation identity and the seller-state carry-over across it, reported through system status: `domains/vms/storefront/tests/integration/test_listing_identity_carryover.py` and `test_publication_loop.py`.
 - Storefront pool overrides — the kit's store, reader, write check, status, and signed-resource contract: `kit/pool-overrides/tests/unit/` and `kit/pool-overrides/tests/integration/`; through the storefront app and its typed clients, including a non-home site, refused writes, commercial terms reaching a listing, and the legacy tier: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`; the VM vocabulary: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; the administrator contract: `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.

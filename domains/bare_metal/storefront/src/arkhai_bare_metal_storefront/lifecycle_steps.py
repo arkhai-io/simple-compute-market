@@ -29,6 +29,7 @@ NEGOTIATION_WATCHDOG = "negotiation_watchdog"
 SETTLEMENT_SERVICING = "settlement_servicing"
 PUBLICATION = "publication"
 INTRODUCTION_RETENTION = INTRODUCTION_RETENTION_LOOP
+PAYMENT_RECONCILIATION = "payment_reconciliation"
 
 
 def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> None:
@@ -64,10 +65,44 @@ def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> 
             report = await cycle.run()
         return to_jsonable_python(report)
 
+    async def publication_preview() -> Mapping[str, Any]:
+        """What one publication pass would open, close, refresh, reopen, or hold."""
+        from .publication_composition import compose_publication_cycle
+
+        factory = runtime.publication_cycle_factory or compose_publication_cycle
+        async with runtime.publication_lock:
+            try:
+                cycle = factory(runtime)
+            except RuntimeError as exc:
+                raise LifecycleRouteError(503, str(exc)) from exc
+            report = await cycle.run(dry_run=True)
+        return to_jsonable_python(report)
+
     loops.register_step(
         NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step
     )
-    loops.register_step(PUBLICATION, route="publication", step=publication_step)
+    loops.register_step(
+        PUBLICATION,
+        route="publication",
+        step=publication_step,
+        preview=publication_preview,
+    )
+
+    if runtime.payments_reconciliation_enabled():
+
+        async def payment_reconciliation_step() -> Mapping[str, Any]:
+            done = await runtime.settlement_service().reconcile_payments_once()
+            return {
+                "loop": PAYMENT_RECONCILIATION,
+                "attempted": done.attempted,
+                "failed": done.failed,
+            }
+
+        loops.register_step(
+            PAYMENT_RECONCILIATION,
+            route="payment-reconciliation",
+            step=payment_reconciliation_step,
+        )
 
     worker = runtime.settlement_worker
     if worker is not None:

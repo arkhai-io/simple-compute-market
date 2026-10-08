@@ -1,6 +1,8 @@
 ansible.log
 inventory/hosts*
-# Allow the committed template through the hosts* glob above.
+inventory/provisioning-hosts*
+# Allow the committed templates through the globs above.
 !inventory/hosts.example
+!inventory/provisioning-hosts.example
 playbooks/frp-server-credentials*
 credentials/*

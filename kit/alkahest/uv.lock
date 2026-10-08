@@ -171,18 +171,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.3.0"
+version = "0.4.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.2.1"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -200,7 +200,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-settlement-runtime", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "web3", specifier = ">=7.14.0" },
 ]
@@ -213,7 +213,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -223,12 +223,12 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.2.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -236,7 +236,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

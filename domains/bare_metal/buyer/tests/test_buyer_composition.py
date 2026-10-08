@@ -6,17 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 import typer
-from arkhai_bare_metal import BareMetalListing
-from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer import cli
 from arkhai_bare_metal_buyer.cli import (
     _IntroductionContext,
     _json,
     _safe_projection,
-    _validate_hosted_option_binding,
     bare_metal_app,
     bare_metal_listing_params,
-    register_commands,
     settlement_app,
 )
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
@@ -27,7 +23,6 @@ from market_core import DomainCapability
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
 from registry_client import FilterSpecResponse
-from typer.testing import CliRunner
 
 PRINCIPAL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -78,19 +73,6 @@ def test_plugin_declares_real_buyer_capability() -> None:
     assert DomainCapability.BUYER in contract.declared_capabilities
     assert contract.buyer is not None
     assert contract.buyer.register_commands is not None
-
-
-def test_hosted_payer_commands_are_available() -> None:
-    app = typer.Typer()
-    register_commands(app)
-
-    result = CliRunner().invoke(
-        app,
-        ["settlement", "stripe", "payer", "--help"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "create" in result.output
 
 
 def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
@@ -160,29 +142,12 @@ def test_json_output_serializes_nested_wire_models(capsys) -> None:
     }
 
 
-def test_hosted_option_binding_compares_physical_host_identity() -> None:
-    listing = BareMetalListing(
-        capacity_backing="backed",
-        host_id="machine-1",
-        physical_host_id="physical-host-1",
-        access_methods=["ssh"],
-        **LISTING_HARDWARE,
-    )
-
-    _validate_hosted_option_binding(
-        listing,
-        physical_host_id="physical-host-1",
-    )
-    with pytest.raises(typer.BadParameter, match="conflicts with trusted listing"):
-        _validate_hosted_option_binding(
-            listing,
-            physical_host_id="different-host",
-        )
 
 def test_introduction_commands_are_registered() -> None:
 
     names = {command.name for command in bare_metal_app.registered_commands}
-    assert "request-introduction" in names
+    # The payment purchase and the introduction request are top-level commands.
+    assert {"request-introduction", "buy"} <= names
     (contact,) = [
         group for group in settlement_app.registered_groups if group.name == "contact"
     ]

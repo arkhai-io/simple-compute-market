@@ -2,11 +2,39 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
+
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_core import MarketDomainContract
+from market_core.schemas import (
+    Agreement,
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
+from market_identity import Identity
+from market_negotiation_runtime import (
+    Acceptance,
+    AgreementTerms,
+    NegotiationDomainHooks,
+    NegotiationRuntime,
+    NegotiationStateError,
+    NegotiationTerms,
+    OfferUnfulfillableError,
+    OpeningRecord,
+    ResolvedNegotiation,
+    RoundEvaluation,
+    RoundRequest,
+)
+from market_policy.scalar_policies import _amount_from_proposal
 
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
@@ -26,36 +54,15 @@ from arkhai_apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
-from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
-from market_core import MarketDomainContract
+from arkhai_apicredits.settlement import validate_payer_account
 from market_core.schemas import (
     ProvisionTerms,
-    SettlementObligation,
-    SettlementOption,
-    SettlementPlan,
-    SettlementSelection,
 )
-from market_hosted_settlement import default_hosted_selection_dispatch
-from market_identity import Identity
-from market_negotiation_runtime import (
-    Acceptance,
-    AgreementTerms,
-    NegotiationDomainHooks,
-    NegotiationRuntime,
-    NegotiationStateError,
-    NegotiationTerms,
-    OpeningRecord,
-    ResolvedNegotiation,
-    RoundEvaluation,
-    OfferUnfulfillableError,
-    RoundRequest,
-)
-from market_policy.scalar_policies import _amount_from_proposal
 
 logger = logging.getLogger(__name__)
 
 AcceptedObligationDispatch = Mapping[
-    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
 ]
 
 
@@ -181,7 +188,7 @@ def _proposal_from_amount(
     return base
 
 
-def _hosted_policy_state(
+def _selected_policy_state(
     listing: Mapping[str, Any],
     proposal: Mapping[str, Any] | None,
     admitted_mechanisms: Collection[str],
@@ -191,16 +198,15 @@ def _hosted_policy_state(
     raw_selection = proposal.get("settlement_selection")
     if raw_selection is None:
         return None
-    if not isinstance(raw_selection, Mapping) or set(raw_selection) != {
-        "mechanism",
-        "option_id",
-        "expiration_unix",
-    }:
-        raise NegotiationStateError("hosted settlement selection is not exact")
+    if not isinstance(raw_selection, Mapping):
+        raise NegotiationStateError("selected settlement selection is not exact")
+    required = {"mechanism", "option_id", "expiration_unix"}
+    if not required <= set(raw_selection) or set(raw_selection) - required - {"params"}:
+        raise NegotiationStateError("selected settlement selection is not exact")
     try:
         selection = SettlementSelection.model_validate(raw_selection)
     except (TypeError, ValueError) as exc:
-        raise NegotiationStateError("hosted settlement selection is invalid") from exc
+        raise NegotiationStateError("selected settlement selection is invalid") from exc
     if selection.mechanism not in admitted_mechanisms:
         raise NegotiationStateError(
             "exact settlement selection uses an unsupported mechanism"
@@ -233,7 +239,7 @@ def _hosted_policy_state(
                 ) from exc
     if len(matches) != 1:
         raise NegotiationStateError(
-            "hosted settlement selection no longer exact-matches the trusted listing"
+            "selected settlement selection no longer exact-matches the trusted listing"
         )
     return {
         "accepted_settlement_selection": selection.model_dump(mode="json"),
@@ -241,7 +247,7 @@ def _hosted_policy_state(
     }
 
 
-def _preserve_hosted_round_selection(
+def _preserve_selected_round_selection(
     listing: Mapping[str, Any],
     history: Sequence[Any],
     admitted_mechanisms: Collection[str],
@@ -251,7 +257,7 @@ def _preserve_hosted_round_selection(
         if history and isinstance(history[0].proposal, Mapping)
         else None
     )
-    state = _hosted_policy_state(listing, opening_proposal, admitted_mechanisms)
+    state = _selected_policy_state(listing, opening_proposal, admitted_mechanisms)
     pinned = state["accepted_settlement_selection"] if state is not None else None
     buyer_rounds = [
         (index, item)
@@ -289,7 +295,7 @@ def _acceptance_policy_state(
     acceptance: Acceptance,
     admitted_mechanisms: Collection[str],
 ) -> Mapping[str, Any]:
-    pinned = _hosted_policy_state(
+    pinned = _selected_policy_state(
         acceptance.listing_record,
         acceptance.pinned_proposal,
         admitted_mechanisms,
@@ -306,7 +312,7 @@ def _acceptance_policy_state(
         selected = candidate.get("accepted_settlement_selection")
         if selected is not None and selected != pinned["accepted_settlement_selection"]:
             raise NegotiationStateError(
-                "hosted settlement policy state changed after opening"
+                "selected settlement policy state changed after opening"
             )
     return pinned
 
@@ -392,15 +398,32 @@ def _accepted_selection_artifacts(
         or accepted.mechanism != advertised.mechanism
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    build_obligation = dispatch.get(accepted.mechanism)
-    if build_obligation is None:
+    if accepted.mechanism == ARKHAI_PAYMENTS_MECHANISM:
+        params = accepted.params
+        if not isinstance(params, Mapping) or set(params) != {"payer_account"}:
+            raise OfferUnfulfillableError("payments_payer_account_missing")
+        try:
+            validate_payer_account(params.get("payer_account"))
+        except ValueError as exc:
+            raise OfferUnfulfillableError("payments_payer_account_invalid") from exc
+    if accepted.mechanism not in dispatch:
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
+    build_obligation = dispatch[accepted.mechanism]
+    if build_obligation is None:
+        return {
+            "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),
+            "_agreement_settlement_option": advertised.model_dump(
+                mode="json", exclude_none=True
+            ),
+        }
+    if accepted.expiration_unix is None:
+        raise OfferUnfulfillableError("settlement_expiration_required")
     quantity = provision_quantity(provision_terms)
     if quantity is None:
         raise OfferUnfulfillableError("api_credit_quantity_unavailable")
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
-        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+        raise OfferUnfulfillableError("selected_listing_identity_unavailable")
     try:
         built = build_obligation(
             advertised.model_dump(mode="json"),
@@ -414,10 +437,10 @@ def _accepted_selection_artifacts(
             },
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if built.amount is not None:
         if agreed_amount != built.amount:
-            raise OfferUnfulfillableError("hosted_amount_not_quantity_scaled")
+            raise OfferUnfulfillableError("selected_amount_not_quantity_scaled")
     elif agreed_amount:
         raise OfferUnfulfillableError("selection_amount_not_negotiable")
     service_terms = {
@@ -438,17 +461,103 @@ def _accepted_selection_artifacts(
             obligations=[SettlementObligation.model_validate(built.obligation)],
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     return {
-        "settlement_selection": accepted.model_dump(mode="json"),
+        "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),
         "settlement_plan": plan.model_dump(mode="json"),
+        "_agreement_settlement_option": advertised.model_dump(
+            mode="json", exclude_none=True
+        ),
     }
+
+
+def _json_compatible(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return _json_compatible(value.model_dump(mode="json", exclude_none=True))
+    if isinstance(value, Mapping):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value.isoformat()
+    return value
+
+
+def _with_agreement(
+    acceptance: Acceptance,
+    artifacts: dict[str, Any],
+    settlement_artifacts_builder: Callable[[Mapping[str, Any]], dict[str, Any]]
+    | None = None,
+) -> dict[str, Any]:
+    settlement_raw = artifacts.pop("_agreement_settlement_option", None)
+    settlement = (
+        SettlementOption.model_validate(settlement_raw)
+        if settlement_raw is not None
+        else None
+    )
+    plan = artifacts.get("settlement_plan")
+    asset = settlement.asset if settlement is not None else None
+    if asset is None and isinstance(plan, Mapping):
+        obligations = plan.get("obligations")
+        if (
+            isinstance(obligations, list)
+            and obligations
+            and isinstance(obligations[0], Mapping)
+        ):
+            raw_asset = obligations[0].get("asset")
+            asset = raw_asset if isinstance(raw_asset, str) else None
+    provision = acceptance.terms.wire
+    if provision is None and hasattr(acceptance.terms.decoded, "model_dump"):
+        provision = acceptance.terms.decoded.model_dump(mode="json", exclude_none=True)
+    provision_terms = (
+        _json_compatible(provision) if isinstance(provision, Mapping) else None
+    )
+    listing_bytes = json.dumps(
+        _json_compatible(acceptance.listing_record),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    if acceptance.accepted_at is None or acceptance.agreement.start_utc is None:
+        raise RuntimeError("accepted Agreement lacks fixed acceptance timestamps")
+    agreement = Agreement(
+        negotiation_id=acceptance.negotiation_id,
+        listing_id=acceptance.listing_id,
+        listing_hash=hashlib.sha256(listing_bytes).hexdigest(),
+        buyer=acceptance.buyer_principal.model_dump(mode="json"),
+        seller=acceptance.seller_principal.model_dump(mode="json"),
+        settlement=settlement,
+        settlement_params=(
+            SettlementSelection.model_validate(artifacts["settlement_selection"]).params
+            if isinstance(artifacts.get("settlement_selection"), Mapping)
+            else None
+        ),
+        amount=acceptance.agreed_amount,
+        asset=asset,
+        duration_seconds=acceptance.agreement.duration_seconds,
+        start_utc=acceptance.agreement.start_utc,
+        provision_terms=provision_terms,
+        accepted_at=acceptance.accepted_at.isoformat().replace("+00:00", "Z"),
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
+    artifacts["agreement"] = agreement
+    if settlement is not None and settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM:
+        if settlement_artifacts_builder is None:
+            raise RuntimeError("API-credit payments mandate builder is not composed")
+        artifacts["settlement_data"] = settlement_artifacts_builder(
+            agreement.model_dump(mode="json", exclude_none=True)
+        )
+    artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
+    return artifacts
 
 
 def _build_response_artifacts(
     acceptance: Acceptance,
     accepted: bool,
     dispatch: AcceptedObligationDispatch,
+    settlement_artifacts_builder: Callable[[Mapping[str, Any]], dict[str, Any]]
+    | None = None,
 ) -> Mapping[str, Any]:
     state = _acceptance_policy_state(acceptance, dispatch)
     selection = state.get("accepted_settlement_selection")
@@ -464,11 +573,9 @@ def _build_response_artifacts(
             listing=acceptance.listing_record,
             provision_terms=acceptance.terms.decoded,
         )
-        return (
-            artifacts
-            if accepted
-            else {"settlement_selection": artifacts["settlement_selection"]}
-        )
+        if accepted:
+            return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
+        return {"settlement_selection": artifacts["settlement_selection"]}
     artifacts = build_api_credit_accepted_artifacts(
         buyer_principal=acceptance.buyer_principal,
         seller_principal=acceptance.seller_principal,
@@ -477,7 +584,7 @@ def _build_response_artifacts(
         uses_scalar_amount=acceptance.uses_scalar_amount,
     )
     if accepted:
-        return artifacts
+        return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
     accepted_proposal = artifacts.get("accepted_escrow_proposal")
     return (
         {"accepted_escrow_proposal": accepted_proposal}
@@ -535,7 +642,11 @@ async def _place_quota_hold(
 ) -> None:
     """Place the API-credit domain's best-effort quota hold after acceptance."""
     state = _acceptance_policy_state(acceptance, dispatch)
-    if state.get("accepted_settlement_selection") is not None:
+    selection = state.get("accepted_settlement_selection")
+    if (
+        isinstance(selection, Mapping)
+        and selection.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
+    ):
         return
 
     from core_storefront.stage_log import stage_event
@@ -617,13 +728,13 @@ def build_api_credit_negotiation_runtime(
     *,
     seller_round_hook: ApiCreditsSellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
+    settlement_artifacts_builder: Callable[[Mapping[str, Any]], dict[str, Any]]
+    | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with API-credit codecs and effects."""
 
     dispatch = (
-        accepted_obligation_dispatch
-        if accepted_obligation_dispatch is not None
-        else default_hosted_selection_dispatch()
+        accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
     )
 
     async def resolve_opening(
@@ -656,7 +767,7 @@ def build_api_credit_negotiation_runtime(
             raise NegotiationStateError(
                 f"Seller's order {listing_id} is gone from local DB"
             )
-        binding = _hosted_policy_state(
+        binding = _selected_policy_state(
             record,
             (
                 thread.get("buyer_escrow_proposal")
@@ -674,7 +785,7 @@ def build_api_credit_negotiation_runtime(
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        history, hosted_state = _preserve_hosted_round_selection(
+        history, selected_state = _preserve_selected_round_selection(
             request.listing_record,
             request.history,
             dispatch,
@@ -698,8 +809,8 @@ def build_api_credit_negotiation_runtime(
             ),
         )
         state = dict(result.intermediate or {})
-        if hosted_state is not None:
-            state.update(hosted_state)
+        if selected_state is not None:
+            state.update(selected_state)
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),
@@ -719,9 +830,9 @@ def build_api_credit_negotiation_runtime(
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     def storefront_is_paused() -> bool:
-        from apicredits_storefront.server import is_globally_paused
+        import apicredits_storefront.container as _container
 
-        return bool(is_globally_paused())
+        return _container.trading_pause.paused
 
     from core_storefront.stage_log import stage_event
 
@@ -738,7 +849,10 @@ def build_api_credit_negotiation_runtime(
         proposal_from_amount=_proposal_from_amount,
         agreement_terms=_agreement,
         build_artifacts=lambda acceptance, accepted: _build_response_artifacts(
-            acceptance, accepted, dispatch
+            acceptance,
+            accepted,
+            dispatch,
+            settlement_artifacts_builder,
         ),
         decision_wire=lambda decision: decision.to_dict(),
         listing_is_live=lambda record: (

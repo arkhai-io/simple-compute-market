@@ -12,19 +12,13 @@ Physical Resource may back VM and bare-metal offers only when both listings
 use the same stable physical-host identity and their Resource Pools explicitly
 declare the relevant `deliverable_modes`.
 
-Whole-host listings may publish Alkahest and hosted Stripe fiat as independent
-settlement alternatives. Hosted options use one exact `card.v1`, US/USD
-`us_bank_transfer.v1`, or US/USD `us_ach_debit.v1` profile; slow or interactive
-payment never reserves, allocates, or provisions the host before authoritative
-funding. See the
+Whole-host listings may publish Alkahest settlement options. See the
 [`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for
-payment behavior and
-[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
-the distinction between shipped support and completed external qualification.
+buyer-side escrow requirements.
 
 ## Prerequisites
 
-- Docker/Podman with Compose v2 on a Linux host.
+- Docker/Podman with Compose v2.24 or later on a Linux host.
 - The staged internal wheels and the images built from this checkout.
 - Canonical marketplace principals and matching role-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
@@ -32,9 +26,9 @@ the distinction between shipped support and completed external qualification.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration. Hosted-only roles require the signed released hosted manifest/client/API capability pins, public authority trust and environment scope, seller account binding, exact profiles/currency/country/condition policy, and no wallet/RPC secret. Alkahest roles require the ordinary chain configuration and funded public seller address. Never put a wallet private key, Stripe credential, payer binding, or provider object in Compose or this document.
+- One strict shared settlement configuration. Alkahest roles require chain configuration, the funded public seller address, and the wallet key in its own credential file. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose or this document.
 
-The installed `arkhai-bare-metal-buyer` contribution supplies the `market bare-metal` discovery, negotiation, hosted start/status/reclaim, and recovery commands. A running seller stack is not end-to-end evidence until that public path also observes authenticated access, teardown, and access revocation against a disposable host.
+The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
 ## Build the images
 
@@ -54,6 +48,9 @@ Create an operator-owned inventory file outside the repository:
 [bare_metal_nodes]
 host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
 ```
+
+The provisioning service registers every host entry in this file; the section
+name is yours to choose and means nothing to it. List only hosts to sell.
 
 Create a Resource Pool document outside the repository. The pool id must match
 the inventory host's `pool_id`; executor connectivity remains service-owned:
@@ -142,12 +139,11 @@ export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
 export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
 export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
-export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
+export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>   # Alkahest only
+export BARE_METAL_STOREFRONT_CHAINS_JSON='{"<chain>":{"rpc_url":"<rpc-url>"}}'   # Alkahest only
+export BARE_METAL_STOREFRONT_WALLET_ENV_FILE=/run/operator/wallet.env   # Alkahest only; holds BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
 export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
 export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
-export BARE_METAL_FUNDING_DEADLINES_JSON='{"card.v1":900,"us_bank_transfer.v1":86400,"us_ach_debit.v1":432000}'
-export BARE_METAL_OFFER_EXPIRES_AT=<UTC-timestamp>
-export BARE_METAL_FULFILLMENT_DEADLINE=<UTC-timestamp>
 export BARE_METAL_MAX_DURATION_SECONDS=7200
 
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
@@ -272,7 +268,7 @@ reason), hold, refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+The storefront refuses to start without its settlement configuration. While that configuration has an Alkahest section, enabled or not, the seller address, the chains, and the wallet file are required, since a disabled section still services accepted deals; with no Alkahest section they must be absent. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
 
 ### Resetting the storefront database
 

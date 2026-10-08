@@ -14,11 +14,9 @@ then did not run at all, because a collection error takes the file with it.
 
 from __future__ import annotations
 
-import re
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from conftest_wheels import APICREDITS, REPO, _members, _requirements, wheels
 
@@ -89,12 +87,18 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     correctly moved.
     """
     expected = {
-        "domain": {"arkhai-core"},
-        "buyer": {"arkhai-apicredits-domain", "arkhai-core", "arkhai-core-buyer"},
+        "domain": {"arkhai-core", "arkhai-kit-arkhai-payments"},
+        "buyer": {
+            "arkhai-apicredits-domain",
+            "arkhai-core",
+            "arkhai-core-buyer",
+            "arkhai-kit-arkhai-payments",
+        },
         "storefront": {
             "arkhai-apicredits-domain",
             "arkhai-core",
             "arkhai-core-storefront",
+            "arkhai-kit-arkhai-payments",
         },
     }
     for role, names in expected.items():

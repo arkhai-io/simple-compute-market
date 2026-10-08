@@ -113,10 +113,8 @@ def _shipped_identity_tables():
     placeholder the storefront refuses until an operator states one.
     """
     toml_files = (
-        "config.stripe-fiat-ed25519.toml",
         "domains/vms/storefront/storefront.alice.toml",
         "domains/vms/storefront/storefront.bob.toml",
-        "e2e-tests/config/hosted-storefront.toml",
     )
     for name in toml_files:
         document = tomllib.loads((REPO / name).read_text())
@@ -161,15 +159,14 @@ def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
     settlement = _section(definition, "Settlement")
     assert settlement["additionalProperties"] is False
     assert _allowed(
-        settlement, "schema_version", "priority", "alkahest", "stripe", "contact"
+        settlement, "schema_version", "priority", "alkahest", "arkhai_payments", "contact"
     )
 
 
-def test_buyer_only_stripe_fields_are_refused_for_the_seller(definition) -> None:
-    stripe = _field(_section(definition, "Settlement"), "stripe")
-    assert stripe["additionalProperties"] is False
-    assert _withheld(stripe, "off_session_policy", "authorization_journal_path")
-    assert _field(stripe, "account_ref") is not False
+def test_payment_settings_are_closed_to_unknown_fields(definition) -> None:
+    payments = _field(_section(definition, "Settlement"), "arkhai_payments")
+    assert payments["additionalProperties"] is False
+    assert _field(payments, "service_url") is not False
 
 
 def test_definition_carries_no_defaults_references_markers_or_exact_names(definition) -> None:

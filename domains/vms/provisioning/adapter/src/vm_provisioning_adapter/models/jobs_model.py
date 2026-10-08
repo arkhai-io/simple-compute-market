@@ -1,12 +1,9 @@
-"""Internal-only data models for the Ansible job system.
+"""The parameters of a VM job.
 
-This file retains only the server-internal DTOs that are never exposed
-in the OpenAPI schema.
-
-Naming conventions:
-  - ``AnsibleJobParams``  — internal DTO built from any typed request and passed
-    to ``AnsibleService``.  Not exposed in the OpenAPI schema.
-  - ``AnsibleRunResult``  — parsed Ansible playbook output; also internal only.
+``VmJobParams`` is what every VM job, however submitted, stores with the job
+authority as its opaque parameters, and what the VM codec turns into the
+VM-operations playbook's variables. It is never serialised into the OpenAPI
+schema.
 """
 
 from __future__ import annotations
@@ -15,21 +12,12 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
-# ---------------------------------------------------------------------------
-# Internal DTO — the parameters of one Ansible job
-# ---------------------------------------------------------------------------
-
-
 @dataclass
-class AnsibleJobParams:
-    """Structured representation of any Ansible job request for internal use.
+class VmJobParams:
+    """One VM job's parameters.
 
-    This is the single internal type that flows from ``AnsibleJobService``
-    through to ``AnsibleService``.  Typed HTTP request models (in
-    ``vm_request_model.py``) each expose a conversion function that
-    produces one of these.
-
-    Never serialised directly into the OpenAPI schema.
+    Typed HTTP request models (in ``vm_request_model.py``) and the VM
+    fulfillment provider each build one of these.
     """
 
     host_id: str
@@ -65,7 +53,7 @@ class AnsibleJobParams:
     # relay_addr/relay_port/relay_token are filled in at execution and are
     # never written to the job's stored parameters — those are returned by the
     # job endpoints, and a rotated token must reach a retry of a job accepted
-    # before the rotation. See services/relay_execution.py.
+    # before the rotation. See the relay execution resolver.
     relay_id: Optional[str] = None
     vm_remote_port: Optional[int] = None
     relay_addr: Optional[str] = None
@@ -80,13 +68,6 @@ class AnsibleJobParams:
     # Deal linkage — on-chain escrow UID for recovery queries
     escrow_uid: Optional[str] = None
 
-    # Bare-metal access jobs (server-internal, used by node_* actions)
-    physical_host_id: Optional[str] = None
-    ssh_user: Optional[str] = None
-    ssh_public_key: Optional[str] = None
-    access_ref: Optional[dict[str, Any]] = None
-    bare_metal_reclaim_policy: Optional[str] = None
-
     # Retry policy (per-job override)
     max_retries: Optional[int] = None
 
@@ -100,22 +81,3 @@ class AnsibleJobParams:
             self.executor_target = self.vm_target or self.host_id
         if not self.vm_action:
             self.vm_action = self.executor_action
-
-
-# ---------------------------------------------------------------------------
-# Parsed result returned to AnsibleJobService after a playbook completes.
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class AnsibleRunResult:
-    """Parsed result returned to AnsibleJobService after a playbook completes."""
-
-    stdout: str
-    stderr: str
-    ssh_port: Optional[str]
-    tenant_user: Optional[str]
-    host_ip: Optional[str]
-    ssh_command: Optional[str]
-    ansible_result: Optional[dict] = None
-    process_id: Optional[int] = None

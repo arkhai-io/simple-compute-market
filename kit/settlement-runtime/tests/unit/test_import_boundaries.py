@@ -4,7 +4,6 @@ import ast
 import sys
 from pathlib import Path
 
-
 PACKAGE = Path(__file__).parents[2] / "src" / "market_settlement_runtime"
 
 

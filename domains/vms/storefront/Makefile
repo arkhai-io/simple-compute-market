@@ -15,14 +15,8 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_REPO_ROOT := ../../..
-HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 
-.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration verify-hosted-release
-
-verify-hosted-release:
-	$(VERIFY_HOSTED_RELEASE)
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
 init: reinit ## Resolve deps from verified wheels and create .venv.
 

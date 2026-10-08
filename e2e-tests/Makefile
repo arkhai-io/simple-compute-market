@@ -20,7 +20,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal e2e-vm-down hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal e2e-vm-down
 
 # -----------------------------------------------------------------------
 # Setup
@@ -48,34 +48,13 @@ build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
-
-hosted-preflight:
-	$(MAKE) -C .. hosted-preflight
-
-hosted-start:
-	$(MAKE) -C .. hosted-compose-start
-
-hosted-restart:
-	$(MAKE) -C .. hosted-compose-restart
-
-hosted-clean:
-	$(MAKE) -C .. hosted-compose-clean
-
-
-hosted-stripe-test:
-	$(MAKE) -C .. hosted-stripe-test
-
-hosted-stripe-test-stop:
-	$(MAKE) -C .. hosted-stripe-test-stop
-
-# -----------------------------------------------------------------------
-# Tests — local
-# -----------------------------------------------------------------------
-
 test:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
 	.venv/bin/pytest $(PYTEST_ARGS)
+
+test-unit: reinit ## Unit tests only; no stack or external services
+	.venv/bin/pytest tests/unit $(PYTEST_ARGS)
 
 # MODULE is a pytest marker expression, so it may be `a or b`.
 test-module:
@@ -112,7 +91,7 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_listing_shapes or e2e_vm_introduction
+              or e2e_credits_deal or e2e_credits_payment_deal or e2e_listing_shapes or e2e_vm_introduction
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
 E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction

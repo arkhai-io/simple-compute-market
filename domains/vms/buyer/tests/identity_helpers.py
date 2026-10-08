@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
+import json
 import time
 from typing import Any
 
+from market_core.schemas import Agreement
 from market_identity import (
     Ed25519Signer,
     ResponseEnvelope,
@@ -18,6 +21,50 @@ SELLER_TRUST = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
 
 def seller_principals() -> TrustedIdentitySet:
     return SELLER_TRUST
+
+def with_accepted_agreement(request: Any, body: dict[str, Any]) -> dict[str, Any]:
+    if body.get("action") != "accept" or body.get("agreement") is not None:
+        return body
+
+    request_body = (
+        json.loads(request.data.decode("utf-8")) if getattr(request, "data", None) else {}
+    )
+    negotiation_id = body.get("negotiation_id") or request.full_url.rstrip("/").rsplit("/", 1)[-1]
+    listing_id = request_body.get("listing_id") or "L-1"
+    provision_terms = body.get("accepted_provision_terms") or request_body.get("provision_terms")
+    if not isinstance(provision_terms, dict):
+        provision_terms = None
+    payload = provision_terms.get("payload", {}) if provision_terms else {}
+    duration = payload.get("duration_seconds", 0) if isinstance(payload, dict) else 0
+    start_utc = payload.get("start_utc") if isinstance(payload, dict) else None
+    accepted_at = "2025-01-01T00:00:00Z"
+    if not isinstance(start_utc, str) or start_utc.strip().lower() in {"", "now"}:
+        start_utc = accepted_at
+    proposal = body.get("proposal")
+    fields = proposal.get("fields") if isinstance(proposal, dict) else None
+    amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+    buyer = request_body.get("buyer_principal") or BUYER_SIGNER.identity.model_dump(mode="json")
+    seller = SELLER_SIGNER.identity.model_dump(mode="json")
+    agreement = Agreement(
+        negotiation_id=str(negotiation_id),
+        listing_id=str(listing_id),
+        listing_hash="0" * 64,
+        buyer=buyer,
+        seller=seller,
+        amount=amount,
+        duration_seconds=int(duration),
+        start_utc=start_utc,
+        provision_terms=provision_terms,
+        accepted_at=accepted_at,
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
+    return {
+        **body,
+        "buyer_principal": buyer,
+        "seller_principal": seller,
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(agreement_bytes).decode("ascii"),
+    }
 
 
 def signed_response_headers(

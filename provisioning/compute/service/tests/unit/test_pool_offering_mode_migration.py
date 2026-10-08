@@ -13,7 +13,8 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _migrate_executor_identities_and_pool_modes,
 )
-from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig
+from compute_provisioning_service.db.models import JobRecord
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from market_fulfillment.db import SettlementRecord
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_site.db import (
@@ -187,13 +188,13 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         )
         db.add_all(
             (
-                AnsibleJob(
+                JobRecord(
                     id="job-proved",
                     status="queued",
                     params={"vm_host": "kvm1", "vm_action": "create"},
                     capacity_reservation_id="reservation-proved",
                 ),
-                AnsibleJob(
+                JobRecord(
                     id="job-unknown",
                     status="running",
                     params={"vm_action": "unknown"},
@@ -208,8 +209,8 @@ def test_legacy_executor_identity_backfills_proof_and_quarantines_unknown_rows()
         unknown = db.get(CapacityReservation, "reservation-unknown")
         settlement = db.get(SettlementRecord, "reservation-proved")
         unknown_settlement = db.get(SettlementRecord, "reservation-unknown")
-        proved_job = db.get(AnsibleJob, "job-proved")
-        unknown_job = db.get(AnsibleJob, "job-unknown")
+        proved_job = db.get(JobRecord, "job-proved")
+        unknown_job = db.get(JobRecord, "job-unknown")
 
         assert proved.offering_mode == "vm"
         assert settlement.scheduling_requirements["offering_mode"] == "vm"
@@ -345,7 +346,7 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
         )
         db.add_all(
             (
-                AnsibleJob(
+                JobRecord(
                     id="job-recorded-kind",
                     status="queued",
                     params={
@@ -356,7 +357,7 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
                     action_kind="provision",
                     idempotency_key="provision-multi-evidence",
                 ),
-                AnsibleJob(
+                JobRecord(
                     id="job-vm-host",
                     status="queued",
                     params={"vm_host": "kvm1", "vm_action": "remove"},
@@ -378,7 +379,7 @@ def test_executor_backfill_combines_all_representable_durable_evidence():
             SettlementRecord,
             "reservation-multi-evidence",
         )
-        jobs = db.query(AnsibleJob).order_by(AnsibleJob.id).all()
+        jobs = db.query(JobRecord).order_by(JobRecord.id).all()
         assert reservation.offering_mode == "vm"
         assert reservation.state == "reserved"
         assert settlement.scheduling_requirements["offering_mode"] == "vm"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -11,8 +12,11 @@ from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
 )
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
+
+import market_storefront.container as _container
 
 from market_storefront.services.capacity_client import (
     listing_source_projection,
@@ -358,15 +362,36 @@ async def _send_webhook(
         return {"action": "webhook", "status": "failed", "error": str(exc)}
 
 
+def _selects_payments(thread: dict[str, Any]) -> bool:
+    raw = thread.get("agreement_bytes")
+    if not isinstance(raw, bytes):
+        return False
+    try:
+        agreement = json.loads(raw)
+    except ValueError:
+        return False
+    selected = agreement.get("settlement") if isinstance(agreement, dict) else None
+    return isinstance(selected, dict) and selected.get("mechanism") == ARKHAI_PAYMENTS_MECHANISM
+
+
 async def _refund(
     db: Any,
     ctx: FulfillmentFailureContext,
     listing_id: str | None,
 ) -> dict[str, Any]:
+    thread = await _load_thread_for_escrow(db, ctx.escrow_uid) or {}
+    if _selects_payments(thread):
+        # A payment deal is refunded by reversing its held payment, and only
+        # when nothing was delivered; the coordinator enforces both.
+        coordinator = getattr(
+            _container.resolved_settlement_composition, "payments_coordinator", None
+        )
+        if coordinator is None:
+            return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}
+        return await coordinator.refund_before_delivery(str(thread["negotiation_id"]))
     if not listing_id:
         return {"action": "refund", "status": "skipped", "reason": "listing_id_unknown"}
 
-    thread = await _load_thread_for_escrow(db, ctx.escrow_uid) or {}
     try:
         Identity.model_validate(thread.get("buyer_principal"))
     except (TypeError, ValueError):

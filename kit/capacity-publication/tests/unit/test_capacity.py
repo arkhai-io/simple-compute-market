@@ -23,7 +23,9 @@ class FakeSite:
         self.reserve = AsyncMock(
             return_value={"capacity_reservation_id": "r-1", "resource_id": "gpu-1"}
         )
-        self.commit = AsyncMock()
+        self.commit = AsyncMock(
+            return_value={"capacity_reservation_id": "r-1", "lease_end_utc": "2099-01-01 01:00"}
+        )
         self.release = AsyncMock(return_value={"capacity_reservation_id": "r-1"})
 
     async def snapshot(self):
@@ -68,7 +70,7 @@ async def test_bound_effects_never_fan_out_or_use_reservation_cache(runtime):
     binding = CapacityBinding("site-b", "vm", "pool-1")
 
     reserved = await composed.reserve(binding, claim={"offering_mode": "vm"})
-    await composed.commit(
+    committed = await composed.commit(
         binding,
         resource_id="gpu-1",
         capacity_reservation_id="r-after-restart",
@@ -79,6 +81,8 @@ async def test_bound_effects_never_fan_out_or_use_reservation_cache(runtime):
     )
 
     assert reserved["site"] == "site-b"
+    # The site's recorded reservation, tagged with the bound site.
+    assert (committed["site"], committed["lease_end_utc"]) == ("site-b", "2099-01-01 01:00")
     assert released["site"] == "site-b"
     remotes["site-a"].reserve.assert_not_awaited()
     remotes["site-a"].commit.assert_not_awaited()

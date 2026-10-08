@@ -23,7 +23,8 @@ from market_fulfillment import (
     SettlementRequirement,
     SettlementResource,
 )
-from market_resource_pools import PoolCreate, ResourcePoolService
+from market_resource_pools import ResourcePoolService
+from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.db import CapacityReservationDebit

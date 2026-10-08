@@ -2,36 +2,41 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
-import time
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
     EvaluateSettleRequest,
     EvaluateSettleResponse,
+    RefundSettlementResponse,
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
     VerifyEscrowRequest,
     VerifyEscrowResponse,
 )
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
-from market_identity import EMPTY_BODY, Identity
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_identity import Identity
 from market_settlement_runtime import (
-    HostedSettlementRouteError,
-    HostedSettlementStart,
+    SettlementAdminRouteError,
+    SettlementAdminRouteService,
 )
+from storefront_client.settlement_routes import SETTLE_STATUS
 
 import market_storefront.container as _container
-from market_storefront.hosted_routes import build_vm_hosted_route_service
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
-from market_storefront.models.settle_models import VmSettleRequest
+from market_storefront.models.settle_models import (
+    VmPaymentsSettleRequest,
+    VmSettleRequest,
+)
+from market_storefront.payment_settlement import PaymentSettlementError
 from market_storefront.services.admin_settle_service import AdminSettleService
 from market_storefront.settlement_composition import serialize_settlement_job
 from market_storefront.utils.escrow_verification import EscrowVerificationError
@@ -59,7 +64,7 @@ class SettleController:
     async def settle_escrow(
         self,
         escrow_uid: str,
-        body: VmSettleRequest,
+        body: VmSettleRequest | VmPaymentsSettleRequest,
         request: Request,
     ) -> Any:
         thread = await self._db.load_negotiation_thread_row(
@@ -75,6 +80,40 @@ class SettleController:
             request,
             negotiation_thread=thread,
         )
+        agreement_raw = thread.get("agreement_bytes")
+        agreement = json.loads(agreement_raw) if isinstance(agreement_raw, bytes) else {}
+        selected = agreement.get("settlement") or {}
+        if selected.get("mechanism") == ARKHAI_PAYMENTS_MECHANISM:
+            if not isinstance(body, VmPaymentsSettleRequest) or escrow_uid != body.negotiation_id:
+                raise HTTPException(status_code=400, detail="Arkhai settlement uses negotiation ID only")
+            composition = _container.resolved_settlement_composition
+            coordinator = getattr(composition, "payments_coordinator", None)
+            if coordinator is None:
+                raise HTTPException(status_code=503, detail="Arkhai settlement is unavailable")
+            if auth.exact_retry and auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            try:
+                result = await coordinator.start(body.negotiation_id, thread)
+            except PaymentSettlementError as exc:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            payload = serialize_settlement_job(result.payload) if "created_at" in result.payload else dict(result.payload)
+            # Job serialization emits a fixed shape; the neutral settlement
+            # fields come from the coordinator's result.
+            payload.update(
+                {
+                    key: result.payload[key]
+                    for key in ("negotiation_id", "escrow_uid", "settlement_ref", "status", "retryable")
+                    if key in result.payload
+                }
+            )
+            payload["buyer_principal"] = Identity.model_validate(thread["buyer_principal"]).model_dump(mode="json")
+            payload["seller_principal"] = composition.local_principal.model_dump(mode="json")
+            # The neutral fields are a cross-domain contract; refuse to emit a
+            # payload that would not parse as one.
+            AgreementSettleResponse.model_validate(payload)
+            return JSONResponse(content=payload, status_code=result.status_code)
+        if not isinstance(body, VmSettleRequest):
+            raise HTTPException(status_code=400, detail="Alkahest settlement requires EVM inputs")
         if auth.exact_retry:
             if auth.recorded_outcome is None:
                 raise HTTPException(status_code=409, detail="request retry is pending")
@@ -121,7 +160,7 @@ class SettleController:
         if mechanism != "alkahest.v1":
             raise HTTPException(
                 status_code=400,
-                detail="hosted obligations use /api/v1/settlements",
+                detail="the selected mechanism does not settle through this route",
             )
         accepted_chain = proposal.get("chain_name")
         if not isinstance(accepted_chain, str) or not accepted_chain:
@@ -203,7 +242,7 @@ class SettleController:
         buyer_principal = Identity.model_validate((thread or {}).get("buyer_principal"))
         auth = await buyer_auth._verify(
             request,
-            "settle_status",
+            SETTLE_STATUS.operation,
             escrow_uid,
             buyer_principal,
         )
@@ -221,109 +260,6 @@ class SettleController:
         return SettleStatusResponse(**serialized)
 
 
-@cbv(settlements_router)
-class SettlementsController:
-    def __init__(
-        self,
-        db: Any = Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
-    ) -> None:
-        self._db = db
-
-    @staticmethod
-    def _composition():
-        composition = _container.resolved_settlement_composition
-        if composition is None or "fiat.stripe.v1" not in composition.mechanism_clients:
-            raise HTTPException(
-                status_code=503,
-                detail="hosted settlement runtime is unavailable",
-            )
-        return composition
-
-    def _service(self):
-        async def authorize(
-            request_context: Request,
-            operation: str,
-            resource_id: str,
-            expected_principal: Identity,
-            body: Any,
-        ):
-            return await buyer_auth._verify(
-                request_context,
-                operation,
-                resource_id,
-                expected_principal,
-                dict(body) if body is not None else EMPTY_BODY,
-            )
-
-        return build_vm_hosted_route_service(
-            composition=self._composition(),
-            sqlite_client=self._db,
-            authorize_request=authorize,
-        )
-
-    @staticmethod
-    def _raise_route_error(exc: HostedSettlementRouteError) -> None:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
-
-    @settlements_router.post(
-        "/settlements",
-        response_model=SettlementPublicResponse,
-        summary="Start one accepted hosted settlement obligation",
-    )
-    async def start(
-        self,
-        body: HostedSettlementStart,
-        request: Request,
-    ) -> SettlementPublicResponse:
-        try:
-            projected = await self._service().start(request, body)
-        except HostedSettlementRouteError as exc:
-            self._raise_route_error(exc)
-        return SettlementPublicResponse.model_validate(projected)
-
-    @settlements_router.get(
-        "/settlements/{settlement_ref}",
-        response_model=SettlementPublicResponse,
-        summary="Retrieve hosted funding and fulfillment status",
-    )
-    async def status(
-        self,
-        settlement_ref: str,
-        request: Request,
-    ) -> SettlementPublicResponse:
-        try:
-            projected = await self._service().status(request, settlement_ref)
-        except HostedSettlementRouteError as exc:
-            self._raise_route_error(exc)
-        return SettlementPublicResponse.model_validate(projected)
-
-    @settlements_router.post(
-        "/settlements/{settlement_ref}/reclaim",
-        response_model=SettlementPublicResponse,
-        summary="Reclaim one eligible expired hosted settlement",
-    )
-    async def reclaim(
-        self,
-        settlement_ref: str,
-        request: Request,
-        mechanism_options: dict[str, Any] | None = Body(default=None),
-    ) -> SettlementPublicResponse:
-        """Reclaim one eligible expired hosted settlement.
-
-        The body is the mechanism's own vocabulary for this one reclaim -- a
-        push-funded profile needs somewhere to address the payer's return --
-        so it is relayed opaquely rather than parsed into a model here.
-        """
-        try:
-            projected = await self._service().reclaim(
-                request, settlement_ref, mechanism_options
-            )
-        except HostedSettlementRouteError as exc:
-            self._raise_route_error(exc)
-        return SettlementPublicResponse.model_validate(projected)
 
 
 # ---------------------------------------------------------------------------
@@ -342,10 +278,42 @@ class AdminSettleController:
     ) -> None:
 
         self._db = db
-        self._svc = AdminSettleService(
+        checks = AdminSettleService(
             sqlite_client=db,
             alkahest_clients=_container.resolved_alkahest_clients,
         )
+
+        async def verify(escrow_uid: str, request):
+            try:
+                return await checks.verify_escrow_dry_run(
+                    escrow_uid=escrow_uid, **dict(request)
+                )
+            except ValueError as exc:
+                raise LookupError(str(exc)) from exc
+
+        async def preview(escrow_uid: str, request):
+            try:
+                return await checks.evaluate_settle_dry_run(
+                    escrow_uid=escrow_uid, **dict(request)
+                )
+            except ValueError as exc:
+                raise LookupError(str(exc)) from exc
+
+        async def settle_status(escrow_uid: str):
+            return await db.load_escrow(escrow_uid=escrow_uid)
+
+        self._routes = SettlementAdminRouteService(
+            verify=verify,
+            preview_fulfillment=preview,
+            settle_status=settle_status,
+            is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        )
+
+    async def _routed(self, call):
+        try:
+            return await call
+        except SettlementAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     @admin_settle_router.post(
         "/{escrow_uid}/verify",
@@ -357,22 +325,11 @@ class AdminSettleController:
     ) -> VerifyEscrowResponse:
         """Read the escrow from chain and confirm it matches caller-supplied terms.
 
-        No DB writes. Returns valid=True/False. Used by e2e stage 07b.
+        No DB writes. Returns valid=True/False.
         """
-        try:
-            result = await self._svc.verify_escrow_dry_run(
-                escrow_uid=escrow_uid,
-                listing_id=body.listing_id,
-                seller_wallet=body.seller_wallet,
-                agreed_price=body.agreed_price,
-                agreed_duration_seconds=body.agreed_duration_seconds,
-                chain_name=body.chain_name,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.error("[ADMIN SETTLE] verify_escrow failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        result = await self._routed(
+            self._routes.verify(escrow_uid, body.model_dump(mode="python"))
+        )
         return VerifyEscrowResponse(**result)
 
     @admin_settle_router.post(
@@ -385,22 +342,11 @@ class AdminSettleController:
     ) -> EvaluateSettleResponse:
         """Resolve a host from inventory and build the provisioning job spec.
 
-        No chain reads, no DB writes. Used by e2e stage 08a.
+        No chain reads, no DB writes.
         """
-        try:
-            result = await self._svc.evaluate_settle_dry_run(
-                escrow_uid=escrow_uid,
-                listing_id=body.listing_id,
-                ssh_public_key=body.ssh_public_key,
-                duration_seconds=body.duration_seconds,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.error(
-                "[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True
-            )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        result = await self._routed(
+            self._routes.evaluate(escrow_uid, body.model_dump(mode="python"))
+        )
         return EvaluateSettleResponse(**result)
 
     @admin_settle_router.get(
@@ -410,9 +356,7 @@ class AdminSettleController:
         description=(
             "Blocks server-side until the settlement job for *escrow_uid* reaches "
             "``ready`` or ``failed``, or until *timeout* seconds elapse. "
-            "Polls the settlement job row every second internally — no client-side "
-            "polling loop needed. Returns immediately if the job is already terminal. "
-            "Intended for the e2e test suite's stage 09b gate."
+            "Returns immediately if the job is already terminal."
         ),
     )
     async def wait_for_settlement(
@@ -426,40 +370,43 @@ class AdminSettleController:
         ),
     ) -> SettleWaitResponse:
         """Server-side long-poll: block until settlement is terminal or timeout elapses."""
-        _terminal = {"ready", "failed"}
-        start = time.monotonic()
-        deadline = start + timeout
-
-        while True:
-            job = await self._db.load_escrow(escrow_uid=escrow_uid)
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            status = (job or {}).get("status", "")
-            job_id = (job or {}).get("provisioning_job_id")
-            fulfillment_id = (job or {}).get("fulfillment_id")
-
-            if status in _terminal:
-                return SettleWaitResponse(
-                    ready=True,
-                    status=status,
-                    provisioning_job_id=job_id,
-                    fulfillment_id=fulfillment_id,
-                    elapsed_ms=elapsed_ms,
-                )
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(1.0, remaining))
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        job = await self._db.load_escrow(escrow_uid=escrow_uid)
-        status = (job or {}).get("status", "unknown")
-        job_id = (job or {}).get("provisioning_job_id")
-        fulfillment_id = (job or {}).get("fulfillment_id")
+        waited = await self._routes.wait(escrow_uid, timeout=timeout)
         return SettleWaitResponse(
-            ready=False,
-            status=status,
-            provisioning_job_id=job_id,
-            fulfillment_id=fulfillment_id,
-            elapsed_ms=elapsed_ms,
+            ready=waited["ready"],
+            status=waited["status"],
+            provisioning_job_id=waited.get("provisioning_job_id"),
+            fulfillment_id=waited.get("fulfillment_id"),
+            elapsed_ms=waited["elapsed_ms"],
         )
+
+
+@settlements_router.post(
+    "/settlements/{negotiation_id}/refund",
+    response_model=RefundSettlementResponse,
+    summary="Refund an accepted payment deal",
+    description=(
+        "Seller-facing. Requires the storefront's own seller v2 signature. Reverses "
+        "the deal's still-held payment and records it refunded so delivery cannot "
+        "start; anything already delivered is left in place."
+    ),
+)
+async def refund_settlement(negotiation_id: str) -> Any:
+    db = _container.resolved_sqlite_client
+    thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    if not isinstance(thread, dict) or thread.get("terminal_state") != "success":
+        raise HTTPException(status_code=404, detail="accepted negotiation not found")
+    agreement_raw = thread.get("agreement_bytes")
+    agreement = json.loads(agreement_raw) if isinstance(agreement_raw, bytes) else {}
+    if (agreement.get("settlement") or {}).get("mechanism") != ARKHAI_PAYMENTS_MECHANISM:
+        raise HTTPException(
+            status_code=409, detail="this settlement mechanism refunds through its own path"
+        )
+    coordinator = getattr(_container.resolved_settlement_composition, "payments_coordinator", None)
+    if coordinator is None:
+        raise HTTPException(status_code=503, detail="Arkhai settlement is unavailable")
+    try:
+        result = await coordinator.refund(negotiation_id, thread)
+    except PaymentSettlementError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    RefundSettlementResponse.model_validate(result.payload)
+    return JSONResponse(content=result.payload, status_code=result.status_code)

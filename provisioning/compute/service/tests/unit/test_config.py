@@ -240,23 +240,3 @@ def test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_loc
     assert values.ENVIRONMENT_VS_DOTENV == "environment"
     assert values.LOCAL_ONLY == "settings"
     assert options.load_dotenv is True
-
-
-class TestBareMetalReclaimPolicy:
-    def test_default_is_remove_lease_key(self):
-        settings = Settings(Dynaconf(environments=False))
-
-        assert settings.bare_metal_reclaim_policy == "remove_lease_key"
-
-    def test_accepts_supported_policy(self):
-        settings = Settings(Dynaconf(environments=False))
-        settings._source.set("bare_metal_reclaim_policy", "lock_user")
-
-        assert settings.bare_metal_reclaim_policy == "lock_user"
-
-    def test_rejects_unknown_policy(self):
-        settings = Settings(Dynaconf(environments=False))
-        settings._source.set("bare_metal_reclaim_policy", "wipe_disk")
-
-        with pytest.raises(ValueError, match="Invalid bare_metal_reclaim_policy"):
-            _ = settings.bare_metal_reclaim_policy

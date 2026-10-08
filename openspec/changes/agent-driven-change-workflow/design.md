@@ -678,6 +678,35 @@ What counts as proven:
 - **Every other skill.** It completes its phase on the pilot without the owner
   carrying text between agents or repairing its output by hand.
 
+## Development-branch merge reconciliation (2026-10-08)
+
+The workflow branch and its capacity-shape pilot retain their accepted behavior
+while adopting the development branch's package boundaries and payment cutover.
+This reconciliation introduces no new workflow or settlement authority model.
+
+- Shared workflow skills and the phase/state index remain. The retired hosted
+  debugging skill and both harness links are removed together; keeping it would
+  advertise tooling for a mechanism the development branch no longer supports.
+- Build and test aggregates include the pilot's capability-admissibility kit,
+  development's contracts/client packages, and Arkhai payments. The moved pool
+  hint validator's admissibility dependency belongs to the contracts distribution,
+  and its moved tests import that distribution. The API-credit
+  wheel fixture includes both resource-pool contracts and capability admissibility.
+- VM listings use the newer VM package bound and retain their admissibility
+  dependency. Existing wheel versions are reused, with locks regenerated through
+  `scripts/uv_project.py` against a freshly built wheelhouse.
+- The index keeps current implementation and pilot history while taking the
+  development branch's archive, re-scope, and acceptance-boundary updates. The
+  former hosted campaign is removed; its surviving independent changes remain
+  discoverable. Review directories remain ignored for active and archived changes.
+
+Permanent destinations remain this change's existing workflow and planning
+specifications and contributor guidance, and the capacity-shape pilot's named
+subsystem specifications. These integration decisions need no additional permanent
+contract. The roadmap retains development's current system description, and the
+index retains each change's unfinished gates. No pilot, remote validation, or
+post-review promotion is completed by resolving the merge.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |

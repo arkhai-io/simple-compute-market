@@ -526,21 +526,28 @@ projected without the view rather than failing the projection generation.
 - **WHEN** the resource-pool projection is produced
 - **THEN** the view is produced and carries the declaration's host
 
-### Requirement: Hosted funding gates whole-host allocation
+### Requirement: Signed payment receipts gate selected-site execution
 
-For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and offering mode. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.
+For `arkhai.payments.v1`, VM and bare-metal storefronts MUST load the accepted mandate from shared `negotiation_threads.settlement_data` beside exact `agreement_bytes` and verify the service-signed receipt against that mandate before any protected physical effect. Fulfillment MUST use the accepted domain/site binding and durable fulfillment identity, not buyer-supplied routing or current listing state.
 
-#### Scenario: Access-ready evidence
+#### Scenario: Receipt is pending or mismatched
 
-- **WHEN** the funded selected-site fulfillment becomes authoritatively access-ready
-- **THEN** the storefront persists a public result and content-addressed seller-signed lease-ready evidence before collection
-- **AND** the evidence binds agreement, obligation, accepted binding, fulfillment, buyer, seller, claimant, site, executor, resource/allocation, condition, access method, and expiry without exposing credentials
+- **WHEN** the seller cannot verify a matching signed receipt
+- **THEN** it reports retryable pending or rejects invalid evidence without provisioning or creating access
 
-#### Scenario: Teardown is independent
+#### Scenario: Bare-metal receipt is verified
 
-- **WHEN** financial collection is complete and the lease later expires
-- **THEN** revocation, executor teardown, and capacity release converge under their physical operation identities
-- **AND** no financial reclaim is inferred from teardown
+- **WHEN** payment settlement succeeds for an accepted bare-metal Agreement
+- **THEN** reservation, fulfillment, result retrieval, and teardown continue against that Agreement's selected-site authority
+
+### Requirement: Physical payment fulfillment recovers on accepted evidence
+
+Retries and restart recovery MUST recheck accepted receipt evidence and converge on the same reservation and physical operation. VM's local provisioning-progress row MAY use the negotiation ID but MUST NOT turn the transaction into a chain escrow, settlement plan, or obligation.
+
+#### Scenario: Verified VM provisioning restarts
+
+- **WHEN** foreground work or recovery resumes verified payment progress
+- **THEN** the existing convergence lease and durable physical fulfillment ID prevent duplicate delivery
 
 ### Requirement: Host registry records the connection port
 
@@ -1128,9 +1135,9 @@ without applying either.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
-- VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and result credential/connection-metadata fields: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardownReadsTheLease`), plus end-to-end HTTP coverage in `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/unit/services/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_definition_document_restart_safety.py`, plus `tests/integration/test_relays_api.py` through the canonical client.
-- Relay port release on terminal settlement states, and the terminality predicate reconciliation is given: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence.py`.
+- VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_relays_api.py` through the canonical client, plus `tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
 
 `PhysicalSettlementScheduler` and fulfillment-provider coordination are durable, not process-local: scheduling, acceptance, and dispatch state live in the fulfillment aggregate (see `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`), and a dedicated periodic worker recovers in-flight provider operations after a crash or restart (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` and `docs/development/ARCHITECTURE.md#recovery-workers`). This is a database-wide SQLite writer guarantee, not a distributed multi-replica protocol.
 

@@ -1,13 +1,13 @@
 # Settlement Servicing Architecture
 
-The [normative contract](spec.md) defines plans, claims, and heartbeat behavior. This document explains why settlement is modeled as a lifecycle rather than a terminal payment receipt.
+The [normative contract](spec.md) defines Agreement-based payments, plans, claims, and heartbeat behavior. This document distinguishes obligation servicing from receipt-gated payment delivery.
 
 ## Servicing lifecycle
 
-Some obligations complete immediately; others depend on conditions that become true later. Settlement therefore produces a mechanism-neutral plan that can be persisted and serviced over time:
+Some obligations complete immediately; others depend on conditions that become true later. For Alkahest and other obligation-runtime mechanisms, settlement produces a plan persisted and serviced over time:
 
 ```text
-accepted Terms
+accepted Agreement
       ↓ materialize
 SettlementPlan
       ↓
@@ -18,13 +18,13 @@ The settlement-runtime kit owns restartable lifecycle structure and stable oblig
 
 ## Plan and codec boundary
 
-A plan carries lifecycle-universal fields and versioned mechanism payloads. Kit codecs translate between shared carriers and mechanism-specific obligations. Domain policy selects conditions and interprets their business meaning.
+Existing plans carry participant, value, and escrow lifecycle fields and versioned mechanism payloads. Kit codecs translate between shared carriers and mechanism-specific obligations. Domain policy selects conditions and interprets their business meaning.
 
 Keeping codecs explicit is safer than generic dispatch on an arbitrary escrow-kind string: each supported `(kind, schema_version)` has an owning validator and materializer, and unknown versions fail instead of being guessed into a current model.
 
 ## Conditional-escrow clients and durable mechanism state
 
-Mechanism implementations satisfy one `ConditionalEscrowClient` port for
+Obligation-runtime mechanisms satisfy the shared `ConditionalEscrowClient` port for
 materialize, authoritative status, check, collect, and expired reclaim. They
 receive a stable operation reference and may return only public-safe opaque
 references, actions, anchors, receipts, and mechanism state. The repository
@@ -81,32 +81,21 @@ Commercial abandonment may request early physical termination, but it does not d
 
 ## Principal and mechanism boundaries
 
-Marketplace authorization binds payer, claimant, storefront, and service actors as complete scheme-tagged principals throughout plans, fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal reservations. Bare identifiers, hosted account references, provider identifiers, and EVM addresses inside mechanism payloads are resources or effect inputs, not credentials.
+Marketplace authorization binds payer, claimant, storefront, and service actors as complete scheme-tagged principals throughout plans, fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal reservations. Bare identifiers, payment account references, provider identifiers, and EVM addresses inside mechanism payloads are resources or effect inputs, not credentials.
 
 A principal is a credential identity, while agreement, obligation, account, and
 provider references remain stable subjects or resources. The mechanism-neutral
 runtime therefore carries principals opaquely and never derives or persists a
 wallet or private-key alias from them.
 
-Wallet and chain configuration is mechanism-scoped. A hosted non-EVM obligation materializes, checks, collects, reclaims, and reconciles through an injected marketplace signer without an EVM wallet or RPC dependency. An Alkahest transaction or explicitly EVM-tagged condition validates its own address, wallet, RPC, chain, and contract inputs inside the owning adapter and never reinterprets an Ed25519 principal.
+Wallet and chain configuration is mechanism-scoped. Arkhai payment calls use owner-scoped WorkOS credentials; signed receipt verification uses the trusted service's Ed25519 identity, with no EVM wallet or RPC dependency. Alkahest validates its own chain inputs without reinterpreting marketplace principals.
 
-## Hosted identity ownership
-
-The hosted adapter passes the marketplace signer through the exact manifest-pinned hosted client identity interface. Hosted canonicalization, headers, scheme wrappers, response verification, account-link behavior, and provider models remain owned by that released client. The adapter neither reproduces those bytes nor persists its private credential. Startup and publication preflight require the released manifest to advertise the configured principal scheme and contract version; otherwise the hosted mechanism remains unavailable.
 
 ## Configuration and durable runtime state
 
-Typed mechanism registration controls which clients are constructed and which new options may be published. It does not create another runtime or status authority: every enabled client dispatches through the same obligation identity, operation journal, leases, retries, claim engine, and aggregate projection.
+Typed registration controls readiness, publication, and selection. Alkahest and contact exchange use the obligation lifecycle and operation journal. Arkhai payments consumes accepted Agreement bytes and its persisted mandate directly and does not produce a plan or obligation.
 
-Configuration and readiness are admission inputs, not durable-plan interpreters. Once Terms are accepted, the stored canonical mechanism, exact parameters, payer/claimant direction, and operation identities govern recovery. Disabling or deprioritizing a mechanism may stop new publication, but funded obligations continue authoritative status, collection, and reclaim convergence through their original client.
-
-## Profile-bound hosted servicing
-
-New hosted settlement records bind the accepted funding profile and the operation-scoped authorization reference without changing the already derived agreement or obligation identity. The binding is immutable and participates in the materialization operation fingerprint, so an exact retry can converge after an unknown acknowledgement while changed reuse fails before another financial effect.
-
-Only the hosted authority's normalized `funded` result after the selected profile's success and availability gate releases the selected domain fulfillment hook. Redirect completion, confirmation, transfer instructions, pending ACH, webhook timing, and local policy are not funding evidence. Provider-neutral reason, deadline, and action metadata may be projected, but raw URLs and provider payloads are transient and authority-owned.
-
-Reclaim uses the same opaque settlement and operation identity and never asks marketplace code to choose refund, return, reversal, or dispute behavior. A pre-collection return blocks collection; a post-fulfillment/pre-collection return preserves fulfillment attribution while domain teardown and hosted financial recovery converge independently. A post-collection loss becomes operator-required state rather than rewriting completed marketplace identities.
+Current priority and readiness govern new deals only. Recovery uses exact accepted state and the same transaction or obligation identity.
 
 ## Accepted domain continuity
 
@@ -124,29 +113,21 @@ they do not consult current listings or payload kinds. Provisioning remains the
 executor authority and dispatches teardown from its durable offering mode, so
 the storefront never derives VM versus bare-metal teardown locally.
 
-## Bare-metal hosted servicing
 
-The bare-metal callback reconstructs one immutable accepted binding before hosted preparation. Funding deadline is already bounded by the signed option and physical feasibility; pending funding neither renews a hold nor selects current capacity. After `funded`, the callback reserves and commits at the accepted site and begins one fulfillment under deterministic identities. It polls provisioning-owned state, signs credential-free lease-ready evidence, and lets the shared runtime collect only after authoritative evidence.
 
-Reclaim consults the same journal and physical lifecycle. Successful access evidence, reserved or unknown collection, and any uncertain physical authority block a contradictory reclaim. A pre-collection return blocks collection and converges financial recovery with independent teardown; a post-collection loss records operator-required state. Lease teardown never becomes a second financial operation.
+## Charge-first payment settlement
 
-## API-credit hosted servicing
+The seller derives the mandate at acceptance from exact Agreement bytes, the selected option, and buyer `settlement_params.payer_account`. The mandate lives in shared `negotiation_threads.settlement_data` next to `agreement_bytes`, not a per-domain mandate table. Transaction identity is `sha256(JCS(mandate))`; deal identity is `sha256(JCS(agreement))`. Whole-second hold intervals round up and approval expiry rounds down, without changing accepted timestamps.
 
-The shared worker remains the only driver of materialize/status/check/collect
-and reclaim operation leases. Once status persists authoritative hosted
-`ready`, the API-credit fulfillment callback derives the obligation-scoped
-fulfillment ID and asks the credits authority to issue. Commit-then-fail is
-reconciled through the authority's fulfillment lookup before another mutation.
-The resulting credential goes to the private buyer result repository, while a
-seller-signed portable evidence digest becomes the public fulfillment
-reference. Condition evaluation precedes collection.
+Buyer approval validates both the mandate and local policy. Buyer and seller poll the same deterministic transaction ID; seller settlement reloads accepted state by negotiation ID and verifies the signed receipt against it. A pending transaction authorizes no domain effect. Retries return completed state or re-drive nonterminal provisioning/issuance with the same durable identity.
 
-The before-reclaim callback uses that same fulfillment ID to resolve any
-uncertain issuance. A committed grant is persisted as fulfillment and makes the
-shared reclaim service reject; an unknown grant leaves reclaim eligible.
-Operation journals, immutable grant digests, and evidence idempotency together
-close restart and acknowledgement-loss races without a cross-authority
-transaction.
+VM and bare-metal retain selected-site physical authority and teardown; API credits retains its grant and credential authority. Those domain journals are not ledger state. Refund uses `reverse`; hold release, fees, disputes, and cash movement remain payments-service responsibilities. The kit has no servicing daemon.
+
+**Delivery start and refund intent are ordered.** Each domain records two transitions with single-statement compare-and-set writes in its own tables. Delivery start, before any external effect, succeeds only while the deal is verified and carries no refund intent. Refund intent records `refunding` before the reversal is requested: if delivery had not started, it can no longer start; if it had, the delivery completes and its details are kept beside the `refunded` status. A refund first confirms a verified payment exists, and abandons its intent if nothing remains to reverse, so an unpaid deal is never left blocked.
+
+**Attachments must match the deal.** Every Agreement attachment is a deal attachment validated against the transaction's deal hash, so the client and its test fake examine every attachment, return the matching one, and refuse any mismatch as a blocked integration fault.
+
+**Snapshot proofs are not evidence.** A transaction snapshot carries a service proof that the marketplace does not verify. Sellers rely only on the independently signed receipt it embeds, which suffices for single-part gating. A change that reads snapshot part state as evidence must first add snapshot verification, a snapshot vector, and a fixture.
 
 ## Current limits
 

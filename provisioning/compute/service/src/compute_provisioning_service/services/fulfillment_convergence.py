@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from market_fulfillment.ids import derive_provisioned_resource_id
@@ -15,10 +16,22 @@ from market_fulfillment import (
     ProviderOperationState,
     SettlementRecordState,
     SettlementResource,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
+from market_fulfillment.db import SettlementRecord
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_site.db import CapacityReservation, ReservationState
+from market_site.ledger import CapacityConflictError
+
+from compute_provisioning.job_fulfillment import fulfillment_executor_target
+
+# Reservations a lease target is never recorded on: their lease is over.
+_TERMINAL_RESERVATION_STATES = (
+    ReservationState.released.value,
+    ReservationState.force_released.value,
+    ReservationState.provisioning_failed.value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +49,14 @@ class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
     def __init__(self, *, session_factory, repository, provider_registry, settings,
-                 port_allocator=None,
-                 worker_id: str | None = None) -> None:
+                 worker_id: str | None = None, capacity_ledger=None) -> None:
         self._session_factory = session_factory
         self._repository = repository
+        # The site ledger the lease's target is recorded on when a fulfillment
+        # becomes active; ``None`` where no site is composed, which records none.
+        self._capacity_ledger = capacity_ledger
         self._providers = provider_registry
         self._settings = settings
-        # Optional: a deployment with no relay leases nothing to release.
-        self._port_allocator = port_allocator
         self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
         self._limit = int(getattr(settings, "fulfillment_convergence_batch_size", 50))
         self._backoff = Backoff(
@@ -159,8 +172,9 @@ class FulfillmentConvergenceWatchdog:
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
+        lease_targets = self._reconcile_lease_targets_logged()
         after = self.diagnostics_snapshot()
-        self._log_diagnostics(after)
+        self._log_diagnostics(after, lease_targets=lease_targets)
         return {"before": before, "after": after}
 
     def diagnostics_snapshot(self) -> dict[str, object]:
@@ -189,16 +203,97 @@ class FulfillmentConvergenceWatchdog:
                 SettlementRecordState.teardown_dispatch_pending.value,
             )
 
-    def _log_diagnostics(self, diagnostics: dict[str, object] | None = None) -> None:
+    def reconcile_lease_targets(self) -> dict[str, object] | None:
+        """Record the target of every active fulfillment whose lease lacks one.
+
+        Activation records a lease's target in its own transaction, and a
+        target its data prevents recording does not fail the activation. This
+        sweep keeps trying: for each active fulfillment on a reservation whose
+        lease is not over, a missing target is recorded wherever the write now
+        succeeds, for instance after the reservation's data was corrected.
+        What it cannot record, and each reservation that records a different
+        target, is counted for the cycle's diagnostics; a recorded target is
+        never replaced. Nothing acts on the site's recorded target, since
+        teardown reads the fulfillment's own metadata, so these are reporting
+        gaps rather than lifecycle faults.
+
+        Returns the counts, or ``None`` where no site ledger is composed.
+        """
+        if self._capacity_ledger is None:
+            return None
+        repaired = 0
+        different = 0
+        unrecordable = {"metadata": 0, "reservation_refused": 0, "no_reservation": 0}
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            rows = db.execute(
+                select(
+                    SettlementRecord.capacity_reservation_id,
+                    SettlementRecord.provider_metadata,
+                    CapacityReservation.executor_target,
+                    CapacityReservation.state,
+                )
+                .outerjoin(
+                    CapacityReservation,
+                    CapacityReservation.capacity_reservation_id
+                    == SettlementRecord.capacity_reservation_id,
+                )
+                .where(SettlementRecord.state == SettlementRecordState.active.value)
+            ).all()
+            for reservation_id, metadata, recorded, reservation_state in rows:
+                if reservation_state is None:
+                    unrecordable["no_reservation"] += 1
+                    continue
+                if reservation_state in _TERMINAL_RESERVATION_STATES:
+                    continue
+                try:
+                    target = fulfillment_executor_target(dict(metadata or {}))
+                except ProviderConfigInvalidError:
+                    unrecordable["metadata"] += 1
+                    continue
+                if recorded is not None:
+                    if recorded != target:
+                        different += 1
+                    continue
+                try:
+                    self._capacity_ledger.record_executor_target_in_session(
+                        db, reservation_id, target
+                    )
+                except CapacityConflictError:
+                    unrecordable["reservation_refused"] += 1
+                    continue
+                repaired += 1
+            db.commit()
+        return {
+            "repaired": repaired,
+            "unrecordable": unrecordable,
+            "different_target_recorded": different,
+        }
+
+    def _reconcile_lease_targets_logged(self) -> dict[str, object] | None:
+        try:
+            return self.reconcile_lease_targets()
+        except Exception:  # noqa: BLE001
+            # A reporting pass must not make lifecycle progress appear to
+            # fail; the next cycle sweeps again.
+            logger.exception("[FULFILLMENT_CONVERGENCE] lease target sweep failed")
+            return None
+
+    def _log_diagnostics(
+        self,
+        diagnostics: dict[str, object] | None = None,
+        *,
+        lease_targets: dict[str, object] | None = None,
+    ) -> None:
         try:
             diagnostics = diagnostics or self.diagnostics_snapshot()
-            logger.info(
-                "[FULFILLMENT_CONVERGENCE] recovery diagnostics",
-                extra={
-                    "event": "fulfillment_recovery_diagnostics",
-                    "recovery_diagnostics": diagnostics,
-                },
-            )
+            extra: dict[str, object] = {
+                "event": "fulfillment_recovery_diagnostics",
+                "recovery_diagnostics": diagnostics,
+            }
+            if lease_targets is not None:
+                extra["lease_targets"] = lease_targets
+            logger.info("[FULFILLMENT_CONVERGENCE] recovery diagnostics", extra=extra)
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed
@@ -393,19 +488,6 @@ class FulfillmentConvergenceWatchdog:
             failure_message=detail,
         )
 
-    # States after which no VM remains reachable through the relay, so the
-    # remote port it held must go back to the window. `succeeded` is
-    # deliberately absent: a created VM is live and its buyer is using that
-    # port. `teardown_failed` is absent because it is not terminal — recovery
-    # may retry, and the proxy may still be registered on the relay.
-    _LEASE_RELEASING_STATES = frozenset(
-        {
-            SettlementRecordState.failed.value,
-            SettlementRecordState.torn_down.value,
-            SettlementRecordState.abandoned.value,
-        }
-    )
-
     def _apply_transition(
         self,
         reservation_id: str,
@@ -415,37 +497,8 @@ class FulfillmentConvergenceWatchdog:
     ) -> None:
         def apply(db) -> None:
             self._repository.transition(db, reservation_id, target_state, **updates)
-            self._release_relay_port(db, reservation_id, target_state)
 
         self._with_owned_record(reservation_id, expected_state, apply)
-
-    def _release_relay_port(self, db, reservation_id: str, target_state: str) -> None:
-        """Return this fulfillment's relay port when it can no longer be reached.
-
-        Inside the caller's transaction, so the release and the state that
-        justifies it commit together. Outside it, a crash between the two
-        leaves a port nothing claims — the leak reconciliation exists to bound
-        for unenumerated paths, reintroduced on the enumerated one.
-
-        Attached here rather than to teardown, cancellation, and expiry
-        individually because a set of call sites is never provably complete and
-        the one that is missed is the one nobody thought of. This is the single
-        place a record becomes terminal.
-        """
-        if target_state not in self._LEASE_RELEASING_STATES:
-            return
-        if self._port_allocator is None:
-            return
-        released = self._port_allocator.release_in_session(
-            db, owner_kind="fulfillment", owner_id=reservation_id
-        )
-        if released:
-            logger.info(
-                "Released %d relay port lease(s) for %s on reaching %s",
-                released,
-                reservation_id,
-                target_state,
-            )
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
@@ -465,6 +518,7 @@ class FulfillmentConvergenceWatchdog:
             self._repository.transition(
                 db, reservation_id, SettlementRecordState.active.value
             )
+            self._record_executor_target(db, reservation_id, record.provider_metadata)
 
         self._with_owned_record(
             reservation_id,
@@ -472,17 +526,50 @@ class FulfillmentConvergenceWatchdog:
             apply,
         )
 
+    def _record_executor_target(
+        self, db, reservation_id: str, provider_metadata: dict[str, Any] | None
+    ) -> None:
+        """Record on the lease what the fulfillment that just became active acts on.
+
+        Written in the activation's own transaction and session: that
+        transaction holds SQLite's single writer slot, so a second session
+        would wait out the busy timeout instead.
+
+        A target the data prevents recording (metadata naming no job-backed
+        target, or a reservation the site refuses) keeps the activation: the
+        workload exists, teardown addresses the target in the fulfillment's
+        own metadata, and ``reconcile_lease_targets`` keeps trying and reports
+        it. Any other failure escapes, so the activation rolls back and the
+        record stays ``dispatching`` for the next cycle to activate. Neither
+        the decoding nor the ledger raises after a write.
+        """
+        if self._capacity_ledger is None:
+            return
+        try:
+            target = fulfillment_executor_target(dict(provider_metadata or {}))
+            recorded = self._capacity_ledger.record_executor_target_in_session(
+                db, reservation_id, target
+            )
+        except (ProviderConfigInvalidError, CapacityConflictError):
+            logger.exception(
+                "[FULFILLMENT] Could not record the executor target of reservation %s; "
+                "convergence keeps trying",
+                reservation_id,
+            )
+            return
+        if recorded is not None and recorded.get("executor_target") != target:
+            logger.warning(
+                "[FULFILLMENT] Reservation %s already records executor target %r; "
+                "its fulfillment acts on %r, which is left unrecorded",
+                reservation_id,
+                recorded.get("executor_target"),
+                target,
+            )
+
     def _apply_teardown_success(self, reservation_id: str) -> None:
         def apply(db) -> None:
             self._repository.mark_provisioned_resources_torn_down(db, reservation_id)
             self._repository.transition(
-                db, reservation_id, SettlementRecordState.torn_down.value
-            )
-            # This path writes its terminal state directly rather than through
-            # _apply_transition, so it needs the release explicitly. Same
-            # transaction, for the same reason: a crash between the two leaves
-            # a port nothing claims.
-            self._release_relay_port(
                 db, reservation_id, SettlementRecordState.torn_down.value
             )
 

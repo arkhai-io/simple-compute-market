@@ -23,9 +23,8 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _migrate_pool_advertisement_and_backing,
 )
-from market_resource_pools import (
-    DEFAULT_POOL_ID,
-    ResourcePool,
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools_contracts import (
     declared_deliverable_modes,
     pool_delivers_offering_mode,
     resolve_pool_declarations,

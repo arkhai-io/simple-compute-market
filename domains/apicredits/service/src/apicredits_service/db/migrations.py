@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from market_identity import Identity, IdentityScheme
-from market_resource_pools.hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
@@ -379,6 +379,25 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             )
 
 
+def _migrate_reservation_release_requested_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.release_requested_at``.
+
+    The site ledger this service composes records when a reservation began
+    releasing; existing rows have none.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if _column_exists(engine, "capacity_reservations", "release_requested_at"):
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE capacity_reservations "
+                "ADD COLUMN release_requested_at VARCHAR"
+            )
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
@@ -395,5 +414,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260922_004_pool_advertisement_and_backing",
         _migrate_pool_advertisement_and_backing,
+    ),
+    Migration(
+        "20261005_005_reservation_release_requested_at",
+        _migrate_reservation_release_requested_at,
     ),
 )

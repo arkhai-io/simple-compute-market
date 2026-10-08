@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
 import sys
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVER = REPO_ROOT / "scripts" / "resolve-review-scope.py"
@@ -75,7 +74,6 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
 
     assert set(payload["validation_projects"]) >= {
         "kit/identity",
-        "kit/hosted-settlement",
         "kit/settlement-runtime",
         "kit/config",
         "kit/policy",
@@ -111,7 +109,6 @@ def test_settlement_deployment_change_selects_full_wheelhouse_scope() -> None:
     assert selected >= {
         "kit/config",
         "kit/settlement-runtime",
-        "kit/hosted-settlement",
         "kit/alkahest",
         "core/buyer",
         "domains/vms/buyer",

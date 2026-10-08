@@ -130,6 +130,13 @@ class CommitRequest(BaseModel):
         ),
     )
     idempotency_ref: Optional[str] = None
+    deal_ref: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "The deal the reservation now serves; an escrow it names is "
+            "recorded where the reservation has none."
+        ),
+    )
 
 
 class ReleaseRequest(BaseModel):

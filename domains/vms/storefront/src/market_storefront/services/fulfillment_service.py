@@ -11,17 +11,22 @@ from functools import partial
 from typing import Any
 
 from alkahest_py import AlkahestClient
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningJobError,
     ComputeProvisioningTimeoutError,
+)
+from compute_provisioning_contracts import (
+    ACCESS_DELIVERY_KIND,
+    ACCESS_DELIVERY_SCHEMA_VERSION,
+    AccessDelivery,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
-    LeaseRegistration,
     LeaseTermination,
 )
+from arkhai_vms import VmConnectionDetails
 from core_storefront.stage_log import stage_event
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,
@@ -55,7 +60,6 @@ async def _do_provision(
     sqlite_client: Any,
     *,
     vm_host: str | None,
-    vm_target: str,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
     capacity_reservation_id: str,
     escrow_uid: str,
@@ -135,10 +139,10 @@ async def _do_provision(
     # fact depend on a caller's configuration, and would let two requests
     # against one host disagree about how that host is reached. The buyer's
     # address and port come back in the fulfillment result instead.
-    request_payload: dict[str, Any] = {
-        "vm_target": vm_target,
-        "ssh_pubkey": ssh_public_key,
-    }
+    #
+    # No guest name either: provisioning names the guest from the capacity
+    # reservation, and refuses a request that names one.
+    request_payload: dict[str, Any] = {"ssh_pubkey": ssh_public_key}
 
     accepted = await fulfillment_client.begin_fulfillment(
         FulfillmentRequestBody(
@@ -183,7 +187,7 @@ async def _do_provision(
         capacity_reservation_id=capacity_reservation_id,
         site_id=site_id,
     )
-    return _fulfillment_result_to_legacy_shape(envelope)
+    return _fulfillment_result_to_connection(envelope)
 
 
 async def _poll_fulfillment_until_terminal(
@@ -219,66 +223,48 @@ async def _poll_fulfillment_until_terminal(
         await asyncio.sleep(poll_interval)
 
 
-def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str, Any]:
-    """Map a fulfillment result envelope into the shape callers of
-    ``provision_vm`` expect: a dict with an optional ``authentication`` key
-    (``{"root": {...}, "tenant": {...}}``, popped out by the caller) plus
-    other connection-detail fields serialized as ``connection_details``.
+def _fulfillment_result_to_connection(envelope: VersionedEnvelope) -> dict[str, Any]:
+    """An active fulfillment's delivery, as the deal's connection details.
+
+    The details are ``VmConnectionDetails``: the delivered SSH endpoint, when
+    access became ready, and the provisioned resources. The credentials the
+    delivery carries, by role and with only their delivered fields, ride along
+    under ``authentication`` for the caller to store; they are never part of
+    the connection details.
     """
     payload: dict[str, Any] = envelope.payload or {}
-    domain_result = payload.get("domain_result") or {}
-    domain_payload: dict[str, Any] = domain_result.get("payload") or {}
-    credentials = domain_payload.get("credentials") or []
-
-    authentication: dict[str, Any] = {}
-    for credential in credentials:
-        role = credential.get("role")
-        if role not in ("root", "tenant"):
-            continue
-        entry: dict[str, Any] = {
-            "password": credential.get("password"),
-            "ssh_commands": credential.get("ssh_commands"),
-        }
-        if role == "root":
-            entry["ssh_key_path_host"] = credential.get("ssh_key_path_host")
-        else:
-            entry["key_type"] = credential.get("key_type")
-        authentication[role] = entry
-
-    # `connection_info` is VmConnectionInfo's field set (vm_name, host,
-    # timestamp, tenant_user, vm_ip_internal, ssh_port), dumped as a plain
-    # dict on the wire -- spread directly rather than naming each field
-    # again here.
-    connection_info: dict[str, Any] = domain_payload.get("connection_info") or {}
-    result: dict[str, Any] = {
-        **connection_info,
-        "provisioned_resource_ids": [
-            resource.get("provisioned_resource_id")
+    domain = payload.get("domain_result") or {}
+    if (
+        domain.get("kind") != ACCESS_DELIVERY_KIND
+        or domain.get("schema_version") != ACCESS_DELIVERY_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            f"physical fulfillment returned an unsupported delivery {domain.get('kind')!r}"
+        )
+    delivery = AccessDelivery.model_validate(domain.get("payload") or {})
+    endpoint = next(
+        (endpoint for endpoint in delivery.endpoints if endpoint.protocol == "ssh"), None
+    )
+    if endpoint is None:
+        raise RuntimeError("physical fulfillment delivered no SSH endpoint")
+    details: dict[str, Any] = VmConnectionDetails(
+        host=endpoint.host,
+        port=endpoint.port,
+        user=endpoint.user,
+        ready_at=delivery.ready_at,
+        provisioned_resource_ids=tuple(
+            str(resource.get("provisioned_resource_id"))
             for resource in payload.get("provisioned_resources", [])
-        ],
+        ),
+    ).model_dump(mode="json", exclude_none=True)
+    authentication = {
+        credential.role: {"password": credential.password, "key_type": credential.key_type}
+        for credential in delivery.credentials
+        if credential.role in ("root", "tenant")
     }
     if authentication:
-        result["authentication"] = authentication
-    return result
-
-
-async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
-    """Schedule VM expiry via the provisioning service.
-
-    NOTE: The provisioning service has no ``schedule_expiry`` endpoint — this
-    hook was wired but the underlying API was never implemented.
-    Lease teardown is managed by the LeaseWatchdog; call
-    ``POST /api/v1/system/check-leases`` or wait for the next watchdog cycle.
-
-    Raises ``NotImplementedError`` if called so callers discover the gap
-    immediately rather than silently failing on a missing import.
-    """
-    raise NotImplementedError(
-        "_do_shutdown is not implemented: the provisioning service has no "
-        "schedule_expiry endpoint. Lease teardown is handled by the "
-        "LeaseWatchdog. Submit POST /api/v1/system/check-leases to trigger "
-        "an immediate teardown cycle."
-    )
+        details["authentication"] = authentication
+    return details
 
 
 async def _build_provisioning_job_spec(
@@ -345,42 +331,14 @@ def _provisioning_client(*, timeout: float) -> ComputeProvisioningClient:
     )
 
 
-async def _register_vm_lease_with_settings(
-    *,
-    resource_id: str | None = None,
-    capacity_reservation_id: str | None,
-    escrow_uid: str,
-    vm_host: str | None = None,
-    vm_target: str,
-    lease_end_utc: str,
-    lease_start_utc: str | None = None,
-) -> None:
-    # resource_id/vm_host are accepted for call-site compatibility with
-    # fulfill_vm_obligation's opaque reservation result, but LeaseRegistration
-    # never reads either: the reservation's executor_ref/vm_host is already
-    # written independently at capacity-commit/rebind time and self-heals
-    # from that value when not explicitly supplied. Requiring a caller to
-    # have a physical resource identity in hand before it can register a
-    # lease at all would reintroduce physical-node pinning into what is
-    # meant to be a pool-scoped capacity negotiation.
-    lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
-        tzinfo=timezone.utc,
-    )
-    async with _provisioning_client(timeout=10) as client:
-        await client.register_lease(
-            LeaseRegistration(
-                capacity_reservation_id=capacity_reservation_id or resource_id,
-                deal_ref={"escrow_uid": escrow_uid},
-                offering_mode="vm",
-                executor_target=vm_target,
-                lease_start_utc=(
-                    datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
-                    if lease_start_utc
-                    else None
-                ),
-                lease_end_utc=lease_end_dt,
-            )
-        )
+def _recorded_utc(value: str) -> datetime:
+    """A lease time as the site recorded it: ISO 8601, or minute precision."""
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = datetime.strptime(text, "%Y-%m-%d %H:%M")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 async def terminate_vm_lease(
@@ -466,8 +424,6 @@ async def fulfill_compute_obligation(
         capacity=build_capacity_runtime(lambda: sqlite_client),
         stage_event=stage_event,
         provision_vm=partial(_do_provision, sqlite_client=sqlite_client),
-        schedule_shutdown=_do_shutdown,
-        register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=partial(
             _apply_fulfillment_failure_policy_adapter,
             sqlite_client=sqlite_client,

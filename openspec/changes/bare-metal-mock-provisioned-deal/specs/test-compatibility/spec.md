@@ -3,12 +3,14 @@
 ### Requirement: A deployable domain's deal runs on every end-to-end run
 
 Every market domain intended for deployment MUST have a complete-deal scenario that runs
-on every run of the end-to-end pipeline, against running services with provisioning in
-its mock profile. The scenario MUST hold every storefront loop it depends on, preview
-each transition it advances through that loop's or route's dry run where one exists, and
-advance it explicitly. That scenario proves the services compose into a working deal. It
-MUST NOT be reported as evidence of real delivery: where a domain's release acceptance
-requires a real access target, that remains a separate protected lane.
+on every run of the end-to-end pipeline, against running services using that domain's
+ordinary local or test authorities. A domain whose delivery crosses compute provisioning
+MUST run provisioning in its mock profile. The scenario MUST hold every storefront loop
+it depends on, preview each transition it advances through that loop's or route's dry
+run where one exists, and advance it explicitly. That scenario proves the services
+compose into a working deal. Mocked delivery MUST NOT be reported as evidence of real
+delivery: where a domain's release acceptance requires a real external resource, that
+remains a separate protected lane.
 
 #### Scenario: Bare metal runs its deal in the pipeline
 
@@ -71,9 +73,8 @@ Bare-metal storefront restart recovery MUST be proven by integration tests that 
 the production application over the same database. After a rebuild following settlement
 commit or teardown acceptance, the buyer MUST retrieve the same operation without a
 second obligation, mechanism selection, or physical teardown, and duplicate polling and
-result reads MUST be idempotent. An authenticated trading pause MUST survive the rebuild,
-refusing new negotiations until an authenticated resume. The end-to-end lane starts from
-empty state and does not restart services.
+result reads MUST be idempotent. The end-to-end lane starts from empty state and does
+not restart services.
 
 #### Scenario: Process stops after settlement commit
 
@@ -84,8 +85,3 @@ empty state and does not restart services.
 
 - **WHEN** teardown was accepted before the response was lost
 - **THEN** after the rebuild, recovery observes the same lease release operation and the site releases capacity once
-
-#### Scenario: Storefront is paused and restarted
-
-- **WHEN** an authenticated operator pauses the storefront and the application is rebuilt
-- **THEN** the paused state remains active and new negotiations are refused until an authenticated resume operation

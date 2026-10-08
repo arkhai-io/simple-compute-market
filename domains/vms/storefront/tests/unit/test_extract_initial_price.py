@@ -140,16 +140,16 @@ class TestSellerReferenceAmount:
         assert isinstance(amount, int)
 
 
-_HOSTED_OPTION = {
+_RATED_OPTION = {
     "option_id": "a" * 64,
-    "mechanism": "fiat.stripe.v1",
+    "mechanism": "example.rated.v1",
     "asset": "usd",
     "rates": [{"field": "amount", "per": "hour", "value": "10000"}],
     "params": {},
 }
 _RATELESS_OPTION = {
     "option_id": "b" * 64,
-    "mechanism": "fiat.stripe.v1",
+    "mechanism": "example.rated.v1",
     "asset": "usd",
     "rates": [],
     "params": {},
@@ -175,19 +175,19 @@ def _with_options(listing: Listing, *options: dict, escrows: bool = True) -> dic
 
 
 class TestSelectedOptionReference:
-    def test_a_hosted_selection_is_referenced_against_its_own_rate(self):
+    def test_a_rated_selection_is_referenced_against_its_own_rate(self):
         """Not the Alkahest rate the listing also offers, in another asset."""
-        listing = _with_options(_make_listing(demand_amount=10**20), _HOSTED_OPTION)
+        listing = _with_options(_make_listing(demand_amount=10**20), _RATED_OPTION)
         assert _seller_reference_amount(
-            listing, 7200, proposal=_selection(_HOSTED_OPTION)
+            listing, 7200, proposal=_selection(_RATED_OPTION)
         ) == 20000
 
-    def test_a_hosted_only_listing_never_uses_the_floor(self):
+    def test_a_rated_only_listing_never_uses_the_floor(self):
         listing = _with_options(
-            _make_listing(demand_amount=None), _HOSTED_OPTION, escrows=False
+            _make_listing(demand_amount=None), _RATED_OPTION, escrows=False
         )
         assert _seller_reference_amount(
-            listing, 3600, default_min_price="1", proposal=_selection(_HOSTED_OPTION)
+            listing, 3600, default_min_price="1", proposal=_selection(_RATED_OPTION)
         ) == 10000
 
     def test_a_rateless_selected_option_uses_the_floor(self):
@@ -199,6 +199,6 @@ class TestSelectedOptionReference:
         ) == 7
 
     def test_an_escrow_proposal_is_referenced_against_its_matched_escrow(self):
-        listing = _with_options(_make_listing(demand_amount=900), _HOSTED_OPTION)
+        listing = _with_options(_make_listing(demand_amount=900), _RATED_OPTION)
         proposal = {"chain_name": "test_chain", "escrow_address": "0x" + "11" * 20}
         assert _seller_reference_amount(listing, 3600, proposal=proposal) == 900

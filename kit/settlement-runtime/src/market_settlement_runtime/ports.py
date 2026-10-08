@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .models import (
     ConditionOutcome,
@@ -118,6 +118,31 @@ class SettlementRuntimeRepository(Protocol):
         condition_state: str | None = None,
         next_attempt_unix: float | None = None,
     ) -> bool: ...
+    async def write_operation_receipt_field(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        key: str,
+        value: Any,
+        uncertain_acknowledgement: bool,
+    ) -> Literal["written", "unchanged", "conflict", "lost"]: ...
+    async def clear_operation_receipt_field(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        key: str,
+        unless_key: str,
+    ) -> Literal["cleared", "refused", "lost"]: ...
+    async def count_manual_required(self) -> int: ...
+    async def load_settlement_operation(
+        self,
+        obligation_ref: str,
+        operation: str,
+    ) -> dict[str, Any] | None: ...
 
 
 @runtime_checkable

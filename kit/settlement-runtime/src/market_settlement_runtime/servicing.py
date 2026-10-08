@@ -59,45 +59,64 @@ class SettlementServicingWorker:
             now_unix=now,
             limit=limit,
         )
-        processed = 0
         for row in rows:
-            record = SettlementObligationRecord.model_validate(row)
+            await self._service_record(
+                SettlementObligationRecord.model_validate(row), now
+            )
+        return len(rows)
+
+    async def service_obligation(self, obligation_ref: str) -> None:
+        """Service one obligation now, exactly as a ``run_once`` pass would.
+
+        For a caller that has just changed an obligation's state and should not
+        wait for the next pass. A failed step is scheduled for retry by the same
+        rules as in a pass, so the worker remains the only retry path. A
+        concurrent pass sees the obligation as busy rather than servicing it
+        twice because each step holds a runtime operation lease; for starting
+        fulfillment that lease is the one the ``on_ready`` hook takes through
+        ``SettlementRuntime.reserve_fulfillment``, so a hook must reserve before
+        it starts anything.
+        """
+
+        await self._service_record(await self._reload(obligation_ref), time.time())
+
+    async def _service_record(
+        self, record: SettlementObligationRecord, now: float
+    ) -> None:
+        try:
+            await self._service(record, now)
+        except _ServicingStepError as exc:
+            operation = exc.operation
             try:
-                await self._service(record, now)
-            except _ServicingStepError as exc:
-                operation = exc.operation
-                try:
-                    await self._schedule(
-                        record.obligation_ref,
-                        operation,
-                        now,
-                        f"{type(exc).__name__}: {exc}",
-                    )
-                except Exception:
-                    logger.exception(
-                        "could not schedule settlement retry for %s",
-                        record.obligation_ref,
-                    )
-                await self._emit(
-                    "settlement_retry",
-                    {
-                        "obligation_ref": record.obligation_ref,
-                        "operation": operation,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    },
-                )
-            except Exception as exc:
-                logger.exception(
-                    "settlement servicing rejected %s",
+                await self._schedule(
                     record.obligation_ref,
-                )
-                await self._terminal(
-                    record,
-                    "manual_required",
+                    operation,
+                    now,
                     f"{type(exc).__name__}: {exc}",
                 )
-            processed += 1
-        return processed
+            except Exception:
+                logger.exception(
+                    "could not schedule settlement retry for %s",
+                    record.obligation_ref,
+                )
+            await self._emit(
+                "settlement_retry",
+                {
+                    "obligation_ref": record.obligation_ref,
+                    "operation": operation,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "settlement servicing rejected %s",
+                record.obligation_ref,
+            )
+            await self._terminal(
+                record,
+                "manual_required",
+                f"{type(exc).__name__}: {exc}",
+            )
 
     async def run(
         self,

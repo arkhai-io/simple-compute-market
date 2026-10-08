@@ -17,9 +17,44 @@ executor reports with what the storefront recorded — is `fulfillment_resume_ru
 convergence mechanism is the same in each; the executor payload and the result
 decoding are the domain's.
 
+*Since written (2026-10-05, `bare-metal-mock-provisioned-deal` slices B and B.9):* the
+line counts above are stale, and the convergence these files implement gained obligations
+the kit must carry, so the copies are less alike than they were:
+
+- A fulfillment attempt has three outcomes in `kit/settlement-runtime` (`fulfilled`,
+  `failed`, `deferred`). VM returns `deferred` when the workload exists but a later step
+  failed (committing the reservation's window, registering the lease, or publishing the
+  evidence), and leaves the deal open for its resume pass.
+- VM's resume pass stops before publishing evidence until the reservation is committed
+  and the lease registered, retrying on the next pass.
+- Bare metal's hosted lifecycle registers the family lease (the machine as target)
+  before recording the deal access-ready, and treats a release the site refuses as not
+  released.
+- A registration records the escrow the deal names on a reservation placed before the
+  escrow existed.
+
+Each is a convergence obligation, not domain payload, so the kit-owned convergence
+should own it for every domain that registers a lease.
+
+*Since written (2026-10-07, `bare-metal-mock-provisioned-deal`'s Section 7 design):* the
+step before convergence is duplicated too. The kit starts fulfillment two ways (an
+in-process coordinator task for Alkahest, the durable servicing worker for hosted
+settlement); each domain writes the deliver-publish-bind step between them; the evidence
+publisher port is declared three times; escrow verification is written in each domain, and
+VM's registers a plan rebuilt from current configuration; and VM publishes and stores
+buyer access material the other domains do not. `design.md`, "Input from
+`bare-metal-mock-provisioned-deal` (2026-10-07)", records the audit.
+
 The VM storefront also keeps `site_projection_cache` (270 lines) as its own view of
 per-site projection state, while bare metal reaches the same state through the
 capacity/publication kit's declaration reader and per-site hold.
+
+The Arkhai payments cutover removes the hosted lifecycle and evidence publisher
+from the current tree. Their descriptions above retain the audit's historical
+context. Current convergence also includes receipt-based payment records, which
+have no conditional-escrow obligation. The proposed unification must preserve
+that distinction and consume each domain's payment reconciliation pass rather
+than register payments on the obligation worker.
 
 ## What Changes
 
@@ -30,6 +65,12 @@ capacity/publication kit's declaration reader and per-site hold.
   restart, terminal-state driving, executor-result reconciliation, and teardown
   independence, with the domain supplying the executor payload, result decoding, and
   effects.
+- Proposed (see `design.md`): make the servicing worker's ready step the one way every
+  domain starts fulfillment, composed from mechanism and domain contributions; one
+  publisher port; a layered evidence envelope; a mechanism-neutral verification contract
+  registering the committed plan; one access rule, with VM's stored access material
+  retired; recovery resources required while a mechanism is configured, and startup
+  refused while a mechanism with no configured section has unfinished obligations.
 - Replace the VM storefront's `site_projection_cache` with the capacity/publication
   kit's per-site projection state.
 - Compose all three domains and remove every domain-local copy in this change.
@@ -46,12 +87,17 @@ None.
 - `market-composition`: listing lifecycle and fulfillment convergence are kit-owned.
 - `storefront-publication`: the seller listing lifecycle is one mechanism over the
   common binding.
+- Proposed: `settlement-servicing` (one start path, the publisher port, the evidence
+  envelope, the verification contract), `vm-storefront-fulfillment` (convergence
+  ownership and access), `api-credits` (its evidence wrapped, not replaced).
 
 ## Non-Goals
 
 - Do not extract the shell, authentication, or persistence residue — sibling changes.
 - Do not change fulfillment semantics for any domain; a divergence between copies is
-  recorded and one behavior chosen, not silently adopted.
+  recorded and one behavior chosen, not silently adopted. The proposed access rule is
+  such a choice: VM's buyers would read access material from an access route rather
+  than from settle status.
 
 ## Impact
 
@@ -84,4 +130,9 @@ None.
   `kit-owned-settlement-runtime` (archived; the obligation journal fulfillment
   convergence reads).
 - `bare-metal-mock-provisioned-deal`'s restart-recovery assertions exercise the
-  convergence mechanism for bare metal.
+  convergence mechanism for bare metal. Its Section 7 adds the pieces this change keeps
+  (`kit/alkahest`'s fulfillment publisher; parked fulfillment and its count in
+  `kit/settlement-runtime`) and an interim bare-metal Alkahest step this change absorbs.
+- Coordinates with `add-api-credits-hosted-settlement` (the issuance evidence an
+  envelope would wrap) and `add-alkahest-attestation-reference-query` (reconciling a
+  parked submission).

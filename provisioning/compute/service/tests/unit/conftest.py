@@ -27,7 +27,7 @@ def mock_settings():
     settings.retry_backoff_multiplier = 2.0
     settings.retry_backoff_max_seconds = 3600
     settings.ansible_timeout_seconds = 1800
-    settings.non_retryable_errors = [
+    settings.additional_non_retryable_errors = [
         "Invalid SSH key",
         "VM target not found",
         "Permission denied",

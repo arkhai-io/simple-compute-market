@@ -1,9 +1,12 @@
+# Deterministic local development principals; never use them on a public network.
+# Provisioning bootstraps one identity per role; the storefront trust lists
+# exercised alongside this fixture allow both schemes.
 provisioning:
   storefrontIdentity:
     principals:
-      - scheme: ed25519
-        identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+      - scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
   adminIdentity:
     principals:
-      - scheme: ed25519
-        identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+      - scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"

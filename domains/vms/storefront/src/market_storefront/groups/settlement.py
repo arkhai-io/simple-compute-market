@@ -4,20 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import webbrowser
 from typing import Any
 
 import typer
-from market_hosted_settlement import onboard_hosted_seller
 from market_settlement_runtime import MechanismReadiness, SettlementConfig
 
 settlement_app = typer.Typer(no_args_is_help=True)
-stripe_app = typer.Typer(
-    no_args_is_help=True, help="Hosted Stripe seller workflow."
-)
-alkahest_app = typer.Typer(
-    no_args_is_help=True, help="Alkahest readiness checks."
-)
+alkahest_app = typer.Typer(no_args_is_help=True, help="Alkahest readiness checks.")
 
 from market_storefront.groups.contact import contact_app  # noqa: E402
 
@@ -32,7 +25,6 @@ def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
         CHAINS,
         get_evm_wallet_address,
         get_evm_wallet_private_key,
-        resolve_marketplace_signer,
         settings,
         settlement_config_mapping,
     )
@@ -40,9 +32,6 @@ def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(), role="seller")
     resources: dict[str, Any] = {}
-    stripe = config.mechanism_config("stripe")
-    if stripe is not None and stripe.enabled:
-        resources["marketplace_signer"] = resolve_marketplace_signer()
     alkahest = config.mechanism_config("alkahest")
     if alkahest is not None and alkahest.enabled:
         resources.update(
@@ -95,7 +84,9 @@ def _select_status(
 
 def _finish_status(status: MechanismReadiness, *, as_json: bool) -> None:
     if as_json:
-        typer.echo(json.dumps(status.safe_projection(), separators=(",", ":"), sort_keys=True))
+        typer.echo(
+            json.dumps(status.safe_projection(), separators=(",", ":"), sort_keys=True)
+        )
     else:
         _render_status(status)
     if not status.ready:
@@ -123,45 +114,6 @@ def settlement_status(
         raise typer.Exit(1)
 
 
-@stripe_app.command("status")
-def stripe_status(
-    as_json: bool = typer.Option(False, "--json", help="Emit sanitized JSON."),
-) -> None:
-    """Observe hosted authority and seller-account readiness."""
-    _config, statuses = _readiness()
-    _finish_status(_select_status(statuses, "fiat.stripe.v1"), as_json=as_json)
-
-
-@stripe_app.command("onboard")
-def stripe_onboard(
-    no_browser: bool = typer.Option(
-        False,
-        "--no-browser",
-        help="Print the transient Account Link instead of opening a browser.",
-    ),
-) -> None:
-    """Create one owner-authorized transient hosted Account Link."""
-    _registry, config, resources = _settlement_context()
-    stripe = config.mechanism_config("stripe")
-    if stripe is None or not stripe.account_ref:
-        raise typer.BadParameter("Settlement.stripe.account_ref is required")
-    signer = resources.get("marketplace_signer")
-    if signer is None:
-        raise typer.BadParameter("Settlement.stripe signer is required")
-    result = onboard_hosted_seller(
-        stripe,
-        signer=signer,
-        account_ref=stripe.account_ref,
-        open_browser=not no_browser,
-        open_url=webbrowser.open,
-    )
-    if no_browser:
-        typer.echo(str(result.url))
-    else:
-        typer.echo("Opened a transient Stripe onboarding link in the browser.")
-    typer.echo(f"expires_at_unix={result.expires_at_unix}")
-
-
 @alkahest_app.command("check")
 def alkahest_check(
     as_json: bool = typer.Option(False, "--json", help="Emit sanitized JSON."),
@@ -174,12 +126,8 @@ def alkahest_check(
 def _mount_mechanism_command_groups() -> None:
     """Mount registration-owned command groups under their config keys."""
     from market_alkahest import create_alkahest_registration
-    from market_hosted_settlement import create_stripe_registration
 
-    for registration in (
-        create_alkahest_registration(command_group=alkahest_app),
-        create_stripe_registration(command_group=stripe_app),
-    ):
+    for registration in (create_alkahest_registration(command_group=alkahest_app),):
         if registration.command_group is None:
             continue
         settlement_app.add_typer(

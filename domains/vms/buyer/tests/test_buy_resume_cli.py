@@ -33,6 +33,7 @@ from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
 )
 from market_config.config_loader import ChainConfig
 from market_core.schemas import RateValue
@@ -126,7 +127,7 @@ def _urlopen_for(responses):
     it = iter(responses)
 
     def _fn(req, timeout=None):
-        body = next(it)
+        body = with_accepted_agreement(req, next(it))
         return _MockResponse(
             status=200,
             text=json.dumps(body),

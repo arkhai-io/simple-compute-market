@@ -1,6 +1,6 @@
 """Integration tests for the retry scheduler (requeue_due_retries).
 
-On a retryable failure ``_process_job`` flips a job back to ``queued`` and
+On a retryable failure the job engine flips a job back to ``queued`` and
 stamps ``next_retry_at``, but does not re-enqueue it (the in-process queue is
 transient). ``requeue_due_retries`` is the sweep that picks those jobs up once
 their backoff elapses. These tests use a real sqlite session_factory.
@@ -10,8 +10,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
-from compute_provisioning_service.db.models import AnsibleJob, JobStatus
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from compute_provisioning_service.db.models import JobRecord, JobStatus
+from compute_provisioning.jobs import JobRetryPolicy
+from compute_provisioning.jobs.engine import JobEngine
 
 
 class _RecordingQueue:
@@ -27,7 +28,7 @@ class _RecordingQueue:
 def _insert(session_factory, job_id, status, next_retry_at, retry_count=1) -> None:
     with session_factory() as db:
         db.add(
-            AnsibleJob(
+            JobRecord(
                 id=job_id,
                 status=status,
                 params={"vm_target": "t", "vm_action": "create"},
@@ -39,13 +40,13 @@ def _insert(session_factory, job_id, status, next_retry_at, retry_count=1) -> No
         db.commit()
 
 
-def _service(session_factory) -> AnsibleJobService:
-    return AnsibleJobService(
-        settings=MagicMock(),
-        session_factory=session_factory,
-        ansible_service=MagicMock(),
-        # Requeueing never resolves a host; the registry is only required.
-        host_service=MagicMock(),
+def _service(session_factory) -> JobEngine:
+    return JobEngine(
+        session_factory,
+        # Requeueing never resolves an executor or a host.
+        executors=MagicMock(),
+        host_lookup=lambda host_id: None,
+        retry_policy=JobRetryPolicy(),
     )
 
 
@@ -84,7 +85,7 @@ async def test_requeue_clears_next_retry_at_to_prevent_double_enqueue(session_fa
 
     assert queue.enqueued == ["due"]
     with session_factory() as db:
-        job = db.query(AnsibleJob).filter(AnsibleJob.id == "due").one()
+        job = db.query(JobRecord).filter(JobRecord.id == "due").one()
         assert job.next_retry_at is None
         assert job.status == JobStatus.queued.value  # awaiting the worker
         assert job.retry_count == 1                  # preserved

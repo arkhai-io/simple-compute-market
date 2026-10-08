@@ -2,103 +2,32 @@
 
 ## Purpose
 
-Define the implemented mechanism-neutral settlement-plan carrier, persisted claim servicing, and signed heartbeat evidence.
+Define Agreement-based payment settlement, escrow obligation servicing, and signed evidence.
 
 ## Requirements
 
-### Requirement: Hosted obligation pins profile and authorization
-
-Every newly accepted `fiat.stripe.v1` obligation MUST carry one exact `funding_profile`, deterministic marketplace operation ID, and operation-scoped `funding_authorization_ref` whose hosted materialization fingerprint agrees with accepted amount, currency, payer, claimant, destination account, expiry, and condition. The mechanism-neutral runtime MUST treat the profile and safe authorization reference as immutable mechanism parameters and MUST reject changed reuse.
-
-Marketplace persistence MUST NOT contain a stable hosted payer/instrument ref, Customer, PaymentMethod, mandate, bank/card detail, provider ID/payload, client secret, or raw action. New operations MUST accept only `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1`; legacy card representation is recovery-only.
-
-#### Scenario: Authorization and plan profiles differ
-
-- **WHEN** hosted materialization reports that the authorization does not bind the accepted obligation/profile
-- **THEN** servicing fails before funding and does not request another authorization or profile
-
-#### Scenario: Exact materialization is retried
-
-- **WHEN** the same obligation, profile, authorization reference, and operation ID are retried after uncertain acknowledgement
-- **THEN** the runtime and adapter reuse one hosted settlement and operation identity
-
-### Requirement: Authoritative profile funding precedes every domain effect
-
-For hosted obligations, only the authority's provider-neutral `funded` state after the exact profile's success and availability gate MAY transition the shared runtime into fulfillment. Setup/payment redirects, confirmation, bank instructions, Checkout completion, webhook-derived local hints, and pending/deferred status MUST NOT authorize fulfillment, evidence, or collection. Status MAY persist only safe reason, deadline, and action metadata.
-
-#### Scenario: ACH reports processing
-
-- **WHEN** authoritative hosted status remains awaiting payment or availability
-- **THEN** no domain fulfillment lease, fulfillment side effect, condition evidence, or collect operation is reserved
-
-#### Scenario: Push-transfer instructions were displayed
-
-- **WHEN** the buyer received bank instructions but attributable funds are not authoritatively funded
-- **THEN** servicing remains pending and does not treat interaction as payment
-
-### Requirement: Profile-specific reclaim and loss remain authority-owned
-
-The marketplace MUST request reclaim through the same opaque hosted settlement and operation identities and project provider-neutral pending/success/manual outcomes. It MUST NOT select a Stripe cancellation, return, refund, reversal, or dispute operation. A pre-fulfillment funding return MUST block fulfillment and collection and follow hosted reclaim/recovery. A return after fulfillment starts but before collection MUST preserve the immutable fulfillment record, block collection, order domain-owned VM teardown and capacity cleanup to convergence, and delegate financial return/reclaim entirely to the hosted authority. A post-collection loss MUST project an incident/manual status without rewriting completed marketplace fulfillment or attempting local reclaim.
-
-#### Scenario: ACH returns before fulfillment
-
-- **WHEN** hosted authority reports the accepted debit returned before the marketplace committed fulfillment
-- **THEN** the runtime performs no fulfillment or collection and follows the eligible reclaim/recovery state
-
-#### Scenario: Funding returns after VM fulfillment
-
-- **WHEN** authoritative funding returns after VM fulfillment committed but before collection reserved or succeeded
-- **THEN** collection remains blocked, the immutable fulfillment record remains attributable, VM teardown and capacity cleanup converge, and hosted financial recovery proceeds without marketplace-selected provider action
-
-#### Scenario: ACH return appears after collection
-
-- **WHEN** hosted status reports a post-collection loss incident
-- **THEN** marketplace keeps completed fulfillment and collection identities and exposes safe operator-required state
-
-### Requirement: Legacy card obligations recover without public alias
-
-A migrated marketplace row whose accepted plan used the historical card-only shape MUST continue status, fulfillment, collection, and reclaim recovery with its original option, obligation, hosted settlement, and operation identities. The legacy decoder MUST be selected only from persisted historical state and MUST NOT be used by publication, negotiation, new materialization, or configuration.
-
-#### Scenario: Legacy card row is pending at upgrade
-
-- **WHEN** the shared runtime loads a nonterminal historical card obligation
-- **THEN** it resumes the exact legacy hosted operation without requiring a new payer profile, funding authorization, or `card.v1` relabel
-
-### Requirement: Negotiation-to-plan handoff
-Negotiation MUST produce deterministic Terms and the settlement path MUST
-register every accepted obligation as a mechanism-neutral Settlement Plan
-before a fulfillment side effect begins. A seller MAY adopt a separately
-verified pre-materialized obligation without invoking materialization again.
-
-#### Scenario: Pre-materialized escrow is accepted
-- **WHEN** the seller verifies the exact obligation represented by an existing
-  mechanism reference
-- **THEN** the runtime registers the accepted plan and idempotently adopts that
-  reference for the verified obligation index before fulfillment
-
 ### Requirement: Mechanism-neutral plan carrier
-Core settlement-plan carriers MUST express lifecycle-universal fields and
-carry mechanism-specific data in tagged `{mechanism, params}` envelopes.
 
-#### Scenario: New settlement mechanism is added
-- **WHEN** a composition registers a client for a new mechanism
-- **THEN** the settlement runtime carries its opaque parameters and public-safe
-  outcomes without importing the mechanism kit
+Settlement plans MUST carry stable participant/value fields and tagged `{mechanism, params}` envelopes for mechanisms using the obligation runtime. Existing carriers retain escrow claimant, expiration, and condition fields; Arkhai payments MUST consume the Agreement without constructing a `SettlementPlan` or `SettlementObligation` or implementing the conditional-escrow client port.
+
+#### Scenario: Charge-first settlement is selected
+
+- **WHEN** an Agreement selects `arkhai.payments.v1`
+- **THEN** settlement uses the mandate and transaction receipt without creating an escrow obligation
 
 ### Requirement: Durable idempotent servicing
-The settlement-runtime worker MUST bind one immutable fulfillment reference,
-persist every condition/effect attempt through the canonical operation
-journal, retry transient or pending outcomes, and avoid duplicate successful
-collection across restarts.
+
+The Alkahest servicing path MUST bind one immutable fulfillment reference, persist each condition/effect attempt under a stable operation identity, retry transient or pending outcomes, and avoid duplicate successful collection across restarts.
 
 #### Scenario: Collection succeeds before a restart
-- **WHEN** the worker resumes the same obligation
+
+- **WHEN** the Alkahest servicing path resumes the same obligation
 - **THEN** it observes the durable terminal state and does not collect twice
 
 #### Scenario: Condition remains pending across restart
-- **WHEN** a client returns pending with updated opaque mechanism state
-- **THEN** the repository persists that state before backoff and supplies it to
-  the next authoritative status or condition check
+
+- **WHEN** Alkahest returns pending with updated opaque mechanism state
+- **THEN** that state is persisted before backoff and supplied to the next authoritative status or condition check
 
 ### Requirement: Signed heartbeat evidence
 The buyer MAY emit signed deal heartbeats while service is healthy; the seller
@@ -124,36 +53,35 @@ that relay them MUST NOT name any option or condition its meaning on one.
 - **THEN** it dispatches through the registered Alkahest client with the stable
   operation reference and prior durable mechanism state
 
-#### Scenario: A hosted profile needs a payer return address
+#### Scenario: A mechanism needs a reclaim-only input
 
-- **WHEN** a hosted obligation funded by push transfer is reclaimed and the
-  authority requires somewhere to address the payer's return
-- **THEN** the hosted client alone reads that address out of the reclaim's
-  mechanism-scoped options and places it on its own request, and no relaying
-  layer names it
+- **WHEN** a mechanism's reclaim requires an input that only its own client
+  understands
+- **THEN** that client alone reads it out of the reclaim's mechanism-scoped
+  options and places it on its own request, and no relaying layer names it
 
 ### Requirement: Durable independent obligation lifecycle
-Settlement servicing MUST derive stable repository identity for every ordered
-plan obligation and MUST persist materialization, condition evaluation,
-collection, reclaim, attempt, uncertain-acknowledgement, and receipt state
-independently. Equivalent retries MUST reuse one operation identity; changed
-reuse MUST fail closed. Collection and reclaim MUST reserve one mutually
-exclusive compare-and-swap winner before mechanism I/O.
+
+Alkahest servicing MUST derive stable repository identity for every ordered plan obligation and persist materialization, condition evaluation, collection, reclaim, attempt, uncertain-acknowledgement, and receipt state independently. Equivalent retries MUST reuse one operation identity; changed reuse MUST fail closed. Alkahest collection and reclaim MUST reserve one mutually exclusive compare-and-swap winner before mechanism I/O.
 
 #### Scenario: Plan contains obligations in both directions
-- **WHEN** an accepted plan contains buyer-funded and seller-funded obligations
+
+- **WHEN** an accepted Alkahest plan contains buyer-funded and seller-funded obligations
 - **THEN** each obligation is materialized by its payer and collected by its claimant without interpreting list position as direction
 
 #### Scenario: One obligation fails after a sibling completes
-- **WHEN** a plan operation requires retry or manual repair after another obligation reached a terminal effect
+
+- **WHEN** an operation requires retry or manual repair after another Alkahest obligation reached a terminal effect
 - **THEN** the completed sibling remains terminal and operator status identifies the affected obligation without replaying the completed effect
 
 #### Scenario: Acknowledgement is uncertain across restart
-- **WHEN** a mechanism mutation may have succeeded before its acknowledgement was lost
-- **THEN** the operation journal records uncertainty and retry uses the same obligation and operation identity
+
+- **WHEN** an Alkahest mutation may have succeeded before its acknowledgement was lost
+- **THEN** retry uses the same obligation and operation identity
 
 #### Scenario: Collection races reclaim
-- **WHEN** claimant collection and payer reclaim concurrently target one obligation
+
+- **WHEN** claimant collection and payer reclaim concurrently target one Alkahest obligation
 - **THEN** exactly one reservation may invoke the mechanism and the other observes a busy or terminal outcome
 
 ### Requirement: Deterministic interval and penalty-bond policy
@@ -177,39 +105,17 @@ accepted mechanism demand bytes and payer/claimant direction.
 - **THEN** the resulting obligation names the seller as payer, the buyer as claimant, and is serviced independently from buyer-funded payment obligations
 
 ### Requirement: Aggregate and per-obligation status
-Operator-facing settlement status MUST derive the plan aggregate from every
-authoritative obligation row and MUST include each obligation's lifecycle
-state. Aggregate status MUST be `complete` only when every obligation has a
-successful collection or reclaim, `manual_required` when any obligation needs
-repair, `partial` when only some obligations are terminal, and `active`
-otherwise.
+
+Alkahest operator-facing settlement status MUST derive the plan aggregate from every authoritative obligation row and MUST include each obligation's lifecycle state. Aggregate status MUST be `complete` only when every obligation has a successful collection or reclaim, `manual_required` when any obligation needs repair, `partial` when only some obligations are terminal, and `active` otherwise.
 
 #### Scenario: Mixed terminal and active obligations
-- **WHEN** one obligation is collected while a sibling remains pending
+
+- **WHEN** one Alkahest obligation is collected while a sibling remains pending
 - **THEN** aggregate status is partial and both independent states are visible
-
-### Requirement: Hosted financial authority lifecycle
-
-`fiat.stripe.v1` MUST use the shared obligation journal and conditional-escrow port while the separately operated hosted service remains the sole payer-profile and financial authority. Marketplace rows MUST contain only exact funding profile, operation-scoped funding authorization and settlement references, public lifecycle/reason/deadline/action metadata, condition anchors, canonical fulfillment references, and opaque receipts; they MUST NOT persist stable payer/instrument refs, provider identifiers, Checkout/setup/confirmation/bank-instruction URLs, payment/bank/card/mandate data, credentials, or raw evidence/provider payloads.
-
-#### Scenario: Hosted funding becomes authoritative
-
-- **WHEN** the hosted authority reports the accepted obligation and exact profile funded
-- **THEN** the storefront provisions once, binds one immutable condition evidence reference, and only then reports the settlement ready and resumes check/collect through the shared worker
-
-#### Scenario: Reclaim races fulfillment
-
-- **WHEN** the buyer reclaims at expiry while fulfillment, satisfied evaluation, or collection is reserved or complete
-- **THEN** the repository compare-and-set rejects reclaim; pending or false evaluation alone does not prevent an otherwise eligible reclaim
-
-#### Scenario: Hosted funding remains delayed
-
-- **WHEN** a bank profile reports a safe pending state or future availability deadline
-- **THEN** the shared runtime retains the same obligation and operation without fulfillment, collection, or mechanism fallback
 
 ### Requirement: Provider-neutral conditional escrow client
 
-The kit-owned settlement runtime MUST drive every settlement mechanism through one asynchronous conditional-escrow contract whose operations materialize an obligation, retrieve authoritative status, evaluate an immutable fulfillment reference, collect an authorized obligation, and reclaim an expired obligation. Results MUST expose only an opaque mechanism reference, public lifecycle status, safe normalized reason/deadline, optional transient buyer action, optional condition anchor, and opaque durable receipt. Mechanism input MAY contain one exact public funding profile and operation-scoped authorization reference but MUST NOT expose a stable payer/instrument or provider model to the runtime.
+The kit-owned settlement runtime MUST drive every settlement mechanism through one asynchronous conditional-escrow contract whose operations materialize an obligation, retrieve authoritative status, evaluate an immutable fulfillment reference, collect an authorized obligation, and reclaim an expired obligation. Results MUST expose only an opaque mechanism reference, public lifecycle status, safe normalized reason/deadline, optional transient buyer action, optional condition anchor, and opaque durable receipt. Mechanism input MUST NOT expose a stable payer, instrument, or provider model to the runtime.
 
 Reclaim MAY additionally carry mechanism-scoped options supplied by the
 requesting participant for that one operation. The runtime MUST pass them to the
@@ -220,15 +126,10 @@ the reclaim reservation MUST bind the options it was given, so that a later
 reclaim naming different ones is refused rather than silently reusing the first
 reservation.
 
-#### Scenario: Hosted materialization requires buyer action
-
-- **WHEN** `fiat.stripe.v1` materialization or confirmation creates a hosted action
-- **THEN** the runtime persists the opaque hosted reference and public action kind/expiry while the URL/client secret remains transient and service-owned
-
 #### Scenario: Alkahest remains selected
 
 - **WHEN** an `alkahest.v1` obligation is serviced
-- **THEN** the existing Alkahest adapter, fields, SDK operations, and outcomes remain unchanged and no hosted-service call occurs
+- **THEN** the existing Alkahest adapter, fields, SDK operations, and outcomes remain unchanged
 
 #### Scenario: A reclaim carries mechanism-scoped options
 
@@ -245,155 +146,23 @@ reservation.
 - **WHEN** a reclaim supplies no options, or supplies options to a mechanism that reads none
 - **THEN** the operation proceeds exactly as it does today with no additional mechanism input
 
-### Requirement: Versioned hosted condition input
-
-A hosted obligation MUST carry exactly one immutable condition descriptor with a unique condition ID, a versioned evaluator kind, a configuration-owned resolver ID where applicable, and canonical demand encoded as either `evm-abi` or `application/jcs+json`. Negotiated condition parameters MUST contain immutable policy inputs only and MUST NOT contain credentials, URLs, RPC endpoints, headers, or signing keys.
-
-#### Scenario: Hosted option contains an unconfigured resolver URL
-- **WHEN** the adapter validates a condition whose negotiated parameters contain a caller-supplied resolver URL
-- **THEN** materialization fails before buyer payment action is created
-
-### Requirement: Hosted adapter validation and state projection
-
-The `fiat.stripe.v1` adapter MUST accept only buyer-funded, seller-claimed obligations with a positive integer minor-unit amount, lowercase ISO 4217 currency, immutable account reference, exact supported funding profile, operation-scoped funding authorization reference, expiry, and supported typed condition. It MUST verify exact client/manifest/schema/profile capability before use. Provider-neutral awaiting-payment, action-required, deadline, return, and loss states MUST map monotonically into the shared lifecycle. Hosted `operator_review` or post-collection loss MUST project as `manual_required` without inventing a successful outcome or provider detail.
-
-A hosted operation refused by the authority with a non-retryable error MUST
-retain the authority's own stable error code. The released client's message,
-identifiers, and payloads MUST NOT reach marketplace persistence or any
-marketplace response; the code MUST, because it is the authority's own
-vocabulary rather than provider detail.
-
-An obligation the marketplace parks as `manual_required` MUST project a stable
-reason alongside its status, in the same field a consumer reads for a funding
-reason, and every domain adopting the hosted mechanism MUST project it
-identically. A `manual_required` projection carrying no reason MUST NOT occur.
-
-#### Scenario: Condition is not currently satisfied
-
-- **WHEN** the hosted authority returns an authoritative false evaluation before expiry
-- **THEN** the shared worker retains a pending condition and may check again without collecting or marking terminal failure
-
-#### Scenario: Hosted authority requires operator review
-
-- **WHEN** status reports `operator_review`
-- **THEN** marketplace state reports manual intervention and does not collect, reclaim, or guess provider outcome
-
-#### Scenario: Profile is unsupported by the release
-
-- **WHEN** an accepted new-format obligation names a profile absent from the verified client/manifest capability set
-- **THEN** adapter admission fails closed before materialization
-
-#### Scenario: Hosted authority refuses an operation outright
-
-- **WHEN** the authority answers a hosted operation with a non-retryable error carrying its own error code
-- **THEN** the obligation is parked as `manual_required` recording that code, and neither the authority's message nor any provider identifier or payload is persisted
-
-#### Scenario: An operator reads a parked obligation
-
-- **WHEN** an obligation is projected while parked as `manual_required`
-- **THEN** the projection names a stable reason for the parking, so the operator can distinguish a refused condition, an unsupported profile, and an account that lost a capability without provider access
-
-#### Scenario: Two domains park the same obligation shape
-
-- **WHEN** the VM, API-credit, and bare-metal storefronts each project an obligation their authority refused for the same reason
-- **THEN** all three carry the same stable reason in the same field, because the projection is built from one shared surface
-
-### Requirement: Fulfillment and reclaim exclusion
-
-Hosted servicing MUST use the shared obligation identity, exact profile and authorization, operation journal, work leases, and compare-and-set transitions. At stored expiry, reclaim MAY reserve only after re-retrieving current hosted state and only when no authoritative funded state, fulfillment lease or success, submitted collect/provider transfer, or reserved satisfied evaluation exists. Authoritative funded state MAY begin fulfillment; fulfillment success MUST permanently remove marketplace reclaim authority and MUST resume check and collect after restart even when expiry subsequently passes.
-
-#### Scenario: Fulfillment succeeds immediately before expiry
-
-- **WHEN** immutable VM fulfillment commits before the reclaim compare-and-set
-- **THEN** reclaim is rejected and restart resumes hosted condition check and collection
-
-#### Scenario: Pending condition reaches expiry without fulfillment success
-
-- **WHEN** no authoritative funding/fulfillment lease or success, collect reservation, or satisfied evaluation exists at expiry after current hosted status retrieval
-- **THEN** reclaim may reserve and the shared lifecycle prevents a later collect reservation
-
-#### Scenario: Funding wins at expiry
-
-- **WHEN** re-retrieval proves the accepted bank operation funded before reclaim reservation
-- **THEN** the runtime proceeds toward fulfillment under the same obligation rather than reclaiming or releasing it as unpaid
-
 ### Requirement: Secret-free fulfillment projection
 
-The VM domain MUST encode only the versioned evidence allowed by the accepted condition. EAS mode MUST send a configured resolver ID and fulfillment UID; portable mode MUST send only the allowlisted proof projection. Generic fulfillment results, tenant credentials, SSH material, connection details, arbitrary provider fields, URLs, and headers MUST NOT enter fulfillment references, hosted requests, settlement rows, logs, or generated fixtures.
+The VM domain MUST encode only the versioned evidence allowed by the accepted mechanism's condition. Generic fulfillment results, tenant credentials, SSH material, connection details, arbitrary provider fields, URLs, and headers MUST NOT enter fulfillment references, settlement-stage evidence, settlement rows, logs, or generated fixtures.
 
 #### Scenario: VM fulfillment contains connection credentials
+
 - **WHEN** a condition evidence projection is generated from a successful fulfillment result
 - **THEN** credentials and connection fields are absent and a canary test rejects any projection that would include them
 
-### Requirement: Principal-bound settlement evidence and authority
-
-Settlement plans, accepted fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal authorization MUST bind payer, claimant, storefront, and service actors as canonical scheme-tagged principals. Matching a bare address, identifier, hosted account reference, or provider identifier MUST NOT grant settlement authority.
-The mechanism-neutral runtime MUST treat those principals as opaque
-authorization values and MUST NOT infer or persist wallet or private-key aliases
-from them.
-
-#### Scenario: Heartbeat uses the wrong scheme
-
-- **WHEN** a heartbeat identifier matches the recorded buyer text but its principal scheme differs
-- **THEN** the storefront rejects the heartbeat and does not update evidence or reclaim timing
-
-#### Scenario: Hosted buyer reclaims without a wallet
-
-- **WHEN** an authorized Ed25519 payer requests reclaim after the hosted obligation becomes eligible
-- **THEN** the mechanism-neutral runtime and hosted client submit the stable operation without resolving wallet or chain settings
-
-#### Scenario: Either participant reconciles shared status
-
-- **WHEN** the payer-facing status route and claimant-side servicing worker reconcile the same non-terminal obligation
-- **THEN** both calls share one principal-bound status operation keyed by the canonical payer and claimant pair rather than conflicting on which authorized participant initiated the poll
-
-### Requirement: Chain credentials are mechanism-scoped
-
-A settlement adapter MAY require an EVM address, wallet, RPC endpoint, chain ID, or deployed contract only for an obligation whose selected mechanism or condition performs that EVM effect. Generic settlement carriers and hosted non-EVM obligations MUST NOT require or infer those values from marketplace principals.
-
-#### Scenario: Hosted condition is non-EVM
-
-- **WHEN** a `fiat.stripe.v1` obligation uses an admitted built-in or signed non-EVM condition
-- **THEN** materialization, check, collect, reclaim, and reconciliation run with no EVM credential or RPC dependency
-
-#### Scenario: EAS condition is selected
-
-- **WHEN** a hosted or Alkahest obligation selects a condition whose contract requires an EVM subject or transaction
-- **THEN** the owning adapter validates the explicitly tagged EVM input without reinterpreting an Ed25519 principal
-
-### Requirement: Hosted client owns hosted identity wire
-
-The hosted settlement adapter and payer/authorization consumer MUST pass the selected or recorded persistent marketplace signer through the exact manifest-pinned hosted client identity interface and MUST NOT duplicate hosted canonicalization, headers, scheme implementations, response verification, payer/profile models, authorization encoding, setup/confirmation behavior, setup verification behavior, or provider models.
-
-Where the marketplace consumes a hosted operation the pinned client does not expose, it MUST NOT reach the authority by another route. Constructing the request, signing it, or verifying its response outside the pinned client's own interface MUST be refused, and the operation MUST be reported as unavailable under the bound release.
-
-#### Scenario: Hosted release lacks the required identity capability
-
-- **WHEN** buyer/storefront startup or publication preflight sees a hosted manifest that does not advertise the configured principal, payer, authorization, and funding-profile contract versions
-- **THEN** hosted settlement remains unavailable and no fiat option or funding authorization is created
-
-#### Scenario: A hosted operation is absent from the pinned client
-
-- **WHEN** the marketplace needs a hosted operation that the pinned client interface does not expose
-- **THEN** the operation is reported as unavailable under the bound release, and no hand-built request, signature, or response verification is used in its place
-
-### Requirement: Configuration composes one settlement runtime
-
-Each composition root MUST build installed mechanism clients from the typed settlement registrations and inject them into the single mechanism-neutral settlement runtime. Enablement, priority, or mechanism-specific commands MUST NOT create a parallel lifecycle, operation journal, claim engine, retry loop, or status authority.
-
-#### Scenario: Both mechanisms are enabled
-
-- **WHEN** Alkahest and hosted Stripe registrations are ready
-- **THEN** both dispatch through the same obligation identity, operation journal, leases, retry rules, and aggregate status contract
-
 ### Requirement: Mechanism configuration cannot reinterpret durable plans
 
-Mechanism configuration and readiness MAY govern new option publication and admission, but a persisted accepted plan MUST retain its canonical mechanism, exact parameters, payer/claimant direction, and stable operation identities. Recovery MUST use authoritative stored state even when that mechanism is no longer preferred or enabled for new deals.
+Mechanism configuration and readiness MAY govern new option publication and admission, but an accepted Agreement MUST retain its exact settlement mechanism, selected option, and parameters. Recovery MUST use the accepted Agreement and mechanism-owned operation identity even when that mechanism is no longer preferred or enabled for new deals.
 
-#### Scenario: Hosted mechanism is disabled after funding
+#### Scenario: Payment mechanism is disabled after acceptance
 
-- **WHEN** reconciliation resumes an existing funded hosted obligation after operators disable new hosted publication
-- **THEN** the runtime continues authoritative status/collection/reclaim recovery for that obligation rather than switching or abandoning it
+- **WHEN** reconciliation resumes an existing Arkhai transaction after operators disable new Arkhai payment options
+- **THEN** the transaction continues under its accepted mechanism and exact ID rather than switching or being abandoned
 
 ### Requirement: Accepted domain binding governs the servicing lifecycle
 
@@ -419,38 +188,6 @@ Settlement verification, plan construction, materialization, condition/effect se
 - **WHEN** a recoverable operation's exact domain/version is not installed or its site trust binding is missing
 - **THEN** the operation remains blocked under its original identities and no capacity, fulfillment, settlement, result, or teardown call occurs
 
-### Requirement: Bare-metal hosted servicing orders funding, access, and collection
-
-The accepted bare-metal hosted obligation MUST be persisted from the immutable seller thread, listing, exact option, plan, and parties. Servicing MUST materialize the exact operation-scoped funding authorization, wait for authoritative funding, fulfill exactly once at the selected site, publish authoritative lease-ready evidence, and only then collect. Unfunded or pre-evidence failures remain reclaimable after the accepted deadline; access-ready evidence, committed collection, or unknown physical authority blocks reclaim. Return/loss and physical teardown remain independently recoverable.
-
-#### Scenario: Restart after evidence
-
-- **WHEN** the storefront restarts after evidence persistence but before collection acknowledgement
-- **THEN** servicing reuses the same obligation, fulfillment identity, result digest, evidence reference, and collection operation
-- **AND** it does not reserve, provision, publish, or collect twice
-
-### Requirement: API-credit hosted servicing orders financial and domain effects
-
-One accepted hosted API-credit obligation MUST progress through immutable plan
-registration, exact authorization materialization, authoritative funded state,
-exact-once credits issuance, signed portable evidence publication, condition
-evaluation, and collection in that order. Shared operation journals MUST
-exclude concurrent duplicate issue, evidence, collect, and reclaim work.
-Restart MUST resume from authority and repository state rather than reissuing
-because a response or credential was not observed.
-
-#### Scenario: Funding is delayed
-- **WHEN** hosted status remains awaiting payment or profile availability
-- **THEN** no credits-authority issuance, credential, fulfillment evidence, condition success, or collection occurs
-
-#### Scenario: Issuance commits before storefront restart
-- **WHEN** the credits authority has the fulfillment-keyed grant but the storefront lacks its response
-- **THEN** servicing retrieves and persists that grant, publishes one evidence object, and proceeds to collection without double issuance
-
-#### Scenario: Reclaim races committed issuance
-- **WHEN** reclaim begins while exact issuance may have committed
-- **THEN** the API-credit before-reclaim callback retrieves by fulfillment identity; committed issuance becomes fulfillment and blocks reclaim, while unknown issuance permits ordinary financial reclaim
-
 ### Requirement: Non-financial obligations are serviceable
 
 An obligation with no amount, no asset, and no funding requirement MUST be a valid
@@ -465,6 +202,151 @@ funding state, a chain client, or an expiration-driven reclaim path.
   the introduction available
 - **THEN** the runtime records it ready, completes collection with a receipt, and no
   funding or reclaim machinery is invoked
+
+### Requirement: Agreement-to-settlement-stage handoff
+
+Negotiation MUST emit one explicit Agreement containing only accepted deal terms, and the selected settlement stage MUST consume that Agreement before domain provisioning begins. A successful negotiation is not evidence of funding or settlement. A mechanism may produce its own settlement evidence from the Agreement; the domain provisioning stage MUST receive that evidence before its protected provisioning effect.
+
+#### Scenario: Arkhai payments agreement is accepted
+
+- **WHEN** negotiation accepts an Agreement selecting `arkhai.payments.v1`
+- **THEN** the seller derives the mandate from that Agreement and provisioning remains blocked until the seller verifies a matching signed transaction receipt
+
+### Requirement: Principal-bound marketplace actions use exact actors
+
+Settlement Agreements, accepted fulfillment references, heartbeats, payment approvals, status and refund requests, and mechanism operation authorization MUST bind the canonical scheme-tagged principals that the accepted negotiation and selected mechanism authorize. No address, identifier, payment account reference, provider identifier, or API credential may replace one. The marketplace MUST treat principals as opaque and MUST NOT infer or persist wallet or private-key aliases from them.
+
+#### Scenario: Heartbeat uses the wrong scheme
+
+- **WHEN** a heartbeat identifier matches the recorded buyer text but its principal scheme differs
+- **THEN** the storefront rejects the heartbeat and does not update evidence or reclaim timing
+
+#### Scenario: Arkhai buyer approves with its owner credential
+
+- **WHEN** an authorized buyer approves an `arkhai.payments.v1` mandate using its owner's WorkOS user-scoped API credential
+- **THEN** approval is bound to the buyer's Arkhai account and does not resolve wallet or chain settings
+
+#### Scenario: Buyer and seller poll one transaction
+
+- **WHEN** the buyer and seller poll the same accepted Arkhai transaction
+- **THEN** both use the transaction ID derived from the accepted mandate, and the seller provisions only after receipt verification
+
+### Requirement: Mechanism credentials remain scoped
+
+A settlement mechanism MAY require an EVM address, wallet, RPC endpoint, chain ID, or deployed contract only when its selected effect performs that EVM operation. Generic settlement carriers and non-EVM mechanisms MUST NOT require or infer those values from marketplace principals.
+
+#### Scenario: Arkhai payment uses no EVM credentials
+
+- **WHEN** an `arkhai.payments.v1` Agreement is settled through the external HTTP service
+- **THEN** approval, polling, receipt verification, and `reverse` require no EVM credential or RPC dependency
+
+#### Scenario: Alkahest condition requires an EVM subject
+
+- **WHEN** an Alkahest obligation selects a condition whose contract requires an EVM subject or transaction
+- **THEN** the Alkahest kit validates the explicitly tagged EVM input without reinterpreting an Ed25519 principal
+
+### Requirement: Arkhai payments settles charge-first from an agreement
+
+The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepted Agreement and return the mandate and Agreement, so both parties know the transaction ID before approval. Both parties MUST poll that same transaction ID. The seller MUST NOT provision until it verifies an Arkhai-signed receipt matching the transaction and the Agreement's `deal`.
+
+#### Scenario: Seller derives a mandate before approval
+
+- **WHEN** negotiation accepts an Agreement selecting `arkhai.payments.v1`
+- **THEN** the seller returns the Agreement and its derived mandate, and both parties compute the same transaction ID before the buyer approves
+
+#### Scenario: Seller provisions only on a matching signed receipt
+
+- **WHEN** the seller polls the transaction ID and receives a receipt
+- **THEN** it verifies the Arkhai signature and matching transaction and Agreement deal before provisioning, and rejects an invalid, absent, or mismatched receipt
+
+### Requirement: The payments mandate is derived exactly from the Agreement
+
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and one `once` part for the agreed amount and asset. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`, and authorize `start` and `stop` for buyer and seller and `reverse` for the seller and Arkhai dispute authority.
+
+#### Scenario: Hold and approval expiry follow the accepted timing
+
+- **WHEN** a seller derives a mandate from an Agreement accepted at `accepted_at`
+- **THEN** the hold is `ceil(start_utc - accepted_at) + duration_seconds + window` whole seconds, approval expires at `floor(accepted_at) + window`, and fractional timestamps stay unchanged in the Agreement and its deal hash
+
+### Requirement: The buyer approves only a mandate it has checked
+
+The buyer kit MUST check the mandate against the exact Agreement and its own policy before approving it with the owner's WorkOS user-scoped API credential. It MUST attach the exact Agreement at approval only when its `attach_agreement` policy is enabled, which it is not by default, and MUST NOT perform the seller's deposit.
+
+#### Scenario: Buyer attaches only by its own policy
+
+- **WHEN** the buyer approves a mandate with `attach_agreement` disabled
+- **THEN** the approval carries no attachment, whatever the selected option's
+  `deposit_agreement` setting
+
+### Requirement: The seller deposits the Agreement before delivering
+
+If the selected option sets `deposit_agreement` and the transaction has no Agreement attachment, the seller MUST attach it after verifying the receipt and before any delivery effect. A failed deposit MUST be retryable and MUST block delivery.
+
+#### Scenario: Seller deposits before delivering
+
+- **WHEN** the selected option sets `deposit_agreement` and the verified
+  transaction has no Agreement attachment
+- **THEN** the seller attaches the exact Agreement before any delivery effect,
+  and a deposit failure returns retryable unavailable without delivery
+
+### Requirement: Only the seller reverses a held payment
+
+A refund MUST be seller-initiated through `reverse`, which is authorized for the seller and the Arkhai dispute authority and never for the buyer. The payments service releases an un-reversed hold without a settlement-service call.
+
+#### Scenario: Seller operator refunds a held payment
+
+- **WHEN** a seller-authenticated refund request names an accepted payment deal
+  with a verified receipt and still-held funds
+- **THEN** the storefront records refund intent, requests `reverse` for that
+  transaction, and records the deal refunded; repeats return the same result
+  without a second reversal
+
+#### Scenario: Refund and delivery start race
+
+- **WHEN** a refund request and the start of delivery for the same deal overlap
+- **THEN** exactly one transition wins: if refund intent was recorded first,
+  delivery does not start; if delivery started first, the refund proceeds and
+  the deal records both the delivery and the refund
+
+#### Scenario: Only the seller initiates a refund
+
+- **WHEN** delivery fails or a buyer requests settlement after any outcome
+- **THEN** no storefront issues `reverse` unless a seller-authenticated refund
+  request names the deal, or the seller has enabled the `refund` failure action
+  and the deal failed before any delivery; the buyer's recourse is a dispute
+  through the payments service
+
+### Requirement: Negotiation-scoped payment settlement converges
+
+The seller MUST derive the mandate at acceptance and store it in opaque `settlement_data` beside exact `agreement_bytes` in `negotiation_threads`. Buyer settlement requests MUST carry only the negotiation ID. The seller MUST authenticate the accepted buyer, load accepted state, poll the deterministic transaction ID, and verify the signed receipt against the mandate before VM or bare-metal provisioning or API-credit issuance.
+
+#### Scenario: Accepted timestamps have fractional seconds
+
+- **WHEN** acceptance and start times are not whole seconds
+- **THEN** mandate derivation rounds the hold interval up and approval expiry down without rewriting the Agreement
+
+### Requirement: Payment settlement is retryable and idempotent
+
+Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment or grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon.
+
+#### Scenario: Settlement is called before approval completes
+
+- **WHEN** the seller has no matching signed receipt for the accepted mandate
+- **THEN** it returns retryable pending and creates no VM, host access, or credit grant
+
+#### Scenario: Issuance or provisioning acknowledgement is lost
+
+- **WHEN** a retry finds nonterminal domain progress after a verified payment
+- **THEN** it resumes or retrieves the same durable domain operation without charging or delivering twice
+
+### Requirement: Seller integration faults are blocked, not retried
+
+A failure caused by the seller's own integration (an authentication or authorization error, an unknown account, missing credentials or servicing configuration, a protocol or schema violation, another transaction ID, or a non-matching Agreement attachment) MUST be `Blocked`: the storefront answers 500 and logs it as an error, and a refund reports the matching `RefundBlocked`.
+
+#### Scenario: The seller's integration fault blocks settlement
+
+- **WHEN** the payments service refuses the seller's credential while a deal settles
+- **THEN** the storefront answers 500, records nothing, and logs the fault as an error rather than reporting a retryable outage
 
 ## Evidence
 

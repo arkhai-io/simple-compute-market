@@ -7,6 +7,10 @@ from .escrow_verification import (
     EscrowVerificationError,
     verify_escrow_for_settlement,
 )
+from .fulfillment_publisher import (
+    AlkahestFulfillmentPublisher,
+    FulfillmentPublication,
+)
 from .settlement_config import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
@@ -18,8 +22,10 @@ __all__ = [
     "ALKAHEST_CONFIG_KEY",
     "ALKAHEST_MECHANISM_ID",
     "AlkahestConditionalEscrowClient",
+    "AlkahestFulfillmentPublisher",
     "AlkahestSettlementConfig",
     "EscrowVerificationError",
+    "FulfillmentPublication",
     "create_alkahest_registration",
     "verify_escrow_for_settlement",
 ]

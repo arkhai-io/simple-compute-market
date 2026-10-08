@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar, TYPE_CHECKING
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 if TYPE_CHECKING:
     from .settlement_types import SettlementResource
 

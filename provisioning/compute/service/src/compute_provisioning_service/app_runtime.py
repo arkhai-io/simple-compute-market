@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 import os
 
+from compute_provisioning_ansible import parse_inventory_ini
 from compute_provisioning.startup import (
     ComputeProvisioningBackgroundTask,
     ComputeProvisioningShutdownStep,
@@ -14,23 +14,26 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
-from market_fulfillment.db import SettlementRecord, SettlementRecordState
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
 )
-from compute_provisioning_service.services.relay_service import RelayService
+
+from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
 def apply_ansible_config() -> None:
-    """Apply ANSIBLE_CONFIG from the active profile if configured."""
+    """Export ``ANSIBLE_CONFIG`` for every playbook the service runs.
+
+    The profile's ``ansible_cfg`` when it names one, otherwise the Ansible
+    distribution's own defaults, which belong to no domain.
+    """
 
     ansible_cfg = str(getattr(settings, "ansible_cfg", "") or "").strip()
-    if ansible_cfg:
-        os.environ["ANSIBLE_CONFIG"] = ansible_cfg
-        logger.info("ANSIBLE_CONFIG set to %s", ansible_cfg)
+    os.environ["ANSIBLE_CONFIG"] = ansible_cfg or str(DEFAULT_ANSIBLE_CONFIG)
+    logger.info("ANSIBLE_CONFIG set to %s", os.environ["ANSIBLE_CONFIG"])
 
 
 def initialise_container_resources() -> None:
@@ -55,14 +58,19 @@ def resolve_request_path_services() -> None:
     # can retrieve them via a simple lambda, avoiding any provider
     # machinery on the request path (prevents asyncio.get_event_loop()
     # errors in AnyIO worker threads).
-    _container_module.resolved_job_service = container.job_service()
+    _container_module.resolved_job_engine = container.job_engine()
     fulfillment_service = container.fulfillment_service()
     container.fulfillment_teardown_port().bind(fulfillment_service)
     _container_module.resolved_fulfillment_service = fulfillment_service
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
-    _container_module.resolved_system_service = container.system_service()
-    _container_module.resolved_host_service = container.host_service()
+    _container_module.resolved_system_status_service = container.system_status_service()
+    _container_module.resolved_inventory_views = container.inventory_views()
+    composed = container.composed_adapters()
+    _container_module.resolved_definition_documents = composed.definition_documents
+    _container_module.resolved_background_tasks = composed.background_tasks
+    _container_module.resolved_host_authority = container.host_authority()
+    _container_module.resolved_connectivity_probes = container.connectivity_probes()
     _container_module.resolved_vm_operations_service = container.vm_operations_service()
     _container_module.resolved_host_operations_service = container.host_operations_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
@@ -71,18 +79,13 @@ def resolve_request_path_services() -> None:
         container.fulfillment_convergence_watchdog()
     )
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
-    _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
-    _container_module.resolved_bare_metal_operations_service = (
-        container.bare_metal_operations_service()
+    _container_module.resolved_bare_metal_mock_executor = (
+        container.bare_metal_mock_executor()
     )
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
-    _container_module.resolved_compute_contract_service = container.compute_contract_service()
+    _container_module.resolved_lease_route_service = container.lease_route_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
-    _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
-    _container_module.resolved_relay_service = RelayService(
-        session_factory=_container_module.resolved_session_factory,
-        settings=settings,
-    )
+    _container_module.resolved_relay_service = container.relay_service()
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
@@ -109,7 +112,7 @@ def seed_inventory_if_empty() -> None:
     # Seeding also declares capacity for each seeded host with GPUs that no
     # capacity declaration names, in the same transaction as the hosts.
     # ------------------------------------------------------------------
-    host_service = _container_module.resolved_host_service
+    host_service = _container_module.resolved_host_authority
     existing_hosts = host_service.list_hosts(enabled_only=False)
     if existing_hosts:
         logger.info(
@@ -136,7 +139,7 @@ def seed_inventory_if_empty() -> None:
 
     if ini_text:
         try:
-            seeded = host_service.seed_from_ini(ini_text)
+            seeded = host_service.apply_inventory(parse_inventory_ini(ini_text))
             logger.info(
                 "Inventory seeding: registered %d host(s) from %s",
                 len(seeded),
@@ -151,8 +154,8 @@ def seed_inventory_if_empty() -> None:
         )
 
 
-def import_relay_definitions_if_configured() -> None:
-    _definition_importer().import_relay_definitions()
+def import_contributed_definitions_if_configured() -> None:
+    _definition_importer(contributed=_definition_documents()).import_contributed_definitions()
 
 
 def import_pool_definitions_if_configured() -> None:
@@ -175,12 +178,20 @@ def import_capacity_definitions_if_configured() -> None:
     _definition_importer().import_capacity_definitions()
 
 
-def _definition_importer() -> DefinitionDocumentImporter:
+def _definition_documents():
+    """Every contributed document kind, in composition order."""
+    contributed = _container_module.resolved_definition_documents
+    if contributed is None:
+        raise RuntimeError("contributed definition documents are not composed")
+    return contributed
+
+
+def _definition_importer(contributed=()) -> DefinitionDocumentImporter:
     return DefinitionDocumentImporter(
         session_factory=_container_module.resolved_session_factory,
         settings=settings,
         pool_service=_container_module.resolved_resource_pool_service,
-        relay_service=_container_module.resolved_relay_service,
+        contributed=contributed,
         capacity_ledger=_container_module.resolved_capacity_ledger_service,
     )
 
@@ -203,11 +214,12 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "resolve-request-path-services",
             resolve_request_path_services,
         ),
-        # Relays before pools: a pool's provider configuration references a
-        # relay, so a first boot from definition documents needs the relay to
-        # exist before the pool that points at it.
+        # Contributed documents before pools: a pool's provider configuration
+        # may reference what they declare, so a first boot from definition
+        # documents needs it to exist before the pool that points at it.
         ComputeProvisioningStartupStep(
-            "import-relay-definitions", import_relay_definitions_if_configured
+            "import-contributed-definitions",
+            import_contributed_definitions_if_configured,
         ),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
@@ -223,27 +235,6 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
     )
 
 
-def _fulfillment_is_terminal(owner_kind: str, owner_id: str) -> bool:
-    """Whether a lease's owner has finished, for reconciliation to act on.
-
-    Supplied to the allocator rather than queried inside it: what makes a
-    fulfillment terminal belongs to fulfillment, not to port accounting, and
-    an allocator that knew would have to be changed whenever that did.
-    """
-    if owner_kind != "fulfillment":
-        return False
-    terminal = {
-        SettlementRecordState.failed.value,
-        SettlementRecordState.torn_down.value,
-        SettlementRecordState.abandoned.value,
-    }
-    session_factory = _container_module.resolved_session_factory
-    with session_factory() as db:
-        record = db.get(SettlementRecord, owner_id)
-        # A lease whose owner has vanished is orphaned by definition.
-        return record is None or record.state in terminal
-
-
 def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     job_queue = _container_module.resolved_job_queue
 
@@ -251,7 +242,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         ComputeProvisioningBackgroundTask(
             "job-processing-loop",
             lambda: job_queue.start(
-                _container_module.resolved_job_service._process_job
+                _container_module.resolved_job_engine.process_job
             ),
             "Job processing loop started (max_concurrent=%d)",
             (settings.max_concurrent_jobs,),
@@ -267,7 +258,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     tasks.append(
         ComputeProvisioningBackgroundTask(
             "retry-scheduler",
-            lambda: _container_module.resolved_job_service.run_retry_scheduler(
+            lambda: _container_module.resolved_job_engine.run_retry_scheduler(
                 job_queue, retry_poll_interval
             ),
             "Retry scheduler started (interval=%ds)",
@@ -319,37 +310,6 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "(capacity_reservation_watchdog_enabled=false)"
         )
 
-    # Relay port reconciliation — the backstop beneath release, which is
-    # attached to the settlement record's terminal transition. This recovers
-    # leases whose owner reached terminal by a path that bypassed it.
-    relay_reconcile_enabled = bool(
-        getattr(settings, "relay_port_reconciliation_enabled", True)
-    )
-    if relay_reconcile_enabled:
-        relay_poll = float(
-            getattr(settings, "relay_port_reconciliation_poll_interval_seconds", 300)
-        )
-        relay_grace = float(
-            getattr(settings, "relay_port_reconciliation_grace_seconds", 3600)
-        )
-        tasks.append(
-            ComputeProvisioningBackgroundTask(
-                "relay-port-reconciliation",
-                lambda: _container_module.resolved_relay_port_allocator.run_reconciliation(
-                    is_owner_terminal=_fulfillment_is_terminal,
-                    poll_interval_seconds=relay_poll,
-                    grace=timedelta(seconds=relay_grace),
-                ),
-                "Relay port reconciliation started (interval=%ds grace=%ds)",
-                (int(relay_poll), int(relay_grace)),
-            )
-        )
-    else:
-        logger.info(
-            "Relay port reconciliation disabled "
-            "(relay_port_reconciliation_enabled=false)"
-        )
-
     # Fulfillment convergence watchdog retries durable dispatch work and
     # converges provider operations without holding database transactions
     # across provider calls.
@@ -377,12 +337,30 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "(fulfillment_convergence_watchdog_enabled=false)"
         )
 
-    return tuple(tasks)
+    contributed = _container_module.resolved_background_tasks
+    if contributed is None:
+        raise RuntimeError("contributed background tasks are not composed")
+    return _unambiguous_tasks((*tasks, *contributed))
 
 
 async def close_storefront_client() -> None:
     await container.lifecycle_event_sink().close()
 
+
+
+def _unambiguous_tasks(tasks) -> tuple:
+    """The tasks to start, refusing two with one name.
+
+    Composition refuses a name two adapters contribute; this also refuses a
+    contributed name the service already uses for one of its own workers, so
+    every running task has the identity it declares.
+    """
+    seen: set[str] = set()
+    for task in tasks:
+        if task.name in seen:
+            raise RuntimeError(f"two background tasks are named {task.name!r}")
+        seen.add(task.name)
+    return tuple(tasks)
 
 def shutdown_steps() -> tuple[ComputeProvisioningShutdownStep, ...]:
     return (

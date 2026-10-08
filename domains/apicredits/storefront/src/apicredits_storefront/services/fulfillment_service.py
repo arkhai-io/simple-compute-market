@@ -10,14 +10,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core_storefront.stage_log import stage_event
 from arkhai_apicredits.settlement import fulfill_api_credits_obligation
-from market_settlement_runtime import FailurePolicy
+from core_storefront.stage_log import stage_event
 from market_identity import Identity
+from market_settlement_runtime import FailurePolicy
 
+import apicredits_storefront.container as _container
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
+from apicredits_storefront.services.payment_selection import selects_payments
 from apicredits_storefront.utils.config import settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -111,6 +113,27 @@ async def _failure_webhook_handler(
     return {"status": "sent", "status_code": response.status_code}
 
 
+async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
+    """Refund the buyer when this storefront's own issuance failed; opt-in.
+
+    Payment deals reverse their held payment only when nothing was issued. API
+    credits has no refund path for other mechanisms.
+    """
+    negotiation_id = str(context.get("negotiation_id") or context.get("escrow_uid") or "")
+    thread = (
+        await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        if negotiation_id
+        else None
+    )
+    if not selects_payments(thread):
+        return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
+    composition = _container.resolved_settlement_composition
+    service = composition.payment_service(db) if composition is not None else None
+    if service is None:
+        return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}
+    return await service.refund_before_delivery(negotiation_id)
+
+
 def build_api_credit_failure_policy() -> FailurePolicy:
     """Compose shared ordered dispatch with API-credit-owned effects."""
     return FailurePolicy(
@@ -119,6 +142,7 @@ def build_api_credit_failure_policy() -> FailurePolicy:
             "release_capacity": _release_capacity_handler,
             "emit_event": _emit_failure_event_handler,
             "webhook": _failure_webhook_handler,
+            "refund": _refund_handler,
         },
     )
 
@@ -165,13 +189,14 @@ async def fulfill_credit_obligation(
     buyer_principal: Identity,
     listing_id: str | None = None,
     negotiation_id: str | None = None,
+    mechanism: str = "alkahest.v1",
+    authoritative_gate: str = "alkahest_verified",
 ) -> dict[str, Any]:
-    """Issue credits for a settled escrow and fulfill the obligation.
+    """Issue credits after the selected mechanism's verified settlement gate.
 
-    When the negotiation's acceptance placed a TTL quota hold (two-phase
-    reserve), its capacity_reservation_id rides the issuance call — the tokens
-    service commits that hold open-ended instead of racing a fresh
-    reserve. Consume-once: the hold row's job is done either way.
+    Any negotiation-time capacity hold accompanies the idempotent issuance
+    command. Alkahest additionally submits its on-chain fulfillment;
+    payment-backed deals use the signed receipt as their funding evidence.
     """
 
     from apicredits_storefront.domain_runtime import (
@@ -179,6 +204,7 @@ async def fulfill_credit_obligation(
     )
 
     held_reservation: dict | None = None
+    db = None
     if negotiation_id:
         db = get_sqlite_client()
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
@@ -187,10 +213,8 @@ async def fulfill_credit_obligation(
             held_reservation.setdefault(
                 "capacity_reservation_id", hold.get("capacity_reservation_id")
             )
-            await db.delete_capacity_hold(negotiation_id=negotiation_id)
-
     listing = get_market_domain_contract().codecs.listing(order)
-    return await fulfill_api_credits_obligation(
+    result = await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,
         listing_resource=listing.listing_resource.model_dump(mode="json"),
@@ -201,6 +225,15 @@ async def fulfill_credit_obligation(
         listing_id=listing_id,
         credits_client=get_credits_service_client(),
         stage_event=stage_event,
+        mechanism=mechanism,
+        authoritative_gate=authoritative_gate,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,
     )
+    if (
+        db is not None
+        and held_reservation is not None
+        and result.get("status") != "pending"
+    ):
+        await db.delete_capacity_hold(negotiation_id=negotiation_id)
+    return result

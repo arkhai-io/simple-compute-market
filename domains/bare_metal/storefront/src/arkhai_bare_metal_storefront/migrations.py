@@ -173,92 +173,6 @@ def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
     )
 
 
-def _add_hosted_physical_lifecycle(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_hosted_lifecycle (
-          obligation_ref TEXT PRIMARY KEY,
-          agreement_ref TEXT NOT NULL,
-          negotiation_id TEXT NOT NULL UNIQUE,
-          accepted_binding_json TEXT NOT NULL,
-          accepted_binding_digest TEXT NOT NULL,
-          fulfillment_identity TEXT NOT NULL UNIQUE,
-          physical_state TEXT NOT NULL DEFAULT 'accepted',
-          financial_state TEXT NOT NULL DEFAULT 'pending',
-          recovery_state TEXT NOT NULL DEFAULT 'none',
-          teardown_state TEXT NOT NULL DEFAULT 'not_started',
-          capacity_reservation_id TEXT UNIQUE,
-          settlement_resource_id TEXT,
-          fulfillment_id TEXT UNIQUE,
-          public_result_json TEXT,
-          public_result_digest TEXT,
-          portable_evidence_json TEXT,
-          portable_evidence_digest TEXT,
-          portable_evidence_ref TEXT,
-          failure_reason TEXT,
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          CHECK (LENGTH(TRIM(obligation_ref)) > 0),
-          CHECK (LENGTH(TRIM(agreement_ref)) > 0),
-          CHECK (LENGTH(TRIM(negotiation_id)) > 0),
-          CHECK (accepted_binding_digest GLOB 'sha256:[0-9a-f]*'),
-          CHECK (fulfillment_identity GLOB 'sha256:[0-9a-f]*'),
-          CHECK (
-            (public_result_json IS NULL AND public_result_digest IS NULL)
-            OR
-            (public_result_json IS NOT NULL AND public_result_digest IS NOT NULL)
-          ),
-          CHECK (
-            (
-              portable_evidence_json IS NULL
-              AND portable_evidence_digest IS NULL
-              AND portable_evidence_ref IS NULL
-            )
-            OR
-            (
-              portable_evidence_json IS NOT NULL
-              AND portable_evidence_digest IS NOT NULL
-              AND portable_evidence_ref IS NOT NULL
-            )
-          )
-        )
-        """
-    )
-    conn.execute(
-        "CREATE INDEX idx_bare_metal_hosted_physical_state "
-        "ON bare_metal_hosted_lifecycle(physical_state)"
-    )
-    conn.execute(
-        "CREATE INDEX idx_bare_metal_hosted_recovery_state "
-        "ON bare_metal_hosted_lifecycle(recovery_state, teardown_state)"
-    )
-    conn.execute(
-        """
-        CREATE TRIGGER bare_metal_hosted_binding_immutable
-        BEFORE UPDATE OF
-          obligation_ref, agreement_ref, negotiation_id,
-          accepted_binding_json, accepted_binding_digest, fulfillment_identity
-        ON bare_metal_hosted_lifecycle
-        WHEN NOT (
-          OLD.obligation_ref IS NEW.obligation_ref
-          AND OLD.agreement_ref IS NEW.agreement_ref
-          AND OLD.negotiation_id IS NEW.negotiation_id
-          AND OLD.accepted_binding_json IS NEW.accepted_binding_json
-          AND OLD.accepted_binding_digest IS NEW.accepted_binding_digest
-          AND OLD.fulfillment_identity IS NEW.fulfillment_identity
-        )
-        BEGIN
-          SELECT RAISE(
-            ABORT,
-            'bare-metal hosted accepted binding is immutable'
-          );
-        END
-        """
-    )
-
-
 def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     """Move historical bare-metal rows under common immutable ownership."""
     rows = conn.execute(
@@ -396,6 +310,26 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE bare_metal_agreement_payloads")
 
 
+def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_settlement_records (
+          negotiation_id TEXT PRIMARY KEY,
+          mechanism TEXT NOT NULL,
+          agreement_sha256 TEXT NOT NULL,
+          settlement_ref TEXT UNIQUE,
+          status TEXT NOT NULL
+            CHECK (status IN ('accepted', 'settlement_verified', 'refunding', 'refunded')),
+          receipt_json TEXT,
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+
+
 def _drop_derived_publication_tracking(conn: sqlite3.Connection) -> None:
     """Retire the domain table that tracked each listing under a second key.
 
@@ -455,6 +389,56 @@ def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
+    """Abandon threads opened before negotiation moved to the kit runtime, and drop
+    the durable trading pause.
+
+    Those threads were never resumable: continuing one was always refused, and
+    their transcripts use actions the runtime does not read. They are abandoned
+    as the negotiation watchdog abandons a stale thread, which starts no
+    settlement or release, since nothing was reserved or held during
+    negotiation. Terminal threads keep their outcome. The trading pause is now
+    process-local, so its table goes.
+    """
+    conn.execute(
+        """
+        UPDATE negotiation_threads
+        SET terminal_state = 'abandoned', status = 'terminated',
+            updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE terminal_state IS NULL
+        """
+    )
+    conn.execute("DROP TABLE IF EXISTS bare_metal_operator_state")
+
+
+def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
+    """Keep an Alkahest fulfillment's lease-ready evidence beside its lifecycle.
+
+    The chain holds only the evidence's digest, so the storefront keeps the body
+    the digest names and resolves it to an authorized caller, and counts the
+    chain's refusals of its submission.
+    """
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN lease_ready_evidence_json TEXT"
+    )
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN lease_ready_evidence_digest TEXT"
+    )
+    # How many times the chain has refused the evidence submission; the step
+    # leaves the deal to an operator after a bounded number of refusals.
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN evidence_rejections INTEGER NOT NULL DEFAULT 0"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_bare_metal_fulfillment_evidence_digest "
+        "ON bare_metal_fulfillment_lifecycle(lease_ready_evidence_digest) "
+        "WHERE lease_ready_evidence_digest IS NOT NULL"
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -492,8 +476,8 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
         apply=_add_selected_site_immutability,
     ),
     Migration(
-        id="bare-metal-storefront-0008-hosted-physical-lifecycle",
-        apply=_add_hosted_physical_lifecycle,
+        id="bare-metal-storefront-0008-settlement-records",
+        apply=_add_bare_metal_settlement_records,
     ),
     Migration(
         id="bare-metal-storefront-0010-drop-derived-publications",
@@ -502,5 +486,13 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0011-accepted-site-generations",
         apply=_add_accepted_site_generations,
+    ),
+    Migration(
+        id="bare-metal-storefront-0012-retire-storefront-negotiation",
+        apply=_retire_storefront_negotiation,
+    ),
+    Migration(
+        id="bare-metal-storefront-0013-alkahest-lease-ready-evidence",
+        apply=_add_alkahest_lease_ready_evidence,
     ),
 )

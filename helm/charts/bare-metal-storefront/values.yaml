@@ -36,11 +36,27 @@ siteBindingsSecret:
 sitePlacement: fill_first
 
 publicUrl: http://bare-metal-storefront:8000
+# Alkahest inputs: all three are set, or none is. Whether Alkahest is enabled
+# is the settlement Secret's to say; the storefront refuses to start when a
+# configured Alkahest section lacks these, or when they are set with none.
 sellerEvmAddress: ""
-alkahestEnabled: false
+# Public chain configuration keyed by chain name: {"rpc_url": "...",
+# "alkahest_address_config_path": "/path/inside/the/container"} (the path is
+# optional, and needed for a chain whose Alkahest deployment is not built in).
+chains: {}
+# Existing Secret holding the seller wallet's private key; an empty name means
+# none. The chart renders only the reference, never the key.
+walletKeySecret:
+  name: ""
+  key: private-key
+# Existing ConfigMap holding an Alkahest address book, mounted read-only at
+# mountPath; an empty name mounts nothing.
+alkahestAddressBook:
+  configMapName: ""
+  key: alkahest_addresses.json
+  mountPath: /etc/arkhai/alkahest
 
 # Strict shared Settlement configuration JSON. Hosted credentials remain in the
-# independently deployed hosted authority; this Secret contains only public
 # authority/trust/account references and release pins.
 settlementConfigSecret:
   name: bare-metal-storefront-settlement

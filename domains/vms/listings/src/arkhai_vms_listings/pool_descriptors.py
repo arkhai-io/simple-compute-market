@@ -34,7 +34,7 @@ def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> s
     # in arkhai_vms_listings.listing_cardinality_mode for the reason (kept
     # out of any consumer that imports this module's signatures without
     # calling it).
-    from market_resource_pools.hints import raw_region
+    from market_resource_pools_contracts.hints import raw_region
 
     hint = raw_region(policy_tags)
     if isinstance(hint, str) and hint:
@@ -69,7 +69,7 @@ def resolve_sla(
         return storefront_override
     if accept_pool_declared_sla:
         # Local import -- same reason as resolve_region, above.
-        from market_resource_pools.hints import sla_value
+        from market_resource_pools_contracts.hints import sla_value
 
         hint = sla_value(policy_tags)
         if hint is not None:

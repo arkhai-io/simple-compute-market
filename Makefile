@@ -10,59 +10,11 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
-IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_REPO_ROOT := .
-HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
-HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
-# The locally built consumer a development stack runs in place of an
-# attested release image.
-HOSTED_LOCAL_MARKETPLACE_IMAGE ?= arkhai:storefront
-# Written by the local credential assembly, whose generated keys they pin.
-HOSTED_STRIPE_TEST_STOREFRONT_CONFIG ?= e2e-tests/config/hosted-storefront.toml
-HOSTED_STRIPE_TEST_BUYER_CONFIG ?= e2e-tests/config/hosted-buyer.toml
-HOSTED_MARKETPLACE_RELEASE_DIR ?= $(DIST_DIR)/marketplace-release
-HOSTED_MARKETPLACE_RELEASE_MANIFEST ?= $(HOSTED_MARKETPLACE_RELEASE_DIR)/marketplace-release-manifest.json
-# A settlement authority built from a sibling checkout, for a development run
-# of a version that has no published release. Empty selects the released
-# producer, which is what every existing invocation gets.
-HOSTED_SETTLEMENT_SOURCE ?= ../hosted-settlement-service
-HOSTED_LOCAL_HOSTED_VERSION ?= $(shell sed -n 's/^RELEASE_VERSION ?= //p' $(HOSTED_SETTLEMENT_SOURCE)/Makefile 2>/dev/null)
-HOSTED_LOCAL_HOSTED_IMAGE ?=
-HOSTED_LOCAL_HOSTED_ARTIFACTS ?= $(HOSTED_SETTLEMENT_SOURCE)/.dist
-# Five of the released producer's six identities are in the trust config that
-# pins it, so a development run reads them from there instead of having six
-# digests copied in by hand. The workflow run id is not among them and stays an
-# input. A protected run passes all six on the command line, which wins over
-# these and is still checked for emptiness before the run starts.
-HOSTED_TRUSTED_IDENTITIES := $(shell uv run --no-project python -c "import json;d=json.load(open('$(HOSTED_RELEASE_TRUST)'));print('sha256:'+d['manifest_sha256'],'sha256:'+d['client_wheel']['sha256'],d['service_image']['digest'],d['source_commit'],d['workflow_ref'])" 2>/dev/null)
-HOSTED_PRODUCTION_MANIFEST_SHA256 ?= $(word 1,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?= $(word 2,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_IMAGE_DIGEST ?= $(word 3,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_SOURCE_COMMIT ?= $(word 4,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_WORKFLOW_REF ?= $(word 5,$(HOSTED_TRUSTED_IDENTITIES))
-HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
-# Which producer a development run binds, in the two places it has to be said.
-HOSTED_PRODUCER_INPUTS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),--local-hosted-image "$(HOSTED_LOCAL_HOSTED_IMAGE)" --hosted-artifacts "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" --hosted-release-version "$(HOSTED_LOCAL_HOSTED_VERSION)",--trust "$(HOSTED_RELEASE_TRUST)" --manifest "$(HOSTED_RELEASE_MANIFEST)" --wheel "$(HOSTED_CLIENT_WHEEL)")
-# A build made here has no released coordinates, and supplying any is refused.
-HOSTED_PRODUCER_PINS = $(if $(HOSTED_LOCAL_HOSTED_IMAGE),,--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" --hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" --hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" --hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" --hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" --hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)")
-HOSTED_MARKETPLACE_COMMIT ?=
-HOSTED_MARKETPLACE_WORKFLOW_RUN_ID ?=
-HOSTED_MARKETPLACE_WORKFLOW_REF ?=
-HOSTED_MARKETPLACE_MANIFEST_SHA256 ?=
-HOSTED_MARKETPLACE_IMAGE_DIGEST ?=
-HOSTED_STRIPE_TEST_RUN_REF ?=
-HOSTED_STRIPE_TEST_SCENARIO ?=
-HOSTED_STRIPE_TEST_FUNDING_PROFILE ?=
-HOSTED_STRIPE_TEST_INTERACTION ?=
-HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
-HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
-HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
-HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
+IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout check-agent-skills review design-review design implement lock validate-local validate-helm check-push-ready push-branch validate
-.PHONY: build-hosted-producer
-.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: check-agent-skills review design-review design implement validate-local validate-helm check-push-ready push-branch validate
+.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
@@ -81,19 +33,15 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-# Build the wheel set with the staged release verified first. Publishing paths
-# call this; `dist` alone builds without requiring a release to be reachable.
-# Written as two sub-invocations rather than two prerequisites because make
-# orders prerequisites only under -j1, and verification that can run after the
-# build it gates is not verification.
+# The wheel set a publishing path builds; publishing workflows call this name.
 dist-release: ## Build the wheel set for a publishing path.
 	$(MAKE) dist
 
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
 
-dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
+dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
 
-dist-domains: dist-ci-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
+dist-domains: dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
@@ -108,11 +56,29 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-compute-provisioning: dist-ci-kits ## Build arkhai-compute-provisioning wheel into .dist/
+dist-compute-provisioning-contracts: ## Build the compute provisioning family's wire-contract wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/contracts && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-contracts produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning-client: dist-compute-provisioning-contracts ## Build the compute provisioning family's client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-client produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning: dist-ci-kits dist-compute-provisioning-contracts ## Build arkhai-compute-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-compute-provisioning-ansible: dist-compute-provisioning ## Build the compute family kit's Ansible implementation wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/ansible && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_ansible-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-ansible produced a platform-specific wheel" && exit 1)
 
 dist-compute-provisioning-service: dist-ci-kits dist-compute-provisioning dist-domains ## Build the extracted compute service wheel.
 	-mkdir -p $(DIST_DIR)
@@ -195,199 +161,6 @@ dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredit
 dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
 
-verify-hosted-release: ## Verify the staged signed production release and exact client wheel.
-	$(VERIFY_HOSTED_RELEASE)
-
-hosted-preflight: prepare-hosted-compose
-
-prepare-hosted-compose: ## Verify production inputs and render a non-secret Compose env.
-	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
-	@test -f "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" || { echo "ERROR: missing attested HOSTED_MARKETPLACE_RELEASE_MANIFEST"; exit 1; }
-	gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
-		--repo arkhai-io/simple-compute-market
-	uv run --no-project --with 'eth-account>=0.13,<0.14' \
-		python scripts/prepare-hosted-compose.py \
-		--trust "$(HOSTED_RELEASE_TRUST)" \
-		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
-		--wheel "$(HOSTED_CLIENT_WHEEL)" \
-		--marketplace-manifest "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)" \
-		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
-		--marketplace-source-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
-		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
-		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
-		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
-		--output "$(HOSTED_COMPOSE_ENV)"
-
-
-build-hosted-producer: ## Build the settlement authority image and artifacts from a sibling checkout.
-	@test -d "$(HOSTED_SETTLEMENT_SOURCE)" || { echo "ERROR: no hosted-settlement-service checkout at $(HOSTED_SETTLEMENT_SOURCE)"; exit 1; }
-	@test -n "$(HOSTED_LOCAL_HOSTED_VERSION)" || { echo "ERROR: cannot read RELEASE_VERSION from $(HOSTED_SETTLEMENT_SOURCE)/Makefile"; exit 1; }
-	$(MAKE) -C "$(HOSTED_SETTLEMENT_SOURCE)" image artifacts
-	@echo "built localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION); bind it with"
-	@echo "  make hosted-stripe-test-local HOSTED_LOCAL_HOSTED_IMAGE=localhost/arkhai-hosted-settlement-service:$(HOSTED_LOCAL_HOSTED_VERSION) ..."
-
-prepare-hosted-compose-local: ## Render a Compose env for a development stack.
-	uv run --no-project --with 'eth-account>=0.13,<0.14' \
-		python scripts/prepare-hosted-compose.py \
-		$(HOSTED_PRODUCER_INPUTS) \
-		--release-mode local \
-		--local-marketplace-image "$(HOSTED_LOCAL_MARKETPLACE_IMAGE)" \
-		--output "$(HOSTED_COMPOSE_ENV)"
-
-hosted-preflight-local: prepare-hosted-compose-local
-
-hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario; its evidence never qualifies.
-	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
-	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
-	@if [ -n "$(HOSTED_LOCAL_HOSTED_IMAGE)" ]; then \
-		test -d "$(HOSTED_LOCAL_HOSTED_ARTIFACTS)" || { echo "ERROR: no producer artifacts at $(HOSTED_LOCAL_HOSTED_ARTIFACTS); run make build-hosted-producer"; exit 1; }; \
-	else \
-		test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }; \
-		test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }; \
-	fi
-	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
-	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	@echo "NOTE: a development run; its evidence never qualifies as protected evidence."
-	# --frozen: a run must not re-resolve dependencies, and an absolute
-	# --find-links would otherwise rewrite the project lock on every run.
-	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m e2e_harness.hosted_real_stripe.driver \
-		--compose-env "$(HOSTED_COMPOSE_ENV)" \
-		--release-mode local \
-		$(HOSTED_PRODUCER_PINS) \
-		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
-		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
-		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
-		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
-		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
-		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
-		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
-		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
-		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
-		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
-		$(if $(HOSTED_STRIPE_TEST_RETAIN_AUTHORITY_STATE),--retain-authority-state,) \
-		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
-		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
-		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
-		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
-
-hosted-compose-up: hosted-preflight ## Start or converge the production stack without deleting authority state.
-	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml up -d --wait
-
-hosted-compose-restart: hosted-preflight ## Recreate from newly verified inputs while preserving named volumes.
-	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
-			up -d --wait --force-recreate
-
-hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete volumes.
-	@env_file="$(HOSTED_COMPOSE_ENV)"; temporary=; \
-	if [ ! -f "$$env_file" ]; then \
-		temporary=$$(mktemp); env_file="$$temporary"; \
-		printf '%s\n' \
-			'HOSTED_SETTLEMENT_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_MARKETPLACE_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=$(CURDIR)' > "$$env_file"; \
-	fi; \
-	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
-	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
-	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
-	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
-	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
-	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
-	docker compose --profile hosted-production --profile hosted-stripe-test \
-		--env-file "$$env_file" -f domains/vms/compose.yml -f compose.hosted-settlement.yml \
-			-f compose.vms-fiat.yml down -v --remove-orphans; \
-	status=$$?; test -z "$$temporary" || rm -f "$$temporary"; exit $$status
-
-hosted-stripe-test-stop: ## Stop protected roles while preserving authority state.
-	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing HOSTED_COMPOSE_ENV"; exit 1; }
-	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
-	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
-	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
-	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
-	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
-	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
-	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
-	docker compose --profile hosted-stripe-test --env-file "$(HOSTED_COMPOSE_ENV)" \
-		-f domains/vms/compose.yml -f compose.hosted-settlement.yml \
-		-f compose.vms-fiat.yml down --remove-orphans
-
-
-hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode system scenario.
-	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
-	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_RUN_ID"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_MARKETPLACE_WORKFLOW_REF"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_MARKETPLACE_MANIFEST_SHA256"; exit 1; }
-	@test -n "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_MARKETPLACE_IMAGE_DIGEST"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_FUNDING_PROFILE"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_INTERACTION)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_INTERACTION"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
-	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
-	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	# --frozen: a run must not re-resolve dependencies, and an absolute
-	# --find-links would otherwise rewrite the project lock on every run.
-	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m e2e_harness.hosted_real_stripe.driver \
-		--compose-env "$(HOSTED_COMPOSE_ENV)" \
-		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
-		--hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" \
-		--hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" \
-		--hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" \
-		--hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" \
-		--hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" \
-		--marketplace-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
-		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
-		--marketplace-workflow-run-id "$(HOSTED_MARKETPLACE_WORKFLOW_RUN_ID)" \
-		--marketplace-workflow-ref "$(HOSTED_MARKETPLACE_WORKFLOW_REF)" \
-		--marketplace-manifest-sha256 "$(HOSTED_MARKETPLACE_MANIFEST_SHA256)" \
-		--marketplace-image-digest "$(HOSTED_MARKETPLACE_IMAGE_DIGEST)" \
-		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
-		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
-		--funding-profile "$(HOSTED_STRIPE_TEST_FUNDING_PROFILE)" \
-		--interaction "$(HOSTED_STRIPE_TEST_INTERACTION)" \
-		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
-		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
-		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
-		--storefront-config "$(HOSTED_STRIPE_TEST_STOREFRONT_CONFIG)" \
-		--buyer-config "$(HOSTED_STRIPE_TEST_BUYER_CONFIG)" \
-		$(if $(HOSTED_STRIPE_TEST_VISIBLE_BROWSER),--visible-browser,) \
-		$(if $(HOSTED_STRIPE_TEST_ATTENDED),--attended,) \
-		$(if $(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT),--lifecycle-timeout "$(HOSTED_STRIPE_TEST_LIFECYCLE_TIMEOUT)",) \
-		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
-
-# The hosted settlement client is not staged into the wheelhouse. It is an
-# external dependency resolved from a package index, so nothing here copies it
-# and `.dist` holds only what this repository builds. Release verification
-# remains available as `verify-hosted-release` for a path that consumes a
-# staged release; no build or test target invokes it.
 dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
@@ -409,12 +182,6 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
 
-check-hosted-client-pin: ## Report any consumer pinning a different hosted client
-	uv run --no-project python scripts/check-hosted-client-pin.py
-
-fix-hosted-client-pin: ## Move every consumer to the version kit/hosted-settlement names
-	uv run --no-project python scripts/check-hosted-client-pin.py --fix
-
 test-release-tooling: dist-identity ## Run release verifier and portable wheelhouse contract tests.
 	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
 		--with 'arkhai-kit-identity' --find-links "$(DIST_DIR)" \
@@ -426,13 +193,22 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
 
+test-compute-provisioning-contracts:
+	cd provisioning/compute/contracts && $(MAKE) test
+
+test-compute-provisioning-client:
+	cd provisioning/compute/client && $(MAKE) test
+
 test-compute-provisioning:
 	cd provisioning/compute && make test
+
+test-compute-provisioning-ansible:
+	cd provisioning/compute/ansible && make test
 
 test-provisioning:
 	cd provisioning/compute/service && make test
@@ -442,6 +218,16 @@ test-provisioning-iac:
 
 test-registry:
 	cd core/registry && make reinit && make test
+
+test-registry-client:
+	cd core/registry-client && $(MAKE) test
+
+test-provisioning-adapter:
+	$(MAKE) -C domains test-provisioning-adapter
+
+# The e2e project's unit tests; its scenarios need the docker-compose stack.
+test-e2e-unit:
+	cd e2e-tests && $(MAKE) test-unit
 
 test-storefront:
 	$(MAKE) -C domains test-storefront
@@ -582,8 +368,7 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
 	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
 	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
-	@# Anvil account 2's published development key, as bob.identity.env holds it.
-	@echo 'BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a'
+	@echo 'BARE_METAL_STOREFRONT_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/bare-metal.wallet.env'
 	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
 	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
 	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
@@ -631,7 +416,7 @@ build-buyer: init-prerequisites init-buyer
 # Runs through the storefront venv, which pins alkahest_py; the relative
 # --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
+	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
 	cd dev-env && make build

@@ -94,6 +94,16 @@ therefore a legitimate, separate introspection channel from the ordinary
 opaque-reservation guarantee, not a loophole in it). Stage 08b no longer
 asserts on resource identity at all; it only confirms dispatch happened.
 
+*Changed since (2026-10-05, `bare-metal-mock-provisioned-deal` slice B).* The VM
+lease surface this view read through, `vm_provisioning_operator`'s lease methods
+and `PATCH /api/v1/leases/{id}`, is deleted. `DealLease` in
+`e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` now reads the lease through
+the compute family's client (`SyncComputeProvisioningClient.get_lease`, admin)
+and the reservation through the site client, and back-dates the lease through
+the site's truncation (`SiteCapacityClient.truncate_lease`, admin), which may only
+move a leased end earlier. Leases are registered by executor target once; there
+is no lease update.
+
 ### Design promotion record
 
 | Material decision | Permanent location |

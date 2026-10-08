@@ -46,6 +46,7 @@ from market_policy.identity import Identity as PolicyIdentity
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
 from storefront_client.client import StorefrontClient
 
+from market_alkahest.dev_chain import anvil_address_book_path
 import market_storefront.container as container
 from market_storefront.middleware import admin_identity
 
@@ -472,11 +473,7 @@ async def publication_app(
     # the capacity-event cursor is process-wide; a cursor left by an earlier app
     # would skip this site's first events.
     reset_site_event_cursors()
-    address_config = (
-        Path(negotiation_runtime.__file__).resolve().parent
-        / "data"
-        / "alkahest_anvil_addresses.json"
-    )
+    address_config = anvil_address_book_path()
     chains = {
         "anvil": ChainConfig(
             name="anvil",
@@ -570,7 +567,7 @@ async def publication_app(
         composition = SettlementCompositionDouble(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
-            else {"alkahest.v1": True, "fiat.stripe.v1": True}
+            else {"alkahest.v1": True, "arkhai.payments.v1": True}
         )
         site = FakeSite(deliverable_modes={"vm"})
         # The site's live answer is the same list the storefront's cache holds,

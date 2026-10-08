@@ -15,18 +15,9 @@ To sell request quota for an OpenAI-compatible vLLM server instead, see the
 
 ## Supported settlement methods
 
-A VM storefront can publish independent Alkahest and hosted Stripe options on
-the same listing. Hosted fiat uses `fiat.stripe.v1` with one exact profile per
-option: `card.v1`, US/USD push `us_bank_transfer.v1`, or US/USD
-`us_ach_debit.v1`. It may publish only the profiles for which the hosted
-authority, seller account, country/currency policy, condition resolver, signed
-release, and funding window are ready. One unavailable rail does not suppress
-the others, and the accepted deal never falls back to a different mechanism or
-profile. See the
-[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for the
-buyer-side payment flow and
-[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
-current external qualification status.
+A VM storefront publishes Alkahest settlement options. See the
+[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for
+buyer-side escrow requirements.
 
 ## Prerequisites
 
@@ -36,9 +27,6 @@ current external qualification status.
   token required to publish.
 - For Alkahest settlement only: an EVM wallet funded with gas and the accepted
   token, an RPC URL, and the deployed Alkahest address file.
-- For hosted Stripe settlement only: the hosted authority URL and trust,
-  release manifest/API/schema pins, ready seller account reference, and
-  condition profile. No EVM wallet or chain is required.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
   passwordless sudo and is in the `libvirt` group.
@@ -115,17 +103,26 @@ default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
 
-For hosted-only publication, set priority to `["fiat.stripe.v1"]`, configure
-the generated `[Settlement.stripe]` public authority/release/account/condition
-fields, omit wallet and chains, and publish one complete clause for each exact
-funding profile and rate you offer:
+For payments-only publication, set priority to `["arkhai.payments.v1"]`,
+configure `[Settlement.arkhai_payments]`, omit wallet and chains, and publish a
+complete clause for each asset and rate you offer:
 
 ```toml
+[Settlement]
+schema_version = 1
+priority = ["arkhai.payments.v1"]
+
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://<PAYMENTS_SERVICE>"
+service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+fee_bps = 250
+dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
+
 [pricing]
 settlements = [
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive" } },
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.90", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive" } },
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.95", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive" } },
+  { mechanism = "arkhai.payments.v1", asset = "USD/2", rate = "200", per = "hour", mechanism_input = { payee_account = "<YOUR_PAYEE_ACCOUNT>", asset = "USD/2" } },
 ]
 ```
 
@@ -134,11 +131,10 @@ at its site, and the storefront's per-pool overrides, take precedence over them;
 there is no command-level override, because the storefront republishes on its
 own and must reach the same terms every cycle.
 
-`funds_flow="separate_charges_transfers"` is fixed by the hosted registration;
-callers cannot override it. Hosted authority trust, account, condition,
-currency/country policy, and exact client/API/schema/capability pins remain in
-`[Settlement.stripe]`. Provider credentials, IDs, webhooks, and persistence are
-rejected by marketplace configuration.
+The receipt-signing identity, fee policy, and dispute authority are trusted
+configuration that both settlement and refunds check against; the API key is
+read from the named environment variable and is never written to
+configuration.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -287,16 +283,19 @@ touching libvirt. To create real VMs:
    chmod 600 ./keys/id_ed25519
    ```
 
-3. Customize your KVM inventory:
+3. List the hosts you sell:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
-   cp hosts.example hosts
-   # edit hosts with your real KVM host(s)
+   cp provisioning-hosts.example provisioning-hosts.ini
+   # edit provisioning-hosts.ini with your real KVM host(s)
    ```
 
-   The provisioning service imports these aliases into its authoritative Host
-   and Resource Pool tables. Storefront listings reference trusted projected
+   The provisioning service registers every host entry in this file into its
+   authoritative Host and Resource Pool tables, whatever section it is listed
+   under. List only hosts to sell: relay proxies and other infrastructure you
+   manage with the IaC playbooks go in `hosts` in the same directory
+   (`cp hosts.example hosts`), which the service is never given. Storefront listings reference trusted projected
    `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
    `ansible_host` is how the provisioning service reaches the host over SSH.
    If buyers reach that host
@@ -312,7 +311,7 @@ touching libvirt. To create real VMs:
 
    Without `public_host`, the connection details fall back to `ansible_host`.
 
-   This file seeds the host registry when the provisioning service starts with
+   `provisioning-hosts.ini` seeds the host registry when the provisioning service starts with
    no hosts registered. Work then runs only against registered hosts, never
    against the file. To add a host to a running deployment, import the file
    again (`POST /api/v1/hosts/import`) or register the host (`POST
@@ -357,38 +356,12 @@ touching libvirt. To create real VMs:
    ```bash
    docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
      seller-provisioning ansible \
-     -i /opt/domains/vms/provisioning/iac/ansible/inventory/hosts \
+     -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
      <your_host_alias> -m ping
    ```
 
    `SUCCESS / ping: pong` means the next buy will actually create a VM.
 
-## Optional hosted fiat publication
-
-Hosted settlement is disabled by default. Add `fiat.stripe.v1` to
-`[Settlement].priority`, configure the public authority/release/account/
-condition and currency/country policy fields under `[Settlement.stripe]`, and
-publish complete clauses such as `mechanism=fiat.stripe.v1 asset=usd
-rate=20/hour stripe.funding_profile=card.v1
-stripe.interaction=interactive`. Repeat the clause for
-`us_bank_transfer.v1` or `us_ach_debit.v1`; the profile participates in option
-identity even if rate and condition are equal.
-
-Use `market-storefront config init-user` and
-`market-storefront settlement stripe onboard|status` for the exact installed
-schema and account workflow. Publication preflights the signed release,
-account, condition, currency/country policy, and each configured profile
-independently. An unready profile suppresses only its clauses; ready hosted
-profiles and valid Alkahest alternatives remain publishable.
-
-The storefront never receives payer profiles, saved instruments, Stripe
-credentials, or provider IDs and never stores setup, Checkout, confirmation,
-bank-instruction, or account-link URLs. After exact buyer authorization it
-persists only the safe authorization/settlement references and drives
-authoritatively funded VM fulfillment, condition check/collect, and eligible
-reclaim through the shared settlement worker. Provider-custodied funds remain
-owned by the separately operated authority; an EAS condition anchor is
-audit/predicate evidence, not custody.
 
 ## Common pitfalls
 

@@ -36,7 +36,11 @@ trigger is a repository-owner decision, so these removals land independently.
   feeds it, and freeze the table (stop creating it, its trigger, its four
   indexes, and its migration-added columns). No `DROP`.
 - Remove the always-`None` `reserved_vm_host` threading in the storefront's
-  fulfillment service. `vm_host` inside the provisioning adapter is the real
+  fulfillment service.
+- Remove the dead VM expiry hook (`schedule_shutdown`, wired to `_do_shutdown`,
+  which always raises because no expiry-scheduling endpoint exists); the lease
+  watchdog performs expiry. Routed here from `bare-metal-mock-provisioned-deal`, and
+  delivered there (its task 5B.8.C.6; this change's task 3.8). `vm_host` inside the provisioning adapter is the real
   execution target and is untouched.
 - Remove the orphaned resource admin routes, their request/response models,
   authentication contracts, and both client variants' `get_resource`/`patch_resource`.

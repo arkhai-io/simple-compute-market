@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -36,12 +36,12 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-pool-overrides"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -57,7 +57,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-identity", specifier = "==0.3.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-site-client" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
@@ -70,7 +70,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.6.0"
+version = "0.9.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -78,7 +78,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]

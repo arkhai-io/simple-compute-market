@@ -7,9 +7,16 @@ from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
     MIGRATIONS,
     SchemaDriftError,
+    _migrate_drop_job_contract_version,
     check_schema_version,
 )
-from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
+from compute_provisioning_service.db.models import (
+    JobRecord,
+    DEFAULT_POOL_ID,
+    Host,
+    ResourcePool,
+)
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from market_site.ledger import CapacityLedgerService
 
 
@@ -44,8 +51,12 @@ def _create_pre_migration_tables(engine):
         ))
         connection.execute(text(
             """
-            INSERT INTO ansible_jobs (id, status, params)
-            VALUES ('job-1', 'queued', '{}')
+            INSERT INTO ansible_jobs (id, status, params, result)
+            VALUES (
+                'job-1', 'succeeded', '{"vm_action": "create", "vm_target": "vm-active"}',
+                '{"host_ip": "203.0.113.9", "ssh_port": "2222", "tenant_user": "t1",
+                  "timestamp": "2030-01-01T00:00:01Z"}'
+            )
             """
         ))
         connection.execute(text(
@@ -215,16 +226,18 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         column["name"] for column in inspector.get_columns("capacity_reservations")
     }
 
-    assert "escrow_uid" in ansible_columns
+    assert "escrow_uid" not in ansible_columns
+    assert "deal_ref" not in ansible_columns
+    assert "contract_version" not in ansible_columns
     assert {
-        "contract_version",
         "capacity_reservation_id",
-        "deal_ref",
         "offering_mode",
         "action_kind",
         "idempotency_key",
     }.issubset(ansible_columns)
-    assert "public_host" in host_columns
+    # A host's connection is an envelope; the SSH columns are gone.
+    assert {"connection_kind", "connection_public", "connection_protected"} <= host_columns
+    assert "public_host" not in host_columns
     # The final schema has no dead lease table or legacy reservation name.
     assert "vm_leases" not in inspector.get_table_names()
     assert "site_allocations" not in inspector.get_table_names()
@@ -328,9 +341,9 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
 
     with Session(engine) as session:
         host = session.query(Host).one()
-        job = session.query(AnsibleJob).one()
-        assert host.public_host is None
-        assert job.escrow_uid is None
+        job = session.query(JobRecord).one()
+        assert host.connection().public["public_host"] is None
+        assert job.capacity_reservation_id is None
         # The pre-existing host (inserted before the migration ran) is
         # backfilled to the default pool by the column's DB-level DEFAULT.
         assert host.pool_id == DEFAULT_POOL_ID
@@ -459,6 +472,15 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260921_004_legacy_host_capacity_declarations",
         "20260922_001_pool_advertisement_and_backing",
         "20260927_001_drop_reservation_release_mirror",
+        "20261002_001_host_connection_envelope",
+        "20261002_002_job_envelopes",
+        "20261002_003_bare_metal_job_shapes",
+        "20261005_001_drop_job_contract_version",
+        "20261005_002_reservation_release_requested_at",
+        "20261006_001_drop_job_deal_correlation",
+        "20261006_002_vm_job_backed_fulfillment",
+        "20261006_003_vm_fulfillment_request_names_no_guest",
+        "20261006_004_active_fulfillment_targets_on_reservations",
     }
 
 
@@ -478,14 +500,15 @@ def test_run_migrations_is_idempotent():
         column["name"] for column in inspector.get_columns("capacity_reservations")
     ]
 
-    assert ansible_columns.count("escrow_uid") == 1
-    assert ansible_columns.count("contract_version") == 1
+    assert ansible_columns.count("escrow_uid") == 0
+    assert ansible_columns.count("contract_version") == 0
+    assert reservation_columns.count("release_requested_at") == 1
     assert ansible_columns.count("capacity_reservation_id") == 1
-    assert ansible_columns.count("deal_ref") == 1
+    assert ansible_columns.count("deal_ref") == 0
     assert ansible_columns.count("offering_mode") == 1
     assert ansible_columns.count("action_kind") == 1
     assert ansible_columns.count("idempotency_key") == 1
-    assert host_columns.count("public_host") == 1
+    assert host_columns.count("connection_public") == 1
     assert host_columns.count("pool_id") == 1
     assert host_columns.count("gpu_model") == 1
     ansible_pool_config_columns = [
@@ -564,3 +587,41 @@ def test_fresh_current_schema_contains_only_capacity_bucket_model():
         "capacity_reservations",
         "capacity_reservation_debits",
     }.issubset(tables)
+
+
+def test_dropping_the_job_contract_version_keeps_every_job_and_its_identity():
+    """A job's correlation identity outlives the dropped column: its values, the
+    reservation index, and the contract-identity uniqueness all survive."""
+    engine = _sqlite_memory_engine()
+    _create_pre_migration_tables(engine)
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE ansible_jobs ADD COLUMN contract_version VARCHAR"))
+        connection.execute(text(
+            "INSERT INTO ansible_jobs (id, status, params, contract_version, "
+            "capacity_reservation_id, action_kind, idempotency_key) "
+            "VALUES ('job-2', 'queued', '{}', '1.0', 'r-1', 'create', 'r-1:create')"
+        ))
+
+    _migrate_drop_job_contract_version(engine)
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("ansible_jobs")}
+    assert "contract_version" not in columns
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT capacity_reservation_id, action_kind, idempotency_key "
+            "FROM ansible_jobs WHERE id = 'job-2'"
+        )).one()
+        assert tuple(row) == ("r-1", "create", "r-1:create")
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM ansible_jobs WHERE id = 'job-1'")
+        ).scalar() == 1
+    with pytest.raises(Exception):
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO ansible_jobs (id, status, params, capacity_reservation_id, "
+                "action_kind, idempotency_key) "
+                "VALUES ('job-3', 'queued', '{}', 'r-1', 'create', 'r-1:create')"
+            ))
+    _migrate_drop_job_contract_version(engine)

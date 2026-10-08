@@ -24,7 +24,13 @@ Verified against the tree at planning time; re-verify before implementing.
   listing record at acceptance. The committed reservation's dimensions and
   `claim_attributes` are authoritative through scheduling and dispatch.
 - `kit/site`'s `resize_reservation` supersedes a reservation with a new shape
-  under the same negotiation. It has no caller.
+  under the same negotiation. It has no caller. *Since 2026-10-05
+  (`bare-metal-mock-provisioned-deal` 5B.8.B.3), the supersede passes the site's
+  release guard, as every capacity release does. The guard frees the superseded
+  reservation only when its fulfillment proves nothing was dispatched (no aggregate,
+  or one still `assigned`, which it abandons), so a resize of a reservation whose
+  fulfillment has begun is refused and changes nothing. A negotiation-time resize
+  precedes fulfillment and passes; design for the refusal anyway.*
 - `kit/capability-shape` and `VM_CAPABILITY_SCHEMA` define the family-grouped
   capability shape and the VM vocabulary. `capacity-shape-pricing` lets a seller
   state per-family rates; a shape-priced listing records its resolved rates on the

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from market_site.authority import SiteAuthorityPort
 
-from .release import ExecutorReleasePort, ReleaseJobPort
+from .release import ReleaseAction, ReleaseDecision, ReleaseProgress, ReleaseStatus
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +100,32 @@ def _datetime_value(value: Any) -> str | None:
     return isoformat() if callable(isoformat) else str(value)
 
 
+class ReleaseExecutorPort(Protocol):
+    """Decides a reservation's release and begins or adopts its teardown."""
+
+    async def submit_release(self, reservation: dict[str, Any]) -> ReleaseDecision: ...
+
+    async def begin_teardown(self, fulfillment_id: str) -> str: ...
+
+
+class ReleaseStatusPort(Protocol):
+    """Reads a releasing lease's progress by its release handle."""
+
+    def get_status(self, fulfillment_id: str) -> ReleaseStatus: ...
+
+
 class LeaseLifecycleService:
-    """Lease lifecycle state machine over generic site reservations."""
+    """Lease lifecycle state machine over site reservations, for every mode.
+
+    The lifecycle owns ``releasing``, the terminal release states, the final
+    capacity return, and the capacity-released notification. What a release
+    does follows the reservation's fulfillment aggregate (``release.py``): it
+    begins or adopts teardown, frees capacity through the site's guarded
+    release when nothing was delivered, waits while a create is in flight, or
+    leaves the lease for an operator. A release waiting on an in-flight create
+    is ``releasing`` with the fulfillment as its release handle, so it survives
+    a restart and a second request finds it.
+    """
 
     TERMINAL_SUCCESS_STATES = {"released", "force_released"}
     TERMINAL_FAILURE_STATES = {"release_failed", "unmanaged", "provisioning_failed"}
@@ -111,16 +135,16 @@ class LeaseLifecycleService:
         settings: Any,
         site_authority: SiteAuthorityPort,
         *,
-        executor_release: ExecutorReleasePort,
-        release_jobs: ReleaseJobPort | None = None,
+        release_executor: ReleaseExecutorPort,
+        release_status: ReleaseStatusPort,
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
         capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
     ) -> None:
         self._settings = settings
         self._site_authority = site_authority
-        self._executor_release = executor_release
-        self._release_jobs = release_jobs
+        self._release_executor = release_executor
+        self._release_status = release_status
         self._capacity_released_notifier = capacity_released_notifier
         self._capacity_release_outbox = (
             capacity_release_outbox or InMemoryCapacityReleaseOutbox()
@@ -150,91 +174,28 @@ class LeaseLifecycleService:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found")
         return reservation
 
-    def get_lease_by_escrow(self, escrow_uid: str) -> dict[str, Any]:
-        reservation = self._site_authority.get_reservation_by_escrow(escrow_uid)
-        if reservation is None or not reservation.get("lease_end_utc"):
-            raise LeaseNotFoundError(f"No lease found for escrow_uid={escrow_uid!r}")
-        return reservation
-
-    def list_leases(self) -> list[dict[str, Any]]:
-        return [
-            reservation
-            for reservation in self._site_authority.list_reservations()
-            if reservation.get("lease_end_utc")
-        ]
-
-    def register_lease(self, body: Any) -> dict[str, Any]:
-        attached = self._site_authority.attach_lease_reservation(
-            capacity_reservation_id=body.capacity_reservation_id,
-            escrow_uid=body.escrow_uid,
-            offering_mode=body.offering_mode,
-            executor_target=body.executor_target,
-            executor_ref=body.executor_ref,
-            lease_start_utc=_datetime_value(body.lease_start_utc),
-            lease_end_utc=_datetime_value(body.lease_end_utc),
-            create_job_id=body.create_job_id,
-        )
-        if attached is None and not body.capacity_reservation_id:
-            attached = self._site_authority.attach_lease_reservation(
-                escrow_uid=body.escrow_uid,
-                offering_mode=body.offering_mode,
-                executor_target=body.executor_target,
-                executor_ref=body.executor_ref,
-                lease_start_utc=_datetime_value(body.lease_start_utc),
-                lease_end_utc=_datetime_value(body.lease_end_utc),
-                create_job_id=body.create_job_id,
-            )
-        if attached is None:
-            raise LeaseNotFoundError(
-                f"No live reservation for capacity_reservation_id={body.capacity_reservation_id!r} / "
-                f"escrow_uid={body.escrow_uid!r}"
-            )
-        return attached
-
-    def update_lease(self, lease_id: str, body: Any) -> dict[str, Any]:
-        updated = self._site_authority.update_reservation_fields(
-            lease_id,
-            offering_mode=body.offering_mode,
-            executor_target=body.executor_target,
-            executor_ref=body.executor_ref,
-            lease_start_utc=_datetime_value(body.lease_start_utc),
-            lease_end_utc=_datetime_value(body.lease_end_utc),
-            release_job_id=body.release_job_id,
-            create_job_id=body.create_job_id,
-        )
-        if updated is None:
-            raise LeaseNotFoundError(
-                f"Lease '{lease_id}' not found or is already in a terminal state."
-            )
-        return updated
-
     async def terminate_lease(self, lease_id: str, body: Any | None = None) -> dict[str, Any]:
+        """Release a leased reservation now, as its expiry would.
+
+        A lease already releasing or released is returned as it is; one an
+        operator holds (``release_failed``, ``unmanaged``) needs repair first.
+        """
         reservation = self.get_lease(lease_id)
         state = str(reservation.get("state"))
-        if state in self.TERMINAL_SUCCESS_STATES:
-            return reservation
-        if state == "releasing":
+        if state in self.TERMINAL_SUCCESS_STATES or state == "releasing":
             return reservation
         if state in {"release_failed", "unmanaged"}:
             raise InvalidLeaseStateError(
                 f"Lease '{lease_id}' is {state}; admin repair is required.",
                 state=state,
             )
-        if state not in {"leased"}:
+        if state != "leased":
             raise InvalidLeaseStateError(
                 f"Lease '{lease_id}' is {state}; only leased reservations can be terminated.",
                 state=state,
             )
-        job_id = await self._run_release_delegate(reservation)
-        if not job_id:
-            raise InvalidLeaseStateError(
-                f"Could not submit release job for lease '{lease_id}'.",
-                state=state,
-            )
-        return self._site_authority.begin_release(
-            lease_id,
-            release_job_id=job_id,
-        ) or self.get_lease(lease_id)
+        await self._request_release(reservation)
+        return self.get_lease(lease_id)
 
     def release_oversight(self, lease_id: str, body: Any) -> dict[str, Any]:
         reservation = self.get_lease(lease_id)
@@ -246,13 +207,26 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only leased reservations can release oversight.",
                 state=state,
             )
-        return self._site_authority.record_unmanaged(
+        handed = self._site_authority.record_unmanaged(
             lease_id,
             reason="oversight_released",
             message=body.reason,
-        ) or self.get_lease(lease_id)
+        )
+        if handed is not None:
+            return handed
+        # The lease changed between the read and the hand-over (the lifecycle
+        # began releasing it, say); the site refused and wrote nothing.
+        current = self.get_lease(lease_id)
+        state = str(current.get("state"))
+        if state == "unmanaged":
+            return current
+        raise InvalidLeaseStateError(
+            f"Lease '{lease_id}' is {state}; only leased reservations can release oversight.",
+            state=state,
+        )
 
     async def retry_release(self, lease_id: str, body: Any | None = None) -> dict[str, Any]:
+        """Ask the fulfillment again: adopt its teardown, or free what it proves free."""
         reservation = self.get_lease(lease_id)
         state = str(reservation.get("state"))
         if state != "release_failed":
@@ -260,16 +234,8 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only release_failed leases can retry release.",
                 state=state,
             )
-        job_id = await self._run_release_delegate(reservation)
-        if not job_id:
-            raise InvalidLeaseStateError(
-                f"Could not submit release retry job for lease '{lease_id}'.",
-                state=state,
-            )
-        return self._site_authority.begin_release(
-            lease_id,
-            release_job_id=job_id,
-        ) or self.get_lease(lease_id)
+        await self._request_release(reservation)
+        return self.get_lease(lease_id)
 
     async def force_release(self, lease_id: str, body: Any) -> dict[str, Any]:
         reservation = self.get_lease(lease_id)
@@ -320,36 +286,32 @@ class LeaseLifecycleService:
 
         for reservation in self._site_authority.list_time_bounded_reservations_due(now):
             try:
-                job_id = await self._run_release_delegate(reservation)
-                if job_id is not None:
-                    self._site_authority.begin_release(
-                        reservation["capacity_reservation_id"],
-                        release_job_id=job_id,
-                    )
-                    checked += 1
-                    logger.info(
-                        "[LEASE_LIFECYCLE] Submitted release job %s for reservation %s",
-                        job_id,
-                        reservation["capacity_reservation_id"],
-                    )
-                else:
-                    self._mark_release_failed(
-                        reservation,
-                        reason="release_submit_failed",
-                        message="release delegate did not return a job id",
-                    )
-                    release_failed += 1
+                outcome = await self._request_release(reservation)
             except Exception as exc:
                 logger.exception(
                     "[LEASE_LIFECYCLE] Failed to begin release for reservation %s: %s",
                     reservation.get("capacity_reservation_id"), exc,
                 )
-                self._mark_release_failed(
-                    reservation,
-                    reason="release_submit_error",
-                    message=str(exc),
-                )
+                if (
+                    self._mark_release_failed(
+                        reservation,
+                        reason="release_submit_error",
+                        message=str(exc),
+                    )
+                    == "release_failed"
+                ):
+                    release_failed += 1
+                else:
+                    skipped += 1
+                continue
+            if outcome == "releasing":
+                checked += 1
+            elif outcome == "released":
+                released += 1
+            elif outcome == "release_failed":
                 release_failed += 1
+            else:
+                skipped += 1
 
         for reservation in self._site_authority.list_reservations(state="releasing"):
             try:
@@ -381,70 +343,176 @@ class LeaseLifecycleService:
             "skipped": skipped,
         }
 
-    async def _run_release_delegate(self, reservation: dict[str, Any]) -> str | None:
-        return await self._executor_release.submit_release(reservation)
+    async def _request_release(self, reservation: dict[str, Any]) -> str:
+        """Act on the fulfillment's decision; return the lease's resulting state.
+
+        A direct release the site's guard refuses means the aggregate moved
+        between the decision and the release (a dispatch won a race), so the
+        decision is taken once more and followed; refused again, nothing proves
+        the capacity free, and an operator must verify.
+        """
+        capacity_reservation_id = reservation["capacity_reservation_id"]
+        decision = await self._release_executor.submit_release(reservation)
+        if decision.action is ReleaseAction.FREE:
+            if await self._finish_release(reservation):
+                return "released"
+            decision = await self._release_executor.submit_release(reservation)
+            if decision.action is ReleaseAction.FREE:
+                if await self._finish_release(reservation):
+                    return "released"
+                return self._mark_release_failed(
+                    reservation,
+                    reason="release_unproven",
+                    message=(
+                        "nothing is left to tear down, but the reservation's "
+                        "provenance does not prove that nothing was dispatched"
+                    ),
+                )
+        if decision.action in (ReleaseAction.TEARDOWN, ReleaseAction.CREATE_IN_FLIGHT):
+            # Recorded first: a crash before teardown begins leaves a lease the
+            # releasing pass resumes, never a teardown the lease knows nothing of.
+            began = self._site_authority.begin_release(
+                capacity_reservation_id,
+                release_job_id=str(decision.fulfillment_id),
+            )
+            if began is None:
+                return self._yield_to_current_state(capacity_reservation_id, "begin releasing")
+            logger.info(
+                "[LEASE_LIFECYCLE] Reservation %s releasing under fulfillment %s (%s)",
+                capacity_reservation_id,
+                decision.fulfillment_id,
+                decision.action.value,
+            )
+            if decision.action is ReleaseAction.TEARDOWN:
+                await self._begin_recorded_teardown(
+                    capacity_reservation_id, str(decision.fulfillment_id)
+                )
+            return "releasing"
+        return self._mark_release_failed(
+            reservation,
+            reason=decision.reason or "release_unproven",
+            message=decision.message,
+        )
+
+    async def _begin_recorded_teardown(
+        self, capacity_reservation_id: str, fulfillment_id: str
+    ) -> None:
+        """Begin the teardown of a release already recorded as ``releasing``.
+
+        A failure here is not the release's failure: the release is durable,
+        and the releasing pass begins the teardown on a later cycle when the
+        aggregate still reads ``active``.
+        """
+        try:
+            await self._release_executor.begin_teardown(fulfillment_id)
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Teardown of fulfillment %s for reservation %s "
+                "did not begin; the releasing pass retries it: %s",
+                fulfillment_id,
+                capacity_reservation_id,
+                exc,
+            )
 
     async def _process_releasing_reservation(
         self, reservation: dict[str, Any], now: datetime, grace_seconds: int
     ) -> str:
-        lease_end = self._parse_utc(reservation.get("lease_end_utc")) or now
-        past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
-        job_id = reservation.get("release_job_id")
-        # "direct-release" means the executor's submit_release reported
-        # nothing to poll -- e.g. no release delegate configured for that
-        # offering mode. This is independent of whether release_jobs is
-        # configured at all: a kind-routed dispatcher may hold a real port
-        # for one offering mode while another kind still submits this
-        # sentinel, and grace-period bookkeeping must not apply to a
-        # release that was never dispatched as a pollable job.
-        if job_id == "direct-release":
-            if not await self._finish_release(reservation):
+        fulfillment_id = reservation.get("release_job_id")
+        if not fulfillment_id:
+            return self._mark_release_failed(
+                reservation,
+                reason="teardown_failed",
+                message="the releasing reservation records no release handle",
+            )
+
+        try:
+            status = self._release_status.get_status(str(fulfillment_id))
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Could not read fulfillment %s for reservation %s: %s",
+                fulfillment_id, reservation["capacity_reservation_id"], exc,
+            )
+            status = None
+
+        if status is not None:
+            if status.progress is ReleaseProgress.TORN_DOWN:
+                if not await self._finish_release(reservation):
+                    return "skipped"
+                return "released"
+            if status.progress is ReleaseProgress.FAILED:
+                return self._mark_release_failed(
+                    reservation,
+                    reason=status.reason or "teardown_failed",
+                    message=status.error,
+                )
+            if status.progress is ReleaseProgress.READY_FOR_TEARDOWN:
+                await self._release_executor.begin_teardown(str(fulfillment_id))
                 return "skipped"
-            return "released"
+            if status.progress is ReleaseProgress.CREATE_IN_FLIGHT:
+                # Waiting on a create is not a stalled teardown: the grace
+                # period starts counting only once there is a teardown to wait on.
+                return "skipped"
 
-        if job_id and self._release_jobs is not None:
-            try:
-                job = self._release_jobs.get_job(
-                    job_id, offering_mode=reservation.get("offering_mode")
-                )
-                if job.status == "succeeded":
-                    if not await self._finish_release(reservation):
-                        return "skipped"
-                    return "released"
-                if job.status in ("failed", "cancelled"):
-                    self._mark_release_failed(
-                        reservation,
-                        reason=f"vm_remove_{job.status}",
-                        message=getattr(job, "error", None) or f"vm_remove job {job.status}",
-                    )
-                    return "release_failed"
-            except Exception as exc:
-                logger.warning(
-                    "[LEASE_LIFECYCLE] Could not poll vm_remove job %s for reservation %s: %s",
-                    job_id, reservation["capacity_reservation_id"], exc,
-                )
-
-        if not past_grace:
-            return "skipped"
-        self._mark_release_failed(
-            reservation,
-            reason="vm_remove_timeout",
-            message="vm_remove did not complete before watchdog grace period elapsed",
+        # A stalled teardown is timed from when this release began, not from
+        # the lease's end: a lease terminated long before its end would
+        # otherwise wait that long, and one that ended long ago would time out
+        # as its teardown began. A reservation that entered ``releasing``
+        # before the start was recorded is timed from its end.
+        began = (
+            self._parse_utc(reservation.get("release_requested_at"))
+            or self._parse_utc(reservation.get("lease_end_utc"))
+            or now
         )
-        return "release_failed"
+        if now < began + timedelta(seconds=grace_seconds):
+            return "skipped"
+        return self._mark_release_failed(
+            reservation,
+            reason="teardown_timeout",
+            message="teardown did not complete before the watchdog grace period elapsed",
+        )
 
     def _mark_release_failed(
         self, reservation: dict[str, Any], *, reason: str, message: str | None,
-    ) -> None:
-        logger.error(
-            "[LEASE_LIFECYCLE] Release failed for reservation %s: %s %s",
-            reservation.get("capacity_reservation_id"), reason, message or "",
+    ) -> str:
+        """Record the release as failed, unless the reservation moved on.
+
+        A releasing reservation is failed only under the handle this cycle
+        read, so a failure observed for one release attempt cannot land on
+        another. The site refuses a failure for a reservation an operator took
+        over or force-released, or that was released; the lifecycle then
+        leaves it as it is.
+        """
+        capacity_reservation_id = reservation["capacity_reservation_id"]
+        expected_handle = (
+            reservation.get("release_job_id")
+            if str(reservation.get("state")) == "releasing"
+            else None
         )
-        self._site_authority.record_release_failure(
-            reservation["capacity_reservation_id"],
+        recorded = self._site_authority.record_release_failure(
+            capacity_reservation_id,
             reason=reason,
             message=message,
+            release_job_id=expected_handle,
         )
+        if recorded is None:
+            return self._yield_to_current_state(capacity_reservation_id, "record a failure")
+        logger.error(
+            "[LEASE_LIFECYCLE] Release failed for reservation %s: %s %s",
+            capacity_reservation_id, reason, message or "",
+        )
+        return "release_failed"
+
+    def _yield_to_current_state(self, capacity_reservation_id: str, write: str) -> str:
+        """Honour a state another actor recorded since this cycle read the lease."""
+        current = self._site_authority.get_reservation(capacity_reservation_id) or {}
+        logger.info(
+            "[LEASE_LIFECYCLE] Reservation %s is now %s; the site refused to %s for "
+            "a stale read, and the lifecycle leaves it as it is",
+            capacity_reservation_id,
+            current.get("state", "absent"),
+            write,
+        )
+        return "skipped"
 
     async def _finish_release(self, reservation: dict[str, Any]) -> bool:
         capacity_reservation_id = reservation["capacity_reservation_id"]

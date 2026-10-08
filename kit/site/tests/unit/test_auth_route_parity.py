@@ -120,3 +120,49 @@ def test_admin_is_accepted_on_every_route_without_being_enumerated():
 def test_an_unknown_route_is_refused_rather_than_defaulted():
     with pytest.raises(ValueError, match="no authenticated site contract"):
         server_auth.resolve_site_route("GET", "/api/v1/capacity/not-a-route")
+
+
+def test_capacity_definition_import_contracts_agree():
+    """The import route is declared by both halves, outside the capacity table.
+
+    A standalone site serves only the capacity routes, so the import contract
+    is a table of its own on each side; a service hosting the ledger assembles
+    it. The two must still sign the same operation and resource.
+    """
+    server = {
+        (contract.method, contract.pattern.pattern): contract
+        for contract in server_auth.CAPACITY_DEFINITION_ROUTE_CONTRACTS
+    }
+    client = {
+        (contract.method, contract.pattern.pattern): contract
+        for contract in client_contracts.CAPACITY_DEFINITION_ROUTE_CONTRACTS
+    }
+    assert server.keys() == client.keys()
+    for key, contract in server.items():
+        assert contract.operation == client[key].operation
+        assert contract.path_resource == client[key].path_resource
+        assert contract.body_resource == client[key].body_resource
+        assert contract.permits(server_auth.ADMIN_ROLE)
+        assert not contract.permits("seller")
+    assert not set(server) & set(_server_index())
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CapacityDefinitionProblem",
+        "CapacityDefinitionsDiff",
+        "CapacityDefinitionsImportRequest",
+        "CapacityDefinitionsImportResponse",
+    ],
+)
+def test_capacity_definition_models_agree(name: str):
+    """The client keeps its own copies of the import models; their schemas match."""
+
+    from market_site import capacity_definitions as server_models
+    from market_site_client import models as client_models
+
+    assert (
+        getattr(server_models, name).model_json_schema()
+        == getattr(client_models, name).model_json_schema()
+    )

@@ -31,7 +31,8 @@ from market_fulfillment import (
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
 )
-from market_resource_pools import PoolCreate, PoolUpdate, ResourcePoolService
+from market_resource_pools import ResourcePoolService
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService

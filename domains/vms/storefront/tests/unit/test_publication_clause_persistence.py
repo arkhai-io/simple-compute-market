@@ -15,15 +15,11 @@ async def test_listing_round_trips_canonical_publication_clauses(tmp_path) -> No
     now = datetime.now().isoformat()
     clauses = [
         {
-            "mechanism": "fiat.stripe.v1",
+            "mechanism": "example.rated.v1",
             "asset": "usd",
             "rate": "2",
             "per": "hour",
-            "mechanism_input": {
-                "funding_profile": "card.v1",
-                "interaction": "interactive",
-                "funds_flow": "separate_charges_transfers",
-            },
+            "mechanism_input": {"profile": "standard", "window": "P7D"},
         }
     ]
 

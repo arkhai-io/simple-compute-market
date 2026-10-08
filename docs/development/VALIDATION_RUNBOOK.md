@@ -79,7 +79,8 @@ Defaults:
 - A quiet `anvil_dumpState` check runs after Anvil is reachable.
 - Helm render validation runs automatically when `helm` is available.
 - Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and `domains/vms/provisioning/iac/ansible/inventory/hosts` are available.
+  and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`
+  (`hosts` and `provisioning-hosts.ini`) are available.
 - The single-pass `e2e-tests make test` sweep is off by default because
   it reruns stack-mutating e2e tests after the marker-specific runs.
 
@@ -217,7 +218,7 @@ Current note:
 ## 5. Optional Environment-Dependent Local Tests
 
 Compute provisioning IAC inventory/playbook validation requires Ansible tooling
-and `domains/vms/provisioning/iac/ansible/inventory/hosts`:
+and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`:
 
 ```bash
 cd domains/vms/provisioning/iac
@@ -366,7 +367,7 @@ Register mock `kvm1` if provisioning returns `{"hosts":[]}`:
 ```bash
 curl -sf -X POST http://localhost:8081/api/v1/hosts/ \
   -H 'Content-Type: application/json' \
-  -d '{"host_id":"kvm1","ssh_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' | jq
+  -d '{"host_id":"kvm1","connection":{"kind":"ssh","public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"gpu_count":1,"enabled":true}' | jq
 ```
 
 ## 10. Failure Diagnostics
@@ -1072,11 +1073,13 @@ case ",${ACTIVE_PROFILES}," in
 esac
 
 make forward ENV="$ENV"
-curl -sf http://localhost:8081/api/v1/system/ansible/readiness \
-  | tee /tmp/scm-ansible-readiness.json \
+# A degraded status answers 503 with the same body, so read it without -f.
+curl -s http://localhost:8081/api/v1/system/status \
+  | tee /tmp/scm-provisioning-status.json \
   | jq
-jq -e '.ansible_mode == "real" and .playbook.exists == true' \
-  /tmp/scm-ansible-readiness.json
+jq -e '.execution.mocked == false
+  and ([.components[] | select(.name == "ansible") | .ready] == [true])' \
+  /tmp/scm-provisioning-status.json
 ```
 
 ## 24. Provisioning Host Registration And Capacity
@@ -1090,10 +1093,14 @@ curl -sf http://localhost:8081/health | jq
 cat >/tmp/scm-gcp-host.json <<EOF
 {
   "host_id":"${KVM_HOST_ALIAS}",
-  "ssh_host":"${KVM_EXTERNAL_IP}",
-  "ssh_user":"ubuntu",
-  "ssh_key_type":"path",
-  "ssh_key_value":"/home/appuser/.ssh/id_ed25519",
+  "connection":{
+    "kind":"ssh",
+    "public":{
+      "ssh_host":"${KVM_EXTERNAL_IP}",
+      "ssh_user":"ubuntu",
+      "key_path":"/home/appuser/.ssh/id_ed25519"
+    }
+  },
   "gpu_count":0,
   "enabled":true
 }
@@ -1110,10 +1117,14 @@ if [ "$register_status" = "409" ]; then
   curl -sf -X PUT "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}" \
     -H 'Content-Type: application/json' \
     -d "{
-      \"ssh_host\":\"${KVM_EXTERNAL_IP}\",
-      \"ssh_user\":\"ubuntu\",
-      \"ssh_key_type\":\"path\",
-      \"ssh_key_value\":\"/home/appuser/.ssh/id_ed25519\",
+      \"connection\":{
+        \"kind\":\"ssh\",
+        \"public\":{
+          \"ssh_host\":\"${KVM_EXTERNAL_IP}\",
+          \"ssh_user\":\"ubuntu\",
+          \"key_path\":\"/home/appuser/.ssh/id_ed25519\"
+        }
+      },
       \"gpu_count\":0
     }" | jq
 

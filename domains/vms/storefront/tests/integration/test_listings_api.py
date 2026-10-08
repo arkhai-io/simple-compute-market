@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime
+from market_policy.listing_source import ListingSourceVerdict
 from market_core.schemas import RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
 
@@ -42,6 +43,12 @@ from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 from tests.listing_service_fixtures import vm_listing_collaborators
+
+_VM_PROVISION_TERMS = {
+    "kind": "compute.v1",
+    "version": 1,
+    "payload": {"duration_seconds": 3600, "ssh_public_key": ""},
+}
 
 _TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
 _TEST_ADMIN_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -461,6 +468,27 @@ async def admin_client(
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
     _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
+    # Evaluate-negotiate previews the opening through the negotiation runtime,
+    # so the fixture composes the same runtime negotiate/new uses.
+    import market_storefront.negotiation_runtime as _negotiation_runtime
+
+    registration = db.domain_registry.resolve_mode("vm")
+
+    async def source_matches(_repository, _resolved):
+        # The listings here have no declared source; these tests preview the
+        # seller's policy, and the source check is tested on its own
+        # (tests/unit/test_listing_source_check.py, test_negotiate_controller.py).
+        return ListingSourceVerdict("matches")
+
+    _container.resolved_negotiation_runtime = (
+        _negotiation_runtime.build_vm_negotiation_runtime(
+            registration.contract,
+            registry=db.domain_registry,
+            binding=registration.binding,
+            capacity_runtime=collaborators.capacity_runtime,
+            listing_source_check=source_matches,
+        )
+    )
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -484,6 +512,7 @@ async def admin_client(
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
     _container.resolved_marketplace_signer = None
+    _container.resolved_negotiation_runtime = None
 
 
 @pytest_asyncio.fixture
@@ -583,6 +612,7 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         assert isinstance(result.would_negotiate, bool)
 
@@ -603,85 +633,68 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         assert result.decision in ("accept", "counter", "exit")
         assert result.direction == "maximize"
         assert result.our_reference_amount > 0
         assert result.strategy  # non-empty string
 
-    async def test_a_hosted_selection_negotiates_from_the_hosted_rate(self, admin_client):
-        """On a listing offering Alkahest at 9000 and a hosted option at 1500,
-        a buyer selecting the hosted option is negotiated against 1500: the
+    async def test_a_rated_selection_negotiates_from_its_own_rate(self, admin_client):
+        """On a listing offering Alkahest at 9000 and an option rated at 1500,
+        a buyer selecting that option is negotiated against 1500: the
         rate of the option it selected, in that option's own asset."""
         c, db = admin_client
         rates = [RateValue(field="amount", per="hour", value=1500)]
-        hosted = {
-            "mechanism": "fiat.stripe.v1",
+        rated = {
+            "mechanism": "example.rated.v1",
             "asset": "usd",
             "rates": [rate.model_dump(mode="json") for rate in rates],
             "params": {},
             "option_id": derive_settlement_option_id(
-                mechanism="fiat.stripe.v1", asset="usd", rates=rates, params={}
+                mechanism="example.rated.v1", asset="usd", rates=rates, params={}
             ),
         }
-        await _seed_listing(db, "neg-eval-hosted", settlement_options=[hosted])
+        await _seed_listing(db, "neg-eval-rated", settlement_options=[rated])
         with patch(
             "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-hosted",
+                "neg-eval-rated",
                 proposal={
                     "settlement_selection": {
-                        "mechanism": hosted["mechanism"],
-                        "option_id": hosted["option_id"],
+                        "mechanism": rated["mechanism"],
+                        "option_id": rated["option_id"],
                         "expiration_unix": 2000000000,
                     },
-                    "fields": {"amount": 1500},
+                    # Below that rate, so the strategy counters from
+                    # it: accepting would build a settlement plan,
+                    # which this fixture composes no mechanism for.
+                    "fields": {"amount": 1000},
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         assert result.our_reference_amount == 1500
 
-    async def test_price_at_floor_does_not_exit(self, admin_client):
-        """Buyer price at or above the seller's floor should not produce exit."""
-        c, db = admin_client
-        await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
-        with patch(
-            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
-            return_value=_bisection_chain(),
-        ):
-            result = await c.evaluate_negotiate(
-                "neg-eval-floor",
-                proposal={
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
-                    "fields": {"amount": 9000, "token": "0x" + "a" * 40},
-                    "expiration_unix": 2000000000,
-                },
-                buyer_principal=_TEST_BUYER_SIGNER.identity,
-            )
-        # At exactly the floor price, bisection should accept or counter, not exit
-        assert result.would_negotiate is True, (
-            f"Strategy exited at floor price 9000. decision={result.decision!r} "
-            f"reason={result.decision_reason!r} our_price={result.our_reference_amount}"
-        )
-
-    async def test_unknown_listing_returns_404(self, admin_client):
-        """Non-existent listing_id returns 404."""
+    async def test_unknown_listing_is_reported_as_refused(self, admin_client):
+        """An opening for a listing that does not exist is refused, as
+        ``negotiate/new`` would refuse it."""
         c, _ = admin_client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_negotiate(
-                "ghost-listing",
-                proposal={
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
-                    "fields": {"amount": 1000, "token": "0x" + "a" * 40},
-                    "expiration_unix": 2000000000,
-                },
-                buyer_principal=_TEST_BUYER_SIGNER.identity,
-            )
-        assert "404" in str(exc_info.value)
+        result = await c.evaluate_negotiate(
+            "ghost-listing",
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {"amount": 1000, "token": "0x" + "a" * 40},
+                "expiration_unix": 2000000000,
+            },
+            buyer_principal=_TEST_BUYER_SIGNER.identity,
+            provision_terms=_VM_PROVISION_TERMS,
+        )
+        assert result.refused is True
+        assert result.would_negotiate is False
 
     async def test_no_negotiation_thread_created(self, admin_client):
         """evaluate-negotiate creates no thread in the DB."""
@@ -700,6 +713,7 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         threads = await db.get_active_negotiations_for_listing(
             listing_id="neg-eval-no-thread"

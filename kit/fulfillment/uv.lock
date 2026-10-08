@@ -34,6 +34,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core"
+version = "0.4.1"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-admissibility"
 version = "0.1.0"
 source = { registry = "../../.dist" }
@@ -54,10 +65,12 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.3.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-site" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
@@ -72,8 +85,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.10.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uuid6", specifier = ">=2024.7.10" },
@@ -87,7 +102,7 @@ dev = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -97,38 +112,52 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
-    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-resource-pools-contracts"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-admissibility" },
+    { name = "arkhai-kit-capability-shape" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_resource_pools_contracts-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.6.0"
+version = "0.10.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.10.1-py3-none-any.whl" },
 ]
 
 [[package]]

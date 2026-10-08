@@ -10,13 +10,15 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from compute_provisioning import (
-    ComputeProvisioningClient,
+from compute_provisioning_client import ComputeProvisioningClient
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseTermination,
+    LeaseView,
 )
 
 from core_storefront.aggregation import (
@@ -285,6 +287,27 @@ class SelectedSiteFulfillmentClient:
         return await self._client(
             capacity_reservation_id
         ).begin_fulfillment_teardown(fulfillment_id)
+
+    async def get_lease(self, capacity_reservation_id: str) -> LeaseView:
+        """The reservation's lease, from the site that holds it."""
+        return await self._client(capacity_reservation_id).get_lease(
+            capacity_reservation_id
+        )
+
+    async def terminate_lease(
+        self,
+        capacity_reservation_id: str,
+        *,
+        reason: str | None = None,
+    ) -> LeaseView:
+        """End the reservation's lease at the site that holds it.
+
+        The site converges teardown through the lease's fulfillment and releases
+        the capacity once; terminating a lease already ending returns it as it is.
+        """
+        return await self._client(capacity_reservation_id).terminate_lease(
+            capacity_reservation_id, LeaseTermination(reason=reason)
+        )
 
 
 def build_trusted_site_clients(

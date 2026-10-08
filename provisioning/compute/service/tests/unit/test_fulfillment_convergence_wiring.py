@@ -1,99 +1,73 @@
-"""The admin convergence route reaches the watchdog it exists to advance.
+"""The system routes the app mounts reach the workers the container composes.
 
-`SystemService` has accepted a `fulfillment_convergence_watchdog` since the
-route was added and nothing ever passed one, so
-`POST /api/v1/system/fulfillment-convergence/run-cycle` answered
-`503 fulfillment_convergence_watchdog not initialised` for every caller. A
-parameter with a `None` default and no supplier is invisible to every test
-that exercises either side on its own, which is why this binds the wiring
-rather than the service.
+Each side can be correct on its own while the wiring between them is missing,
+so a control would answer that its worker is not initialised to every caller.
+The routes resolve the workers through accessors; this binds those accessors,
+on the routers ``main.py`` actually mounts, to the container's resolved workers.
 """
 
 from __future__ import annotations
 
 import pytest
-from vm_provisioning_adapter.services.system_service import SystemService
+
+from compute_provisioning_service import container as container_module
+from compute_provisioning_service import main
 
 
 class _Watchdog:
+    is_paused = True
+
     def __init__(self) -> None:
         self.cycles = 0
+        self.advances = 0
 
     async def run_cycle(self) -> dict[str, object]:
         self.cycles += 1
-        return {"converged": 1, "skipped": 0}
+        return {"converged": 1}
+
+    async def advance_cycle(self) -> dict[str, object]:
+        self.advances += 1
+        return {"converged": 1}
 
 
-class _Runtime:
-    """The adapter runtime's construction seam, with nothing else attached."""
+class _LeaseLifecycle:
+    def __init__(self) -> None:
+        self.cycles = 0
 
-    ansible_service = object()
-    config = object()
-    host_service = None
-    session_factory = None
-    job_queue_provider = None
-
-    def system_service(
-        self,
-        *,
-        lease_lifecycle_service,
-        fulfillment_convergence_watchdog=None,
-    ):
-        return SystemService(
-            ansible_service=self.ansible_service,
-            settings=self.config,
-            host_service=self.host_service,
-            session_factory=self.session_factory,
-            job_queue_provider=self.job_queue_provider,
-            lease_lifecycle_service=lease_lifecycle_service,
-            fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
-        )
+    async def force_check_leases(self) -> dict[str, int]:
+        self.cycles += 1
+        return {"checked": 0}
 
 
-async def test_the_container_seam_forwards_the_watchdog():
-    """`_system_service` is the only place these two singletons meet."""
-    from compute_provisioning_service.container import _system_service
+def _endpoint(path: str):
+    for route in main._system_router.routes:
+        if route.path == path:
+            return route.endpoint
+    raise AssertionError(f"the mounted system router has no {path}")
 
-    watchdog = _Watchdog()
-    service = _system_service(
-        _Runtime(),
-        lease_lifecycle_service=None,
-        fulfillment_convergence_watchdog=watchdog,
+
+@pytest.fixture
+def composed(monkeypatch):
+    watchdog, lifecycle = _Watchdog(), _LeaseLifecycle()
+    monkeypatch.setattr(
+        container_module, "resolved_fulfillment_convergence_watchdog", watchdog
     )
-
-    result = await service.force_fulfillment_convergence()
-
-    assert "error" not in result, (
-        "the composed system service could not reach its watchdog, so the "
-        "admin convergence route has nothing to advance"
-    )
-    assert watchdog.cycles == 1, "exactly one cycle per call"
+    monkeypatch.setattr(container_module, "resolved_lease_lifecycle_service", lifecycle)
+    return watchdog, lifecycle
 
 
-async def test_an_absent_watchdog_still_refuses_by_name():
-    """The refusal stays: a service composed without one says which one."""
-    service = _Runtime().system_service(lease_lifecycle_service=None)
+async def test_the_convergence_controls_reach_the_composed_watchdog(composed):
+    watchdog, _ = composed
 
-    result = await service.force_fulfillment_convergence()
+    await _endpoint("/system/fulfillment-convergence/run-cycle")()
+    await _endpoint("/system/fulfillment-convergence/advance-cycle")()
 
-    assert result.get("error") == "fulfillment_convergence_watchdog not initialised"
-
-
-def test_the_container_declares_the_dependency():
-    """Reading the provider's own arguments, not the service it built.
-
-    The forwarding test above passes a watchdog in by hand, so it would also
-    pass while the container still omitted it -- which is exactly the state
-    that shipped.
-    """
-    from compute_provisioning_service import container as container_module
-
-    provider = container_module.Container.system_service
-    assert "fulfillment_convergence_watchdog" in provider.kwargs, (
-        "the container's system_service provider does not pass the "
-        f"convergence watchdog; it passes {sorted(provider.kwargs)}"
-    )
+    assert (watchdog.cycles, watchdog.advances) == (1, 1)
 
 
-if __name__ == "__main__":  # pragma: no cover - convenience
-    raise SystemExit(pytest.main([__file__]))
+async def test_check_leases_reaches_the_composed_lease_lifecycle(composed):
+    _, lifecycle = composed
+
+    await _endpoint("/system/check-leases")()
+
+    assert lifecycle.cycles == 1

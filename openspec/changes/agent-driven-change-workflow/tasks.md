@@ -365,6 +365,47 @@ in that form rather than converted.
       has; like it, `openspec validate --strict` reports the missing delta until
       design either adds one or confirms none is owed.
 
+## 8A. Reconcile the development-branch merge
+
+- [x] 8A.1 Reconcile root, kit, and E2E `Makefile` targets, `.gitignore`,
+      `domains/vms/listings/pyproject.toml`, and the API-credit distribution-wheel
+      fixture: preserve workflow and admissibility tooling alongside development's
+      package boundaries and payments cutover. Remove the retired shared hosted
+      debugging skill and both harness links together. Move the admissibility
+      dependency to `kit/resource-pools-contracts/pyproject.toml`, which now owns
+      hint validation, and update its moved tests' imports and build prerequisite.
+      Adapt the pilot's added pool API tests to `ProvisioningClients.pools` and
+      `ComputeProvisioningError` in the provisioning-service integration suite.
+- [x] 8A.2 Reconcile the campaign index and completed task history, retaining its
+      phase/state columns while applying development's archive, scope, and progress
+      updates. Record the merge rationale in `design.md`; leave unfinished pilots,
+      validation gates, and feature sections open.
+- [ ] 8A.3 Regenerate locks through `make lock` after a clean wheel build. Run
+      focused workflow and shape-admissibility tests and the root unit/integration
+      aggregate; run `make check-packaging`, `make check-agent-skills`, comment
+      hygiene, scoped documentation citations, and strict OpenSpec validation.
+      Check import placement, documentation ownership, completed-note compression,
+      roadmap/index currency, and existing promotion destinations. Record failures
+      and unrun typing, Docker/Helm end-to-end, or remote pipeline checks; retain
+      the corresponding post-review closeout and promotion gates.
+      Local merge checks (2026-10-08): every root unit/integration target passed
+      across the aggregate and resumed run, including the migrated pool-contract
+      and pool API tests, shape-admissibility integration, workflow tooling, all
+      three middleware implementations, E2E unit tests, and Helm render checks.
+      Agent skill links, comment hygiene, strict OpenSpec 1.14.0 validation, and
+      the index's row schema, statuses, link targets, and citations passed.
+      Registry-client typing passed. Core typing still reports its inherited
+      `query_dsl.py:487` assignment error; that file is identical on both parents.
+      The scoped citation check reports four inherited references to the planned
+      workflow specification, architecture companion, and contributor guide,
+      which remain absent until closeout; no missing permanent document is added
+      by this merge. Import placement adds no function-local imports, and roadmap
+      gaps and feature gates remain applicable. Docker and Helm end-to-end and
+      the remote pipeline remain unrun: local containers are already running and
+      the standard stack tests replace volumes; this uncommitted merge has no
+      corresponding pipeline revision. Section 12's promotion and closeout remain
+      open. `make check-packaging` passed against the final rebuilt wheelhouse.
+
 ## 9. Implementation-round triage
 
 The review, validation, and the owner's notes on one commit are triaged together in

@@ -4,14 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-apicredits-service"
-version = "0.4.0"
+version = "0.5.0"
 license = "MIT"
 description = "API-credits service: keys, credit grants, consumption, and the site quota ledger"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-kit-site>=0.4.0",
+    "arkhai-kit-resource-pools-contracts>=0.1.0",
+    "arkhai-kit-site>=0.10.0",
     "arkhai-kit-resource-pools>=0.3.0",
-    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-identity==0.4.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -31,7 +32,7 @@ dev = [
     # sides disagreeing, which is exactly how the query-canonicalization
     # defect survived. Neither package is a runtime dependency.
     "arkhai-apicredits-middleware[signed]",
-    "arkhai-apicredits-domain>=0.4.0",
+    "arkhai-apicredits-domain>=0.5.0",
     # The capacity half of this service's own boundary. Credits are backed by
     # declared capacity, so the canonical-client test has to register a quota
     # resource before an issuance can succeed -- and registering it through

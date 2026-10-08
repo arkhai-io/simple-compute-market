@@ -1,5 +1,21 @@
 ## MODIFIED Requirements
 
+### Requirement: Dependency boundary
+
+`market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site`, `market_resource_pools` and its wire contracts `market_resource_pools_contracts`, and the core carrier package `market_core`, which provides `VersionedEnvelope`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
+
+Carrier modules for IDs, envelopes, requests, requirements, resources, and provider protocols MUST remain independent of concrete service implementations. Scheduler modules MAY depend on site and resource-pool service interfaces required to enumerate and bind eligible resources.
+
+#### Scenario: Type-only reverse import is introduced
+
+- **WHEN** `market_site` or `market_resource_pools` imports `market_fulfillment` under `TYPE_CHECKING`
+- **THEN** the repository dependency-boundary validation rejects the import as an upward dependency
+
+#### Scenario: A concrete VM adapter implements fulfillment
+
+- **WHEN** the VM provisioning composition registers an Ansible provider
+- **THEN** the adapter depends on `market_fulfillment` and VM/Ansible packages while the fulfillment kit remains free of VM vocabulary
+
 ### Requirement: Versioned envelopes
 
 Generic dictionaries crossing a domain, provider, process, or persistence boundary MUST be wrapped in `VersionedEnvelope` or a more specific typed model. `VersionedEnvelope` is provided by the dependency-light `arkhai-core` distribution (`market_core`), so a wire-contract package can carry one without depending on this fulfillment kit; fulfillment uses that one implementation and defines no envelope of its own.

@@ -56,8 +56,10 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         "mock" if development else "docker"
     )
     mounts = {v["target"]: v["source"] for v in provisioning["volumes"]}
-    assert mounts["/opt/domains/vms/provisioning/iac"] == str(
-        REPO_ROOT / "domains/vms/provisioning/iac"
+    # Bare metal's stack needs nothing from another domain's tree.
+    assert "/opt/domains/vms/provisioning/iac" not in mounts
+    assert mounts["/opt/domains/bare_metal/provisioning/iac"] == str(
+        REPO_ROOT / "domains/bare_metal/provisioning/iac"
     )
     registry = services["bare-metal-registry"]
     assert registry["environment"]["REGISTRY_AUTHORITY_ID"] == "bare-metal-registry"
@@ -70,5 +72,10 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         for volume in service.get("volumes", []):
             if volume["type"] == "volume":
                 assert volume["source"] in model["volumes"]
+    storefront = services["bare-metal-storefront"]["environment"]
+    # The chains and the wallet key reach the storefront through the wrapper's
+    # own inputs, with or without the development overlay.
+    assert json.loads(storefront["BARE_METAL_STOREFRONT_CHAINS"])["anvil"]
+    assert storefront["BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY"].startswith("0x")
     if development:
         assert services["bare-metal-storefront"]["depends_on"]["anvil"]["condition"] == "service_healthy"

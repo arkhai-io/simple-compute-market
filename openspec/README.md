@@ -9,7 +9,7 @@ OpenSpec separates the system's durable current contract from the temporary work
 - `changes/archive/` records completed transitions after their durable results have been synchronized into `specs/` and, where repository-wide, `docs/development/ARCHITECTURE.md`.
 - `config.yaml` supplies repository context and artifact-quality rules.
 
-Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <name>` to read one, and `validate --all --strict` before review.
+Use `bunx @fission-ai/openspec@1.14.0 list` to inspect active changes, `show <name>` to read one, and `validate --all --strict` before review. The validator is pinned to 1.14.0: 1.14.1 adds a strict-mode failure for requirement text over 500 characters, which most permanent specs do not yet meet, and [`shorten-long-requirements`](changes/shorten-long-requirements/) restructures them and moves the pin forward.
 
 ## Documentation placement
 

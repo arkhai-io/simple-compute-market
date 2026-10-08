@@ -4,49 +4,32 @@ on `market buy`.
 
 from __future__ import annotations
 
-import uuid
 import json
-from dataclasses import replace
+import uuid
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 import pytest
 from arkhai_vms import make_vm_provision_terms
-from core_buyer.action_policy import BuyerActionPolicy
 from core_buyer.registry_config import RegistryAuthority
-from arkhai_vms_buyer.buy_cli import _make_hosted_settle_hook
-from arkhai_vms_buyer.buyer_client import NegotiationOutcome
-from arkhai_vms_buyer.negotiate_cli import _pricing_listing_for_selection
+from identity_helpers import BUYER_SIGNER, seller_principals
+from market_core.schemas import (
+    EscrowProposal,
+    EscrowTerms,
+)
+from registry_client import FilterSpecResponse
+
 from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
-    NegotiationResult,
     extract_seller_min_price,
     make_legacy_negotiate_hook,
     make_legacy_settle_hook,
     query_registry_for_matches,
     run_buy,
 )
-from arkhai_vms_buyer.settlement_composition import resolve_buyer_settlement_policy
-from registry_client import FilterSpecResponse
-from market_hosted_settlement import (
-    FundingMode,
-    FundingProfile,
-    FundingSelection,
-    StripeSettlementConfig,
-    stripe_contract_fingerprint,
-)
-from identity_helpers import BUYER_SIGNER, seller_principals
-from market_core.schemas import (
-    EscrowProposal,
-    EscrowTerms,
-    RateValue,
-    SettlementOption,
-    SettlementObligation,
-    SettlementPlan,
-    derive_settlement_option_id,
-)
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 def _config(registry_url: str = "http://reg") -> BuyConfig:
@@ -98,309 +81,6 @@ def _escrow_proposal() -> EscrowProposal:
         ],
         expiration_unix=1_800_000_000,
     )
-
-
-def _hosted_config() -> StripeSettlementConfig:
-    return StripeSettlementConfig(
-        enabled=True,
-        authority_id="authority-main",
-        environment="production",
-    )
-
-
-def _buyer_hosted_section() -> dict[str, Any]:
-    return _hosted_config().model_dump(mode="json", exclude_defaults=True)
-
-
-def _hosted_option() -> SettlementOption:
-    rates = [RateValue(field="amount", value=125)]
-    config = _hosted_config()
-    params = {
-        "account_ref": "acct-seller",
-        "authority_id": config.authority_id,
-        "funding_profile": "card.v1",
-        "country": config.country,
-        "environment": config.environment,
-        "claimant_principal": seller_principals().identities[0].model_dump(mode="json"),
-        "condition": {
-            "condition_id": "vm-fulfillment",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {"encoding": "application/jcs+json", "value": {}},
-        },
-        "interaction": "interactive",
-        "funds_flow": "separate_charges_transfers",
-        "contract_fingerprint": stripe_contract_fingerprint(config),
-    }
-    return SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        rates=rates,
-        params=params,
-    )
-
-
-def _with_hosted_readiness(policy):
-    section = policy.config.mechanism_config("stripe")
-    return replace(
-        policy,
-        public_context={
-            "contract_fingerprint": stripe_contract_fingerprint(section),
-            "funding_profiles": ("card.v1",),
-            "currencies": ("usd",),
-            "countries": ("US",),
-            "interactions": ("interactive",),
-            "selected_payer_binding": {
-                "authority_id": section.authority_id,
-                "environment": section.environment,
-                "binding_ref": "payer-safe",
-                "bound_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
-                "state": "active",
-            },
-            "selected_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
-            "profile_readiness": {"card.v1": {"interactive": True}},
-        },
-    )
-
-
-def test_select_hosted_option_pins_exact_listed_choice():
-    option = _hosted_option()
-    listing = {"settlement_options": [option.model_dump(mode="json")]}
-    policy = _with_hosted_readiness(
-        resolve_buyer_settlement_policy(
-            {
-                "Settlement": {
-                    "priority": ["fiat.stripe.v1"],
-                    "stripe": _buyer_hosted_section(),
-                }
-            }
-        )
-    )
-
-    selected = policy.select(
-        listing,
-        clauses=(f"option_id={option.option_id}",),
-        expiration_unix=1_800_000_000,
-    )
-    assert selected is not None
-    assert selected.selection.option_id == option.option_id
-    assert selected.selection.expiration_unix == 1_800_000_000
-
-
-def test_select_hosted_option_rejects_unlisted_choice():
-    option = _hosted_option()
-    policy = _with_hosted_readiness(
-        resolve_buyer_settlement_policy(
-            {
-                "Settlement": {
-                    "priority": ["fiat.stripe.v1"],
-                    "stripe": _buyer_hosted_section(),
-                }
-            }
-        )
-    )
-
-    assert (
-        policy.select(
-            {"settlement_options": [option.model_dump(mode="json")]},
-            clauses=('option_id="' + "0" * 64 + '"',),
-            expiration_unix=1_800_000_000,
-        )
-        is None
-    )
-
-
-def test_standalone_pricing_uses_selected_option_rate_and_units():
-    option = _hosted_option()
-    legacy_alkahest_entry = {
-        "chain_name": "anvil",
-        "escrow_address": "0x" + "aa" * 20,
-        "literal_fields": {"token": "0x" + "bb" * 20},
-        "rates": [{"field": "amount", "per": "hour", "value": "999000000"}],
-    }
-    listing = {
-        "accepted_escrows": [legacy_alkahest_entry],
-        "settlement_options": [option.model_dump(mode="json")],
-    }
-    policy = _with_hosted_readiness(
-        resolve_buyer_settlement_policy(
-            {
-                "Settlement": {
-                    "schema_version": 1,
-                    "priority": ["fiat.stripe.v1"],
-                    "stripe": _buyer_hosted_section(),
-                }
-            }
-        )
-    )
-    selected = policy.select(listing, expiration_unix=1_800_000_000)
-    assert selected is not None
-
-    pricing_listing = _pricing_listing_for_selection(
-        listing,
-        selected,
-        accepted_escrow=None,
-    )
-
-    assert pricing_listing["accepted_escrows"] == []
-    assert extract_seller_min_price(pricing_listing) == 125
-
-
-def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
-    monkeypatch,
-):
-
-    monkeypatch.setattr(
-        "core_buyer.hosted_settlement.make_publisher_trust_resolver",
-        lambda **_kwargs: seller_principals,
-    )
-
-    starts: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        "core_buyer.hosted_settlement.HostedSettlementTransport.start",
-        lambda _transport, **kwargs: (
-            starts.append(kwargs)
-            or {
-                "settlement_ref": "settlement-1",
-                "status": "requires_action",
-                "action": {
-                    "kind": "redirect",
-                    "url": "https://checkout.example/session",
-                    "expires_at_unix": 1_800_000_000,
-                },
-                "action_kind": "redirect",
-                "action_expires_at_unix": 1_800_000_000,
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "core_buyer.hosted_settlement.HostedSettlementTransport.wait",
-        lambda _transport, **_kwargs: {"status": "ready"},
-    )
-    monkeypatch.setattr(
-        "arkhai_vms_buyer.buy_cli.prepare_hosted_funding_authorization",
-        lambda **_kwargs: SimpleNamespace(
-            funding_profile=FundingProfile.CARD,
-            funding_authorization_ref="funding-auth-safe-1",
-            expires_at_unix=1_800_000_000,
-        ),
-    )
-    opened: list[str] = []
-    events: list[tuple[str, dict[str, Any]]] = []
-    hook = _make_hosted_settle_hook(
-        config=_config("http://registry"),
-        provision=make_vm_provision_terms(
-            duration_seconds=3600,
-            ssh_public_key="ssh-ed25519 AAAA",
-        ),
-        poll_interval=0,
-        total_timeout=5,
-        sleep=lambda _seconds: None,
-        action_policy=BuyerActionPolicy.OPEN,
-        open_url=lambda url: opened.append(url),
-        print_url=lambda _url: None,
-        stripe_config=SimpleNamespace(),
-        funding_selection=FundingSelection(FundingMode.INTERACTIVE),
-        automatic_funding=False,
-    )
-    outcome = NegotiationOutcome(
-        status="agreed",
-        negotiation_id="neg-1",
-        agreed_amount=125,
-        settlement_plan=SettlementPlan(
-            obligations=[
-                SettlementObligation(
-                    payer="buyer",
-                    claimant="seller",
-                    payer_principal=BUYER_SIGNER.identity.model_dump(mode="json"),
-                    claimant_principal=seller_principals()
-                    .identities[0]
-                    .model_dump(mode="json"),
-                    amount=125,
-                    asset="usd",
-                    expiration_unix=1_800_000_000,
-                    mechanism="fiat.stripe.v1",
-                )
-            ]
-        ),
-    )
-
-    result = hook(
-        NegotiationResult(
-            match=_listing_with_identity(
-                {"listing_id": "L1", "seller": "http://seller"},
-                "http://registry",
-            ),
-            outcome=outcome,
-        ),
-        lambda stage, body: events.append((stage, body)),
-    )
-
-    assert opened == ["https://checkout.example/session"]
-    assert starts[0]["negotiation_id"] == "neg-1"
-    assert len(starts[0]["obligation_ref"]) == 64
-    assert starts[0]["funding_authorization_ref"] == "funding-auth-safe-1"
-    assert "payer_principal" not in starts[0]
-    assert "claimant_principal" not in starts[0]
-    assert result.status == "ready"
-    assert result.escrow_uid == "settlement-1"
-    assert all("url" not in body for _, body in events)
-
-
-def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
-    monkeypatch,
-) -> None:
-
-    monkeypatch.setattr(
-        "arkhai_vms_buyer.buy_cli.prepare_hosted_funding_authorization",
-        lambda **_kwargs: pytest.fail("funding authorization preceded accepted terms"),
-    )
-    monkeypatch.setattr(
-        "core_buyer.hosted_settlement.HostedSettlementTransport.start",
-        lambda _transport, **_kwargs: pytest.fail(
-            "settlement start preceded accepted terms"
-        ),
-    )
-    hook = _make_hosted_settle_hook(
-        config=_config("http://registry"),
-        provision=make_vm_provision_terms(
-            duration_seconds=3600,
-            ssh_public_key="ssh-ed25519 AAAA",
-        ),
-        poll_interval=0,
-        total_timeout=5,
-        sleep=lambda _seconds: None,
-        action_policy=BuyerActionPolicy.PRINT,
-        open_url=lambda _url: None,
-        print_url=lambda _url: None,
-        stripe_config=SimpleNamespace(),
-        funding_selection=FundingSelection(FundingMode.INTERACTIVE),
-        automatic_funding=False,
-    )
-    with pytest.raises(ValueError, match="accepted settlement plan"):
-        hook(
-            NegotiationResult(
-                match=_listing_with_identity(
-                    {"listing_id": "L1", "seller": "http://seller"},
-                    "http://registry",
-                ),
-                outcome=NegotiationOutcome(
-                    status="agreed",
-                    negotiation_id="neg-1",
-                    agreed_amount=125,
-                ),
-            ),
-            lambda _stage, _body: None,
-        )
 
 
 def _build_escrow_proposal():
@@ -938,3 +618,39 @@ class TestConfirmSettlementGate:
         )
         assert result.status == "exited"
         assert "confirm_settlement_callback_raised" in (result.reason or "")
+
+
+def test_pricing_uses_only_the_selected_option_rate():
+    """A listing's other alternatives never price the option the buyer selected."""
+    from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+
+    from arkhai_vms_buyer.negotiate_cli import _pricing_listing_for_selection
+
+    rates = [RateValue(field="amount", per="hour", value=125)]
+    params = {"payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD/2"}
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
+    legacy_alkahest_entry = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "aa" * 20,
+        "literal_fields": {"token": "0x" + "bb" * 20},
+        "rates": [{"field": "amount", "per": "hour", "value": "999000000"}],
+    }
+    listing = {
+        "accepted_escrows": [legacy_alkahest_entry],
+        "settlement_options": [option.model_dump(mode="json")],
+    }
+
+    pricing_listing = _pricing_listing_for_selection(
+        listing, SimpleNamespace(option=option), accepted_escrow=None
+    )
+
+    assert pricing_listing["accepted_escrows"] == []
+    assert extract_seller_min_price(pricing_listing) == 125

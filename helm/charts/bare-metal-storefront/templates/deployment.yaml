@@ -38,9 +38,20 @@ spec:
               value: {{ .Values.adminPrincipals | toJson | quote }}
             - name: BARE_METAL_STOREFRONT_PUBLIC_URL
               value: {{ required "bare-metal storefront publicUrl is required" .Values.publicUrl | quote }}
-            {{- if .Values.alkahestEnabled }}
+            {{- $alkahestInputs := list (ne .Values.sellerEvmAddress "") (gt (len .Values.chains) 0) (ne .Values.walletKeySecret.name "") }}
+            {{- if and (has true $alkahestInputs) (has false $alkahestInputs) }}
+            {{- fail "sellerEvmAddress, chains, and walletKeySecret.name are set together or not at all" }}
+            {{- end }}
+            {{- if ne .Values.sellerEvmAddress "" }}
             - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
-              value: {{ required "sellerEvmAddress is required when Alkahest is enabled" .Values.sellerEvmAddress | quote }}
+              value: {{ .Values.sellerEvmAddress | quote }}
+            - name: BARE_METAL_STOREFRONT_CHAINS
+              value: {{ .Values.chains | toJson | quote }}
+            - name: BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.walletKeySecret.name | quote }}
+                  key: {{ .Values.walletKeySecret.key | quote }}
             {{- end }}
             - name: BARE_METAL_STOREFRONT_SETTLEMENT
               valueFrom:
@@ -68,6 +79,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
+            {{- if ne .Values.alkahestAddressBook.configMapName "" }}
+            - name: alkahest-address-book
+              mountPath: {{ .Values.alkahestAddressBook.mountPath | quote }}
+              readOnly: true
+            {{- end }}
           startupProbe:
             httpGet:
               path: /health
@@ -96,6 +112,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if ne .Values.alkahestAddressBook.configMapName "" }}
+        - name: alkahest-address-book
+          configMap:
+            name: {{ .Values.alkahestAddressBook.configMapName | quote }}
+            items:
+              - key: {{ .Values.alkahestAddressBook.key | quote }}
+                path: {{ .Values.alkahestAddressBook.key | quote }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

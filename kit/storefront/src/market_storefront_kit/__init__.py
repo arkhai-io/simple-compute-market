@@ -22,7 +22,14 @@ from .lifecycle import (
     QUIESCENCE_TIMEOUT_SECONDS,
     StorefrontLoopController,
 )
+from .deal_control_routes import (
+    DealControlRouteError,
+    NegotiationControlRouteService,
+    StageEventRouteService,
+    opening_proposal,
+)
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
+from .trading_pause import TradingPause, TradingPauseRouteService
 from .negotiation_watchdog import (
     NegotiationRepository,
     NegotiationWatchdogPolicy,
@@ -33,6 +40,10 @@ from .negotiation_watchdog import (
 )
 
 __all__ = [
+    "DealControlRouteError",
+    "NegotiationControlRouteService",
+    "StageEventRouteService",
+    "opening_proposal",
     "AlkahestChain",
     "AlkahestClientPolicy",
     "HELD_POLL_SECONDS",
@@ -49,6 +60,8 @@ __all__ = [
     "StorefrontContainer",
     "StorefrontRouteHooks",
     "StorefrontServiceHooks",
+    "TradingPause",
+    "TradingPauseRouteService",
     "build_alkahest_clients",
     "build_composed_storefront_app",
     "build_storefront_lifespan",

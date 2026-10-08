@@ -93,7 +93,7 @@ from core_buyer.registry_config import RegistryAuthority
 from registry_client import RegistryClientError, SyncRegistryClient
 from market_site_client import SiteCapacityAdminClient
 from storefront_client import SyncStorefrontClient
-from vm_provisioning_operator import SyncProvisioningClient
+from compute_provisioning_client import SyncComputeProvisioningClient
 
 from market_identity import (
     Identity,
@@ -489,10 +489,11 @@ class TestStage00g_AliceStrategy:
 @pytest.fixture(scope="module")
 def alice_provisioning_client():
     config = settings.ALICE_PROVISIONING
-    with SyncProvisioningClient(
+    with SyncComputeProvisioningClient(
         _require_setting(config.API_URL, "ALICE_PROVISIONING.API_URL"),
         _signer(config.ADMIN_SCHEME, config.ADMIN_CREDENTIAL,
                 "ALICE_PROVISIONING.ADMIN_CREDENTIAL"),
+        "admin",
         _trust(config.AUTHORITY_IDENTIFIER, scheme=config.AUTHORITY_SCHEME),
     ) as client:
         yield client

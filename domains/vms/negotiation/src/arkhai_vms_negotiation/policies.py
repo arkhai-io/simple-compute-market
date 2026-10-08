@@ -5,14 +5,14 @@ shape guards, the per-kind dispatch) moved to
 ``market_policy.scalar_policies`` — it is escrow vocabulary, not VM
 vocabulary — and is re-exported here so existing import paths keep
 working. This module keeps the middlewares that interpret VM market
-content: the round-zero duration guard and the inventory guard.
+content, such as the round-zero duration guard. The inventory guard is
+domain-neutral and lives in ``market_policy.listing_source``.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -59,20 +59,6 @@ from market_policy.scalar_policies import (  # noqa: F401 — re-exports
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _coerce_resource_dict(value: Any) -> dict[str, Any]:
-    import json
-
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except (ValueError, TypeError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
 
 
 @register_negotiation_middleware("round_zero_opening_guard")
@@ -124,11 +110,14 @@ def round_zero_opening_guard(
     if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
             selection = proposal["settlement_selection"]
-            if not isinstance(selection, dict) or set(selection) != {
-                "mechanism",
-                "option_id",
-                "expiration_unix",
-            }:
+            # A selection names its option exactly; `params` carries the buyer's
+            # inputs to the mechanism (a payer account, say) and is optional.
+            if (
+                not isinstance(selection, dict)
+                or not {"mechanism", "option_id", "expiration_unix"} <= set(selection)
+                or not set(selection) <= {"mechanism", "option_id", "expiration_unix", "params"}
+                or not isinstance(selection.get("params") or {}, dict)
+            ):
                 raise ValueError("selection has invalid fields")
             mechanism = selection["mechanism"]
             option_id = selection["option_id"]
@@ -215,46 +204,6 @@ def round_zero_opening_guard(
     return None, context
 
 
-@register_negotiation_middleware("has_matching_inventory_guard")
-def has_matching_inventory_guard(
-    history: list[NegotiationRound],
-    context: NegotiationContext,
-) -> NegotiationStep:
-    """Veto a listing its own source no longer supports, or cannot supply.
-
-    Two checks, both about this listing's own site and pool or Physical
-    Resource, never capacity elsewhere:
-
-    - **Declared match**, for every listing: each published field sourced from
-      its declaration or pool still matches that source, and the published
-      quantity fits what it declares. A failure is ``no_matching_declaration``.
-    - **Availability**, for capacity-backed listings only: the published
-      quantity is currently free at the listing's own site. A failure is
-      ``no_matching_inventory``, which keeps meaning "nothing free".
-
-    The storefront computes both from the listing's durable binding and passes
-    the result as ``available_resources["source_check"]``; an unbacked listing
-    is never checked for availability and makes no site call. See
-    openspec/specs/storefront-publication/spec.md, "The seller's inventory guard
-    checks a listing against its own source".
-    """
-    listing_resource = _coerce_resource_dict(context.listing.get("listing_resource"))
-    if "gpu_model" not in listing_resource:
-        return None, context
-    check = (context.available_resources or {}).get("source_check") or {}
-    if check.get("declared_match") is not True:
-        return (
-            NegotiationDecision(action="reject", reason="no_matching_declaration"),
-            context,
-        )
-    if check.get("available") is False:
-        return (
-            NegotiationDecision(action="reject", reason="no_matching_inventory"),
-            context,
-        )
-    return None, context
-
-
 __all__ = [
     "_amount_from_proposal",
     "format_wire_amount",
@@ -265,7 +214,6 @@ __all__ = [
     "buyer_counter_guard",
     "buyer_escrow_shape_guard",
     "escrow_shape_guard",
-    "has_matching_inventory_guard",
     "make_escrow_kind_dispatch_middleware",
     "our_first_proposal",
     "our_previous_counters",

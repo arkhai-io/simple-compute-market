@@ -28,6 +28,8 @@ from apicredits_service.models.keys_model import (
     issuance_request_digest,
     legacy_issuance_request_digest,
 )
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
 
 KEY_NOT_FOUND = "key_not_found"
 KEY_NOT_OWNED = "key_not_owned"
@@ -129,7 +131,7 @@ class KeysService:
         if owner is None:
             raise ValueError("owner is required")
         key_target = KeyDisposition(mode=key_mode, key_id=key_id)
-        if mechanism not in {"alkahest.v1", "fiat.stripe.v1"}:
+        if mechanism not in {"alkahest.v1", "arkhai.payments.v1"}:
             raise ValueError(f"unsupported settlement mechanism {mechanism!r}")
         if fulfillment_id != derive_credit_fulfillment_id(obligation_ref):
             raise ValueError("fulfillment_id does not match obligation_ref")

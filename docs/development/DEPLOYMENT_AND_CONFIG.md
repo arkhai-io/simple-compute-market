@@ -154,7 +154,7 @@ is stale). That definition refuses, in any spelling, every field a model marks
 secret or not applicable to the seller role, every field a typed section's
 model does not have, and every key in `Identity` other than its public
 principal, administrators, and service peers. So a wallet private key, a
-registry write token, private identity material, and hosted payer data are
+registry write token, private identity material, and payer data are
 refused before anything renders; they belong in the Secret overlay, or for the
 signer credential in `identity.credentialSecret`. Untyped sections such as
 `provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
@@ -250,8 +250,7 @@ separate provisioning authorities. Each authority has its own service signer,
 storefront trust pin, callback destination, database, and process-local job
 queue. Both storefronts use the local site alias `default`, resolved against
 their respective authorities. The local identity overlay supplies deterministic
-development credentials, while the VM fiat overlay selects Alice and her
-authority together.
+development credentials.
 
 The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
 to merge role bindings with the domain topology, and declares the named volumes
@@ -266,7 +265,7 @@ and bare-metal SQLite/queue/registry stores occupy separate named volumes.
 
 Stack files carry public URLs, canonical principals, explicit Resource Pool
 offering modes, and exact selected-site bindings. Signer, API-admin,
-provisioning SSH, hosted-authority, and buyer credentials are independent
+provisioning SSH, payment account, and buyer credentials are independent
 role-scoped file references with no committed fallback. Missing identity,
 inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
@@ -307,7 +306,7 @@ Helm the list is each agent's `config.storefront_domains`, passed through as
 written (see "Storefront agents: pass-through configuration").
 
 `storefront_domains` is public routing metadata only. Signing credentials,
-provider settings, SSH material, tenant credentials, hosted provider objects,
+provider settings, SSH material, tenant credentials, payment-provider objects,
 and private domain results remain in role-owned Secret channels and never enter
 ConfigMaps, command arguments, images, listing bindings, or migration reports.
 Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
@@ -538,8 +537,7 @@ drift, and old signature versions fail closed. Versioned buyer run logs have
 their own explicit migration before recovery.
 
 For an identity-contract cutover, authenticated mutations remain quiesced
-until every participating registry, storefront, service peer, hosted
-authority, and exact client reports the pinned version and capabilities.
+until every participating registry, storefront, service peer, and exact client reports the pinned version and capabilities.
 Rollback is limited to the boundary before the identity schema cutover and
 before provider or settlement mutations resume. After version 2 effects run
 against migrated state, operators recover by rolling forward from current
@@ -640,59 +638,36 @@ and `ARKHAI_IDENTITY_CREDENTIAL`, so that identity must be listed in
 
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
-`[Settlement.stripe]` and `[Settlement.alkahest]` tables contain only
-mechanism-owned consumer settings. Buyer marketplace identity comes only from
+`[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
+mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee/dispute policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input (`[vms].payer_account` or `[apicredits].payer_account`), carried in selection params and the accepted Agreement, not inferred from marketplace identity. API-credit sellers supply `payee_account` and `asset` in each payment publication clause; the accepted option determines the seller client's owner. Local development uses `development_auth = true` with a loopback service origin instead of `api_key_env`; the two modes are mutually exclusive. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
 service-role principals retain their role-owned public identity configuration.
-EVM credentials and networks remain in `[Wallet]` and `[Chains]`. A hosted-only
-buyer therefore needs no wallet, chain, RPC, balance, or gas configuration.
+EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
-Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
+Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
+attaches the exact Agreement when it approves a payment; setting it in a seller
+configuration is a publication blocker. A seller that wants the Agreement on file sets
+`deposit_agreement` on its payment option, and attaches the Agreement itself after
+verifying the receipt and before delivering, whenever the buyer did not. The Agreement
+discloses both principals, the listing, amount, timing, and provision terms, so enable
+either only where that disclosure to the payments service is intended.
+
+Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
 
-Expanded hosted configuration uses exact funding-profile clauses rather than `payment_method_types` or provider method strings. One seller clause names one of `card.v1`, `us_bank_transfer.v1`, or `us_ach_debit.v1`, its lowercase currency, positive rate, interaction capability, and typed condition input. Config may declare all three; preflight reports readiness per profile and suppresses only the clauses whose profile/currency/country/authority contract is unavailable. Buyer config carries the same exact client/API `0.2.0`/schema `5`/capability pins and references the owner-restricted local buyer profile store. The opaque authority/environment payer binding is stored only in that profile; saved instrument refs remain authority-side or transient.
-
-The expanded cutover coordinates buyer and storefront config, the exact hosted client wheel, signed manifest and service-image coordinate, generated templates, Compose/Helm values, and role-scoped marketplace signer Secrets. A legacy unambiguous card publication clause migrates to `card.v1`; accepted historical card obligations are not rewritten. Before the first new publication or purchase authorization, rollback restores the matching prior artifacts and config together. After an effect begins, recovery rolls forward under the accepted funding profile, authorization, and marketplace operation identities.
-
-Marketplace schemas reject provider credentials and IDs, Customer/PaymentMethod/mandate/bank/card data, stable instruments in storefront state, action URLs, webhooks, hosted databases/migrations, provider reconciliation, and recovery controls. The hosted authority remains the only process that receives those inputs.
-
-For an API-credit hosted-only role, set settlement priority to
-`fiat.stripe.v1`, provide an Ed25519 marketplace identity through the normal
-role credential Secret, and leave wallet/chains absent. The storefront requires
-the public hosted authority/release pins, seller account, exact funding-profile
-clauses, credits-service URL plus admin-key file, and portable issuance-evidence
-resolver trust. The buyer requires its selected durable profile and matching
-opaque authority binding. API bearer secrets are returned only through the
-authenticated buyer result route; they do not belong in TOML, environment
-variables, listings, settlement evidence, logs, images, or ConfigMaps.
-
-The API-credit storefront distribution and image install
-`arkhai-kit-hosted-settlement` from the staged wheelhouse and the released hosted
-client from the public package index.
-
-The hosted settlement client is produced outside this repository and is obtained
-the way any other third-party dependency is: each consuming project pins an exact
-version and resolves it from the public package index, recording the wheel URL and
-hash in its lockfile. Nothing stages it into `.dist`, which holds only what this
-repository builds, and no build or test target verifies a signed release in order
-to obtain it. Attestation remains available and remains separate: the wheel the
-index serves is byte-identical to the one the signed manifest binds, so a consumer
-that wants provenance takes it from the manifest, which is the only artifact that
-carries it. The storefront owns the settlement operation journal, private
-buyer-result table, and signed issuance-evidence table; the credits service
-independently owns keys, request-digested grants, balances, quota, credentials,
-and its migration history. Restart either authority against its own volume.
-Never source-share a sibling package or mount one service's database into the
-other.
+The API-credit storefront and the credits service each own their own state: the
+credits service owns keys, request-digested grants, balances, quota, credentials,
+and its migration history. Restart either against its own volume. Never
+source-share a sibling package or mount one service's database into the other.
 
 For each buyer and storefront configuration overlay, use this production
 sequence:
 
-1. Stage the release containing the migration commands and the exact signed
-   hosted client and manifest artifacts, without activating the new workload.
+1. Stage the release containing the migration commands without activating the
+   new workload.
 2. Preview every mounted or generated file. Select a storefront file with the
    root `--config` option; select a buyer overlay through its normal
    `XDG_CONFIG_HOME` mount.
@@ -729,7 +704,7 @@ sequence:
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
-   schema check, or hosted manifest check fails. Helm values are not a file
+   schema check or image/config schema check fails.
    `config migrate` reads: rendering applies the values schema, and at startup
    the storefront applies its typed validation — refusing, for example, a
    settlement schema version other than its own. Untyped settings are not
@@ -749,13 +724,6 @@ sequence:
    artifacts together. After effects resume, recover forward from accepted
    settlement plans and operation identities; never change mechanism priority
    to redirect an accepted deal.
-
-The marketplace Helm chart renders only consumer settings. It does not deploy
-the hosted API, worker, hosted migrations, database, ingress, EAS signer,
-Stripe credentials, or provider state. Those belong to the hosted service's
-independent release and chart. Marketplace packages consume the exact hosted
-client wheel and identity interface bound by that signed release manifest;
-editable sibling sources and compatible-major substitution are rejected.
 
 ### Contact-exchange contacts
 
@@ -858,106 +826,15 @@ window, including those revealed under the longer one. The window is published t
 buyers; deletion and disclosure behaviour are specified in
 [contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md).
 
-### Bare-metal hosted role configuration
+### Bare-metal role configuration
 
-`arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.
+`arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains registry URLs, authority trust pins, and bounded public defaults; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared storefront transport.
 
-The bare-metal storefront accepts one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT`. Hosted-only configuration leaves `BARE_METAL_STOREFRONT_EVM_ADDRESS` empty and constructs no Alkahest wallet, chain, or RPC client. Publication additionally requires authenticated registry trust, exact typed clauses, per-profile funding deadlines, offer/fulfillment bounds, fresh signed selected-site projections, and a maximum lease duration. The Compose wrapper exposes those as public/config inputs; the Helm chart mounts the settlement JSON from an existing Secret. Neither deployment surface carries Stripe credentials or hosted provider state.
+The bare-metal storefront requires one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT` and refuses to start without it. A configured Alkahest section, enabled or disabled, requires the seller's public address (`BARE_METAL_STOREFRONT_EVM_ADDRESS`), at least one chain (`BARE_METAL_STOREFRONT_CHAINS`, a JSON object mapping each chain name to its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY`). Disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. Publication additionally requires authenticated registry trust, exact typed clauses, fresh selected-site projections, and a maximum lease duration.
 
-The hosted authority remains a separately verified deployment. The storefront needs its public URL, authority/environment trust, seller account reference, contract fingerprint, supported profile/currency/country policy, and exact manifest/client/API capability pins through the shared settlement config. The selected-site authority keeps inventory, executor routing, provisioning SSH credentials, and teardown ownership. The buyer, storefront, site authority, and hosted authority each retain independent signer credentials and databases.
+The Compose wrapper forwards `BARE_METAL_STOREFRONT_CHAINS_JSON` as the chains and reads the wallet key from an optional `BARE_METAL_STOREFRONT_WALLET_ENV_FILE`, separate from the identity credential file (Compose 2.24 or later supports the optional file). The Helm chart mounts the settlement JSON from an existing Secret. Its `sellerEvmAddress`, `chains`, and `walletKeySecret` are set together or left empty together; rendering fails otherwise. `walletKeySecret` references an existing Secret rather than rendering key material, and `alkahestAddressBook` mounts an existing ConfigMap read-only.
 
-
-Local cross-repository Compose uses the same verified supply-chain path.
-`make prepare-hosted-compose` verifies the configured trust policy, signed
-manifest, manifest-bound artifacts, and exact client wheel, then atomically
-generates `.dist/hosted-settlement-compose.env` with an immutable
-`HOSTED_SETTLEMENT_VERIFIED_IMAGE=<repository>@sha256:<digest>`.
-`make hosted-compose-up` passes that file to `compose.vms-fiat.yml`. The stack
-runs the hosted service-owned migration, API, and single reconciliation worker
-against one shared volume; it never builds or imports sibling service source.
-
-### Protected hosted Stripe test execution
-
-Hosted financial system E2E has one operator lane:
-
-```console
-make hosted-stripe-test \
-  HOSTED_RELEASE_TRUST=/path/to/release-trust \
-  HOSTED_RELEASE_MANIFEST=/path/to/production-release/release-manifest.json \
-  HOSTED_CLIENT_WHEEL=/path/to/production-release/client.whl \
-  HOSTED_COMPOSE_ENV=.dist/hosted-settlement-compose.env \
-  HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
-  HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
-  HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:<digest> \
-  HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
-  HOSTED_PRODUCTION_WORKFLOW_REF=<signed-producer-workflow-ref> \
-  HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
-  HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
-  HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
-  HOSTED_STRIPE_TEST_SCENARIO=<scenario> \
-  HOSTED_STRIPE_TEST_ACCOUNT_REF=<allowlisted-account-reference> \
-  HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT=<environment-name> \
-  HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE=/path/to/protected-authority.env
-```
-
-Supply `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID` only through the
-approved protected Secret/environment boundary, not as command-line literals.
-`HOSTED_STRIPE_TEST_EVIDENCE` may select the sanitized report destination.
-
-The target uses `hosted-preflight` to verify the signed production manifest,
-trust policy, exact client wheel, service image digest, migration schema,
-OpenAPI/conformance artifacts, provenance, signed repository and workflow
-reference, and hosted source commit. Preflight emits only the allowlisted
-non-secret coordinates `HOSTED_SETTLEMENT_VERIFIED_IMAGE`,
-`HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256`,
-`HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST`,
-`HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256`,
-`HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR`,
-`HOSTED_SETTLEMENT_VERIFIED_REPOSITORY`,
-`HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF`, and
-`HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT`. The protected gate compares the
-independently trusted signed-release `HOSTED_PRODUCTION_*` assertions to those
-values. `HOSTED_PRODUCTION_WORKFLOW_RUN_ID` remains separate orchestration
-evidence; it is not promoted to a signed-manifest field. No service starts
-until the complete identity agrees. The stack then runs the ordinary hosted
-migration, API, and one reconciliation worker against
-one authority volume; it never builds, mounts, imports, or installs sibling
-hosted source and has no alternate provider, clock, event-control, or test
-service artifact.
-
-Protected activation additionally requires a test-mode secret (`sk_test` or
-least-privilege `rk_test`), Stripe connectivity and non-live returned objects,
-the expected allowlisted connected account with required
-ownership/capabilities/readiness, the Stripe CLI forwarding to
-`http://127.0.0.1:18080/webhooks/stripe`, and Chromium. Failure stops before
-the relevant publication or financial mutation. The target derives an
-ephemeral storefront configuration only from the verified release
-authority/manifest coordinates, mounts it for the run, and removes it on every
-outcome. The authority API/worker receive only their provider, account, and
-protected authority-environment inputs; the webhook process receives only the
-ephemeral signing secret, Stripe CLI receives only its provider credential,
-and marketplace storefront/buyer profiles receive only release-pinned public
-consumer coordinates and their own signer credentials.
-
-Selected restart scenarios retain the authority volume and original operation
-identities while restarting only ordinary API/worker roles or webhook
-forwarding. `make hosted-stripe-test-stop` stops the protected stack while
-preserving that volume for maintained connected-account binding and authorized
-recovery. Clean execution and every workflow outcome remove transient
-configuration, processes, webhook material, and browser state. Accepted
-external financial objects are recovered, transferred, or refunded through
-their original durable identities rather than being deleted or recreated.
-
-The protected matrix runs and attributes `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` separately. Each selected rail must have its exact signed-release, account, currency/country, instrument or funding path, mandate where applicable, transient browser/action, and supported Stripe test-mode prerequisite. A missing prerequisite makes only that assertion unavailable and cannot be replaced by another profile, a provider-port script, or a credential-free marketplace result.
-
-The sanitized report keeps the marketplace repository/commit independent from hosted manifest/client/image/API/schema/migrations/provenance/repository/workflow/source identities and the protected workflow run. It contains only selected profile/currency, public lifecycle stages, normalized outcomes, attempts/timestamps, failure class, and bounded hashed opaque correlations. Recursive canary validation rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, provider payloads/events/requests, source-bearing local paths, and marketplace configuration secrets before evidence is signed.
-
-Default and fork workflows do not receive protected release access, Stripe
-credentials, connected-account identifiers, webhook secrets, or browser
-payment inputs and do not probe this lane. Alkahest E2E is invoked
-independently as documented in `TESTING.md`. Local EAS/allowlisted-arbiter
-checks are condition-boundary work only; there is currently no standalone
-hosted local-EAS operator target.
+The selected-site authority owns inventory, executor routing, provisioning credentials, and teardown. The payments authority owns financial state. Buyer, storefront, site, and payment credentials retain their separate authority boundaries.
 
 ## Current limits
 

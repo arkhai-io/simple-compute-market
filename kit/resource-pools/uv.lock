@@ -32,11 +32,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
@@ -49,8 +49,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
@@ -58,6 +58,19 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
+
+[[package]]
+name = "arkhai-kit-resource-pools-contracts"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-admissibility" },
+    { name = "arkhai-kit-capability-shape" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_resource_pools_contracts-0.1.0-py3-none-any.whl" },
+]
 
 [[package]]
 name = "colorama"

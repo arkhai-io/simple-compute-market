@@ -3,14 +3,15 @@
 ``POST /api/v1/hosts/import`` applies INI hosts and derives declarations for
 their legacy capacity in the same transaction. ``POST /api/v1/hosts`` is
 administration of connection identity and derives nothing. Every call goes
-through ``ProvisioningClient``, and every read of capacity through
+through ``AnsibleHostImportClient`` and ``ComputeProvisioningClient``, and every read of capacity through
 ``SiteCapacityAdminClient``.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import pytest
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 from compute_provisioning_service import container as _container_module
 
@@ -34,7 +35,7 @@ async def test_an_ini_import_declares_capacity_for_hosts_with_gpus(
 ):
     client, _ = client_and_queue
 
-    await client.import_hosts_from_text(_INI, ssh_key_type="path")
+    await client.host_import.import_hosts_from_text(_INI, ssh_key_type="path")
 
     resources = await _resources(capacity)
     assert set(resources) == {"kvm1"}
@@ -48,9 +49,9 @@ async def test_a_reimport_with_changed_gpus_leaves_the_declaration(
 ):
     """Once a declaration names the host, INI values stop affecting capacity."""
     client, _ = client_and_queue
-    await client.import_hosts_from_text(_INI, ssh_key_type="path")
+    await client.host_import.import_hosts_from_text(_INI, ssh_key_type="path")
 
-    await client.import_hosts_from_text(
+    await client.host_import.import_hosts_from_text(
         _INI.replace("gpus=4", "gpus=8"), ssh_key_type="path"
     )
 
@@ -62,9 +63,8 @@ async def test_registering_a_host_through_the_api_derives_nothing(
 ):
     client, _ = client_and_queue
 
-    await client.register_host(HostCreate(
-        host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
-        ssh_key_value="/keys/id", gpu_count=4,
+    await client.family.register_host(HostCreate(
+        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=4,
     ))
 
     assert await _resources(capacity) == {}
@@ -75,7 +75,7 @@ async def test_a_failure_before_the_derivation_commits_leaves_neither(
 ):
     """The upsert and the derivation are one transaction."""
     client, _ = client_and_queue
-    derivation = _container_module.resolved_host_service._capacity_derivation
+    derivation = _container_module.resolved_host_authority._capacity_derivation
     derive = derivation.derive_in_session
 
     def derive_then_fail(db, host_ids=None):
@@ -87,7 +87,7 @@ async def test_a_failure_before_the_derivation_commits_leaves_neither(
     # The in-process transport re-raises the server's exception rather than
     # answering 500; what matters is the state it leaves.
     with pytest.raises(RuntimeError, match="injected"):
-        await client.import_hosts_from_text(_INI, ssh_key_type="path")
+        await client.host_import.import_hosts_from_text(_INI, ssh_key_type="path")
 
-    assert (await client.list_hosts(include_disabled=True)).hosts == []
+    assert (await client.family.list_hosts(include_disabled=True)).hosts == []
     assert await _resources(capacity) == {}

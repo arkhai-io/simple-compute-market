@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from storefront_client import StorefrontClient, StorefrontClientError
 from storefront_client.models import SettleResponse, SettleStatusResponse
 from market_core.schemas import SettlementPlan
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     EMPTY_BODY,
@@ -31,10 +31,13 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
+from seeded_threads import seed_thread
+from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -51,9 +54,11 @@ BUYER_SIGNER = Eip191Signer(PRIVATE_KEY)
 BUYER = BUYER_SIGNER.identity.identifier
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
 ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
+SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 ESCROW_ADDRESS = "0x1111111111111111111111111111111111111111"
 ESCROW_UID = "0x" + "ab" * 32
 OTHER_ESCROW_UID = "0x" + "cd" * 32
+TOKEN = "0x2222222222222222222222222222222222222222"
 
 
 def _buyer(app) -> StorefrontClient:
@@ -165,8 +170,18 @@ def _plan(**kwargs):
     }
 
 
+def _alkahest(escrow: EscrowOnChain | None = None):
+    """The production Alkahest composition over the chain boundary's doubles."""
+    return alkahest_composition(
+        SELLER_SIGNER,
+        wallet="0x3333333333333333333333333333333333333333",
+        chain_clients={"anvil": ChainClient()},
+        escrow=escrow or EscrowOnChain(),
+    )
+
+
 async def _accepted_runtime(
-    path: str, verifier
+    path: str, verifier, *, commit_plan: bool = True
 ) -> tuple[BareMetalStorefrontRuntime, str]:
     domain = get_market_domain_contract()
     db = SQLiteClient(path, domain=domain)
@@ -181,7 +196,7 @@ async def _accepted_runtime(
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=_plan,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -206,27 +221,24 @@ async def _accepted_runtime(
         accepted_escrows=[],
     )
     negotiation_id = "neg-accepted"
-    await db.persist_bare_metal_opening(
+    proposal = {
+        "chain_name": "anvil",
+        "escrow_address": ESCROW_ADDRESS,
+        "fields": {"amount": "100"},
+        "expiration_unix": int(time.time()) + 3600,
+    }
+    await seed_thread(
+        db,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
-        seller_principal=runtime.seller_principal,
-        buyer_agent_id="https://buyer.example",
         buyer_principal=BUYER_SIGNER.identity,
-        seller_reference_amount=100,
-        strategy="listed",
+        seller_principal=runtime.seller_principal,
         message=BareMetalMessage(
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 persisted-key",
         ),
-        proposal={
-            "chain_name": "anvil",
-            "escrow_address": ESCROW_ADDRESS,
-            "fields": {"amount": "100"},
-            "expiration_unix": int(time.time()) + 3600,
-        },
-        buyer_amount=100,
-        seller_action="accept",
-        seller_amount=100,
+        proposal=proposal,
+        amount=100,
         terms=BareMetalTerms(
             host_id="machine-1",
             physical_host_id="host-1",
@@ -234,7 +246,15 @@ async def _accepted_runtime(
             ssh_public_key="ssh-ed25519 persisted-key",
             listing_ref="listing-1",
         ),
-        agreed_amount=100,
+        settlement_plan=(
+            _plan(
+                proposal=proposal,
+                buyer_principal=BUYER_SIGNER.identity,
+                seller_principal=SELLER_SIGNER.identity,
+            )["settlement_plan"]
+            if commit_plan
+            else None
+        ),
     )
     return runtime, negotiation_id
 
@@ -255,14 +275,14 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
 
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
-            first = await buyer.settle(
+            first = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
-            retry = await buyer.settle(
+            retry = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
             with pytest.raises(StorefrontClientError) as conflict:
-                await buyer.settle(
+                await buyer.settle_evm(
                     OTHER_ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -276,14 +296,14 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         marketplace_signer=runtime.marketplace_signer,
         seller_evm_address=runtime.seller_evm_address,
         plan_builder=_plan,
-        chain_clients={},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
     restarted_app = _app(restarted)
     async with restarted_app.router.lifespan_context(restarted_app):
         async with _buyer(restarted_app) as buyer:
-            restart_retry = await buyer.settle(
+            restart_retry = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
             status = await buyer.get_settle_status(ESCROW_UID)
@@ -311,7 +331,9 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert (first.provisioning_job_id, first.fulfillment_id) == (None, None)
     assert not ({"tenant_credentials", "receipt", "result"} & first.extra.keys())
     assert _settled(restart_retry) == expected
-    assert restarted.settlement_runtime._clients == {}
+    # The restarted process services the obligation through the same
+    # composition the first one verified it with.
+    assert set(restarted.settlement_runtime._clients) == {"alkahest.v1"}
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
     obligations = SettlementPlan.model_validate(
@@ -334,7 +356,9 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert verified.materialization_state == "materialized"
     assert verified.mechanism_status == "ready"
     assert verified.mechanism_state == {}
-    assert verified.condition_anchor is None
+    # The worker's status step, run once by verification, anchors the
+    # condition on the escrow; with no site configured here nothing is delivered.
+    assert verified.condition_anchor == ESCROW_UID
     assert verified.fulfillment_ref is None
     assert verified.condition_state == "pending"
     assert verified.collection_state == "pending"
@@ -357,7 +381,10 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         )
     finally:
         conn.close()
-    assert operations == [("materialize", "succeeded")]
+    # Verification adopted the escrow and stepped the worker once; no
+    # collection or reclaim was attempted.
+    assert ("materialize", "succeeded") in operations
+    assert not {operation for operation, _state in operations} & {"collect", "reclaim"}
     assert legacy_claims == 0
 
 
@@ -388,7 +415,7 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
             with pytest.raises(StorefrontClientError) as failed:
-                await buyer.settle(
+                await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -411,7 +438,7 @@ async def test_settlement_rejects_unmatched_obligation_without_registering_claim
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
             with pytest.raises(StorefrontClientError) as refused:
-                await buyer.settle(
+                await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -428,9 +455,11 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     async def verifier(**_kwargs):
         raise AssertionError("status must not call a settlement provider")
 
+    # No committed plan, so nothing at startup can adopt the recorded escrow.
     runtime, negotiation_id = await _accepted_runtime(
         str(tmp_path / "storefront.db"),
         verifier,
+        commit_plan=False,
     )
     inserted = await runtime.db.insert_escrow(
         escrow_uid=ESCROW_UID,
@@ -469,6 +498,8 @@ class _CapacityClient:
         self.site_client = _FulfillmentSite()
         self.reservation_sites = {}
         self.reserve_calls = []
+        self.commit_calls = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -482,11 +513,26 @@ class _CapacityClient:
             "site": request["site"],
         }
 
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commit_calls.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
+        }
+
 
 class _ProvisioningClient:
     def __init__(self, *, torn_down: bool = False) -> None:
         self.begin_calls = []
         self.teardown_calls = []
+        self.terminations = []
         self.torn_down = torn_down
 
     async def schedule_resource(self, request):
@@ -530,22 +576,29 @@ class _ProvisioningClient:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "host_id": "machine-1",
-                        "physical_host_id": "host-1",
-                        "ssh_user": "tenant-a",
-                        "host": "203.0.113.25",
-                        "port": 2222,
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.25",
+                                "port": 2222,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
         )
+
+    async def terminate_lease(self, capacity_reservation_id, *, reason=None):
+        """The site ends the lease, then converges teardown through its fulfillment."""
+        self.terminations.append((capacity_reservation_id, reason))
+        self.torn_down = True
+        return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
 
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
         self.teardown_calls.append((fulfillment_id, request))
@@ -591,11 +644,11 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
             caller_role="buyer",
             expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
         ) as storefront:
-            settled = await storefront.settle(
+            settled = await storefront.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
         buyer = _fulfillment_client(base_url)
-        begun = buyer.begin(negotiation_id, escrow_uid=ESCROW_UID)
+        # Settlement started fulfillment; the buyer only observes it.
         ready = buyer.status(negotiation_id)
         result = buyer.result(negotiation_id)
         access = buyer.access(negotiation_id)
@@ -607,16 +660,33 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         db=SQLiteClient(path, domain=runtime.domain),
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                authority_url="http://site-a",
+                authority_principal=SITE_SIGNER.identity,
+            ),
+        ),
     )
     with serving(_app(restarted)) as base_url:
         buyer = _fulfillment_client(base_url)
+        torn_down = buyer.status(negotiation_id)
+        # The site releases the capacity after the teardown and says so.
+        async with StorefrontClient(
+            base_url,
+            signer=SITE_SIGNER,
+            caller_role="service",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        ) as site:
+            recorded = await site.notify_capacity_released("reservation-a", site_id="site-a")
         released = buyer.status(negotiation_id)
         repeated = buyer.status(negotiation_id)
 
     assert settled.status == "settlement_verified"
-    assert begun["negotiation_id"] == negotiation_id
     assert ready["state"] == "active"
-    assert tearing_down["state"] == "teardown_dispatch_pending"
+    assert tearing_down["state"] == "terminating"
+    assert torn_down["state"] == "torn_down"
+    assert recorded == {"capacity_reservation_id": "reservation-a", "state": "released"}
     assert released["state"] == "released"
     assert repeated == released
     assert capacity.reserve_calls[0]["site"] == "site-a"
@@ -625,20 +695,25 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
     assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
-    assert len(provisioning.teardown_calls) == 1
-    assert len(restarted_capacity.site_client.releases) == 1
+    assert provisioning.terminations == [("reservation-a", "buyer_teardown")]
+    assert provisioning.teardown_calls == []
+    # The storefront never releases capacity itself.
+    assert restarted_capacity.site_client.releases == []
     public_result = result
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
-    assert public_result["result"]["host"] is None
-    assert public_result["result"]["port"] is None
+    # Where to connect is served live by the access route, never stored.
+    assert "host" not in public_result["result"]
+    assert "port" not in public_result["result"]
+    lease_end = public_result["receipt"]["lease_end_utc"]
+    assert public_result["result"]["lease_end_utc"] == lease_end
     assert access == {
         "negotiation_id": negotiation_id,
         "method": "ssh",
         "host": "203.0.113.25",
         "port": 2222,
         "username": "tenant-a",
-        "expires_at": None,
+        "expires_at": lease_end,
     }
     serialized_result = json.dumps(public_result, sort_keys=True)
     for forbidden in (
@@ -649,3 +724,136 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         "provider_metadata",
     ):
         assert forbidden not in serialized_result
+
+
+async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
+    """Settlement verification registers the plan committed at acceptance.
+
+    The buyer funds from the plan in the negotiation response, the one committed
+    at acceptance; verification builds nothing and registers that plan's
+    obligations exactly. Built here with the real builder against the development
+    chain's addresses, every build recorded.
+    """
+    from market_alkahest.dev_chain import anvil_address_book_path
+    from source_sites import SourceSites
+
+    from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
+
+    builds: list[dict] = []
+
+    def recording_builder(**kwargs):
+        artifacts = build_bare_metal_settlement_plan(**kwargs)
+        builds.append(artifacts["settlement_plan"])
+        return artifacts
+
+    async def verifier(**_kwargs):
+        # The escrow matches the plan's only obligation.
+        return 0
+
+    domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
+    runtime = BareMetalStorefrontRuntime(
+        db=db,
+        domain=domain,
+        seller_principal=SELLER_SIGNER.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        marketplace_signer=SELLER_SIGNER,
+        seller_evm_address="0x3333333333333333333333333333333333333333",
+        plan_builder=recording_builder,
+        settlement_composition=_alkahest(),
+        chain_config_paths={"anvil": str(anvil_address_book_path())},
+        escrow_verifier=verifier,
+        capacity_client=SourceSites(),
+    )
+    await db.upsert_bare_metal_listing(
+        listing_id="listing-1",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
+            "physical_host_id": "physical-host-1",
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": ESCROW_ADDRESS,
+                "literal_fields": {"token": TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }
+        ],
+    )
+    opened = await runtime.negotiation_runtime.start(
+        repository=db,
+        listing_id="listing-1",
+        buyer_principal=BUYER_SIGNER.identity,
+        seller_principal=runtime.seller_principal,
+        actor_principal=BUYER_SIGNER.identity,
+        proposal={
+            "chain_name": "anvil",
+            "escrow_address": ESCROW_ADDRESS,
+            "fields": {"amount": "100", "token": TOKEN},
+            "literal_fields": {"token": TOKEN},
+            "expiration_unix": int(time.time()) + 3600,
+        },
+        terms={
+            "kind": "bare_metal.v2",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 3600,
+                "access_method": "ssh",
+                "ssh_public_key": "ssh-ed25519 persisted-key",
+            },
+        },
+        seller_agent_url=runtime.storefront_url,
+        buyer_agent_url="https://buyer.example",
+    )
+    assert opened["action"] == "accept"
+    negotiation_id = opened["negotiation_id"]
+
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+
+    thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    committed = thread["settlement_plan"]
+    committed = json.loads(committed) if isinstance(committed, str) else committed
+    assert len(builds) == 1, "only the opening builds a plan"
+    assert opened["settlement_plan"] == committed == builds[0]
+    registered = await runtime.settlement_runtime.get_status(negotiation_id)
+    assert [record.obligation for record in registered.obligations] == (
+        SettlementPlan.model_validate(committed).model_dump(mode="json")["obligations"]
+    )
+
+
+async def test_verify_refuses_a_thread_with_no_committed_plan(tmp_path) -> None:
+    async def verifier(**_kwargs):
+        raise AssertionError("verification must not reach the escrow")
+
+    runtime, negotiation_id = await _accepted_runtime(
+        str(tmp_path / "storefront.db"), verifier, commit_plan=False
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.settle_evm(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
+
+    assert refused.value.status_code == 409
+    assert "no committed settlement plan" in str(refused.value)
+    assert (await runtime.settlement_runtime.get_status(negotiation_id)).obligations == []

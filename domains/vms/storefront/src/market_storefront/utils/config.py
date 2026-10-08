@@ -7,9 +7,8 @@ both. Marketplace signing material is never loaded into Dynaconf:
 ``ARKHAI_IDENTITY_CREDENTIAL`` is resolved at the composition root and passed
 directly to the identity signer factory.
 
-Wallet and chain tables are optional EVM-mechanism configuration. Hosted-only
-storefronts leave them absent; Alkahest call sites read them through the
-explicit ``get_evm_wallet_*`` helpers only after that mechanism is selected.
+Wallet and chain tables are EVM-mechanism configuration. Alkahest call sites
+read them through the explicit ``get_evm_wallet_*`` helpers only after that mechanism is selected.
 """
 
 from __future__ import annotations

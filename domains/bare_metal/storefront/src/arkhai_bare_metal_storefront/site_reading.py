@@ -25,7 +25,7 @@ from market_resource_pools import (
     read_site_declarations,
     resolve_asking_rates,
 )
-from market_resource_pools.hints import raw_listing_shapes, raw_region
+from market_resource_pools_contracts.hints import raw_listing_shapes, raw_region
 
 
 def _policy_tags(pool: Mapping[str, Any]) -> Mapping[str, Any]:

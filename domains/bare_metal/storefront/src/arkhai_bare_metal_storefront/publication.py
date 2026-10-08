@@ -181,13 +181,23 @@ class BareMetalPublicationCycle:
         self._candidates: list[dict[str, Any]] = []
         self._pending: dict[int, dict[str, Any]] = {}
         self._overrides: dict[tuple[str, str], BareMetalPoolOverride] = {}
+        self._dry_run = False
 
     def _await(self, awaitable: Awaitable[T]) -> T:
         return self._driver.call(awaitable)
 
     # -- run -------------------------------------------------------------
 
-    async def run(self) -> dict[str, Any]:
+    async def run(self, *, dry_run: bool = False) -> dict[str, Any]:
+        """Run one pass; with ``dry_run``, report what it would do and do none of it.
+
+        A dry run reads the sites, the stored listings, and the registries as a
+        pass would, and writes nothing: no accepted generation, listing,
+        binding, close, publication, or registry repair. Its report names each
+        open, close, refresh, reopen, and hold the pass would make.
+        """
+        self._dry_run = dry_run
+        self.report.dry_run = dry_run
         # Read once, before any site, so every site in a run sees one view.
         self._overrides = await asyncio.to_thread(
             read_bare_metal_pool_overrides,
@@ -245,14 +255,17 @@ class BareMetalPublicationCycle:
             )
             return
         pools = response["resource_pools"]
-        await asyncio.to_thread(
-            record_accepted_generation,
-            self._db.db_path,
-            site_id=site_id,
-            revision=generation.revision,
-            digest=generation.digest,
-            pool_ids=[str(pool.get("pool_id")) for pool in pools if pool.get("pool_id")],
-        )
+        if not self._dry_run:
+            await asyncio.to_thread(
+                record_accepted_generation,
+                self._db.db_path,
+                site_id=site_id,
+                revision=generation.revision,
+                digest=generation.digest,
+                pool_ids=[
+                    str(pool.get("pool_id")) for pool in pools if pool.get("pool_id")
+                ],
+            )
         site_overrides = {
             pool_id: override
             for (override_site, pool_id), override in self._overrides.items()
@@ -483,6 +496,10 @@ class BareMetalPublicationCycle:
             reasons[binding.listing_id] = reason
         if not plan:
             return []
+        if self._dry_run:
+            for listing_id in plan:
+                self.report.record("close", listing_id=listing_id, reason=reasons[listing_id])
+            return plan
         result = self._await(self._reconciliation_close(plan))
         for listing_id in result["closed"]:
             self.report.record("close", listing_id=listing_id, reason=reasons[listing_id])
@@ -568,6 +585,9 @@ class BareMetalPublicationCycle:
         demands: list[dict[str, Any]],
         max_duration_seconds: int | None,
     ) -> dict[str, Any]:
+        if self._dry_run:
+            # Nothing is recorded or published, so the listing has no identity.
+            return {"listing_id": None, "status": "dry_run"}
         listing_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
         # Recorded locally, with its binding, before any registry is told: a
@@ -672,7 +692,14 @@ class BareMetalPublicationCycle:
                 list(comparison.differing_fields),
                 "closing it" if is_open else "not reopening it",
             )
-            if is_open:
+            if is_open and self._dry_run:
+                self.report.record(
+                    "close",
+                    listing_id=listing_id,
+                    reason=IDENTITY_CHANGED,
+                    fields=list(comparison.differing_fields),
+                )
+            elif is_open:
                 result = await self._reconciliation_close([listing_id])
                 if listing_id in result["closed"]:
                     self.report.record(
@@ -695,6 +722,14 @@ class BareMetalPublicationCycle:
             return {"status": REOPEN_UNCHANGED}
         if is_open and comparison.outcome == UNCHANGED:
             return {"status": REOPEN_UNCHANGED}
+        if self._dry_run:
+            self.report.record(
+                "refresh" if is_open else "reopen",
+                listing_id=listing_id,
+                fields=list(comparison.differing_fields),
+                status="dry_run",
+            )
+            return {"status": "dry_run", "listing_id": listing_id}
 
         await self._db.update_listing(
             listing_id=listing_id,

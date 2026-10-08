@@ -184,8 +184,8 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
         base_url="http://seller",
         build_payload=lambda *_args: PublicationPayload(
             accepted_escrows=({"escrow": "alkahest"},),
-            settlement_options=({"option_id": "hosted"},),
-            publication_clauses=({"mechanism": "fiat.stripe.v1"},),
+            settlement_options=({"option_id": "rated"},),
+            publication_clauses=({"mechanism": "example.payment.v1"},),
             demands=({"demand": "compute"},),
             max_duration_seconds=60,
         ),
@@ -194,10 +194,10 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
 
     assert failed == []
     assert skipped == []
-    assert published[0]["settlement_options"] == [{"option_id": "hosted"}]
+    assert published[0]["settlement_options"] == [{"option_id": "rated"}]
     assert captured["accepted_escrows"] == [{"escrow": "alkahest"}]
-    assert captured["settlement_options"] == [{"option_id": "hosted"}]
-    assert captured["publication_clauses"] == [{"mechanism": "fiat.stripe.v1"}]
+    assert captured["settlement_options"] == [{"option_id": "rated"}]
+    assert captured["publication_clauses"] == [{"mechanism": "example.payment.v1"}]
 
 
 def test_an_unchanged_existing_listing_is_skipped_not_failed_or_duplicated() -> None:

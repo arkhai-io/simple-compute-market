@@ -48,20 +48,22 @@ services:
       service: bare-metal-storefront
     env_file:
       - ${BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?set storefront signer credential environment file}
+      # The seller wallet's key (BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY), kept apart
+      # from the identity credential; a storefront with no Alkahest section has none.
+      - path: ${BARE_METAL_STOREFRONT_WALLET_ENV_FILE:-/dev/null}
+        required: false
     environment:
       - BARE_METAL_STOREFRONT_IDENTITY_SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
       - BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
       - BARE_METAL_STOREFRONT_ADMIN_IDENTITIES=${BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON:?set canonical storefront admin identities JSON}
       - BARE_METAL_STOREFRONT_PUBLIC_URL=${BARE_METAL_STOREFRONT_PUBLIC_URL:?set externally reachable storefront URL}
       - BARE_METAL_STOREFRONT_EVM_ADDRESS=${BARE_METAL_STOREFRONT_EVM_ADDRESS:-}
+      - BARE_METAL_STOREFRONT_CHAINS=${BARE_METAL_STOREFRONT_CHAINS_JSON:-}
       - BARE_METAL_STOREFRONT_SETTLEMENT=${BARE_METAL_STOREFRONT_SETTLEMENT_JSON:?set strict shared settlement config JSON}
       - BARE_METAL_STOREFRONT_REGISTRY_URL=${BARE_METAL_STOREFRONT_REGISTRY_URL:?set signed registry URL}
       - BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY=${BARE_METAL_REGISTRY_AUTHORITY_ID:?set registry authority id}
       - BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS=${BARE_METAL_REGISTRY_PRINCIPALS_JSON:?set registry trust pins JSON}
       - BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES=${BARE_METAL_PUBLICATION_CLAUSES_JSON:?set exact settlement publication clauses}
-      - BARE_METAL_STOREFRONT_FUNDING_DEADLINES=${BARE_METAL_FUNDING_DEADLINES_JSON:?set per-profile funding deadlines}
-      - BARE_METAL_STOREFRONT_OPTION_EXPIRES_AT=${BARE_METAL_OPTION_EXPIRES_AT:?set current settlement-option expiry}
-      - BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE=${BARE_METAL_FULFILLMENT_DEADLINE:?set capacity/fulfillment deadline}
       - BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS=${BARE_METAL_MAX_DURATION_SECONDS:?set maximum lease duration}
       - BARE_METAL_STOREFRONT_DEMANDS=${BARE_METAL_PUBLICATION_DEMANDS_JSON:-[]}
 

@@ -1,5 +1,11 @@
 """Kit-owned capacity projection and listing publication lifecycle."""
 
+from .admin_routes import (
+    CapacityAdminRouteError,
+    CapacityAdminRouteService,
+    ReleasedHook,
+    ReserveHook,
+)
 from .capacity import (
     capacity_availability,
     CapacityBinding,
@@ -32,6 +38,10 @@ from .publication import (
 )
 
 __all__ = [
+    "CapacityAdminRouteError",
+    "CapacityAdminRouteService",
+    "ReleasedHook",
+    "ReserveHook",
     "run_capacity_event_pollers",
     "BoundListing",
     "capacity_availability",

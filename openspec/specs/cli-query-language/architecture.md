@@ -30,7 +30,7 @@ This ordering preserves distinct diagnostics. “No resource listing matched” 
 
 A seller publication clause carries one complete mechanism option request. Common fields identify mechanism, asset, decimal rate, and unit; mechanism input supplies only its registered public construction fields. Command clauses and config defaults are whole-list defaults, while a resource record's list replaces them in full.
 
-Rates remain human asset quantities until the owning mechanism normalizes them exactly once. Stripe applies the currency exponent; Alkahest applies authoritative token decimals. The shared layer never rounds, guesses an asset scale, or reuses one scalar as two mechanism prices.
+Rates remain human asset quantities until the owning mechanism normalizes them exactly once. Arkhai payments uses the explicit asset scale (for example `USD/2`); Alkahest applies authoritative token decimals. The shared layer never rounds, guesses an asset scale, or reuses one scalar as two mechanism prices.
 
 ## Semantic pushdown and explanation
 

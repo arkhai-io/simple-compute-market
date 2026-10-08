@@ -12,6 +12,7 @@ from core_storefront.site_projections import (
     ProjectionState,
 )
 from market_capacity_publication import CapacityBinding, UnbackedBinding
+from market_policy.listing_source import ListingSourceVerdict
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -156,8 +157,7 @@ async def test_availability_is_read_from_the_pinned_site_only(repository):
         capacity,
     )
 
-    assert result["declared_match"] is True
-    assert result["available"] is True
+    assert result == ListingSourceVerdict("matches")
     assert capacity.asked == ["site-a"]
 
 
@@ -172,8 +172,8 @@ async def test_a_match_only_at_another_site_is_not_a_match(repository):
     )
 
     # The shape names its model, so another model is another listing's source.
-    assert result["declared_match"] is False
-    assert result["differing_fields"] == ["source"]
+    assert result.outcome == "declared_mismatch"
+    assert result.differing_fields == ("source",)
     assert capacity.asked == []
 
 
@@ -186,7 +186,7 @@ async def test_a_match_only_in_another_pool_is_not_a_match(repository):
         _Capacity({}),
     )
 
-    assert result["declared_match"] is False
+    assert result.outcome == "declared_mismatch"
 
 
 async def test_a_fungible_match_needs_one_member_large_enough(repository):
@@ -201,8 +201,8 @@ async def test_a_fungible_match_needs_one_member_large_enough(repository):
         CapacityBinding("site-a", "vm", "pool-a"), _listing(gpu_count=2), _Capacity({}),
     )
 
-    assert too_large["declared_match"] is False
-    assert fits["declared_match"] is True
+    assert too_large.outcome == "declared_mismatch"
+    assert fits.outcome != "declared_mismatch"
 
 
 async def test_an_unbacked_listing_makes_no_site_call(repository):
@@ -217,7 +217,7 @@ async def test_an_unbacked_listing_makes_no_site_call(repository):
         capacity,
     )
 
-    assert result == {"declared_match": True, "differing_fields": [], "available": None}
+    assert result == ListingSourceVerdict("matches")
     assert capacity.asked == []
 
 
@@ -230,8 +230,7 @@ async def test_a_backed_listing_with_nothing_free_is_declared_but_unavailable(re
         _Capacity({"site-a": [{"resource_id": "pool-a-r1", "available_units": 0}]}),
     )
 
-    assert result["declared_match"] is True
-    assert result["available"] is False
+    assert result.outcome == "unavailable"
 
 
 async def test_an_unloaded_site_projection_confirms_nothing(repository):
@@ -245,6 +244,22 @@ async def test_an_unloaded_site_projection_confirms_nothing(repository):
         capacity,
     )
 
-    assert result["declared_match"] is False
-    assert result["differing_fields"] == ["source_unavailable"]
+    # Retryable, not a mismatch: nothing is known to be wrong with the listing.
+    assert result.outcome == "unverifiable"
     assert capacity.asked == []
+
+
+async def test_a_site_whose_capacity_cannot_be_read_confirms_nothing(repository):
+    class _Unreachable(_Capacity):
+        def site_client(self, site_id):
+            raise ConnectionError("site unreachable")
+
+    result = await _check(
+        repository,
+        {"site-a": [_pool("pool-a")]},
+        CapacityBinding("site-a", "vm", "pool-a"),
+        _listing(),
+        _Unreachable({}),
+    )
+
+    assert result.outcome == "unverifiable"

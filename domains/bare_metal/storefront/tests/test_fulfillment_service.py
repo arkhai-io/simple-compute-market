@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +12,7 @@ from core_storefront import (
     fulfill_domain,
 )
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
@@ -86,6 +87,10 @@ class FakeDb:
         assert listing_id == "listing-a"
         return self.listing
 
+    async def load_bare_metal_settlement_record(self, *, negotiation_id):
+        # These deals settle through escrow, so they carry no payment record.
+        return None
+
     async def ensure_bare_metal_fulfillment_lifecycle(self, **identity):
         if self.lifecycle is None:
             self.lifecycle = {**identity, "state": "planning"}
@@ -147,6 +152,8 @@ class FakeCapacity:
         self.site_client = FakeSite()
         self.reservation_sites = {}
         self.reserves = []
+        self.commits = []
+        self.committed_window: tuple[str, str] | None = None
 
     def site(self, site_id):
         assert site_id == "site-a"
@@ -160,6 +167,20 @@ class FakeCapacity:
             "site": self.returned_site,
         }
 
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's window is kept."""
+        self.commits.append(request)
+        if self.committed_window is None:
+            self.committed_window = (request["lease_start_utc"], request["lease_end_utc"])
+        start, end = self.committed_window
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": start,
+            "lease_end_utc": end,
+            "site": request["site_id"],
+        }
+
 
 class FakeFulfillment:
     def __init__(self, *, begin_failures: int = 0) -> None:
@@ -167,6 +188,7 @@ class FakeFulfillment:
         self.schedules = []
         self.begins = []
         self.teardowns = []
+        self.terminations = []
         self.begin_failures = begin_failures
 
     async def schedule_resource(self, request):
@@ -214,20 +236,29 @@ class FakeFulfillment:
                 "state": "active",
                 "provisioned_resources": [],
                 "domain_result": {
-                    "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 2,
+                    "kind": "compute.access-delivery",
+                    "schema_version": 1,
                     "payload": {
-                        "kind": "bare_metal.v2",
-                        "action": "node_grant_access",
-                        "host_id": "machine-a",
-                        "physical_host_id": "host-a",
-                        "ssh_user": "tenant-a",
-                        "status": "success",
-                        "details": {"private_key": "must-not-cross-storefront"},
+                        "endpoints": [
+                            {
+                                "protocol": "ssh",
+                                "host": "203.0.113.10",
+                                "port": 22,
+                                "user": "tenant-a",
+                            }
+                        ],
+                        "credentials": [],
+                        "ready_at": "2030-01-01T00:00:01+00:00",
                     },
                 },
             },
         )
+
+    async def terminate_lease(self, capacity_reservation_id, *, reason=None):
+        """The site ends the lease and converges teardown through its fulfillment."""
+        self.phase = "teardown"
+        self.terminations.append((capacity_reservation_id, reason))
+        return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
 
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
         self.phase = "teardown"
@@ -240,7 +271,7 @@ class FakeFulfillment:
 
 
 @pytest.mark.asyncio
-async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> None:
+async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> None:
     db = FakeDb()
     capacity = FakeCapacity()
     fulfillment = FakeFulfillment()
@@ -305,29 +336,28 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert ready["state"] == "active"
     assert db.receipt.status == "ready"
     assert db.result.ssh_user == "tenant-a"
-    assert db.result.details is None
+    assert "host" not in db.result.model_dump()
 
     tearing_down = await service.teardown(
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    assert tearing_down["state"] == "teardown_dispatch_pending"
-    released = await service.status(
+    assert tearing_down["state"] == "terminating"
+    repeated_teardown = await service.teardown(
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    assert released["state"] == "released"
-    assert capacity.site_client.releases == [
-        {
-            "capacity_reservation_id": "reservation-a",
-            "deal_ref": {
-                "negotiation_id": "neg-a",
-                "escrow_uid": "escrow-a",
-            },
-        }
-    ]
-    assert "reservation-a" not in capacity.reservation_sites
-    assert len(fulfillment.teardowns) == 1
+    torn_down = await service.status(
+        negotiation_id="neg-a",
+        buyer_principal=BUYER,
+    )
+    # Teardown ends the lease once; a repeat reports what the site has since
+    # converged, and only its capacity-released callback records the release.
+    assert repeated_teardown["state"] == "torn_down"
+    assert fulfillment.terminations == [("reservation-a", "buyer_teardown")]
+    assert fulfillment.teardowns == []
+    assert torn_down["state"] == "torn_down"
+    assert capacity.site_client.releases == []
 
 
 @pytest.mark.asyncio
@@ -360,6 +390,18 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
     assert len(capacity.reserves) == 1
     assert len(fulfillment.schedules) == 1
     assert len(fulfillment.begins) == 2
+    # The lease begins at commit: each attempt commits with the deal's escrow
+    # before beginning, and the materialization states the window the first
+    # commit recorded, not a clock of the storefront's own.
+    assert [commit["deal_ref"] for commit in capacity.commits] == [
+        {"escrow_uid": "escrow-a"},
+        {"escrow_uid": "escrow-a"},
+    ]
+    start, end = capacity.committed_window
+    assert (recorded.lease_start_utc, recorded.lease_end_utc) == (
+        datetime.fromisoformat(start),
+        datetime.fromisoformat(end),
+    )
 
 
 @pytest.mark.asyncio

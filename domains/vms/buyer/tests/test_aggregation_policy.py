@@ -29,6 +29,7 @@ from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
 )
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
@@ -243,6 +244,8 @@ def _route_by_url(routes: dict[str, list]):
                 if not queue:
                     raise AssertionError(f"No more responses for {key!r} ({url})")
                 nxt = queue.pop(0)
+                if isinstance(nxt, dict):
+                    nxt = with_accepted_agreement(req, nxt)
                 body = nxt if isinstance(nxt, str) else json.dumps(nxt)
                 headers = (
                     signed_response_headers(req, nxt)

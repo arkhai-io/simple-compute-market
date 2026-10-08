@@ -49,92 +49,17 @@ For an injected domain boundary, focused tests supply a compatible contract obje
 
 Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. They enforce one default contract construction site, no lower-layer singleton accessor, no concrete cross-domain import, and an installed dependency on the lower-layer contract package.
 
-## Hosted settlement evidence ownership
 
-Hosted settlement has one provider-authentic system lane and two lower-level
-evidence boundaries. Each boundary proves only behavior it owns:
-
-| Evidence boundary | Owner | What it proves |
-|---|---|---|
-| Financial-provider and webhook-inbox integration | Hosted producer | Production journal, immutable fingerprints, leases, retries, idempotency, reconciliation, inbox deduplication, and lifecycle transitions under provider-neutral scripted outcomes |
-| Client, adapter, configuration, packaging, and marketplace orchestration | Owning producer or marketplace package | Released public contracts and credential-free composition without provider mutation |
-| Protected `stripe-test` system E2E | Marketplace consumer | The complete marketplace lifecycle composed with an exact ordinary hosted production release and supported Stripe test-mode Checkout, webhook, connected-account, retrieval, transfer, refund, decline, and authentication behavior |
-
-The hosted producer's scripted collaborator is a direct test injection at its
-financial-provider interface. It has no HTTP server, provider-shaped public
-model, credential, clock/event control API, production entry point, or release
-artifact. Scripts prescribe typed interface outcomes; names and assertions
-describe Arkhai behavior under those outcomes rather than attributing them to
-Stripe. Focused Stripe adapter tests verify SDK request construction and
-normalization, but only the protected lane establishes real Stripe behavior.
-
-The marketplace owns protected publication, discovery, negotiation,
-materialization, buyer action, VM fulfillment, collection, reclaim, status,
-restart, and recovery scenarios. It consumes the hosted implementation only
-through the signed production manifest, released client, digest-pinned image,
-ordinary migration, API, worker, and public network contracts. Missed-webhook
-and restart evidence pauses real forwarding or ordinary processes and retains
-the authority store and original operation identity; arbitrary provider fault
-placement remains at the provider port.
-
-Every protected run creates a unique namespace but keeps financial
-idempotency derived from durable operation identity. Retrieval follows the
-exact Checkout, payment, transfer, or refund relations created by that run
-rather than accepting an account's latest object. Reports identify the
-marketplace repository and exact consumer commit separately from the hosted
-manifest digest, client wheel hash, service image digest, signed release
-repository/workflow reference/source commit, and the separate protected
-producer workflow run identity used as orchestration evidence.
-
-Preflight establishes a verified production release, a test-mode secret
-(`sk_test` or least-privilege `rk_test`), non-live returned objects, Stripe connectivity, an allowlisted capable and
-ready connected account, loopback-only webhook forwarding, and Chromium
-before publication or financial mutation. Terminal results use the
-`product`, `account`, `environment`, and `timeout` classes. Evidence is an
-allowlist of identities, scenario/stage, opaque operation identity, normalized
-state/amount/currency/cardinality, and bounded diagnostics; secrets, action
-URLs, account/customer/card data, raw webhooks, and unrestricted provider
-payloads never enter reports.
-
-Public and fork checks receive no protected credentials and do not discover or
-skip secret-bearing tests. Alkahest system E2E remains a separate mechanism
-lane. Local EAS/allowlisted-arbiter work is condition-boundary conformance
-only; it is not part of hosted financial evidence, and there is currently no
-standalone hosted local-EAS operator target.
-
-## Expanded consumer evidence matrix
-
-Credential-free marketplace tests own exact profile configuration and option identity, per-profile readiness/publication, persistent opaque payer binding, direct payer and authorization helpers, bounded automation, storefront mediation, transient action redaction, delayed funding gates, immutable journals, legacy recovery, reclaim races, and package boundaries. They use the released provider-neutral client with deterministic ports and never stand in for Stripe assertions.
-
-The protected VM lane attributes each selected `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action` assertion separately. Reports keep marketplace source/commit distinct from the hosted signed manifest, client, image, schema/migrations, provenance, repository/workflow/source, and protected workflow run. A missing rail, account, mandate, browser, or signed-release prerequisite is an unavailable assertion, not permission to substitute another profile or local simulation.
-
-Reports permit only public lifecycle stages, profile/currency, normalized outcomes, timestamps, attempts, and bounded hashed opaque correlations. Recursive canary scanning rejects credentials, provider/customer/payment-method/mandate/bank/card data, raw actions or URLs, payloads, events, requests, source-bearing local paths, and unrestricted logs before evidence is signed.
 
 ## Multi-domain storefront evidence ownership
 
-Core tests own contribution discovery, frozen registry invariants, exact-object
-resolution, schema-opaque carriers, publication source fan-out, immutable
-bindings, and cross-swap rejection. VM composition tests own adapters, selected-site calls, exact mode projection, migration, and restart. Bare-metal domain/buyer/storefront tests own trusted option and accepted-binding codecs, hosted-only composition, schema-opaque buyer transport consumption, per-profile publication, funding gates, deterministic selected-site reservation/fulfillment, access-ready evidence, collect/reclaim exclusion, restart, loss/return recovery, and teardown convergence. Deployment tests inspect staged wheels and rendered public/secret separation.
+Core tests own contribution discovery, frozen registry invariants, exact-object resolution, schema-opaque carriers, publication fan-out, immutable bindings, and cross-swap rejection. Domain suites own selected-site adapters and payment receipt gates. Bare-metal live acceptance requires disposable hardware, real access and revocation, teardown, and capacity release; deterministic ports cannot establish those claims. API-credit suites own canonical key ownership, fulfillment-keyed grants, unknown-outcome retrieval, private credential delivery, and retryable issuance.
 
-Protected bare-metal proof consumes the exact signed hosted producer release and an isolated disposable whole host. It must observe each selected funding profile, no physical effect before authoritative funding, authenticated access with buyer-owned SSH material, collection after portable evidence, later access failure after revocation, executor teardown, Capacity Reservation release, and capacity republication. Signed producer inputs, Stripe test-mode prerequisites, and disposable hardware are external blockers; deterministic local ports cannot claim them.
+## Payment evidence ownership
 
-## API-credit hosted evidence ownership
+SCM's credential-free suites exercise generated payment models, shared JCS vectors, mandate policy, signed receipts, accepted-state persistence, and domain composition through deterministic collaborators. A controlled VM smoke can prove pending → provisioning → ready with one delivery, but cannot prove a live ledger or hardware effect.
 
-The shared transport/runtime suites prove request shape, signature delegation,
-replay, operation leases, delayed states, and collect/reclaim exclusion.
-API-credit domain and buyer suites prove strict carriers, selection, pricing,
-accepted identity, wallet-free policy, and recovery. Credits-authority suites
-prove canonical ownership and fulfillment-keyed exact-once grants.
-API-credit storefront suites prove funding-gated issuance, unknown-outcome
-lookup, private credentials, signed evidence, restart, and Alkahest
-independence.
-
-Only the protected system lane may attribute Stripe interaction and
-authoritative provider funding to the exact signed hosted release. It also owns
-deployed portable-resolution evidence and a real new-key/use-to-402/existing-key
-top-up path. Missing producer artifacts, Stripe capabilities, browser inputs,
-or deployed resolver remain named external blockers; deterministic ports prove
-only marketplace behavior.
+The payments service owns ledger accounting, fee collection, hold release, disputes, and cash-provider behavior. Consumer tests do not inherit Stripe claims or a signed hosted-release profile matrix. Live qualification against a deployed payments service is owned by the payments service's own end-to-end tests, which import this repository's published packages; this repository does not import the private service to test it. This repository's live payment scenario runs only when a payments target is configured, and otherwise reports the unmet prerequisite. A live payment run records the actual service target, consumer revision, authentication method, seed state, and observed readiness. Missing credentials, unavailable service, or missing physical target is reported as an unmet prerequisite before scenario mutations, not converted into local acceptance.
 
 ## Current limits
 

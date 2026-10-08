@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
@@ -7,7 +8,26 @@ from typing import Any
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
-from compute_provisioning.release import ReleaseJobDispatcher
+from compute_provisioning import JobExecutorTable
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning.jobs.submission import JobSubmissionService
+from compute_provisioning_ansible import (
+    ANSIBLE_COMPONENT,
+    SSH_CONNECTION_KIND,
+    MockAnsibleRunner,
+    SshConnectionCodec,
+    ansible_readiness_component,
+    probe_connectivity,
+)
+from compute_provisioning_ansible.runner import AnsibleRunner
+from compute_provisioning.leases import LeaseRouteService
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+)
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
@@ -17,6 +37,7 @@ from bare_metal_provisioning_adapter.runtime import (
     build_bare_metal_runtime,
 )
 from vm_provisioning_adapter.runtime import (
+    HOST_POOL_CHANGE_HOOKS as VM_HOST_POOL_CHANGE_HOOKS,
     HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
     build_vm_runtime,
 )
@@ -30,9 +51,8 @@ from compute_provisioning_service.identity import resolve_identity_context
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from compute_provisioning_service.composition import compose_adapter_bundles
-from compute_provisioning_service.services.compute_contract_service import ComputeContractService
+from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning import ReleaseEffects, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -40,7 +60,11 @@ from compute_provisioning_service.services.deal_event_sink import (
 )
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
-from compute_provisioning_service.services.relay_port_allocator import RelayPortAllocator
+from compute_provisioning_service.services.job_retry import retry_policy_from
+from compute_provisioning_service.services.system_status import (
+    StatusComponentProvider,
+    SystemStatusService,
+)
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -98,19 +122,28 @@ def _runtime_value(runtime, name):
 
 
 
-def _vm_bundle(runtime, site_authority):
-    return runtime.adapter_bundle(site_authority)
+def _adapter_bundle(runtime):
+    return runtime.adapter_bundle()
 
 
-def _bare_metal_bundle(runtime, site_authority):
-    return runtime.adapter_bundle(site_authority)
+def _make_status_components(job_executors, host_authority):
+    """The readiness components status reports, each built by its implementation.
+
+    The Ansible implementation reports on every executor it built, whichever
+    domain contributed it, and on the keys the registered hosts reference.
+    """
+
+    def ansible():
+        return ansible_readiness_component(
+            executors_by_offering_mode=job_executors.executors_by_offering_mode(),
+            list_hosts=lambda: host_authority.list_hosts(enabled_only=True),
+        )
+
+    return (StatusComponentProvider(name=ANSIBLE_COMPONENT, collect=ansible),)
 
 
-def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
-    return runtime.system_service(
-        lease_lifecycle_service=lease_lifecycle_service,
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
-    )
+def _inventory_views(composed_adapters):
+    return composed_adapters.inventory_views
 
 
 def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, bool]:
@@ -131,10 +164,78 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
-def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement):
+def _make_host_authority(session_factory, cfg, capacity_derivation, pool_change_hooks):
+    """The one host authority: every connection kind's codec and every hook.
+
+    The ``ssh`` codec is the Ansible implementation's, protecting a submitted
+    key with the service's decryption key; pool-change hooks are the adapters'
+    static declarations, merged here because the authority exists before any
+    runtime does.
+    """
+    return HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
+        capacity_derivation=capacity_derivation,
+        pool_change_hooks=tuple(pool_change_hooks),
+    )
+
+
+def _mock_profile_active() -> bool:
+    profiles = os.environ.get("ACTIVE_PROFILES", "")
+    return "mock" in {profile.strip() for profile in profiles.split(",")}
+
+
+def _probe_only(playbook) -> str:
+    raise RuntimeError("the connectivity probe runner runs no playbook")
+
+
+def _make_probe_runner(cfg):
+    """The runner connectivity probes use, belonging to no domain.
+
+    The real Ansible runner, or under the mock profile the mock, whose every
+    registered host is reachable. It probes; it never runs a playbook.
+    """
+    if _mock_profile_active():
+        return MockAnsibleRunner(default_output=_probe_only)
+    return AnsibleRunner(cfg)
+
+
+def _make_connectivity_probes(runner) -> Mapping[str, Any]:
+    """Each connection kind's probe; the Ansible implementation probes ``ssh``."""
+
+    async def probe_ssh(host):
+        return await probe_connectivity(runner, host)
+
+    return MappingProxyType({SSH_CONNECTION_KIND: probe_ssh})
+
+
+def _make_job_engine(session_factory, job_executors, host_authority, cfg):
+    """The one job authority every domain submits to and every route reads."""
+    return JobEngine(
+        session_factory,
+        executors=job_executors,
+        host_lookup=host_authority.lookup,
+        retry_policy=retry_policy_from(cfg),
+    )
+
+
+def _make_release_effects():
+    """The one registry of what domains return with a reservation's capacity.
+
+    Created empty, filled and frozen by adapter composition, and run by the
+    site ledger in every transaction that releases capacity.
+    """
+    return ReleaseEffects()
+
+
+def _compose_adapters(
+    vm_bundle, bare_metal_bundle, host_requirement, job_executors, release_effects
+):
     return compose_adapter_bundles(
         [vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
+        job_executors=job_executors,
+        release_effects=release_effects,
     )
 
 
@@ -146,50 +247,19 @@ def _pool_config_handlers(composed_adapters):
     return dict(composed_adapters.pool_config_handlers)
 
 
-def _release_dispatcher(composed_adapters):
-    return composed_adapters.release_dispatcher
-
-
-def _make_release_job_dispatcher(vm_runtime, job_service):
-    """Route release-job status reads: VM through the fulfillment
-    aggregate, bare-metal through the shared job queue, unchanged.
-
-    ``vm_runtime.release_job_port()`` is used rather than reading it off
-    ``composed_adapters`` because ``ReleaseJobPort`` has no place in the
-    generic ``ExecutorAdapterBundle`` contract -- it is specific to
-    ``LeaseLifecycleService``'s polling loop, not a fulfillment-provider or
-    executor-adapter concern the bundle already models.
-    """
-
-    return ReleaseJobDispatcher(
-        {
-            "vm": vm_runtime.release_job_port(),
-            "bare_metal": job_service,
-        },
-    )
-
-
-def _make_compute_contract_service(site_authority, job_service, composed_adapters):
-    return ComputeContractService(
-        site_authority=site_authority,
-        job_service=job_service,
-        adapters=composed_adapters.executor_registry,
-    )
-
-
 def _make_lease_lifecycle(
     cfg,
     site_authority,
-    release_dispatcher,
-    release_jobs,
+    release_executor,
+    release_status,
     lifecycle_event_sink,
     capacity_release_outbox,
 ):
     return LeaseLifecycleService(
         cfg,
         site_authority,
-        executor_release=release_dispatcher,
-        release_jobs=release_jobs,
+        release_executor=release_executor,
+        release_status=release_status,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 cfg, reservation, sink=lifecycle_event_sink
@@ -239,17 +309,16 @@ class Container(containers.DeclarativeContainer):
     # composition never imports concrete request/action/provider models.
     # ------------------------------------------------------------------
 
-    # Declared here, ahead of vm_runtime, because VmReleaseExecutor and
-    # VmFulfillmentReleaseJobPort (built inside vm_runtime) need it to
-    # resolve a reservation's fulfillment_id. Also supplies the concrete
-    # SettlementAbandonmentHook implementation the ledger calls when it
-    # reclaims capacity that might belong to a not-yet-dispatched
-    # settlement assignment (a lapsed hold, a terminal release, or a
-    # negotiation-driven resize) -- market_site defines the hook protocol
-    # but cannot import market_fulfillment to implement it.
+    # Declared ahead of the ledger: the release guard the ledger consults on
+    # every capacity reclaim reads the fulfillment aggregate through it.
+    # market_site defines the guard protocol but cannot import
+    # market_fulfillment to implement it.
     settlement_repository = providers.Singleton(SettlementRepository)
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
+
+    # Declared ahead of the ledger, which runs it whenever it releases capacity.
+    release_effects = providers.Singleton(_make_release_effects)
 
     host_requirement = providers.Object(
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
@@ -264,10 +333,13 @@ class Container(containers.DeclarativeContainer):
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
-        settlement_abandonment_hook=providers.Callable(
-            lambda repository: repository.abandon_if_assigned,
-            repository=settlement_repository,
+        # Capacity returns only on fulfillment's proof that nothing remains
+        # delivered, whoever asks the site to free it.
+        release_guard=providers.Singleton(
+            FulfillmentReleaseGuard,
+            settlement_repository=settlement_repository,
         ),
+        release_effect=release_effects,
     )
 
     # Declared ahead of vm_runtime: host inventory derives capacity
@@ -278,14 +350,50 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
+    # Filled and frozen by adapter composition; the job engine resolves each
+    # job's executor through it.
+    job_executor_table = providers.Singleton(JobExecutorTable)
+
+    host_pool_change_hooks = providers.Object(VM_HOST_POOL_CHANGE_HOOKS)
+
+    host_authority = providers.Singleton(
+        _make_host_authority,
+        session_factory=session_factory,
+        cfg=config,
+        capacity_derivation=capacity_derivation,
+        pool_change_hooks=host_pool_change_hooks,
+    )
+
+    probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
+
+    connectivity_probes = providers.Singleton(
+        _make_connectivity_probes, runner=probe_runner
+    )
+
+    job_engine = providers.Singleton(
+        _make_job_engine,
+        session_factory=session_factory,
+        job_executors=job_executor_table,
+        host_authority=host_authority,
+        cfg=config,
+    )
+
+    # Every job, a fulfillment's or an operator's, is submitted through this.
+    job_submission = providers.Singleton(
+        JobSubmissionService,
+        engine=job_engine,
+        hosts=host_authority,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+    )
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
         session_factory=session_factory,
         job_queue_provider=providers.Object(_resolved_job_queue),
-        settlement_repository=settlement_repository,
-        teardown_port=fulfillment_teardown_port,
-        capacity_derivation=capacity_derivation,
+        host_authority=host_authority,
+        job_engine=job_engine,
+        job_submission=job_submission,
     )
 
     ansible_service = providers.Callable(
@@ -293,20 +401,10 @@ class Container(containers.DeclarativeContainer):
         runtime=vm_runtime,
         name=providers.Object("ansible_service"),
     )
-    host_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("host_service"),
-    )
     ansible_pool_config_handler = providers.Callable(
         _runtime_value,
         runtime=vm_runtime,
         name=providers.Object("pool_config_handler"),
-    )
-    job_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("job_service"),
     )
     vm_operations_service = providers.Callable(
         _runtime_value,
@@ -318,6 +416,11 @@ class Container(containers.DeclarativeContainer):
         runtime=vm_runtime,
         name=providers.Object("host_operations_service"),
     )
+    relay_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("relay_service"),
+    )
 
     site_authority = providers.Singleton(
         LedgerSiteAuthority,
@@ -326,33 +429,20 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
-        site_authority=site_authority,
-        job_service=job_service,
-        job_queue_provider=providers.Object(_resolved_job_queue),
+        job_engine=job_engine,
+        job_submission=job_submission,
         config=config,
-        host_service=host_service,
     )
-    bare_metal_lease_service = providers.Callable(
+    bare_metal_mock_executor = providers.Callable(
         _runtime_value,
         runtime=bare_metal_runtime,
-        name=providers.Object("lease_service"),
-    )
-    bare_metal_operations_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("operations_service"),
+        name=providers.Object("mock_executor"),
     )
 
-    vm_adapter_bundle = providers.Singleton(
-        _vm_bundle,
-        runtime=vm_runtime,
-        site_authority=site_authority,
-    )
+    vm_adapter_bundle = providers.Singleton(_adapter_bundle, runtime=vm_runtime)
 
     bare_metal_adapter_bundle = providers.Singleton(
-        _bare_metal_bundle,
-        runtime=bare_metal_runtime,
-        site_authority=site_authority,
+        _adapter_bundle, runtime=bare_metal_runtime
     )
 
     composed_adapters = providers.Singleton(
@@ -360,6 +450,13 @@ class Container(containers.DeclarativeContainer):
         vm_bundle=vm_adapter_bundle,
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
+        job_executors=job_executor_table,
+        release_effects=release_effects,
+    )
+
+    inventory_views = providers.Singleton(
+        _inventory_views,
+        composed_adapters=composed_adapters,
     )
 
     composed_pool_config_handlers = providers.Singleton(
@@ -415,22 +512,16 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
-    release_dispatcher = providers.Singleton(
-        _release_dispatcher,
-        composed_adapters=composed_adapters,
+    release_executor = providers.Singleton(
+        FulfillmentReleaseExecutor,
+        settlement_repository=settlement_repository,
+        session_factory=session_factory,
+        teardown_port=fulfillment_teardown_port,
     )
 
-    release_job_dispatcher = providers.Singleton(
-        _make_release_job_dispatcher,
-        vm_runtime=vm_runtime,
-        job_service=job_service,
-    )
-
-    compute_contract_service = providers.Factory(
-        _make_compute_contract_service,
-        site_authority=site_authority,
-        job_service=job_service,
-        composed_adapters=composed_adapters,
+    release_status = providers.Singleton(
+        FulfillmentReleaseStatusPort,
+        teardown_port=fulfillment_teardown_port,
     )
 
     fulfillment_unit_of_work = providers.Singleton(
@@ -474,10 +565,16 @@ class Container(containers.DeclarativeContainer):
         _make_lease_lifecycle,
         cfg=config,
         site_authority=site_authority,
-        release_dispatcher=release_dispatcher,
-        release_jobs=release_job_dispatcher,
+        release_executor=release_executor,
+        release_status=release_status,
         lifecycle_event_sink=lifecycle_event_sink,
         capacity_release_outbox=capacity_release_outbox,
+    )
+
+    lease_route_service = providers.Singleton(
+        LeaseRouteService,
+        leases=executor_lease_service,
+        lifecycle=lease_lifecycle_service,
     )
 
     lease_watchdog = providers.Singleton(
@@ -486,30 +583,30 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
-    relay_port_allocator = providers.Singleton(
-        RelayPortAllocator,
-        session_factory,
-    )
-
     fulfillment_convergence_watchdog = providers.Singleton(
         FulfillmentConvergenceWatchdog,
         session_factory=session_factory,
         repository=settlement_repository,
         provider_registry=provider_registry,
         settings=config,
-        port_allocator=relay_port_allocator,
+        capacity_ledger=capacity_ledger_service,
     )
 
-    system_service = providers.Singleton(
-        _system_service,
-        runtime=vm_runtime,
-        lease_lifecycle_service=lease_lifecycle_service,
-        # The admin convergence route exists to run exactly one cycle of this
-        # watchdog. Its parameter was there and nothing ever passed it, so the
-        # route answered `503 fulfillment_convergence_watchdog not
-        # initialised` for every caller -- the only thing missing was the
-        # wiring between two singletons in this container.
-        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+    status_components = providers.Singleton(
+        _make_status_components,
+        job_executors=job_executor_table,
+        host_authority=host_authority,
+    )
+
+    system_status_service = providers.Singleton(
+        SystemStatusService,
+        settings=config,
+        session_factory=session_factory,
+        job_queue_provider=providers.Object(_resolved_job_queue),
+        lease_lifecycle=lease_lifecycle_service,
+        job_executors=job_executor_table,
+        components=status_components,
+        identity_resolver=providers.Object(lambda: resolve_identity_context(settings)),
     )
 
 
@@ -525,25 +622,27 @@ container = Container()
 # ---------------------------------------------------------------------------
 from sqlalchemy.orm import sessionmaker, Session  # noqa: E402
 
-resolved_job_service: Any | None = None
+resolved_job_engine: "JobEngine | None" = None
 resolved_session_factory: "sessionmaker[Session] | None" = None
 resolved_ansible_service: Any | None = None
 resolved_job_queue: "AsyncJobQueue | None" = None
-resolved_system_service: Any | None = None
-resolved_host_service: Any | None = None
+resolved_system_status_service: "SystemStatusService | None" = None
+resolved_inventory_views: Any | None = None
+resolved_definition_documents: "tuple[Any, ...] | None" = None
+resolved_background_tasks: "tuple[Any, ...] | None" = None
+resolved_host_authority: "HostAuthority | None" = None
+resolved_connectivity_probes: Mapping[str, Any] | None = None
 resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
-resolved_bare_metal_lease_service: Any | None = None
-resolved_bare_metal_operations_service: Any | None = None
+resolved_bare_metal_mock_executor: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
-resolved_compute_contract_service = None
+resolved_lease_route_service: "LeaseRouteService | None" = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_relay_service: Any | None = None
-resolved_relay_port_allocator: Any | None = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

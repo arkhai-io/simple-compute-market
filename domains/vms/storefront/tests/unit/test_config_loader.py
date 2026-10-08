@@ -475,16 +475,6 @@ def test_nested_env_var_via_double_underscore(tmp_path, monkeypatch):
 _ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 
-def test_build_settings_leaves_wallet_absent_for_hosted_only_profile(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    cfg = agent_config._build_settings()
-    assert cfg.get("wallet") is None
-    assert agent_config.get_evm_wallet_address(cfg) == ""
-    assert agent_config.get_evm_wallet_private_key(cfg) == ""
-
-
 def test_evm_wallet_helpers_return_only_explicit_values(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"

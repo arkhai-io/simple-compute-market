@@ -42,6 +42,7 @@ from market_identity import (
 )
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from e2e_harness.settings import settings
 
@@ -495,18 +496,13 @@ def create_profiled_buyer_cli(
 
 
 def _alkahest_addresses_path() -> Optional[str]:
-    """Locate the alkahest_anvil_addresses.json shipped with market-storefront.
+    """Locate the dev chain's Alkahest address book shipped with the Alkahest kit.
 
-    Same import path the storefront uses internally; it's installed
-    transitively into the e2e-tests venv via the market-storefront
-    dep so this resolves without runtime config.
+    The kit is installed into the e2e-tests venv, so this resolves without
+    runtime config.
     """
     try:
-        from importlib import resources
-        ref = resources.files("market_storefront.data").joinpath(
-            "alkahest_anvil_addresses.json"
-        )
-        return str(ref)
+        return str(anvil_address_book_path())
     except Exception:
         return None
 
@@ -570,8 +566,8 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
     alkahest_path = _alkahest_addresses_path()
     if not alkahest_path:
         pytest.skip(
-            "Could not locate alkahest_anvil_addresses.json via "
-            "market_storefront.data — is market-storefront installed?"
+            "Could not locate alkahest_anvil_addresses.json in the Alkahest "
+            "kit — is arkhai-kit-alkahest installed?"
         )
     registry_url = str(settings.REGISTRY.API_URL or "http://localhost:8080")
     sections = (

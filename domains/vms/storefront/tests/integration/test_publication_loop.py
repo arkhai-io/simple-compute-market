@@ -37,13 +37,21 @@ from tests.publication_app import (
 pytestmark = pytest.mark.asyncio
 
 # Alkahest declared as not fulfilled through capacity, so unbacked supply publishes.
-_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "fiat.stripe.v1": True}
+_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
 
 
 @pytest.fixture
 async def world(tmp_path):
     async with publication_app(
         tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE
+    ) as app:
+        yield app
+
+
+@pytest.fixture
+async def negotiating_world(tmp_path):
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, negotiation=True
     ) as app:
         yield app
 
@@ -497,7 +505,8 @@ async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
     assert (await _cycle(world, dry_run=True))["counts"] == {}
 
 
-async def test_round_zero_evaluation_runs_the_inventory_guard(world):
+async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world):
+    world = negotiating_world
     """The admin dry run of a buyer's opening round checks the listing against a
     fresh derivation of its own source, as a real round does."""
     world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
@@ -530,7 +539,11 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(world):
                 listing_id,
                 proposal=proposal,
                 buyer_principal=BUYER_SIGNER.identity,
-                requested_duration_seconds=3600,
+                provision_terms={
+                    "kind": "compute.v1",
+                    "version": 1,
+                    "payload": {"duration_seconds": 3600, "ssh_public_key": ""},
+                },
             )
 
     supported = await evaluate()
@@ -541,8 +554,10 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(world):
     world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=1)
     refused = await evaluate()
 
-    assert refused.decision == "reject"
-    assert refused.decision_reason == "no_matching_declaration"
+    # A policy rejection refuses the opening, as negotiate/new would.
+    assert refused.refused is True
+    assert refused.decision == "refused"
+    assert "no_matching_declaration" in refused.decision_reason
 
 
 @pytest.fixture

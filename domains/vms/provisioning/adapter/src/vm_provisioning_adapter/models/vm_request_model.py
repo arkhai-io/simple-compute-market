@@ -1,10 +1,10 @@
-"""Server-side helpers for building internal AnsibleJobParams from VM request models.
+"""Server-side helpers for building internal VmJobParams from VM request models.
 
 ``CreateVmRequest`` and ``VmActionRequest`` live in the direct VM operator
 package (``vm_provisioning_operator.models``).
 
 This file retains the server-side conversion helpers that produce the
-internal ``AnsibleJobParams`` DTO consumed by ``AnsibleJobService``.
+internal ``VmJobParams`` DTO the operator services submit.
 These helpers take path parameters (``host``, ``vm_name``) that come from
 URL routing and are never part of the request body.
 
@@ -15,18 +15,18 @@ from __future__ import annotations
 
 from typing import Optional
 
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 
 
-def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
-    """Build ``AnsibleJobParams`` for a VM create action.
+def build_create_params(host: str, body: CreateVmRequest) -> VmJobParams:
+    """Build ``VmJobParams`` for a VM create action.
 
     Replaces ``CreateVmRequest.to_ansible_job_params()`` — conversion from
     HTTP request model to server-internal DTO lives here, not on the model,
-    because ``AnsibleJobParams`` is a server-private type.
+    because ``VmJobParams`` is a server-private type.
     """
-    return AnsibleJobParams(
+    return VmJobParams(
         host_id=host,
         vm_action="create",
         offering_mode="vm",
@@ -59,13 +59,13 @@ def build_simple_params(
     host: str,
     body: VmActionRequest,
     vm_name: Optional[str] = None,
-) -> AnsibleJobParams:
-    """Produce ``AnsibleJobParams`` for actions whose only inputs are the
+) -> VmJobParams:
+    """Produce ``VmJobParams`` for actions whose only inputs are the
     path parameters and the shared optional overrides in ``VmActionRequest``.
 
     ``vm_name`` is ``None`` for host-level actions (list, check).
     """
-    return AnsibleJobParams(
+    return VmJobParams(
         host_id=host,
         vm_action=action,
         offering_mode="vm",

@@ -37,6 +37,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import NegotiationControlRouteService
 from pydantic import ValidationError
 
 import market_storefront.container as _container
@@ -346,21 +347,21 @@ class AdminListingsController:
     async def evaluate_negotiate(
         self, listing_id: str, body: EvaluateNegotiateRequest
     ) -> EvaluateNegotiateResponse:
-        """Dry-run the seller's round-0 negotiation decision without creating a thread.
+        """Preview the opening ``negotiate/new`` would receive, writing nothing.
 
-        Delegates to ``ListingService.evaluate_negotiate`` and the same
-        domain policy adapter used by round zero of the shared runtime.
-
-        Returns HTTP 404 if the listing doesn't exist or has no usable strategy.
+        Runs the negotiation runtime's opening pipeline — decode, opening
+        validation, pause and liveness checks, and round-zero policy — and
+        reports a refusal rather than raising it.
         """
-        try:
-            return await self._listing_svc.evaluate_negotiate(
-                listing_id,
-                body.proposal,
-                requested_duration_seconds=body.requested_duration_seconds,
+        signer = _container.resolved_marketplace_signer
+        runtime = _container.resolved_negotiation_runtime
+        if signer is None or runtime is None:
+            raise HTTPException(
+                status_code=503, detail="storefront negotiation is unavailable"
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Exception as exc:
-            logger.error("[ADMIN] evaluate-negotiate: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+        controls = NegotiationControlRouteService(
+            runtime=runtime,
+            repository=_container.resolved_sqlite_client,
+            seller_principal=lambda: signer.identity,
+        )
+        return await controls.evaluate_negotiate(listing_id, body)

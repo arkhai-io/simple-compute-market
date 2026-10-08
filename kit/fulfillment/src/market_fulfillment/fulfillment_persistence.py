@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from market_resource_pools import ResourcePoolService
 
 from .db import SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .provider import FulfillmentConflictError
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 
@@ -122,17 +122,17 @@ class SqlAlchemyFulfillmentTransaction:
 
         Best-effort by construction. The fulfillment itself has already been
         acknowledged; failing it here would trade a working VM for a missing
-        cross-reference. ``update_lease_fields_in_session`` validates before it
-        mutates, so a raise leaves this transaction's own writes intact and
-        committable.
+        cross-reference. ``record_create_handle_in_session`` raises before any
+        write it makes, so a raise leaves this transaction's own writes intact
+        and committable.
         """
         if self._capacity_ledger is None:
             return
         try:
-            self._capacity_ledger.update_lease_fields_in_session(
+            self._capacity_ledger.record_create_handle_in_session(
                 self.db,
                 capacity_reservation_id,
-                create_job_id=job_id,
+                job_id,
             )
         except Exception:
             logger.warning(
