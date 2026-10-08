@@ -217,3 +217,4 @@ Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; 
 - [x] 7.8 **Documentation citations.** `make check-doc-citations CHANGE=settle-through-arkhai-payments` passes.
 - [x] 7.9 **Packaging.** `make check-packaging` passes on the merged tree (reviewer's machine, recorded under 6.3).
 - [ ] 7.10 **End-to-end pipeline.** Run the end-to-end workflow on the closed-out branch and record the run, its result, and the scenarios exercising this change. The credits deal scenario covers the Alkahest settlement path this branch's configuration fix restored; the payment scenario reports its unmet prerequisite without a payments target.
+  - Run 37775654478 on `8284e2a0`: bare-metal scenarios passed (16). The VM job failed before its scenarios: the API-credit storefront could not import `storefront_client`, declared only as a development dependency. Fixed; the run is to be repeated.
