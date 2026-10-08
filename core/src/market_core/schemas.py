@@ -496,11 +496,13 @@ class SettlementPlan(BaseModel):
     Generalizes the single accepted-escrow handoff: a plan is N
     obligations (payment escrows, interval escrows, penalty bonds —
     possibly under different mechanisms) plus the off-chain duties each
-    party takes on while servicing the deal. The determinism contract
-    extends unchanged in kind: both sides must derive the same plan from
-    the shared message history; for mechanisms whose materialization is
-    not independently derivable (fiat), determinism covers the agreed
-    terms and the codec verifies the materialized object against them.
+    party takes on while servicing the deal. Plans belong to mechanisms
+    serviced through the obligation runtime; a mechanism that settles from
+    the Agreement alone creates none. The determinism contract extends
+    unchanged in kind: both sides must derive the same plan from the shared
+    message history; for mechanisms whose materialization is not
+    independently derivable, determinism covers the agreed terms and the
+    codec verifies the materialized object against them.
 
     ``service_terms`` is the attachment point for heartbeat cadence and
     schema, oracle identity, evidence format, and interval boundaries.

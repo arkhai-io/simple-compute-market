@@ -33,7 +33,6 @@ from market_core import DomainIdentity
 from market_identity import Identity, ReplayIdentity, ReplayReservation
 
 from core_storefront.auth import ReplayClaim
-from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 from core_storefront.domain_registry import (
     PreparedStorefrontDomainArtifact,
     StorefrontDomainBinding,
@@ -43,6 +42,8 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     bind_fulfillment_context,
 )
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
+
 from .sqlite_migrations import (
     LegacyMigrationInputs,
     MigrationLike,
@@ -4626,45 +4627,6 @@ class SQLiteClient:
     # ------------------------------------------------------------------
     # Negotiations API helpers
     # ------------------------------------------------------------------
-
-    async def list_accepted_negotiations_settling_through(
-        self,
-        *,
-        mechanism: str,
-        unsettled_join: str,
-        unsettled_where: str,
-        limit: int = 100,
-    ) -> list[str]:
-        """Accepted negotiations settling through ``mechanism`` that a domain has not settled.
-
-        The domain names its own unsettled deals with a fixed join onto the
-        thread row ``t`` and a condition over it, so the limit applies after
-        that filter: completed deals never crowd out an unsettled one, however
-        many there are. Oldest first.
-        """
-
-        def _list() -> list[str]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                rows = conn.execute(
-                    f"""
-                    SELECT t.negotiation_id
-                    FROM negotiation_threads t
-                    {unsettled_join}
-                    WHERE t.terminal_state = 'success'
-                      AND t.agreement_bytes IS NOT NULL
-                      AND json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism') = ?
-                      AND ({unsettled_where})
-                    ORDER BY t.created_at ASC, t.negotiation_id ASC
-                    LIMIT ?
-                    """,
-                    (mechanism, limit),
-                ).fetchall()
-                return [str(row[0]) for row in rows]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_list)
 
     async def list_negotiations_for_listing(
         self,

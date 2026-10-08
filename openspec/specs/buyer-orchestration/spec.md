@@ -206,7 +206,7 @@ Generated buyer configuration MUST reference the XDG profile store and credentia
 
 ### Requirement: Payment buyers preserve accepted state
 
-VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain exact Agreement bytes, the advertised option, opaque settlement selection parameters, and seller-derived `settlement_data`. The buyer MUST supply its Arkhai account as `payer_account`, validate the mandate against the Agreement and local payment policy, approve with owner-scoped WorkOS credentials, poll the deterministic transaction ID, and call seller settlement with only the negotiation ID. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials. Resume MUST reuse accepted state and transaction identity, not current priority or an incomplete reconstructed listing. The typed storefront client settles an Agreement-settled deal with `settle_agreement(negotiation_id)`, which sends only the negotiation ID and the signer's principal; EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism. Agreement-settlement and refund responses are strict on both sides: the client refuses a response missing a required field, and each storefront validates its payment payload through the core response models before returning it.
+VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain exact Agreement bytes, the advertised option, opaque settlement selection parameters, and seller-derived `settlement_data`. Resume MUST reuse that accepted state and transaction identity, not current priority or an incomplete reconstructed listing.
 
 #### Scenario: Payment buyer resumes after approval
 
@@ -223,10 +223,27 @@ VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain
 - **WHEN** a verified payment has issued credits but the buyer did not observe credentials
 - **THEN** it retrieves the same grant through the authenticated seller boundary rather than approving or issuing again
 
+### Requirement: Payment buyers approve and settle by negotiation
+
+The buyer MUST supply its Arkhai account as `payer_account`, validate the mandate against the Agreement and local payment policy, approve with owner-scoped WorkOS credentials, poll the deterministic transaction ID, and call seller settlement with only the negotiation ID. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
+
+#### Scenario: Payment and marketplace credentials stay separate
+
+- **WHEN** a payment buyer approves a mandate and then settles
+- **THEN** the approval uses the owner's WorkOS credential, and the settle request is signed by the recorded profile signer and carries only the negotiation ID
+
+### Requirement: The typed client settles Agreement deals apart from EVM deals
+
+The typed storefront client MUST settle an Agreement-settled deal with `settle_agreement(negotiation_id)`, which sends only the negotiation ID and the signer's principal; EVM settlement is the separate `settle_evm`, so EVM arguments never appear on the agreement path. Both use the settle route contract, and the storefront dispatches on the accepted Agreement's mechanism.
+
 #### Scenario: A buyer settles a payments deal through the typed client
 
 - **WHEN** a buyer settles an accepted Arkhai payments deal with `settle_agreement`
 - **THEN** the request carries the negotiation ID and the buyer's principal and no EVM fields
+
+### Requirement: Agreement-settlement responses are strict on both sides
+
+The client MUST refuse an agreement-settlement or refund response missing a required field, and each storefront MUST validate its payment payload through the core response models before returning it.
 
 #### Scenario: A drifted settlement response is refused
 

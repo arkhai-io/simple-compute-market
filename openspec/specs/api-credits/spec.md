@@ -80,7 +80,7 @@ An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them th
 
 ### Requirement: Payment grants are principal-bound and exact once
 
-An accepted `arkhai.payments.v1` Agreement MUST bind service, positive quantity, key mode and optional key ID, canonical buyer and seller, amount, asset, and selected payment policy. The storefront MUST verify the signed receipt against its persisted mandate before issuance. The credits authority MUST accept `arkhai.payments.v1` and `alkahest.v1` issuance, key each grant by deterministic fulfillment identity, and reject changed reuse against its immutable request digest. Key ownership, balance, and quota remain authority-owned.
+An accepted `arkhai.payments.v1` Agreement MUST bind service, positive quantity, key mode and optional key ID, canonical buyer and seller, amount, asset, and payment policy. The storefront MUST verify the signed receipt against its persisted mandate first. The credits authority MUST accept `arkhai.payments.v1` and `alkahest.v1` issuance, key each grant by deterministic fulfillment ID, and reject changed reuse against its immutable request digest. Keys, balances, and quota stay authority-owned.
 
 #### Scenario: Issuance acknowledgement is lost
 

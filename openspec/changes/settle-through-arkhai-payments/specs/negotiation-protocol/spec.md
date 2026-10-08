@@ -1,32 +1,15 @@
-## REMOVED Requirements
+## ADDED Requirements
 
-### Requirement: Additive hosted settlement choice
+### Requirement: Acceptance persists opaque settlement data
 
-**Reason**: The hosted Stripe choice beside legacy Alkahest escrows is superseded by mechanism-neutral settlement options and one accepted Agreement.
+Seller acceptance MUST return exact `agreement_bytes` and any mechanism-owned `settlement_data` in the negotiation response and `NegotiationOutcome`. The runtime MUST persist them together in `negotiation_threads` at the acceptance chokepoint. Core MUST carry settlement data opaquely; domain settlement MUST load the accepted mandate by negotiation ID rather than rebuild it from history or current configuration.
 
-**Migration**: Publish Alkahest escrow terms inside its option parameters and use the accepted Agreement as the input to the selected settlement stage.
+#### Scenario: Payment acceptance is resumed
 
-### Requirement: Exact fiat minor-unit settlement
-
-**Reason**: The requirement derives a `fiat.stripe.v1` obligation and Checkout amount, both of which are removed.
-
-**Migration**: `arkhai.payments.v1` derives its `once` part from the agreed amount and asset in the Agreement.
+- **WHEN** a buyer or seller resumes an accepted `arkhai.payments.v1` negotiation
+- **THEN** it uses the same Agreement bytes and seller-derived mandate stored in `settlement_data`
 
 ## MODIFIED Requirements
-
-### Requirement: Deterministic agreed terms
-
-On acceptance, negotiation MUST produce exactly one Agreement object containing only the accepted deal terms and the identifiers needed to bind them: `negotiation_id`, `listing_id`, `listing_hash`, canonical `buyer` and `seller` principals, the selected settlement `{option_id, mechanism, params}`, `amount`, `asset`, `duration_seconds`, explicit `start_utc`, domain-owned `provision_terms`, and `accepted_at`. The seller MUST resolve any requested relative start, including “now”, to `start_utc` at acceptance. The acceptance response MUST preserve the Agreement as exact bytes; both participants MUST retain those bytes and MUST NOT rebuild the Agreement from transcript or accepted terms. Core MUST NOT define a universal Agreement hash; a settlement mechanism defines any hash it requires.
-
-#### Scenario: Seller accepts a proposal
-
-- **WHEN** a round terminates in acceptance
-- **THEN** the seller returns one Agreement containing only accepted terms, an exact selected settlement option, and an explicit start time rather than requiring buyer and seller to reduce the message history independently
-
-#### Scenario: Both participants retain the accepted Agreement
-
-- **WHEN** the buyer receives the accept response
-- **THEN** buyer and seller retain the exact Agreement bytes from that response and neither reconstructs or reserializes a replacement before settlement
 
 ### Requirement: Additive settlement option carriers
 
@@ -41,6 +24,20 @@ Listings and proposals MAY carry ordered `SettlementOption` envelopes containing
 
 - **WHEN** a listing supports charge-first settlement through `arkhai.payments.v1`
 - **THEN** its option is carried in `settlement_options` without rewriting legacy Alkahest escrow fields
+
+### Requirement: Deterministic agreed terms
+
+On acceptance, negotiation MUST produce exactly one Agreement object containing only the accepted deal terms and the identifiers needed to bind them: `negotiation_id`, `listing_id`, `listing_hash`, canonical `buyer` and `seller` principals, the selected settlement `{option_id, mechanism, asset, rates, params}`, opaque buyer `settlement_params`, `amount`, `asset`, `duration_seconds`, explicit `start_utc`, domain-owned `provision_terms`, and `accepted_at`. The seller MUST resolve any requested relative start, including “now”, to `start_utc` at acceptance. The acceptance response MUST preserve the Agreement as exact bytes; both participants MUST retain those bytes and MUST NOT rebuild the Agreement from transcript or accepted terms. Core MUST NOT define a universal Agreement hash; a settlement mechanism defines any hash it requires.
+
+#### Scenario: Seller accepts a proposal
+
+- **WHEN** a round terminates in acceptance
+- **THEN** the seller returns one Agreement containing only accepted terms, an exact selected settlement option, and an explicit start time rather than requiring buyer and seller to reduce the message history independently
+
+#### Scenario: Both participants retain the accepted Agreement
+
+- **WHEN** the buyer receives the accept response
+- **THEN** buyer and seller retain the exact Agreement bytes from that response and neither reconstructs or reserializes a replacement before settlement
 
 ### Requirement: Deterministic option identity
 
@@ -74,3 +71,45 @@ Every negotiation MUST persist durable ownership by the exact canonical scheme-t
 
 - **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `arkhai.payments.v1`
 - **THEN** the Agreement preserves both exact party principals and the settlement selection without requiring EVM addresses
+
+### Requirement: The seller's reference amount is the selected option's rate
+
+A seller's reference amount for a scalar negotiation MUST be derived from the amount rate of the
+option the buyer's proposal selects: the matched accepted escrow for an escrow proposal, or the
+settlement option matched by its identity for a settlement selection. A configured negotiation floor
+MUST apply only when the selected option advertises no rate. A reference amount MUST NOT be derived
+from an option the buyer did not select or from a rate in another asset. The negotiation runtime
+MUST give the domain the buyer's pinned proposal when it asks for the reference amount.
+
+#### Scenario: A second mechanism's option is selected on a two-mechanism listing
+
+- **WHEN** a listing offers an Alkahest option and an Arkhai payments option, and the buyer selects
+  the payments option
+- **THEN** the seller's reference amount is derived from the payments option's rate in its own minor
+  units, not from the Alkahest rate
+
+#### Scenario: A listing offering only non-escrow options is negotiated
+
+- **WHEN** a listing offers only Arkhai payments options with rates and the storefront configures a
+  negotiation floor
+- **THEN** the seller's reference amount is derived from the selected option's rate, and the floor
+  is not used
+
+#### Scenario: The selected option is a hidden reserve
+
+- **WHEN** the buyer selects an option that advertises no rate
+- **THEN** the seller's reference amount is derived from the configured negotiation floor
+
+## REMOVED Requirements
+
+### Requirement: Additive hosted settlement choice
+
+**Reason**: The hosted Stripe choice beside legacy Alkahest escrows is superseded by mechanism-neutral settlement options and one accepted Agreement.
+
+**Migration**: Publish Alkahest escrow terms inside its option parameters and use the accepted Agreement as the input to the selected settlement stage.
+
+### Requirement: Exact fiat minor-unit settlement
+
+**Reason**: The requirement derives a `fiat.stripe.v1` obligation and Checkout amount, both of which are removed.
+
+**Migration**: `arkhai.payments.v1` derives its `once` part from the agreed amount and asset in the Agreement.

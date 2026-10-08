@@ -502,7 +502,7 @@ A capacity-backed listing with a durable site mapping MUST route all capacity cl
 
 ### Requirement: Payment publication discloses mandate policy
 
-VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST publish ready payment clauses as independent `settlement_options` beside supported Alkahest alternatives. Every option MUST bind asset, rates, payee account, hold window, and agreement-deposit setting. No Stripe funding profile or provider object MAY enter an option. Bare-metal publication MUST also require a non-stale selected-site projection with exclusive allocation and supported SSH access; API-credit publication MUST use sellable quota for the named service. Pending payment MUST NOT renew an accepted capacity hold or select another site.
+VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST publish ready payment clauses as independent `settlement_options` beside supported Alkahest alternatives. Every option MUST bind asset, rates, payee account, hold window, and agreement-deposit setting. No Stripe funding profile or provider object MAY enter an option.
 
 #### Scenario: A payment clause is ready
 
@@ -513,6 +513,15 @@ VM, bare-metal, and API-credit storefronts supporting `arkhai.payments.v1` MUST 
 
 - **WHEN** a clause lacks required payee, asset, window, or deposit policy
 - **THEN** publication rejects it without inferring values from an Alkahest price or mutating accepted deals
+
+### Requirement: Domain payment publication respects domain capacity
+
+Bare-metal payment publication MUST require a non-stale selected-site projection with exclusive allocation and supported SSH access; API-credit publication MUST use sellable quota for the named service. Pending payment MUST NOT renew an accepted capacity hold or select another site.
+
+#### Scenario: A bare-metal site projection is stale
+
+- **WHEN** a bare-metal storefront's selected-site projection is stale
+- **THEN** it publishes no payment option for that site until a fresh projection shows exclusive allocation and supported SSH access
 
 ### Requirement: A listing's origin site is not its admission authority
 

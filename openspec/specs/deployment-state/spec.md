@@ -507,7 +507,7 @@ described as deployable.
 
 ### Requirement: Domain payment persistence is role-owned
 
-Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment/grant progress MUST remain under that storefront's ordered migrations. The payments service MUST own transaction, ledger, hold-release, fee, and dispute state. VM and bare-metal MUST retain selected-site authority bindings independently of payment trust. API credits MUST retain the separate registry, credits authority, gated application, storefront, and buyer roles.
+Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment or grant progress MUST stay under that storefront's ordered migrations. The payments service owns transaction, ledger, hold-release, fee, and dispute state. VM and bare metal MUST keep selected-site authority bindings independent of payment trust. API credits MUST keep its registry, credits authority, gated application, storefront, and buyer roles separate.
 
 #### Scenario: Seller restarts after payment approval
 

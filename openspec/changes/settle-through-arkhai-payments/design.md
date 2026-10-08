@@ -202,7 +202,7 @@ The kit owns the reversal operation and outcome classification. Each domain adds
 
 ## Accepted permanent wording
 
-Exact text for promotion at closeout. Destinations are listed in [Planned promotion](#planned-promotion).
+Exact text promoted at closeout. Destinations are listed in the [Promotion record](#promotion-record).
 
 ### `docs/development/TESTING.md`
 
@@ -471,7 +471,7 @@ Resolved against development head `4c55a328`, merged into this branch's head `ce
   - Bare metal's `negotiation_service.py` was retired on development, and its payment path moved into the new runtime. That runtime refused any exact selection whose mechanism has no obligation builder, which was every bare-metal payment negotiation; an Agreement-only mechanism is now admitted. Bare metal builds the Agreement for every accepted deal, as VM does, and acceptance records the settlement data and payment record.
   - Bare metal follows VM's rule for what a deal provisions: a per-mechanism capacity declaration, the round hook's admission rules applied to every provisioning deal, and terms derived from the trusted listing and the buyer's message whatever the mechanism. The hosted-only `bare_metal` option-parameter path is removed.
 - **M3. Settle surface.** `settle_evm` keeps development's narrower signature, the admin settle route service is development's, and development's callers of `StorefrontClient.settle` now call `settle_evm`. The settle, settle-status, and refund routes now have the architecture's route contract: `storefront_client.settlement_routes` declares each route's method, path, signed operation, resource, and role once. It lives in the thin client package because the client and all three storefronts already depend on it and the client cannot depend on `core_storefront`. The typed client builds its requests from it; VM, bare-metal, and API-credit authentication bind through it; and each storefront's tests check that every contract is mounted. VM's response-signing map lost three dead hosted settlement branches. `kit-owned-storefront-shell` can consume the same declarations when it extracts the bindings.
-- **M4. Restart re-drive.** Accepted payment deals now converge without the buyer. The payments kit provides one reconciliation pass (`market_arkhai_payments.reconciliation`) that advances each deal through the domain's own settle path and contains each deal's failure. Each domain selects its unsettled deals through the core query `list_accepted_negotiations_settling_through`, supplying its own join and condition so the limit applies after its filter and completed deals never crowd out an unsettled one; each domain tests this with more completed deals than the limit. The unsettled deals are those with no verified receipt, refunds left `refunding`, and, per domain, delivery that never started (bare metal) or credit issuance still open (API credits). VM runs the pass after each fulfillment-resume sweep. Bare metal and API credits run a gated `payment_reconciliation` loop with a registered step, started only when payments is composed. Each domain has an integration test that approves a payment, recreates the storefront over the same SQLite file, and shows delivery without a buyer settle call. `kit-owned-listing-and-fulfillment-lifecycles` can absorb the pass when it extracts convergence.
+- **M4. Restart re-drive.** Accepted payment deals now converge without the buyer. The payments kit provides one reconciliation pass (`market_arkhai_payments.reconciliation`) that advances each deal through the domain's own settle path and contains each deal's failure. Each domain selects its unsettled deals with its own persistence query, `list_unsettled_payment_negotiations`, which joins the accepted negotiation threads to the domain's status table and applies that filter before the limit, so completed deals never crowd out an unsettled one; a malformed Agreement is skipped rather than failing the pass. Each domain tests both: more completed deals than the limit, and a corrupt accepted thread. The unsettled deals are those with no verified receipt, refunds left `refunding`, and, per domain, delivery that never started (bare metal) or credit issuance still open (API credits). VM runs the pass after each fulfillment-resume sweep. Bare metal and API credits run a gated `payment_reconciliation` loop with a registered step, started only when payments is composed. Each domain has an integration test that approves a payment, recreates the storefront over the same SQLite file, and shows delivery without a buyer settle call. `kit-owned-listing-and-fulfillment-lifecycles` can absorb the pass when it extracts convergence.
 - **M5. Bare-metal failure policy.** Unchanged: development's §7 has not landed, so bare metal has no failure policy and the `refund` action does not reach it yet.
 - **M6. Bare-metal fulfillment trigger.** Development's §7.1 has not landed; `begin` remains for Alkahest and now names the escrow. Payment settlement still starts fulfillment itself (R6), through development's capacity commit, and the bare-metal integration suite proves it through real negotiation.
 - **M7. Permanent documents.** Development's new documentation is kept and its hosted content removed. This change's sections are re-applied, and its requirements touched by the merge were checked to be unchanged.
@@ -487,18 +487,20 @@ Other findings:
 - **Case-colliding configuration tables.** Git merged the development branch's `[settlement]` table in `domains/apicredits/storefront/storefront.credits.toml`, which enables Alkahest, beside this change's `[Settlement]` table, which sets `priority = []`. The settings loader treats keys case-insensitively, so the later table won: the credits storefront started without Alkahest clients and refused every Alkahest settle. The file now has one `[settlement]` table carrying both sections; no other configuration in the tree has the collision.
 - **Tests migrated from hosted fixtures.** Development tested three general behaviours only through hosted selections: API credits rejecting a mid-negotiation selection switch, API credits revalidating the listing's option at acceptance, and the VM buyer pricing from the selected option's rate. Each was rewritten with an Arkhai payments option rather than deleted; the selection-switch test also refuses a changed payer account.
 
-## Planned promotion
+## Promotion record
 
-| Decision | Planned permanent location |
+Promoted at closeout on 2026-10-08. Each decision is stated at its permanent location.
+
+| Decision | Permanent location |
 |---|---|
 | R1 agreement settlement client methods and parity | `openspec/specs/buyer-orchestration/spec.md#requirement-payment-buyers-preserve-accepted-state`; `docs/development/TESTING.md` sync/async parity rule (already present) |
 | R2 receipt outcomes and status mapping | `openspec/specs/settlement-servicing/spec.md#requirement-negotiation-scoped-payment-settlement-converges` |
 | R3 vector-pinned receipt fixture and payment test levels | `docs/development/TESTING.md` (wording above); `openspec/specs/test-compatibility/spec.md#requirement-payment-evidence-is-attributed-at-its-owning-boundary` |
 | R4 kit-owned mechanism, single settlement-data shape, neutral settle fields | `openspec/specs/settlement-servicing/spec.md` and companion `architecture.md#charge-first-payment-settlement`; `openspec/specs/market-composition/spec.md#requirement-arkhai-payments-registers-as-a-peer-settlement-mechanism` |
-| R5 attachment policies | `openspec/specs/settlement-servicing/spec.md#requirement-arkhai-payments-settles-charge-first-from-an-agreement` (wording above); `openspec/specs/settlement-configuration/spec.md#requirement-payments-configuration-separates-accounts-and-credentials`; `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover` |
+| R5 attachment policies | `openspec/specs/settlement-servicing/spec.md#requirement-arkhai-payments-settles-charge-first-from-an-agreement` (wording above); `openspec/specs/settlement-configuration/spec.md#requirement-agreement-attachment-is-a-policy-each-side-owns`; `docs/development/DEPLOYMENT_AND_CONFIG.md#settlement-consumer-configuration-and-cutover` |
 | R6 bare-metal settle starts fulfillment | `openspec/specs/physical-provisioning/spec.md#requirement-signed-payment-receipts-gate-selected-site-execution` |
 | R7 seller-initiated refunds | `openspec/specs/settlement-servicing/spec.md` (wording above) |
-| R8 mechanism-dispatched refund failure action | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-configuration/spec.md` |
+| R8 mechanism-dispatched refund failure action | `openspec/specs/settlement-servicing/spec.md`; `openspec/specs/settlement-configuration/spec.md#requirement-the-refund-failure-action-is-opt-in-and-follows-the-accepted-mechanism` |
 | R9 snapshot proofs not trusted | `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` (current limitation) |
 | R11 accepted deals serviced from their accepted artifact | `openspec/specs/settlement-servicing/spec.md#requirement-mechanism-configuration-cannot-reinterpret-durable-plans` (requirement already present; servicing-capability wording) and `openspec/specs/settlement-configuration/spec.md#requirement-recovery-follows-the-accepted-settlement-option` |
 | R12 durable delivery-start and refund-intent ordering | `openspec/specs/settlement-servicing/spec.md` (wording above) and companion `architecture.md#charge-first-payment-settlement` |
@@ -507,6 +509,7 @@ Other findings:
 | R15 attachment contract | `openspec/specs/settlement-servicing/architecture.md#charge-first-payment-settlement` |
 | R16 advertised option bound at acceptance | `openspec/specs/buyer-orchestration/spec.md` (acceptance validation binds the Agreement to the advertised option for every mechanism) |
 | R10 core carrier description | `core/src/market_core/schemas.py` docstrings, consistent with `openspec/specs/settlement-servicing/spec.md#requirement-mechanism-neutral-plan-carrier` |
+| Goal 6 current state | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice`: agreement settlement, owned attachment policies, seller-initiated refunds, and seller-side reconciliation; the live-qualification row names the payments service's tests as its owner |
 
 These rows move into the design promotion record as each promotion lands.
 
@@ -516,6 +519,8 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`, and archived as supersede
 
 ## Deferred
 
+
+- **A paginated core query for accepted deals.** Reconciliation candidates come from one persistence query per domain. A typed, cursor-paginated core query over accepted negotiations by mechanism, which domains filter with their typed loaders, would keep SQL out of the domains entirely; it belongs to its own change.
 - **Identity slot.** `kit/identity` already dispatches by scheme, but the listing carries one `seller_principal`. Revisit when a listing needs to advertise several identity schemes.
 - **Negotiation slot.** `kit/negotiation-runtime` builds in one protocol (counter/accept/exit, an amount, `AgreementTerms`). Revisit when a second negotiation protocol arrives, e.g. auctions.
 - **Per-stage kit declarations** (which predecessor outputs a stage accepts, for filtering). Revisit with the negotiation slot.

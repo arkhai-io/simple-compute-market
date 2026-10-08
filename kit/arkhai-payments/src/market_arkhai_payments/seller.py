@@ -96,7 +96,7 @@ class ReceiptInvalid:
 
 @dataclass(frozen=True, slots=True)
 class ReceiptUnavailable:
-    """The service could not be reached or answered outside its published contract."""
+    """The service was unreachable or reported a transient failure; retrying may verify it."""
 
     transaction_id: str
     reason: str
@@ -141,12 +141,16 @@ class NothingToReverse:
 
 @dataclass(frozen=True, slots=True)
 class RefundUnavailable:
+    """The reversal hit a transient failure; retrying may complete it."""
+
     transaction_id: str
     reason: str
 
 
 @dataclass(frozen=True, slots=True)
 class RefundBlocked:
+    """The reversal failed in a way only the seller's operator can repair."""
+
     transaction_id: str
     reason: str
 

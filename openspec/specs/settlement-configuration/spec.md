@@ -8,7 +8,16 @@ Define one typed operator and consumer contract for configuring, validating, ins
 
 ### Requirement: Payments configuration separates accounts and credentials
 
-Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, and an API-key environment-variable reference, not the resolved credential. Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy; VM uses `[vms].payer_account` and API credits uses `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `payee_account`, not a service-policy account field. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, and an API-key environment-variable reference, not the resolved credential. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+
+#### Scenario: Credentials stay out of public surfaces
+
+- **WHEN** a storefront or buyer is configured for Arkhai payments
+- **THEN** its configuration names the API key's environment variable only, and the credential appears in no public option, Agreement, run log, or status
+
+### Requirement: Payment accounts come from domain input and the accepted option
+
+Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy: VM uses `[vms].payer_account` and API credits `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `payee_account`, not a service-policy account field.
 
 #### Scenario: Buyer chooses a payer account
 
@@ -120,7 +129,7 @@ Each affected role MUST provide dry-run and write modes that map still-supported
 
 ### Requirement: Settlement configuration selects explicit peer mechanisms
 
-Settlement configuration MUST have one root containing a duplicate-free ordered list of canonical mechanism IDs and one typed subsection per installed mechanism. `alkahest.v1` MUST map to `[Settlement.alkahest]` and `arkhai.payments.v1` MUST map to `[Settlement.arkhai_payments]`. `fiat.stripe.v1` MUST NOT be registered, accepted as an alias, or silently mapped to Arkhai payments. Identity, wallet, and chain resources MUST remain outside mechanism subsections. New defaults MUST enable no mechanism or implicit priority; initialization MUST require an explicit choice, while migration of still-supported settings MUST preserve the effective enabled set and order. Unknown mechanism IDs, unknown keys, duplicate priority entries, and role-inapplicable required fields MUST fail validation.
+Settlement configuration MUST have one root with a duplicate-free ordered list of mechanism IDs and one typed subsection per installed mechanism (`alkahest.v1` as `[Settlement.alkahest]`, `arkhai.payments.v1` as `[Settlement.arkhai_payments]`). `fiat.stripe.v1` MUST NOT be registered, aliased, or mapped to Arkhai payments. Identity, wallet, and chain resources MUST stay outside mechanism subsections. Unknown IDs or keys, duplicates, and role-inapplicable required fields MUST fail validation.
 
 #### Scenario: Seller enables Arkhai payments only
 
@@ -132,6 +141,10 @@ Settlement configuration MUST have one root containing a duplicate-free ordered 
 - **WHEN** configuration names a mechanism for which the composition root has no registration, including `fiat.stripe.v1`
 - **THEN** startup and publication fail with the unknown canonical mechanism ID and do not substitute another mechanism
 
+### Requirement: New configuration chooses no mechanism
+
+New defaults MUST enable no mechanism and no implicit priority; initialization MUST require an explicit choice, while migration of still-supported settings MUST preserve the effective enabled set and order.
+
 #### Scenario: New config has no mechanism choice
 
 - **WHEN** an operator generates or starts from defaults without selecting a settlement mechanism
@@ -139,7 +152,7 @@ Settlement configuration MUST have one root containing a duplicate-free ordered 
 
 ### Requirement: Mechanism registrations own typed configuration and readiness
 
-Each installed mechanism MUST register its canonical ID, configuration key and schema, applicable roles, preflight, listing-option builder, buyer compatibility hook, typed public settlement-clause projections, and any mechanism-specific operator commands. A client factory and accepted-obligation/verifier hooks MAY be absent for an Agreement-based stage that does not use the conditional-escrow runtime. Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and MUST declare their applicable roles, operators, and value types. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition; it MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
+Each installed mechanism MUST register its canonical ID, configuration key and schema, applicable roles, preflight, listing-option builder, buyer compatibility hook, typed public settlement-clause projections, and any mechanism-specific operator commands. A client factory and accepted-obligation or verifier hooks MAY be absent for an Agreement-based stage that does not use the conditional-escrow runtime.
 
 #### Scenario: Arkhai payments readiness is evaluated
 
@@ -150,6 +163,15 @@ Each installed mechanism MUST register its canonical ID, configuration key and s
 
 - **WHEN** a buyer clause filters on the public agreement-deposit setting of an advertised `arkhai.payments.v1` option
 - **THEN** the mechanism registration projects that typed option value and shared selection compares it without interpreting opaque parameters
+
+### Requirement: Mechanism clause fields stay in their namespace
+
+Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
+
+#### Scenario: A mechanism contributes a clause field
+
+- **WHEN** a mechanism adds a publication clause field
+- **THEN** the field lives under the mechanism's configuration key with its declared roles, operators, and value types, and the shared grammar composes it without interpreting its value
 
 ### Requirement: Mechanism-specific commands stay registration-owned
 
@@ -195,14 +217,19 @@ Run logs MAY record configuration-schema version, the public resolved mechanism 
 
 ### Requirement: Settlement options keep mechanism-owned parameters opaque
 
-A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option. The core MUST NOT interpret mechanism-specific values in `params`. Alkahest options carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
+A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option, and the core MUST NOT interpret mechanism-specific values in `params`.
 
 #### Scenario: Alkahest option is published
 
 - **WHEN** a seller publishes an Alkahest settlement choice
 - **THEN** its escrow policy is interpreted by the Alkahest kit, not by Arkhai payments
 
+### Requirement: Each mechanism's option carries its own parameters
+
+Alkahest options MUST carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
+
 #### Scenario: Arkhai payment option is published
 
 - **WHEN** a seller publishes an `arkhai.payments.v1` option
 - **THEN** the option identifies its payee account, declared hold window, and agreement-deposit setting while core exposes only the shared option envelope
+

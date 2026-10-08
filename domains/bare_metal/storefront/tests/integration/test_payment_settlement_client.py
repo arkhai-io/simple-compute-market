@@ -502,3 +502,21 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(harness):
         negotiation_id=harness.negotiation_id
     )
     assert record["status"] == "settlement_verified"
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_agreement_never_stops_reconciliation(harness):
+    """One corrupt accepted thread is skipped; the stranded deal still converges."""
+    db_path = harness.runtime.db.db_path
+    _clone_row(
+        db_path, "negotiation_threads", harness.negotiation_id, "corrupt",
+        created_at="2000-01-01T00:00:00", agreement_bytes=b"{not json",
+    )
+    _clone_row(db_path, "bare_metal_settlement_records", harness.negotiation_id, "corrupt")
+    harness.serve()
+
+    done = await harness.runtime.settlement_service().reconcile_payments_once(limit=1)
+
+    assert (done.attempted, done.failed) == (1, 0)
+    assert len(harness.provisioning.begin_calls) == 1
+

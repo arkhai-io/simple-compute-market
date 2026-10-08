@@ -134,11 +134,8 @@ class ApiCreditPaymentSettlementService:
         still open, and refunds left `refunding`; the same settle path a buyer's
         call takes advances each.
         """
-        candidates = await self.db.list_accepted_negotiations_settling_through(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM,
-            unsettled_join="LEFT JOIN escrows e ON e.escrow_uid = t.negotiation_id",
-            unsettled_where="e.escrow_uid IS NULL OR e.status IN ('provisioning', 'refunding')",
-            limit=limit,
+        candidates = await self.db.list_unsettled_payment_negotiations(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
         )
 
         async def settle(negotiation_id: str) -> None:

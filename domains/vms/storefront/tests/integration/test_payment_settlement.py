@@ -615,3 +615,21 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(make):
     assert (done.attempted, done.failed) == (1, 0)
     await h.delivered()
     assert h.delivery.starts == [NEGOTIATION]
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_agreement_never_stops_reconciliation(make):
+    """One corrupt accepted thread is skipped; the stranded deal still converges."""
+    h = await make()
+    _clone_row(
+        h.db.db_path, "negotiation_threads", NEGOTIATION, "corrupt",
+        created_at="2000-01-01T00:00:00", agreement_bytes=b"{not json",
+    )
+    h.serve()
+
+    done = await h.coordinator.reconcile_once(limit=1)
+
+    assert (done.attempted, done.failed) == (1, 0)
+    await h.delivered()
+    assert h.delivery.starts == [NEGOTIATION]
+

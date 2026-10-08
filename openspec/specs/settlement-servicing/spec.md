@@ -214,7 +214,7 @@ Negotiation MUST emit one explicit Agreement containing only accepted deal terms
 
 ### Requirement: Principal-bound marketplace actions use exact actors
 
-Settlement Agreements, accepted fulfillment references, heartbeats, payment approvals, status/refund requests, and mechanism operation authorization MUST bind the canonical scheme-tagged principals authorized by the accepted negotiation and the selected mechanism. A bare address, identifier, payment account reference, provider identifier, or API credential MUST NOT replace the authorized marketplace principal. The marketplace MUST treat principals as opaque and MUST NOT infer or persist wallet or private-key aliases from them.
+Settlement Agreements, accepted fulfillment references, heartbeats, payment approvals, status and refund requests, and mechanism operation authorization MUST bind the canonical scheme-tagged principals that the accepted negotiation and selected mechanism authorize. No address, identifier, payment account reference, provider identifier, or API credential may replace one. The marketplace MUST treat principals as opaque and MUST NOT infer or persist wallet or private-key aliases from them.
 
 #### Scenario: Heartbeat uses the wrong scheme
 
@@ -247,9 +247,7 @@ A settlement mechanism MAY require an EVM address, wallet, RPC endpoint, chain I
 
 ### Requirement: Arkhai payments settles charge-first from an agreement
 
-The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepted Agreement. Its `deal` MUST be `sha256(JCS(agreement))`, and its transaction ID MUST be `sha256(JCS(mandate))`. The mandate MUST identify `settlement_params.payer_account`, the buyer's Arkhai account, as `from`, the payee account declared by the selected option as `to`, and one `once` part for the agreed amount and asset. The hold MUST be `ceil(start_utc - accepted_at) + duration_seconds + window` in whole seconds, with `window` from the selected option. Approval expiry MUST be `floor(accepted_at) + window`. Fractional timestamps MUST remain unchanged in the Agreement and its deal hash. The mandate MUST use the service's published fee policy, authorize `start` and `stop` for the buyer and seller and `reverse` for the seller and Arkhai dispute authority (never the buyer), and use the fixed nonce `arkhai.payments.v1`. The seller MUST return the mandate and Agreement so both parties know the transaction ID before approval.
-
-The buyer kit MUST check the mandate against the exact Agreement and buyer policy before approving it with the owner's WorkOS user-scoped API credential. The buyer MUST attach the exact Agreement at approval only when its `attach_agreement` policy is enabled, which it is not by default, and MUST NOT perform the seller's deposit. If the selected option sets `deposit_agreement` and the transaction has no Agreement attachment, the seller MUST attach it after verifying the receipt and before any delivery effect. A failed deposit is retryable and blocks delivery. Both parties MUST poll the same transaction ID. The seller MUST NOT provision until it verifies an Arkhai-signed receipt matching that transaction and the Agreement's `deal`. A seller refund MUST use `reverse`; the payments service releases an un-reversed hold without a settlement-service call.
+The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepted Agreement and return the mandate and Agreement, so both parties know the transaction ID before approval. Both parties MUST poll that same transaction ID. The seller MUST NOT provision until it verifies an Arkhai-signed receipt matching the transaction and the Agreement's `deal`.
 
 #### Scenario: Seller derives a mandate before approval
 
@@ -261,11 +259,28 @@ The buyer kit MUST check the mandate against the exact Agreement and buyer polic
 - **WHEN** the seller polls the transaction ID and receives a receipt
 - **THEN** it verifies the Arkhai signature and matching transaction and Agreement deal before provisioning, and rejects an invalid, absent, or mismatched receipt
 
+### Requirement: The payments mandate is derived exactly from the Agreement
+
+The mandate's `deal` MUST be `sha256(JCS(agreement))` and its transaction ID `sha256(JCS(mandate))`. It MUST name `settlement_params.payer_account` as `from`, the selected option's payee account as `to`, and one `once` part for the agreed amount and asset. It MUST use the service's published fee policy and the fixed nonce `arkhai.payments.v1`, and authorize `start` and `stop` for buyer and seller and `reverse` for the seller and Arkhai dispute authority.
+
+#### Scenario: Hold and approval expiry follow the accepted timing
+
+- **WHEN** a seller derives a mandate from an Agreement accepted at `accepted_at`
+- **THEN** the hold is `ceil(start_utc - accepted_at) + duration_seconds + window` whole seconds, approval expires at `floor(accepted_at) + window`, and fractional timestamps stay unchanged in the Agreement and its deal hash
+
+### Requirement: The buyer approves only a mandate it has checked
+
+The buyer kit MUST check the mandate against the exact Agreement and its own policy before approving it with the owner's WorkOS user-scoped API credential. It MUST attach the exact Agreement at approval only when its `attach_agreement` policy is enabled, which it is not by default, and MUST NOT perform the seller's deposit.
+
 #### Scenario: Buyer attaches only by its own policy
 
 - **WHEN** the buyer approves a mandate with `attach_agreement` disabled
 - **THEN** the approval carries no attachment, whatever the selected option's
   `deposit_agreement` setting
+
+### Requirement: The seller deposits the Agreement before delivering
+
+If the selected option sets `deposit_agreement` and the transaction has no Agreement attachment, the seller MUST attach it after verifying the receipt and before any delivery effect. A failed deposit MUST be retryable and MUST block delivery.
 
 #### Scenario: Seller deposits before delivering
 
@@ -273,6 +288,10 @@ The buyer kit MUST check the mandate against the exact Agreement and buyer polic
   transaction has no Agreement attachment
 - **THEN** the seller attaches the exact Agreement before any delivery effect,
   and a deposit failure returns retryable unavailable without delivery
+
+### Requirement: Only the seller reverses a held payment
+
+A refund MUST be seller-initiated through `reverse`, which is authorized for the seller and the Arkhai dispute authority and never for the buyer. The payments service releases an un-reversed hold without a settlement-service call.
 
 #### Scenario: Seller operator refunds a held payment
 
@@ -299,7 +318,16 @@ The buyer kit MUST check the mandate against the exact Agreement and buyer polic
 
 ### Requirement: Negotiation-scoped payment settlement converges
 
-The seller MUST derive the mandate at acceptance and store it in opaque `settlement_data` beside exact `agreement_bytes` in `negotiation_threads`. Buyer settlement requests MUST carry only the negotiation ID. The seller MUST authenticate the accepted buyer, load accepted state, poll the deterministic transaction ID, and verify the signed receipt against the mandate before VM or bare-metal provisioning or API-credit issuance. Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment/grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it permanently pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon. A failure caused by the seller's own integration (an authentication or authorization error, an unknown account, missing credentials or servicing configuration, a protocol or schema violation, another transaction ID, or an Agreement attachment that does not match the deal) is `Blocked`: the storefront answers 500 and logs it as an error, and a refund reports the matching `RefundBlocked`.
+The seller MUST derive the mandate at acceptance and store it in opaque `settlement_data` beside exact `agreement_bytes` in `negotiation_threads`. Buyer settlement requests MUST carry only the negotiation ID. The seller MUST authenticate the accepted buyer, load accepted state, poll the deterministic transaction ID, and verify the signed receipt against the mandate before VM or bare-metal provisioning or API-credit issuance.
+
+#### Scenario: Accepted timestamps have fractional seconds
+
+- **WHEN** acceptance and start times are not whole seconds
+- **THEN** mandate derivation rounds the hold interval up and approval expiry down without rewriting the Agreement
+
+### Requirement: Payment settlement is retryable and idempotent
+
+Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment or grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon.
 
 #### Scenario: Settlement is called before approval completes
 
@@ -311,10 +339,9 @@ The seller MUST derive the mandate at acceptance and store it in opaque `settlem
 - **WHEN** a retry finds nonterminal domain progress after a verified payment
 - **THEN** it resumes or retrieves the same durable domain operation without charging or delivering twice
 
-#### Scenario: Accepted timestamps have fractional seconds
+### Requirement: Seller integration faults are blocked, not retried
 
-- **WHEN** acceptance and start times are not whole seconds
-- **THEN** mandate derivation rounds the hold interval up and approval expiry down without rewriting the Agreement
+A failure caused by the seller's own integration (an authentication or authorization error, an unknown account, missing credentials or servicing configuration, a protocol or schema violation, another transaction ID, or a non-matching Agreement attachment) MUST be `Blocked`: the storefront answers 500 and logs it as an error, and a refund reports the matching `RefundBlocked`.
 
 #### Scenario: The seller's integration fault blocks settlement
 

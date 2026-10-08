@@ -10,11 +10,11 @@ from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
-    BareMetalResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
+    BareMetalResult,
     BareMetalTerms,
     bare_metal_source_identity,
 )
@@ -32,8 +32,8 @@ from market_contact_exchange import (
 )
 from market_core import MarketDomainContract, validate_domain_contract
 from market_identity import Identity
-from market_settlement_runtime import settlement_migrations
 from market_pool_overrides import pool_override_migrations
+from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
@@ -83,6 +83,36 @@ class SQLiteClient(CoreSQLiteClient):
             *pool_override_migrations(),
             *BARE_METAL_STOREFRONT_MIGRATIONS,
         )
+
+    async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
+        """Accepted payment deals not yet verified, refunds left `refunding`, and verified deals whose delivery never started.
+
+        The filter runs before the limit, so completed deals never crowd out an
+        unsettled one. A malformed Agreement is skipped, never fatal to the query.
+        """
+
+        def load() -> list[str]:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT t.negotiation_id
+                    FROM negotiation_threads t
+                    JOIN bare_metal_settlement_records r ON r.negotiation_id = t.negotiation_id
+                    LEFT JOIN bare_metal_fulfillment_lifecycle l ON l.negotiation_id = t.negotiation_id
+                    WHERE t.terminal_state = 'success'
+                      AND t.agreement_bytes IS NOT NULL
+                      AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
+                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                          END = ?
+                      AND (r.status IN ('accepted', 'refunding') OR (r.status = 'settlement_verified' AND l.negotiation_id IS NULL))
+                    ORDER BY t.created_at ASC, t.negotiation_id ASC
+                    LIMIT ?
+                    """,
+                    (mechanism, limit),
+                ).fetchall()
+            return [str(row[0]) for row in rows]
+
+        return await asyncio.to_thread(load)
 
     async def count_open_bare_metal_resources(self) -> int:
         """Count open, unpaused bare-metal listings for operator status."""
