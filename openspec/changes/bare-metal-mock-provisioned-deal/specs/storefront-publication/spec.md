@@ -158,3 +158,24 @@ verify, or no site authority is configured.
 - **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource is
   reserved by another deal
 - **THEN** the opening is refused with the availability reason
+
+## ADDED Requirements
+
+### Requirement: The bare-metal storefront reports its deal readiness
+
+The bare-metal storefront's administrator status MUST report its registry's reachability, its seller chain's viability, its configured Alkahest chains, and the provisioning contract version it speaks, and MUST admit a configured site authority under the `service` role. When it records a site's capacity release, it MUST record a `fulfillment/capacity_released` stage event.
+
+#### Scenario: A site checks its link to the storefront
+
+- **WHEN** a configured site authority reads the storefront's status under the `service` role
+- **THEN** the storefront answers, signed; any other service principal is refused
+
+#### Scenario: Readiness is read before a deal
+
+- **WHEN** an administrator reads the storefront's status
+- **THEN** it reports `registry`, `negotiation_strategy`, and `alkahest` checks, judged per key as VM's are, and `provisioning_contract_version`, while the `/health` probe makes no registry call
+
+#### Scenario: A site releases a deal's capacity
+
+- **WHEN** the storefront records a capacity release from the reservation's site
+- **THEN** its stage-event log carries a `fulfillment/capacity_released` event for the deal

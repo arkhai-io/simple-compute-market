@@ -108,7 +108,7 @@ the missing controls are built (below).
 | 08a evaluate-settle, 08c evaluate-job, 08b settle → dispatching | Same; bare metal's evaluate-settle previews scheduling and materialization |
 | 09a release gate, converge to active; 09a2 listing closes | Same; the publication dry run then step closes the listing as unavailable |
 | 09b ready and credentials | Buyer result carries no access coordinates; buyer access returns host, port, and user |
-| 09bb settlement-servicing dry run then step → claim | Same |
+| 09bb settlement-servicing dry run then step → claim | Bare metal's own: the servicing step publishes the evidence digest, which resolves for the buyer ("Section 9 design: the bare-metal deal on the shared stages", decision 3) |
 | 09c lease registered | Same, through the bare-metal lease view |
 | 10a–11b expire lease, gated teardown, release, re-reserve | Same; release reaches the storefront through the capacity-released callback |
 | — | A second deal on the freed host: buyer-requested teardown sent twice returns the same operation, capacity is released once, and publication reopens the listing |
@@ -2596,7 +2596,7 @@ Design review of this section (2026-10-07), with the maintainer's dispositions:
 | Access ownership and VM's cutover are undesigned | Moved, with the correction |
 | A configured but disabled mechanism may still strand obligations | Accepted: recovery resources are required while configured; the startup refusal for an unconfigured mechanism moves, for all three domains |
 | Validation must grow with the scope | Moot for the moved work; this plan validates its own pieces |
-| The Zone.Identifier files remain | They are tombstoned in the fileset and deleted after packaging |
+| The Zone.Identifier files remain | They are tombstoned in the fileset and deleted after packaging. The 2026-10-08 snapshot carried them again; Section 8's review fixes tombstone them again |
 
 Second design review of this section (2026-10-07), with the maintainer's dispositions:
 
@@ -2766,11 +2766,12 @@ Decisions:
    - each domain module subclasses every shared stage once, in the shared order, named
      `Test` plus the base's name, so stage IDs and test names cannot drift, and each
      subclass body is empty;
-   - every field `ComputeDealState` declares is read by a shared stage or by each
-     domain module (`_supply_seeded` is read by the domains' first listing stages);
-   - every field a shared stage requires is produced by a shared stage or by each
-     domain module;
-   - every field a stage writes or requires is declared on its state class.
+   - every field a stage writes or requires is declared on its state class;
+   - in each domain's run order, with each shared stage standing for the body it
+     runs, every field a stage requires or reads is produced by an earlier stage
+     (or, for a read, earlier in the same stage), each field `ComputeDealState`
+     declares has exactly one producer, and each is read by a stage after its
+     producer.
 7. **Helpers move to `helpers/compute_deal.py` and `helpers/escrow.py`**, and importers
    import from there, with no re-export from VM's conftest: `DealLease`, `SiteCapacity`,
    `advance_fulfillment_to`, `wait_for_stage_event`, `delete_mock_rules_if_present`,
@@ -2782,12 +2783,24 @@ Decisions:
    reads VM's capacity-event report. The escrow helper's `_ensure_ws_rpc_url` becomes
    `ensure_ws_rpc_url`, since two modules outside it call it. Function-level imports of
    moved helpers go to module level; `host_registry.py` stays VM's.
-8. **Readiness checks bare metal does not report are Section 9's.** 00b, 00d, and 00g
-   stay shared as VM runs them. Section 9 decides, before it implements its driver,
+8. **Readiness checks bare metal does not report are Section 9's** (decided in
+   "Section 9 design: the bare-metal deal on the shared stages", decision 1). 00b,
+   00d, and 00g stay shared as VM runs them. Section 9 decides, before it implements its driver,
    whether the bare-metal storefront reports `registry`, `negotiation_strategy`, and
    `alkahest` checks or those stages become each domain's own; the first follows
    decision 1 and the delta's rule that a domain's difference is resolved in its
    storefront composition, not in the stage.
+
+Implementation review (2026-10-08), with the maintainer's dispositions. The review
+found the stage contract right on the happy path and incomplete on failure paths:
+
+| Finding | Disposition |
+|---|---|
+| `fulfillment_id` had two producers: 08b wrote the delivery fulfillment and 10b rewrote it from the lease. If 10b failed before its write, 11a and 11b ran against a fulfillment still `active` and failed again instead of skipping. Both name one fulfillment aggregate, since release goes through it, so the harm is a secondary failure, not a wrong operation | 10b writes `teardown_fulfillment_id`, which 11a and 11b require. `lease_status`, written three times and read only by a log line, leaves the shared state; VM's `DealState` keeps it for the buyer-CLI deal |
+| The structural test checked field sets, so it could not see a consumer running before its producer, or a second producer | Decision 6's ordered checks |
+| 07 created an on-chain escrow even when 00g found Alkahest unconfigured | 07 requires `_alkahest_configured`: an escrow cannot be undone |
+| A failed pause at 00 did not stop later stages | 00 sets `_lifecycle_paused`, required by the first stages that write (shared 00f1, VM's 00f). The read-only readiness stages still run after a failed pause, so their diagnostics stay available |
+| The change directory's two `Zone.Identifier` files name a private workstation path | Tombstoned; they arrived with the snapshot, not a Section 8 fileset |
 
 Alternatives rejected: keeping 04a's raw request behind a shared signed-header helper,
 which would make every compute domain inherit a request path that can diverge from the
@@ -2802,6 +2815,124 @@ The permanent destination is `openspec/specs/test-compatibility/spec.md` through
 change's "The canonical compute deal's shared stages are defined once" delta, and
 `docs/development/TESTING.md`'s system-test section, which 11.2 updates to name the
 shared stages module beside `domain_deal.py`.
+
+### Section 9 design: the bare-metal deal on the shared stages (2026-10-08)
+
+Re-read against the bare-metal storefront, its site's mock routes, and the lane's
+configuration before planning Section 9, stage by stage against the shared stages;
+decided with the maintainer, who kept the larger VM and bare-metal unification (settle
+responses, escrow rows, and claim events made alike) out of this change, where
+`kit-owned-listing-and-fulfillment-lifecycles` owns it. This settles task 9.0 and
+Section 8 design decision 8.
+
+Most shared stages fit with the driver and the lane's fixtures: 00, 00a, 00c, 00e,
+00f1, 04a, 05a, 05b, 06b, 07, 07b, 08a, 08c, 09c, 10a, 10b, and 11a. Bare metal emits
+the negotiation runtime's `round_decided` events, its preview returns `would_submit`
+and the listing's `host_id`, its job evaluation has its own route
+(`evaluate_bare_metal_job`, behind the existing `evaluate_create_job` hook), and its
+site commits the lease with the escrow as its deal reference, so the shared lease view
+resolves it.
+
+| Finding | Consequence |
+|---|---|
+| The bare-metal status reports no `registry`, `negotiation_strategy`, or `alkahest` check, which 00b, 00d, and 00g read, and no `provisioning_contract_version`, which 00c2 reads | Decision 1 |
+| Bare metal's `/api/v1/system/status` admits only administrators. The site's `storefront_auth` probe, which 00h reads, signs with the `service` role, so it reports `unauthorized`; VM's administrator routes admit a verified service peer | Decision 1 |
+| 09a and 11b release the mock gate with `resume_rule`. Bare metal's rules live on `/test/bare-metal/mock-rules` and are released with `resume_bare_metal_rule` | Decision 2 |
+| 08b expects settle to return `provisioning`, waits for a `provision/job_submitted` event, and reads `fulfillment_id` from settle status. Bare metal's settle returns `settlement_verified` and emits no event; its fulfillment exists when settle returns, since settle verify runs one servicing pass that begins it, and it is read through the buyer's `/api/v1/fulfillments/{negotiation_id}/status` | Decision 2 |
+| 09b expects settle status `ready` with `tenant_credentials`, and the primary escrow `ready` with a `fulfillment_uid`. Bare metal's admin wait reports `ready` once the lease is active, but its settle status stays `settlement_verified`, delivery is the fulfillments status, result, and access routes, and its escrow row stays `settlement_verified`: the attestation UID is recorded on the obligation, and only after the next servicing pass | Decision 2 |
+| 09bb asserts a `claims/claim_submitted` event. Bare metal's servicing pass after activation is what publishes the evidence digest and completes the fulfillment; there are no claim events, and the step means something different | Decision 3 |
+| 11b waits for `fulfillment/capacity_released`, which bare metal never emits, and releases its re-reservation through the peer callback, which bare metal refuses for a reservation that is not a deal lifecycle's | Decisions 1 and 2 |
+| The lane's publication clause lists 100 tokens an hour, where the shared deal terms are 10; `bare_metal_lane` has no buyer wallet, RPC URL, seller wallet, or service-role credential | Decision 5 |
+| `test_restart_recovery.py` does not show a retried teardown returns the same operation, nor that status, result, access, and settle-status reads after a restart while the lease is active are idempotent. An active status poll re-derives and saves the result and receipt each time, and those artifacts are write-once, so a restarted process that derived a different one would fail the read | Decision 6 |
+
+Decisions:
+
+1. **The bare-metal storefront reports what the shared readiness stages read.** Its
+   `/api/v1/system/status`, not its `/health` probe, adds `registry` (its registry's
+   reachability through the client publication already uses), `negotiation_strategy`
+   (its seller chain run through `market_policy`'s `run_negotiation_chain` against a
+   synthetic round zero, VM's probe and values), `alkahest` (the configured chain
+   names, or `unconfigured`), and `provisioning_contract_version` (from its installed
+   `compute_provisioning_contracts`). Status health is judged per key as VM's is: a
+   chain list is not a degradation, a strategy reporting `exit_on_probe` or `error` is.
+   The route admits a configured site authority under the `service` role as well as an
+   administrator, the same trust its capacity-released callback already uses, so the
+   site's link check reads it. When it records a release, the storefront emits
+   `fulfillment/capacity_released`, VM's event, so the lease view's release
+   observation means one thing in both lanes. The delta's rule that a domain's
+   difference is resolved in its storefront composition, not in the stage, decides
+   this over driver-supplied readings.
+2. **Four shared stages gain driver hooks; their bodies stay shared.** VM's driver
+   gains each with VM's current behaviour, so VM's lane proves the change:
+   - `release_create_gate()` (09a) and `release_teardown_gate()` (11b);
+   - `settle_dispatched(settle_response, deal_state)` (08b), which asserts the domain's
+     settle response and returns the dispatched fulfillment's ID: VM's asserts
+     `provisioning`, waits for `job_submitted`, and reads settle status; bare metal's
+     asserts `settlement_verified` and reads the buyer's fulfillments status. The stage
+     keeps the settle call and the `dispatching` assertion;
+   - `assert_delivery(deal_state)` (09b) replaces `assert_delivery(settle_status)`: VM's
+     asserts settle status `ready` with credentials and the primary escrow `ready` with
+     its `fulfillment_uid`; bare metal's asserts an active lease, a result carrying no
+     access coordinates, and access carrying host, port, and user, through
+     `BareMetalFulfillmentTransport`. The stage keeps the settlement wait and the
+     closed listing;
+   - `release_reserved(reservation)` (11b) replaces the stage's peer callback and the
+     driver's `site_id`: VM's sends the callback, bare metal's releases the reservation
+     at the site, the only place an administrative reservation exists.
+   VM's escrow assertions move out of the shared body; none is weakened.
+3. **09bb is each domain's own.** VM's keeps its body, as VM's own stage under its
+   name. Bare metal's steps settlement servicing and asserts the evidence it published:
+   the obligation's evidence resolves as the buyer through the typed evidence client
+   and matches the lease, and status reports no obligation waiting for an operator.
+   It is the first live run of Alkahest delivery and digest publication. Collection is
+   not asserted, for the reason VM's stage gives.
+4. **Bare metal's own stages** follow the stage-for-stage table: after 00h,
+   `TestStage03a_PublicationDryRun` (the preview reports the deal's resource as a
+   publish) and `TestStage03b_PublicationStepPublishes` (the step publishes it; sets
+   `seller_listing_id` and `listing_published`, requiring `_lifecycle_paused` and
+   `_supply_seeded`); after 09a, `TestStage09a2_PublicationClosesTheListing` (the
+   preview reports a close as `unavailable`, the step closes it; sets
+   `_listing_reconciled`); its 09bb; and after 11b the second deal's stages, numbered
+   from 12: publication reopens the listing, a second negotiated and settled deal,
+   buyer teardown sent twice returning the same operation, and capacity released
+   once.
+5. **Lane configuration.** The publication clause's rate becomes `10` tokens an hour,
+   the shared deal terms' rate; `bare_metal_lane` gains the buyer's wallet key,
+   address, and RPC URL, the seller's wallet address, and the service-role credential
+   (the site authority's well-known development key); the seller chain is set to
+   `["escrow_shape_guard", "bisection"]` (Section 6 decision 11). The site's
+   `PROVISIONING_STOREFRONT_URL` is already set, and the storefront already trusts the
+   site's authority through `BARE_METAL_STOREFRONT_SITES`, which decision 1's status
+   admission reuses.
+6. **Task 3.5's two gaps are closed with Section 9, at integration level.**
+   `test_restart_recovery.py` gains a restart while the lease is active (status and
+   result read twice, access and settle status read, all identical; one begin and one
+   reservation), and its teardown restart asserts the retried response is the first
+   one (`terminating`, the same reservation and fulfillment). A restarted process whose
+   site reports a different delivery keeps failing the read closed, as the write-once
+   artifacts make it; the test pins the unchanged case.
+7. **The structural test gains bare metal's row**, so its ordered checks run over
+   bare metal's scenario too. Each domain subclasses every shared stage once; 09bb
+   leaves the shared set.
+
+Versions: `arkhai-bare-metal-storefront` 0.14.2 → 0.15.0 (status checks, service
+admission, the release event), cascading VM's exact pin; `e2e-tests` gains
+`arkhai-bare-metal-buyer` and raises `arkhai-bare-metal` to 0.11.0, the evidence
+route's clients.
+
+Alternatives rejected: aligning bare metal's settle and settle-status responses,
+escrow rows, and claim events with VM's, which would change the bare-metal buyer's wire
+and anticipate the unification `kit-owned-listing-and-fulfillment-lifecycles` owns;
+driver-supplied readiness readings, which would let a shared readiness stage assert
+nothing of bare metal; and driver hooks for 09bb, which would hollow out a stage whose
+meaning differs.
+
+Permanent destinations: the bare-metal storefront's status checks, service admission,
+and release event in `openspec/specs/storefront-publication/spec.md` through this
+change's delta, promoted at 11.4; the shared stages, their hooks, and the per-domain
+09bb in `docs/development/TESTING.md` at 11.2; restart recovery in the
+`test-compatibility` delta's "Bare-metal storefront restart recovery is proven at
+integration level".
 
 ### Bare-metal publication has a dry run
 

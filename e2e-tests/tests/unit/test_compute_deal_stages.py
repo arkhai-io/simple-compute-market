@@ -78,7 +78,11 @@ class _Use:
 
 
 def _use(classes: list[ast.ClassDef]) -> _Use:
-    """Which `deal_state` fields the stage classes write, read, and require."""
+    """Which `deal_state` fields the stage classes write, read, and require.
+
+    `read` holds plain attribute reads; `required` the fields named to
+    `require_state`.
+    """
     use = _Use(set(), set(), set())
     for node in classes:
         for sub in ast.walk(node):
@@ -160,25 +164,69 @@ def test_a_domain_state_extends_the_compute_state(domain: Domain):
     assert "ComputeDealState" in _base_names(node), _base_names(node)
 
 
-def test_every_compute_state_field_is_read():
-    """A field nothing reads records nothing a later stage needs."""
-    domain_reads = [
-        (lambda use: use.read | use.required)(_use(_domain_own_stages(domain)))
-        for domain in DOMAINS
-    ]
-    read_everywhere = set.intersection(*domain_reads) if domain_reads else set()
-    unread = COMPUTE_FIELDS - SHARED_USE.read - SHARED_USE.required - read_everywhere
-    assert unread == set(), unread
+def _scenario(domain: Domain) -> list[tuple[str, _Use]]:
+    """The domain's stages in run order, each with the body that runs.
+
+    A subclass of a shared stage runs the shared body, so its use is the
+    shared stage's; a domain's own stage runs its own.
+    """
+    shared = {node.name: node for node in SHARED_STAGES}
+    stages = []
+    for node in _domain_stages(domain):
+        bases = [name for name in _base_names(node) if name in shared]
+        body = shared[bases[0]] if bases else node
+        stages.append((node.name, _use([body])))
+    return stages
 
 
 @pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
-def test_every_shared_prerequisite_has_a_producer(domain: Domain):
-    """A required field no stage writes skips every stage that requires it."""
-    produced = SHARED_USE.written | _use(_domain_own_stages(domain)).written
-    missing = SHARED_USE.required - produced
-    assert missing == set(), (
-        f"the shared stages require {sorted(missing)}, which neither they nor "
-        f"{domain.name}'s own stages produce"
+def test_every_prerequisite_is_produced_by_an_earlier_stage(domain: Domain):
+    """A stage requiring a field no earlier stage writes skips forever."""
+    produced: set[str] = set()
+    for name, use in _scenario(domain):
+        missing = use.required - produced
+        assert missing == set(), (
+            f"{domain.name}'s {name} requires {sorted(missing)}, which no "
+            "earlier stage produces"
+        )
+        produced |= use.written
+
+
+@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
+def test_every_field_read_is_produced_first(domain: Domain):
+    produced: set[str] = set()
+    for name, use in _scenario(domain):
+        missing = use.read - produced - use.written - DOMAIN_DEAL_FIELDS
+        assert missing == set(), (
+            f"{domain.name}'s {name} reads {sorted(missing)} before any stage "
+            "writes it"
+        )
+        produced |= use.written
+
+
+@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
+def test_each_compute_state_field_has_one_producer(domain: Domain):
+    """A handoff written by two stages lets a consumer read the first
+    producer's value when the second fails, instead of skipping."""
+    producers: dict[str, list[str]] = {}
+    for name, use in _scenario(domain):
+        for field_name in use.written & COMPUTE_FIELDS:
+            producers.setdefault(field_name, []).append(name)
+    repeated = {name: stages for name, stages in producers.items() if len(stages) > 1}
+    assert repeated == {}, repeated
+
+
+@pytest.mark.parametrize("domain", DOMAINS, ids=lambda domain: domain.name)
+def test_every_compute_state_field_is_consumed_after_it_is_produced(domain: Domain):
+    """A field no later stage reads records nothing a later stage needs."""
+    produced: set[str] = set()
+    consumed: set[str] = set()
+    for _name, use in _scenario(domain):
+        consumed |= (use.read | use.required) & produced
+        produced |= use.written
+    unconsumed = COMPUTE_FIELDS - consumed
+    assert unconsumed == set(), (
+        f"{domain.name}: no stage after its producer reads {sorted(unconsumed)}"
     )
 
 

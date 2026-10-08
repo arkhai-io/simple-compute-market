@@ -113,7 +113,7 @@ Former tasks 3.5–3.6 are storefront behaviour proven at integration level.
       authenticated and idempotent at the buyer). The storefront half — a repeated
       teardown returns the same operation and capacity is released once — is proven by
       this change's second deal and the `physical-provisioning` delta.
-- [ ] 3.5 **Restart recovery.** Bare-metal storefront integration tests rebuild the
+- [ ] 3.5 **Restart recovery.** (Closed by 9.0c.) Bare-metal storefront integration tests rebuild the
       application over the same database file and a fake site after settlement commit
       and after teardown acceptance; the buyer retrieves the same operation with no
       second obligation, mechanism selection, or teardown, and duplicate polling and
@@ -4329,9 +4329,12 @@ The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispos
 ## 8. Shared compute deal stages and the VM scenario
 
 Decisions: "Compute deal stages are shared" and "Section 8 design: the shared stages
-against the code (2026-10-08)", decisions 1–7. Behaviour-neutral for VM: no assertion
-changes, and stage IDs, test names, and markers are unchanged; dependent stages skip on
-more failed readiness checks than before (decision 2). Reviewable alone: e2e-tests only.
+against the code (2026-10-08)", decisions 1–7, and its implementation-review fixes.
+Behaviour-neutral for VM's happy path: no assertion is weakened, and stage IDs, test
+names, and markers are unchanged. 00c checks the family's execution readiness instead of
+Ansible's component, 04a reads through the typed registry client, and dependent stages
+skip on more failed readiness checks than before (decision 2). Reviewable alone:
+e2e-tests only.
 Paths below are under `e2e-tests/tests/`.
 
 - [x] 8.1 Move the shared helpers (decisions 4 and 7).
@@ -4472,26 +4475,88 @@ Paths below are under `e2e-tests/tests/`.
       10. Promotion: the promotion record's shared-stages row stays pending until 11.4
           and 11.2, which own the `test-compatibility` and `TESTING.md` edits.
 
+- [x] 8.7 Implementation-review fixes (2026-10-08; "Section 8 design", implementation
+      review): 10b writes `teardown_fulfillment_id`, which 11a and 11b require, and
+      `lease_status` leaves the shared state; 00 sets `_lifecycle_paused`, required by
+      00f1 and VM's 00f; 07 requires `_alkahest_configured`; the structural test checks
+      producers in each domain's run order, one producer per shared field, and a reader
+      after it; the change directory's `design.md:Zone.Identifier` and
+      `tasks.md:Zone.Identifier` are tombstoned.
+  - Notes: e2e unit suite 31 passed (9 in `test_compute_deal_stages.py`); each new
+    rule was broken once (a second producer, a field read only by its producer, two
+    VM stages swapped across their handoff, an unproduced prerequisite, a read before
+    its producer) and failed alone. Node IDs identical for all of `tests/e2e`;
+    `--setup-plan` resolves every VM scenario's fixtures; pyflakes reports nothing
+    new. The VM lane has not run on these fixes; 9.0b's gate runs it.
+  - `e2e_non_erc20_settlement` is in neither lane, so its import changes are proven by
+    `--setup-plan` and its helper's unit tests, not a lane run.
+
 ## 9. The bare-metal mock-provisioned deal
 
-Decision: "The scenario is VM's deal, stage for stage". Reviewable alone: e2e-tests and
-lane configuration; depends on Sections 4–8.
+Decisions: "The scenario is VM's deal, stage for stage" and "Section 9 design: the
+bare-metal deal on the shared stages (2026-10-08)", decisions 1–7. Depends on Sections
+4–8. Reviewable in three parts: the bare-metal storefront (9.0a, 9.0c), the shared
+stages' hooks with VM's driver (9.0b, gated by VM's lane), and bare metal's scenario and
+lane (9.1–9.5).
 
-- [ ] 9.0 **Decision gate** ("Section 8 design: the shared stages against the code
-      (2026-10-08)", decision 8). Before the driver: decide whether the bare-metal
-      storefront reports the `registry`, `negotiation_strategy`, and `alkahest` checks
-      shared stages 00b, 00d, and 00g read, or those stages become each domain's own, and
-      record the decision and its files.
-- [ ] 9.0a Bare-metal storefront (`domains/bare_metal/storefront`): system status
-      reports `provisioning_contract_version` from its installed
-      `compute_provisioning_contracts` wheel, as VM's does, for shared stage 00c2
-      (decision 1); a storefront HTTP test reads it through the canonical client; bump,
-      cascade, and relock.
+- [x] 9.0 **Decision gate** ("Section 8 design: the shared stages against the code
+      (2026-10-08)", decision 8). Decided 2026-10-08 in "Section 9 design: the bare-metal
+      deal on the shared stages": the bare-metal storefront reports what the shared
+      readiness stages read (decision 1); four shared stages gain driver hooks
+      (decision 2); 09bb is each domain's own (decision 3).
+- [ ] 9.0a Bare-metal storefront (`domains/bare_metal/storefront`, 0.14.2 → 0.15.0;
+      decision 1):
+      - `runtime.py`: an administrator status adding `registry` (reachability through
+        the publication registry client), `negotiation_strategy` (the seller chain
+        through `market_policy`'s `run_negotiation_chain`, VM's probe and values), and
+        `alkahest` (configured chain names or `unconfigured`), with health judged per
+        key as VM's `system_service.py` does; `/health` unchanged.
+      - `api.py`: `/api/v1/system/status` reports `provisioning_contract_version` from
+        `compute_provisioning_contracts`, and admits a configured site authority under
+        the `service` role beside administrators.
+      - `deal_controls.py`: the capacity-released hook records a
+        `fulfillment/capacity_released` stage event through `core_storefront.stage_log`.
+      - Tests (`tests/test_http_system.py`, `tests/test_deal_controls.py`): each check's
+        values and its effect on `status`; `/health` makes no registry call; the site
+        authority reads status as `service`, another service principal is refused; a
+        recorded release writes the event and a refused one does not, read through the
+        canonical client's `get_events`.
+      - Versions and locks: the bump, VM storefront's exact pin cascaded
+        (`domains/vms/storefront/pyproject.toml`, 0.16.0 → 0.16.1); both storefronts
+        hand-locked; `e2e-tests` relocked.
+- [ ] 9.0b Shared stage hooks (e2e-tests; decisions 2 and 3):
+      - `helpers/compute_deal_stages.py`: `ComputeDealDriver` gains
+        `release_create_gate()`, `release_teardown_gate()`,
+        `settle_dispatched(settle_response, deal_state)`,
+        `assert_delivery(deal_state)` in place of `assert_delivery(settle_status)`, and
+        `release_reserved(reservation)` in place of `site_id`; 09a, 08b, 09b, and 11b
+        call them; `Stage09bb_ClaimSubmittedForTheFulfilledEscrow` leaves the shared
+        set.
+      - `scenarios/vms/compute_deal_driver.py`: VM's hooks, with VM's current behaviour
+        (the `provisioning` settle response and `job_submitted` wait, settle status
+        `ready` with credentials and the primary escrow `ready` with its
+        `fulfillment_uid`, the peer callback); the driver holds the buyer and service
+        storefront clients it now needs.
+      - `scenarios/vms/test_full_deal.py`: 09bb becomes VM's own stage with its present
+        body, under its present name.
+      - `unit/test_compute_deal_stages.py` passes unchanged in its rules.
+      - Gate: the e2e unit suite, identical node IDs for both lanes' selections,
+        pyflakes, an AST comparison showing every VM assertion still in a shared stage,
+        VM's own stage, or VM's driver, and VM's lane.
+- [ ] 9.0c Restart recovery (task 3.5; decision 6): `tests/test_restart_recovery.py`
+      gains a restart while the lease is active (status and result read twice, access
+      and settle status read, each identical to before the restart; one begin, one
+      reservation), and its teardown restart asserts the retried teardown returns the
+      first response (`terminating`, the same reservation and fulfillment). Then close
+      3.5 against both test files.
 - [ ] 9.1 Add `scenarios/bare_metal/compute_deal_driver.py`: backed pool, host record,
-      and whole-host capacity declaration; publication preview then step; bare-metal
-      provision terms; bare-metal rule IDs; the lease view over `/api/v1/leases/{id}`;
-      evaluate-settle expectations; result with no access coordinates and access
-      carrying host, port, and user, through `BareMetalFulfillmentTransport`.
+      and whole-host capacity declaration; bare-metal provision terms; the bare-metal
+      mock rules on `/test/bare-metal/mock-rules` and their release, and
+      `evaluate_bare_metal_job`; evaluate-settle expectations; `settle_dispatched`
+      reading the buyer's fulfillments status; delivery with no access coordinates in
+      the result and access carrying host, port, and user, through
+      `BareMetalFulfillmentTransport`; the shared `DealLease` over the lane's site; the
+      re-reservation and its release at the site.
 - [ ] 9.2 Extend `scenarios/bare_metal/conftest.py` with the fixtures the shared stages
       request under the names decision 3 of the Section 8 design lists
       (`storefront_client`, `storefront_admin_client`, `storefront_service_client`,
@@ -4500,29 +4565,50 @@ lane configuration; depends on Sections 4–8.
       plus `site_capacity` over the shared `SiteCapacity` and
       `convergence_advanced_explicitly` over `convergence_paused`; `deal_state` is a
       bare-metal `ComputeDealState` subclass only if bare metal's own stages need fields
-      of their own.
+      of their own. The existing publication and introduction scenarios keep their own
+      fixtures.
 - [ ] 9.3 Add `scenarios/bare_metal/test_bare_metal_mock_deal.py`
-      (`pytestmark = pytest.mark.e2e_bare_metal_mock_deal`): the shared stages in order,
-      bare metal's publication stages in place of VM's listing stages, and the
-      second-deal stages (buyer teardown sent twice returns the same operation, capacity
-      released once, listing reopened). Its publication step sets `listing_published`
-      and `_supply_seeded` is required by its first publication stage; its listing-close
-      stage sets `_listing_reconciled`. Add the module to 8.4's domain table.
+      (`pytestmark = pytest.mark.e2e_bare_metal_mock_deal`, taking
+      `convergence_advanced_explicitly`): the shared stages in order, with bare
+      metal's own (decision 4) — `TestStage03a_PublicationDryRun` and
+      `TestStage03b_PublicationStepPublishes` after 00h (setting `seller_listing_id`
+      and `listing_published`; requiring `_lifecycle_paused` and `_supply_seeded`),
+      `TestStage09a2_PublicationClosesTheListing` after 09a (a close as `unavailable`;
+      setting `_listing_reconciled`), its own 09bb (decision 3), and the second deal's
+      stages from 12 after 11b (publication reopens the listing, a second deal,
+      teardown sent twice returning the same operation, capacity released once). Add
+      the module to `unit/test_compute_deal_stages.py`'s domain table.
 - [ ] 9.4 Register `e2e_bare_metal_mock_deal` in `e2e-tests/pyproject.toml` and add it to
       `E2E_BARE_METAL_MODULE` in `e2e-tests/Makefile`; `e2e_bare_metal_deal` stays in no
-      lane. Add `arkhai-bare-metal-buyer` to `e2e-tests/pyproject.toml` and relock.
-- [ ] 9.5 Lane configuration: a host inventory record and any settings the driver
-      needs in `e2e-tests/config/config-docker.yml`'s bare-metal section and
-      `dev-env/bare-metal/`; the bare-metal storefront's service-peer trust for the
-      site's capacity-released callback in the lane's environment
-      (`make e2e-bare-metal-dev-env` in the root `Makefile`); and a seller chain that
-      counters below the listed rate, `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES` set
-      to `["escrow_shape_guard", "bisection"]` in `compose.bare-metal-local.yml`
-      (decision 11 of "Section 6 design: bare metal on the negotiation runtime
-      (2026-10-07)"), so stage 05b's round zero counters and 06b force-accepts an open
-      thread. The listing's publication clause accepts the dev chain's MockERC20 at the
-      shared deal terms' 10 tokens per hour.
-- [ ] 9.6 **Gate.** The bare-metal lane passes with publication and the mock deal.
+      lane. Add `arkhai-bare-metal-buyer` to `e2e-tests/pyproject.toml`, raise
+      `arkhai-bare-metal` to 0.11.0 (the evidence route's clients), bump
+      `arkhai-e2e-tests`, and relock.
+- [ ] 9.5 Lane configuration (decision 5): `e2e-tests/config/config-docker.yml`'s
+      `bare_metal_lane` gains the buyer's wallet key, address, and RPC URL, the seller's
+      wallet address, and the service-role credential, each a well-known development
+      value; the root `Makefile`'s `e2e-bare-metal-dev-env` lists the publication
+      clause at `10` tokens an hour, the shared deal terms' rate; and
+      `BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES` is `["escrow_shape_guard",
+      "bisection"]` (Section 6 decision 11), checking how the local overlay reaches the
+      container, since the Compose wrapper does not forward that variable (2.6), so
+      stage 05b's round zero counters and 06b force-accepts an open thread. The
+      storefront already trusts the site's authority through
+      `BARE_METAL_STOREFRONT_SITES`; confirm the status admission and the callback both
+      use it, and add nothing if they do.
+- [ ] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
+      and the mock deal, and the VM lane with 9.0b's hooks. Also: the bare-metal
+      storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
+      e2e unit suite, `make check-packaging`, comment hygiene, documentation citations,
+      OpenSpec strict validation, and pyflakes.
+- [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
+      to Section 9): comment hygiene, with a direct read of the new modules; import
+      placement for every function-level import the section adds or touches;
+      documentation compliance against decisions 1–7; narrative compression of
+      Section 9's notes; roadmap currency (`ROADMAP.md`'s gap that no bare-metal deal
+      runs in the pipeline is closed by 9.6's run, and Goal 7's state names it);
+      campaign index currency (this change's row); documentation citations; `make
+      check-packaging`; 9.6's run recorded; and promotion pending at 11.2 and 11.4 for
+      the `storefront-publication` and `test-compatibility` deltas.
 
 ## 10. Pipeline: images built once and an API-credit lane
 

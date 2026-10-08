@@ -128,6 +128,9 @@ class ComputeDealState(DomainDealState):
     """
 
     # Phase 0 — readiness. Each check gates the stages that depend on it.
+    #: The storefront's timer loops are held, so every later effect is one a
+    #: stage asked for. Required before the first write.
+    _lifecycle_paused: bool = False
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
@@ -159,9 +162,8 @@ class ComputeDealState(DomainDealState):
     _evaluate_settle_host_id: Optional[str] = None
     _evaluate_settle_passed: bool = False
     _provision_job_evaluated: bool = False
-    #: Durable fulfillment identity, from the settle-status response at 08b
-    #: and from the lease at 10b; the buyer-facing path surfaces no raw
-    #: executor job id.
+    #: Durable fulfillment identity, from the settle-status response at 08b;
+    #: the buyer-facing path surfaces no raw executor job id.
     fulfillment_id: Optional[str] = None
     provisioning_result_injected: bool = False
     #: The domain stepped its listing's reconciliation after the deal took the
@@ -172,7 +174,11 @@ class ComputeDealState(DomainDealState):
     #: The domain's lease view (`LeaseView`), resolved at 09c.
     deal_lease: Optional[Any] = None
     lease_id: Optional[str] = None
-    lease_status: Optional[str] = None
+    #: The fulfillment the lease names once its release begins, observed at
+    #: 10b. A separate field from `fulfillment_id` so the teardown stages skip
+    #: when 10b did not observe release, rather than run against a fulfillment
+    #: still active.
+    teardown_fulfillment_id: Optional[str] = None
     #: The resource the deal holds, as the domain's driver names it. Captured
     #: at 09c from the driver, never from a buyer-facing response: physical
     #: identity is opaque across the ordinary reservation boundary.
@@ -253,7 +259,9 @@ class ComputeDealDriver(Protocol):
 # ===========================================================================
 
 class Stage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
+    def test_00_pauses_the_storefront_loops(
+        self, storefront_admin_client, deal_state: ComputeDealState
+    ):
         """Hold the storefront's timer loops idle for the rest of this scenario.
 
         A named stage rather than a fixture because every later assertion depends
@@ -268,6 +276,7 @@ class Stage00_LifecyclePause:
         `advance_storefront`.
         """
         pause_storefront(storefront_admin_client)
+        deal_state._lifecycle_paused = True
 
 
 class Stage00a_StorefrontHealth:
@@ -492,10 +501,11 @@ class Stage00f1_ExecutorHostRegistry:
         sells it on.
 
         The first write over the provisioning wire, so it requires the
-        contract pins to agree.
+        contract pins to agree and the storefront's loops held.
         """
         require_state(
             deal_state,
+            "_lifecycle_paused",
             "_storefront_healthy",
             "_provisioning_mock_mode",
             "_contract_pins_agree",
@@ -842,8 +852,11 @@ class Stage07_OnChainEscrowAndProvGate:
         giving stage 08b a window to assert the fulfillment dispatching before
         stage 09a releases it.
         """
+        # Alkahest readiness is required before the escrow is created, not only
+        # before 07b verifies it: an escrow created on chain cannot be undone.
         require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
-                      "_provisioning_mock_mode", "_escrow_expiration_unix")
+                      "_provisioning_mock_mode", "_escrow_expiration_unix",
+                      "_alkahest_configured")
 
         escrow_uid = create_buyer_escrow(
             buyer_private_key=buyer_config["private_key"],
@@ -1270,13 +1283,12 @@ class Stage09c_LeaseRecorded:
         # declared -- the lease never reported it.
         deal_state.reserved_resource_id = deal_driver.reserved_resource_id
         deal_state.lease_id = lease.get("id")
-        deal_state.lease_status = lease.get("status")
         log.info(
             "[09c] Lease %s recorded for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,
             deal_state.real_escrow_uid,
             deal_state.reserved_resource_id,
-            deal_state.lease_status,
+            lease.get("status"),
             "ledger" if lease_view.is_ledger else "legacy",
         )
 
@@ -1342,8 +1354,7 @@ class Stage10b_LeaseCycleBeginsTeardown:
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
         )
-        deal_state.fulfillment_id = fulfillment_id
-        deal_state.lease_status = "releasing"
+        deal_state.teardown_fulfillment_id = fulfillment_id
 
 
 # ===========================================================================
@@ -1354,10 +1365,12 @@ class Stage11a_TeardownDispatch:
     def test_11a_convergence_dispatches_teardown_while_capacity_stays_held(
         self, provisioning_client, storefront_admin_client, deal_state: ComputeDealState,
     ):
-        require_state(deal_state, "fulfillment_id", "reserved_resource_id")
+        require_state(deal_state, "teardown_fulfillment_id", "reserved_resource_id")
         diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
         assert "before" in diagnostics and "after" in diagnostics
-        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
+        fulfillment = provisioning_client.get_fulfillment_status(
+            deal_state.teardown_fulfillment_id
+        ).model_dump(mode="json")
         assert fulfillment.get("state") == "tearing_down", fulfillment
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
@@ -1370,7 +1383,7 @@ class Stage11b_TeardownCompletion:
         storefront_admin_client, storefront_service_client,
         deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
-        require_state(deal_state, "fulfillment_id", "lease_id",
+        require_state(deal_state, "teardown_fulfillment_id", "lease_id",
                       "reserved_resource_id")
         sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
@@ -1382,7 +1395,7 @@ class Stage11b_TeardownCompletion:
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
         advance_fulfillment_to(
-            provisioning_client, deal_state.fulfillment_id, "torn_down",
+            provisioning_client, deal_state.teardown_fulfillment_id, "torn_down",
         )
 
         release_summary = provisioning_client.check_leases()
@@ -1422,5 +1435,4 @@ class Stage11b_TeardownCompletion:
             reserved_again.capacity_reservation_id,
             site_id=deal_driver.site_id,
         )
-        deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

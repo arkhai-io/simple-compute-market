@@ -240,8 +240,8 @@ class TestStage00f_ResourceSeed:
         self-contained while exercising the same upsert path operators use.
         """
         require_state(
-            deal_state, "_storefront_healthy", "_provisioning_mock_mode",
-            "_contract_pins_agree",
+            deal_state, "_lifecycle_paused", "_storefront_healthy",
+            "_provisioning_mock_mode", "_contract_pins_agree",
         )
 
         result = storefront_admin_client.admin_import_resources(

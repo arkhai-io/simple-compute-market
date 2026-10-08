@@ -94,10 +94,11 @@ class DealState(ComputeDealState):
     settle_run_handle: Optional[Any] = None
     # Buyer-CLI only: the host captured from the lease.
     host_id: Optional[str] = None
-    # Buyer-CLI only: what its settlement stages record.
+    # Buyer-CLI only: what its settlement and lease stages record.
     settlement_submitted: bool = False
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
+    lease_status: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

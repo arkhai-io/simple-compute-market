@@ -49,9 +49,10 @@ MAY insert stages of its own; a stage whose body differs between domains is not 
 
 #### Scenario: A domain's part of a shared stage
 
-- **WHEN** a shared stage needs supply seeding, provision terms, mock rules, the lease
-  view, settlement-preview expectations, result and access assertions, or the claim that
-  re-reserves released supply
+- **WHEN** a shared stage needs supply seeding, provision terms, mock rules and their
+  release, the lease view, settlement-preview expectations, the settlement's dispatch,
+  result and access assertions, or the claim that re-reserves released supply and its
+  release
 - **THEN** the domain's driver supplies it and the stage's body is unchanged
 
 #### Scenario: A deal outside the canonical deal
@@ -94,7 +95,12 @@ not restart services.
 - **WHEN** the settlement authority committed the recorded operation but the buyer did not receive its response
 - **THEN** after the rebuild, resume retrieves the same operation and continues without a second obligation or mechanism selection
 
+#### Scenario: Process stops while the lease is active
+
+- **WHEN** the storefront is rebuilt while a delivered lease is active
+- **THEN** repeated status, result, access, and settlement-status reads return what they returned before, with no second reservation or fulfillment start
+
 #### Scenario: Process stops after teardown acceptance
 
 - **WHEN** teardown was accepted before the response was lost
-- **THEN** after the rebuild, recovery observes the same lease release operation and the site releases capacity once
+- **THEN** after the rebuild, a repeated teardown returns the same lease release operation and the site releases capacity once
