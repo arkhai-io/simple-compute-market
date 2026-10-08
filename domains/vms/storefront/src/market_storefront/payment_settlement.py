@@ -222,13 +222,12 @@ class VmPaymentsCoordinator:
         resume sweep; this pass takes the deals before that point (no receipt
         recorded yet) and refunds left `refunding`.
         """
-        candidates = []
-        for negotiation_id in await self.db.list_accepted_negotiations_settling_through(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
-        ):
-            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
-            if existing is None or existing["status"] == "refunding":
-                candidates.append(negotiation_id)
+        candidates = await self.db.list_accepted_negotiations_settling_through(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM,
+            unsettled_join="LEFT JOIN escrows e ON e.escrow_uid = t.negotiation_id",
+            unsettled_where="e.escrow_uid IS NULL OR e.status = 'refunding'",
+            limit=limit,
+        )
 
         async def settle(negotiation_id: str) -> None:
             thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)

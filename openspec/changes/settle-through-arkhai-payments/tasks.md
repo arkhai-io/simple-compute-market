@@ -313,7 +313,7 @@ Deviations from the task text:
 
 Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; the decisions are taken with the reviewer.
 
-- [x] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`. Recorded in `design.md#merge-outcome`; M3's route contract is left to `kit-owned-storefront-shell`.
+- [x] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`. Recorded in `design.md#merge-outcome`; M3's settlement route contract is `storefront_client.settlement_routes`.
 - [x] 6.2 Make `kit/identity`'s field framing public as `frame_fields`, use it in `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, bump `arkhai-kit-identity` once, and move every pin to it in one step (P1). `arkhai-kit-identity` 0.4.0; every exact pin and minor-bump bound moved, with the patch bumps that cascade.
 - [ ] 6.3 Relock `domains/vms/storefront` and `domains/vms/buyer` where `download-r2.pytorch.org` is reachable, re-run every suite from §5 on the merged tree, then `make check-packaging` (P2), and resolve every failure.
   - Evidence on the merged tree (sandbox without `download-r2.pytorch.org`, Helm, or Cargo): `make dist` builds every wheel; 48 of 51 locks are regenerated and current. Static checks: comment hygiene, uv setup, Python version, and project layout pass; document citations match the development branch's 15 pre-existing problems.

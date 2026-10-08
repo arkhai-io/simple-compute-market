@@ -349,3 +349,40 @@ async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []
     assert await restarted.db.load_escrow(escrow_uid=NEGOTIATION) is None
+
+def _clone_row(db_path: str, table: str, source: str, new_id: str, **columns) -> None:
+    """Copy one negotiation-keyed row under a new negotiation ID, overriding columns."""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DROP TABLE IF EXISTS temp.clone")
+        conn.execute(f"CREATE TEMP TABLE clone AS SELECT * FROM {table} WHERE negotiation_id = ?", (source,))
+        assignments = ", ".join(f"{name} = ?" for name in ("negotiation_id", *columns))
+        conn.execute(f"UPDATE clone SET {assignments}", (new_id, *columns.values()))
+        conn.execute(f"INSERT INTO {table} SELECT * FROM clone")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def test_completed_deals_never_crowd_out_an_unsettled_one(harness):
+    """More completed payment deals than the pass limit still leave room for the stranded one."""
+    h = await harness()
+    for index in range(3):
+        completed = f"completed-{index}"
+        _clone_row(
+            h.db.db_path, "negotiation_threads", NEGOTIATION, completed,
+            created_at=f"2000-01-01T00:00:0{index}",
+        )
+        await h.db.insert_escrow(
+            escrow_uid=completed, negotiation_id=completed, chain_name=None,
+            escrow_address=None, is_primary=True, status="ready",
+        )
+    h.serve()
+
+    service = _container.resolved_settlement_composition.payment_service(h.db)
+    done = await service.reconcile_once(limit=1)
+
+    assert (done.attempted, done.failed) == (1, 0)
+    assert h.issuer.issued == [NEGOTIATION]

@@ -271,19 +271,18 @@ class BareMetalSettlementService:
         verified deals whose delivery never started; the same settle path a
         buyer's call takes advances each.
         """
-        candidates = []
-        for negotiation_id in await self.db.list_accepted_negotiations_settling_through(
-            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
-        ):
-            record = await self.db.load_bare_metal_settlement_record(negotiation_id=negotiation_id)
-            status = (record or {}).get("status")
-            if status in ("accepted", "refunding"):
-                candidates.append(negotiation_id)
-            elif status == "settlement_verified" and (
-                await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
-                is None
-            ):
-                candidates.append(negotiation_id)
+        candidates = await self.db.list_accepted_negotiations_settling_through(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM,
+            unsettled_join=(
+                "JOIN bare_metal_settlement_records r ON r.negotiation_id = t.negotiation_id "
+                "LEFT JOIN bare_metal_fulfillment_lifecycle l ON l.negotiation_id = t.negotiation_id"
+            ),
+            unsettled_where=(
+                "r.status IN ('accepted', 'refunding') "
+                "OR (r.status = 'settlement_verified' AND l.negotiation_id IS NULL)"
+            ),
+            limit=limit,
+        )
 
         async def settle(negotiation_id: str) -> None:
             thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)

@@ -4628,38 +4628,39 @@ class SQLiteClient:
     # ------------------------------------------------------------------
 
     async def list_accepted_negotiations_settling_through(
-        self, *, mechanism: str, limit: int = 100
+        self,
+        *,
+        mechanism: str,
+        unsettled_join: str,
+        unsettled_where: str,
+        limit: int = 100,
     ) -> list[str]:
-        """Accepted negotiations whose Agreement settles through ``mechanism``, oldest first.
+        """Accepted negotiations settling through ``mechanism`` that a domain has not settled.
 
-        A seller-side reconciliation pass reads this to find deals a buyer may
-        never settle; the domain narrows it to the ones not yet settled.
+        The domain names its own unsettled deals with a fixed join onto the
+        thread row ``t`` and a condition over it, so the limit applies after
+        that filter: completed deals never crowd out an unsettled one, however
+        many there are. Oldest first.
         """
 
         def _list() -> list[str]:
             conn = sqlite3.connect(self.db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT negotiation_id, agreement_bytes
-                    FROM negotiation_threads
-                    WHERE terminal_state = 'success' AND agreement_bytes IS NOT NULL
-                    ORDER BY created_at ASC
-                    """
-                )
-                found: list[str] = []
-                for negotiation_id, raw in cur.fetchall():
-                    try:
-                        agreement = json.loads(bytes(raw) if not isinstance(raw, str) else raw)
-                    except (TypeError, ValueError):
-                        continue
-                    settlement = agreement.get("settlement") if isinstance(agreement, dict) else None
-                    if isinstance(settlement, dict) and settlement.get("mechanism") == mechanism:
-                        found.append(str(negotiation_id))
-                        if len(found) >= limit:
-                            break
-                return found
+                rows = conn.execute(
+                    f"""
+                    SELECT t.negotiation_id
+                    FROM negotiation_threads t
+                    {unsettled_join}
+                    WHERE t.terminal_state = 'success'
+                      AND t.agreement_bytes IS NOT NULL
+                      AND json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism') = ?
+                      AND ({unsettled_where})
+                    ORDER BY t.created_at ASC, t.negotiation_id ASC
+                    LIMIT ?
+                    """,
+                    (mechanism, limit),
+                ).fetchall()
+                return [str(row[0]) for row in rows]
             finally:
                 conn.close()
 
