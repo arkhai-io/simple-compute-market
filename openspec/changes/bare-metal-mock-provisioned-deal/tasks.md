@@ -3807,7 +3807,7 @@ bare-metal storefront's force-accept and continuation.
       independent rejection or exit keeps its reason), with a scenario for it; the
       runtime requirement's resumption rule and a scenario for a round interrupted before
       the seller answers; 6B.6's status-code wording; the promotion record's row.
-- [ ] 6C.4 **Gate.** The negotiation-runtime and storefront kits, the VM storefront by
+- [x] 6C.4 **Gate.** The negotiation-runtime and storefront kits, the VM storefront by
       frozen sync, the API-credit and bare-metal storefronts, the e2e unit suite and
       collection, the root aggregate, `make check-packaging`, comment hygiene,
       documentation citations, OpenSpec strict validation (1.14.0), pyflakes on edited
@@ -3829,7 +3829,8 @@ bare-metal storefront's force-accept and continuation.
       `make check-packaging`, comment hygiene, documentation citations for the change,
       and OpenSpec strict validation (1.14.0) pass; pyflakes reports nothing new on any
       edited module.
-    - Not yet run end to end; 6C.4 stays open until both lanes pass.
+    - End to end: run 37748279841, on the Section 7 build (which carries 6C), passed
+      the VM lane (135) and the bare-metal lane (16).
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
@@ -4125,6 +4126,9 @@ settlement, fulfillment, and evidence; teardown still releases directly.
       `__post_init__` and are no longer constructor fields: a runtime copied with
       other site clients composes its own instead of keeping one bound to the old
       clients. `test_http_system` counts sweeps on the composed worker's repository.
+    - Correction (2026-10-08, from the implementation review): 7C.7's evidence-route
+      coverage did not include the claimant, and the route did not admit it; both are
+      fixed in 7E.2.
     - 7C.5: an unsigned evidence request is refused 401. Nothing in this repository
       calls the evidence route; the hosted path hands its evidence body to the hosted
       authority directly, so the hosted authority's signed read is unexercised here.
@@ -4201,6 +4205,78 @@ The rest of the original Section 7. Reviewable alone: release and deal controls.
       `test_alkahest`, the API-credit middleware's Rust toolchain); the locks it
       rewrote were restored. `make check-packaging`, comment hygiene, documentation
       citations, OpenSpec strict validation (1.14.0), and pyflakes (nothing new) pass.
+
+### 7E. Fixes from the implementation review of Section 7
+
+The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispositions.
+
+- [x] 7E.1 The Alkahest publisher takes `chain_tx_lock(None)`, the lock every other
+      Alkahest submission from the wallet takes (materialize, collect, reclaim, VM's
+      fulfillment and listing submissions), so it cannot race them for a nonce and
+      misread the result as a rejection; its unused `chain_name` argument goes.
+      `kit/alkahest/tests/unit/test_fulfillment_publisher.py` holds the lock as
+      another operation would and checks the publication waits.
+- [x] 7E.2 The evidence route admits the evidence's claimant, signing as `seller`, as
+      the `storefront-publication` delta says; a role with no reader is refused by
+      authentication itself, so the refusal is signed.
+- [x] 7E.3 The evidence route follows the five-piece route pattern
+      (`docs/development/ARCHITECTURE.md`, "Route contracts and their HTTP binding"):
+      `arkhai_bare_metal/evidence_routes.py` holds its wire model
+      (`BareMetalSignedLeaseReadyEvidence`), route contract (method, path, operation,
+      resource, reader roles), framework-free route service (lookup, readers by
+      binding, proof), and typed clients, sync and async, over the storefront
+      client's generic `authenticated_request`; `api.py` only binds it. Responses,
+      refusals and a missing digest included, are signed. `test_alkahest_lifecycle.py`
+      resolves evidence through the typed client as buyer, claimant, and
+      administrator, is refused it as a stranger and as a hosted authority, gets 404
+      for an unknown digest, and resolves hosted evidence, recorded with the hosted
+      lifecycle's own writes, as its hosted authority; raw HTTP remains only for the
+      unsigned request. `domains/bare_metal/tests/test_evidence_routes.py` covers the
+      contract, the route service, and both clients. The pre-closeout review replaced
+      the first form of this fix, a role-taking `core_buyer` helper and a client in
+      the bare-metal buyer package; both are reverted (`core_buyer` back to 0.3.6, the
+      buyer to 0.5.0, its `evidence.py` deleted).
+- [x] 7E.4 The rejection bound counts refusals, not reservations: migration `0013`
+      adds `evidence_rejections` to `bare_metal_fulfillment_lifecycle` (it had not been
+      released), `record_bare_metal_evidence_rejection` counts one, and the step parks
+      at the third. A new test defers on a provisioning lease three times before the
+      first refusal, which does not park.
+- [x] 7E.5 `commercial_settlement` follows VM's and API credits' convention: `ok` while
+      Alkahest or hosted settlement is enabled, `unconfigured` when the settlement
+      root enables no payment mechanism (none, or contact exchange only), and
+      `unavailable` with no composition; `status` counts `unconfigured` as healthy,
+      as theirs does.
+- [x] 7E.6 Versions and locks: arkhai-kit-alkahest 0.4.1, arkhai-bare-metal 0.11.0
+      (the evidence route's shared pieces), arkhai-bare-metal-storefront 0.14.2
+      (floors raised to the Alkahest kit 0.4.1 and the domain 0.11.0), cascaded to
+      arkhai-vms-storefront 0.15.8; arkhai-core-buyer and arkhai-bare-metal-buyer are
+      unchanged from Section 7 (0.3.6 and 0.5.0). The three hand-locked projects
+      hand-locked, the rest relocked, no marker changed.
+- [x] 7E.8 From the pre-closeout review (2026-10-08): `design.md` decision 11 now
+      states the refusal count rather than the operation's journal attempts, and
+      decision 12 records the evidence route's placement; the wallet-lock test yields
+      to the event loop instead of sleeping on the wall clock.
+- [ ] 7E.7 **Gate.** The core buyer, Alkahest kit, and bare-metal storefront and buyer
+      suites, the VM storefront and buyer, the root aggregate, `make check-packaging`,
+      comment hygiene, documentation citations, OpenSpec strict validation, pyflakes,
+      and both lanes; then 7A.7, 7B.7, 7C.9, and 7D.7 close with the same run.
+  - Notes:
+    - Before 7E, run 37748279841 passed both lanes on 7A to 7D's build (VM 135,
+      bare metal 16). The bare-metal storefront started with the required settlement
+      configuration, its chains and wallet key arriving through the wrapper's inputs
+      and `bare-metal.wallet.env`. The bare-metal lane has no deal scenario yet
+      (Section 9), so Alkahest delivery, digest publication, and collection are not
+      yet exercised live.
+    - 7E results, on the final fileset: bare-metal domain 143, bare-metal storefront
+      300, bare-metal buyer 13, core buyer 134, Alkahest kit 194, VM buyer 206; VM
+      storefront unit 1103 and integration 360 (the two known `test_alkahest`
+      failures). The root aggregate passed 53 suites with only VM's known
+      `test_alkahest` failures; the locks it rewrote were restored. An earlier
+      aggregate on the same tree failed two provisioning integration tests with the
+      shared in-memory SQLite race recorded in 2.6 ("cannot commit - no transaction is
+      active"); the provisioning integration suite then passed four consecutive runs
+      under the mock profile. `make check-packaging`, comment hygiene, documentation
+      citations, OpenSpec strict validation, and pyflakes pass.
 
 ## 8. Shared compute deal stages and the VM scenario
 
@@ -4449,6 +4525,9 @@ service code.
       in 5B.10.D, `test_a_release_is_durable_before_teardown_and_a_restart_resumes_it`
       failed the same way once, in the authentication middleware's replay-record commit
       during a bare-metal `begin`, and passed on the rerun.
+      In 7E, `test_a_grant_is_delivered_through_convergence_and_reclaimed_from_its_parameters`
+      and `test_a_bare_metal_lease_expires_through_its_fulfillment` failed the same way
+      in one root aggregate and passed on every rerun.
       Production uses a file database with a connection per session. The harness needs
       the same, or an equivalent that gives each session its own connection.
       Found in 6B: the policy kit's refusal of an unknown middleware name tells the

@@ -481,7 +481,8 @@ def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
     """Keep an Alkahest fulfillment's lease-ready evidence beside its lifecycle.
 
     The chain holds only the evidence's digest, so the storefront keeps the body
-    the digest names and resolves it to an authorized caller.
+    the digest names and resolves it to an authorized caller, and counts the
+    chain's refusals of its submission.
     """
     conn.execute(
         "ALTER TABLE bare_metal_fulfillment_lifecycle "
@@ -490,6 +491,12 @@ def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
     conn.execute(
         "ALTER TABLE bare_metal_fulfillment_lifecycle "
         "ADD COLUMN lease_ready_evidence_digest TEXT"
+    )
+    # How many times the chain has refused the evidence submission; the step
+    # leaves the deal to an operator after a bounded number of refusals.
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN evidence_rejections INTEGER NOT NULL DEFAULT 0"
     )
     conn.execute(
         "CREATE UNIQUE INDEX idx_bare_metal_fulfillment_evidence_digest "

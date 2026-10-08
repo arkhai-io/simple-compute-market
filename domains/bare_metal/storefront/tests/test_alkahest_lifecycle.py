@@ -8,21 +8,12 @@ production ones; the site and the chain are doubled at their clients.
 
 from __future__ import annotations
 
-import time
-import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 
 import httpx
 import pytest
-from market_identity import (
-    EMPTY_BODY,
-    Eip191Signer,
-    RequestEnvelope,
-    TrustedIdentitySet,
-    canonical_body_hash,
-    sign_request,
-)
+from market_identity import Eip191Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     FULFILLMENT_REFERENCE_KEY,
     MANUAL_REASON_KEY,
@@ -35,6 +26,8 @@ from settlement_compositions import (
     alkahest_composition,
 )
 from storefront_client import StorefrontClient
+from arkhai_bare_metal.evidence_routes import BareMetalEvidenceClient, evidence_path
+from storefront_client.client import StorefrontClientError
 from test_http_settlement import (
     ADMIN_SIGNER,
     BUYER,
@@ -313,108 +306,143 @@ async def test_a_parked_obligation_does_not_end_the_lease(tmp_path) -> None:
     assert site.terminations == []
 
 
+async def test_passes_spent_waiting_for_the_lease_do_not_count_as_rejections(
+    tmp_path,
+) -> None:
+    chain = ChainClient(StringObligations(raises=RuntimeError("execution reverted")))
+    runtime, _app_, obligation_ref = await _settled(
+        tmp_path,
+        site=_Site("provisioning", "provisioning", "provisioning", "active"),
+        chain=chain,
+        escrow=EscrowOnChain(),
+    )
+    # Verification's step and two more passes find the lease not yet active.
+    for _ in range(2):
+        await runtime.settlement_worker.service_obligation(obligation_ref)
+    assert chain.string_obligation.submitted == []
+
+    # The first refusal, on the fourth pass, is one rejection, not a fourth.
+    await runtime.settlement_worker.service_obligation(obligation_ref)
+
+    assert len(chain.string_obligation.submitted) == 1
+    assert (await _fulfill_operation(runtime, obligation_ref))["state"] == "pending"
+    assert await runtime.settlement_runtime.manual_required_count() == 0
+
+    for _ in range(REJECTION_BOUND - 1):
+        await runtime.settlement_worker.service_obligation(obligation_ref)
+
+    assert len(chain.string_obligation.submitted) == REJECTION_BOUND
+    record = await _record(runtime, obligation_ref)
+    assert record.mechanism_state[MANUAL_REASON_KEY] == REJECTED
+
+
 # -- evidence resolution ------------------------------------------------------
 
 
-def _signed(signer, role: str, digest: str) -> dict[str, str]:
-    signed = sign_request(
+def _storefront_client(app, signer, role: str) -> StorefrontClient:
+    return StorefrontClient(
+        "http://seller",
         signer=signer,
-        envelope=RequestEnvelope(
-            role=role,
-            principal=signer.identity,
-            method="GET",
-            operation="resolve_bare_metal_lease_ready_evidence",
-            resource=digest,
-            request_id=f"test-{uuid.uuid4().hex}",
-            timestamp=int(time.time()),
-            body_hash=canonical_body_hash(EMPTY_BODY),
-        ),
+        caller_role=role,
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
     )
-    return {
-        "X-Market-Signature-Version": signed.protocol,
-        "X-Market-Identity-Scheme": signed.principal.scheme.value,
-        "X-Market-Identity-Identifier": signed.principal.identifier,
-        "X-Market-Role": signed.role,
-        "X-Market-Request-ID": signed.request_id,
-        "X-Market-Timestamp": str(signed.timestamp),
-        "X-Market-Signature": signed.proof.value,
-    }
+
+
+async def _resolve(app, signer, role: str, digest: str):
+    async with _storefront_client(app, signer, role) as client:
+        return await BareMetalEvidenceClient(client, role=role).lease_ready_evidence(
+            digest
+        )
 
 
 async def test_alkahest_evidence_is_served_only_to_the_deals_parties(tmp_path) -> None:
     chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
-    runtime, app, obligation_ref = await _settled(
+    runtime, app, _obligation_ref = await _settled(
         tmp_path, site=_Site("active"), chain=chain, escrow=EscrowOnChain()
     )
-    [(data, _ref)] = chain.string_obligation.submitted
-    digest = data.removeprefix("sha256:")
-    path = f"/api/v1/evidence/bare-metal/{digest}"
+    [(digest, _ref)] = chain.string_obligation.submitted
     stranger = Eip191Signer(bytes.fromhex("77" * 32))
+    refused: dict[str, int] = {}
 
     async with app.router.lifespan_context(app):
+        as_buyer = await _resolve(app, BUYER_SIGNER, "buyer", digest)
+        as_claimant = await _resolve(app, SELLER_SIGNER, "seller", digest)
+        as_admin = await _resolve(app, ADMIN_SIGNER, "admin", digest)
+        for name, signer, role in (
+            ("stranger", stranger, "buyer"),
+            # No hosted authority takes part in an Alkahest deal.
+            ("authority", stranger, "authority"),
+        ):
+            with pytest.raises(StorefrontClientError) as raised:
+                await _resolve(app, signer, role, digest)
+            refused[name] = raised.value.status_code
+        with pytest.raises(StorefrontClientError) as missing:
+            await _resolve(app, BUYER_SIGNER, "buyer", "sha256:" + "00" * 32)
+        # Malformed authentication stays on raw HTTP: an unsigned request.
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://seller"
-        ) as client:
-            unsigned = await client.get(path)
-            as_buyer = await client.get(path, headers=_signed(BUYER_SIGNER, "buyer", digest))
-            as_admin = await client.get(path, headers=_signed(ADMIN_SIGNER, "admin", digest))
-            as_stranger = await client.get(
-                path, headers=_signed(stranger, "buyer", digest)
-            )
-            as_authority = await client.get(
-                path, headers=_signed(stranger, "authority", digest)
-            )
+        ) as raw:
+            unsigned = await raw.get(evidence_path(digest))
 
+    assert as_buyer == as_claimant == as_admin
+    assert as_buyer.evidence.condition_anchor == ESCROW_UID
+    assert as_buyer.evidence.evidence_digest == digest
+    assert as_buyer.evidence.accepted_binding_kind == (
+        "bare_metal.accepted-alkahest-binding.v1"
+    )
+    assert refused == {"stranger": 403, "authority": 403}
+    assert missing.value.status_code == 404
     assert unsigned.status_code == 401
-    assert as_buyer.status_code == 200
-    assert as_admin.status_code == 200
-    body = as_buyer.json()
-    assert body["evidence"]["condition_anchor"] == ESCROW_UID
-    assert as_stranger.status_code == 403
-    # No hosted authority takes part in an Alkahest deal.
-    assert as_authority.status_code == 403
 
 
+async def test_hosted_evidence_is_served_to_its_hosted_authority(tmp_path) -> None:
+    from test_hosted_lifecycle_repository import accepted_binding, lease_ready_result
 
-def test_hosted_evidence_is_also_readable_by_the_trusted_hosted_authority(
-    tmp_path,
-) -> None:
-    from arkhai_bare_metal import BareMetalLeaseReadyEvidence, CanonicalPrincipal
-    from settlement_compositions import hosted_composition
-
-    from arkhai_bare_metal_storefront.api import _evidence_readers
+    from arkhai_bare_metal import build_bare_metal_lease_ready_evidence
     from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
     from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
     from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+    from settlement_compositions import hosted_composition
 
+    authority = Eip191Signer(bytes.fromhex("88" * 32))
     domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
     runtime = BareMetalStorefrontRuntime(
-        db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
+        db=db,
         domain=domain,
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
         marketplace_signer=SELLER_SIGNER,
-        settlement_composition=hosted_composition(SELLER_SIGNER),
+        settlement_composition=hosted_composition(SELLER_SIGNER, authority=authority),
     )
-    buyer = CanonicalPrincipal(
-        scheme=BUYER_SIGNER.identity.scheme.value,
-        identifier=BUYER_SIGNER.identity.identifier,
+    # A hosted deal's evidence, recorded with the writes its lifecycle makes.
+    binding = accepted_binding()
+    await db.save_bare_metal_hosted_binding(binding)
+    result = lease_ready_result()
+    evidence = build_bare_metal_lease_ready_evidence(
+        binding=binding, condition_anchor="condition-a", result=result
     )
-    # Only the fields the readers depend on; the route validates stored evidence.
-    hosted = BareMetalLeaseReadyEvidence.model_construct(
-        accepted_binding_kind="bare_metal.accepted-hosted-binding.v1",
-        buyer_principal=buyer,
+    await db.advance_bare_metal_hosted_lifecycle(
+        obligation_ref=binding.obligation_ref,
+        physical_state="access_ready",
+        capacity_reservation_id=result.capacity_reservation_ref,
+        settlement_resource_id=result.settlement_resource_ref,
+        fulfillment_id=result.fulfillment_ref,
+        public_result=result,
     )
-    alkahest = BareMetalLeaseReadyEvidence.model_construct(
-        accepted_binding_kind="bare_metal.accepted-alkahest-binding.v1",
-        buyer_principal=buyer,
+    await db.advance_bare_metal_hosted_lifecycle(
+        obligation_ref=binding.obligation_ref,
+        physical_state="evidence_published",
+        public_result=result,
+        portable_evidence=evidence,
+        portable_evidence_ref="portable-evidence-a",
     )
+    app = _app(runtime)
 
-    hosted_readers = _evidence_readers(runtime, hosted)
-    alkahest_readers = _evidence_readers(runtime, alkahest)
+    async with app.router.lifespan_context(app):
+        served = await _resolve(app, authority, "authority", evidence.evidence_digest)
 
-    assert hosted_readers["authority"] == (SELLER_SIGNER.identity,)
-    assert "authority" not in alkahest_readers
-    assert hosted_readers["buyer"] == alkahest_readers["buyer"] == (BUYER_SIGNER.identity,)
-    assert hosted_readers["admin"] == (ADMIN_SIGNER.identity,)
+    assert served.evidence == evidence
+    assert served.seller_principal.identifier == SELLER_SIGNER.identity.identifier

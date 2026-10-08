@@ -49,8 +49,8 @@ logger = logging.getLogger(__name__)
 ALKAHEST_MECHANISM = "alkahest.v1"
 OUTCOME_UNKNOWN = "alkahest_submission_outcome_unknown"
 REJECTED = "alkahest_submission_rejected"
-# Attempts of one fulfillment operation after which a chain that keeps
-# rejecting the submission is left to an operator rather than retried again.
+# Refusals of a deal's evidence submission after which a chain that keeps
+# refusing it is left to an operator rather than retried again.
 REJECTION_BOUND = 3
 
 # Settlement outcomes that end a deal without paying for it.
@@ -166,8 +166,11 @@ class BareMetalAlkahestLifecycle:
             local_principal=self.local_principal,
             worker_id=worker_id,
         )
-        if publication.outcome == "rejected" and (reserved.attempts or 0) >= (
-            REJECTION_BOUND
+        if publication.outcome == "rejected" and (
+            await self.db.record_bare_metal_evidence_rejection(
+                negotiation_id=record.agreement_ref
+            )
+            >= REJECTION_BOUND
         ):
             await self._park(
                 record,
@@ -322,7 +325,7 @@ class BareMetalAlkahestLifecycle:
             raise BareMetalAlkahestFulfillmentError(
                 f"no Alkahest chain client is configured for {chain_name!r}"
             )
-        return AlkahestFulfillmentPublisher(client, chain_name=chain_name)
+        return AlkahestFulfillmentPublisher(client)
 
     @staticmethod
     def _escrow_uid(record: SettlementObligationRecord) -> str:

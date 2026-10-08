@@ -2551,8 +2551,11 @@ Decisions:
     - *Outcome unknown* parks the obligation in the same way.
     - *Rejected* means the chain refused the transaction and no attestation exists, so a
       retry cannot duplicate one: the step clears its intent and records a retry, as
-      for *not submitted*, until the operation's journal attempts reach a small bound,
-      after which it parks the obligation (`alkahest_submission_rejected`). A transient
+      for *not submitted*, until the deal's own count of refusals reaches a small bound,
+      after which it parks the obligation (`alkahest_submission_rejected`). The count
+      is kept apart from the operation's journal attempts, which also count the passes
+      spent waiting for the lease, none of which is a refusal (implementation review,
+      2026-10-08). A transient
       revert recovers by itself; a deterministic one is a defect, reported by the
       status count (decision 13). The maintainer preferred an operator resolution
       path, but not one `add-alkahest-attestation-reference-query` already plans to
@@ -2567,6 +2570,10 @@ Decisions:
     claimant and the seller's administrator for either kind, and the hosted authority's
     principals (role `authority`, from the Stripe section's trust) only for evidence with
     the hosted binding, since no hosted authority takes part in an Alkahest deal.
+    The route follows the five-piece route pattern: its wire model, route contract,
+    framework-free route service, and typed client (over the storefront client's
+    generic `authenticated_request`) live in `arkhai_bare_metal`, and the
+    storefront's `api.py` is only its binding (implementation review, 2026-10-08).
 13. **Status reports what needs an operator.** The administrator's
     `/api/v1/system/status` carries `settlement_manual_required`: the number of
     obligations parked for an operator, by mechanism status or by any operation.

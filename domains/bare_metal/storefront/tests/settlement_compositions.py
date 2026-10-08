@@ -72,13 +72,19 @@ def stripe_section(signer: Signer) -> dict[str, Any]:
     }
 
 
-def hosted_composition(signer: Signer) -> BareMetalStorefrontSettlementComposition:
-    """Hosted settlement only, signed by ``signer`` as the storefront."""
+def hosted_composition(
+    signer: Signer, *, authority: Signer | None = None
+) -> BareMetalStorefrontSettlementComposition:
+    """Hosted settlement only, signed by ``signer`` as the storefront.
+
+    ``authority`` is the hosted authority the storefront trusts; the storefront's
+    own signer when none is given.
+    """
     return BareMetalStorefrontSettlementComposition.from_raw_config(
         {
             "schema_version": 1,
             "priority": ["fiat.stripe.v1"],
-            "stripe": stripe_section(signer),
+            "stripe": stripe_section(authority or signer),
         },
         resources={
             "marketplace_signer": signer,

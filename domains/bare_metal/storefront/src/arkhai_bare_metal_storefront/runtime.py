@@ -426,6 +426,22 @@ class BareMetalStorefrontRuntime:
             wake_publication=None,
         )
 
+    def _commercial_settlement_check(self) -> str:
+        """``ok`` while a mechanism that takes payment is enabled for new deals.
+
+        A settlement root that enables none (nothing at all, or only contact
+        exchange, which takes no payment) is ``unconfigured``: a deliberate
+        choice, while its configured sections still service the deals accepted
+        under them. ``unavailable`` means there is no settlement composition.
+        """
+        composition = self.settlement_composition
+        if composition is None:
+            return "unavailable"
+        paying = {ALKAHEST_MECHANISM, HOSTED_MECHANISM}
+        if paying & set(composition.enabled_mechanisms):
+            return "ok"
+        return "unconfigured"
+
     async def health(self) -> dict[str, object]:
         """Report composed authorities without implying fulfillment readiness.
 
@@ -446,9 +462,7 @@ class BareMetalStorefrontRuntime:
         checks = {
             "api": "ok",
             "database": "ok",
-            "commercial_settlement": (
-                "ok" if self.settlement_composition is not None else "unavailable"
-            ),
+            "commercial_settlement": self._commercial_settlement_check(),
             "fulfillment": (
                 "ok" if self.fulfillment_client is not None else "unavailable"
             ),
@@ -460,8 +474,12 @@ class BareMetalStorefrontRuntime:
             checks["database"] = "error"
             resource_count = None
         return {
+            # A mechanism deliberately left unconfigured is reported, not a
+            # degradation, as the other storefronts report theirs.
             "status": (
-                "ok" if all(value == "ok" for value in checks.values()) else "degraded"
+                "ok"
+                if all(value in ("ok", "unconfigured") for value in checks.values())
+                else "degraded"
             ),
             "checks": checks,
             "paused": self.trading_pause.paused,

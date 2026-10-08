@@ -58,9 +58,8 @@ class FulfillmentPublication:
 class AlkahestFulfillmentPublisher:
     """Submit evidence data as a string obligation referencing an escrow."""
 
-    def __init__(self, client: Any, *, chain_name: str | None = None) -> None:
+    def __init__(self, client: Any) -> None:
         self._client = client
-        self._chain_name = chain_name
 
     async def publish(
         self, *, condition_anchor: str, data: str
@@ -81,7 +80,9 @@ class AlkahestFulfillmentPublisher:
                 "not_submitted", reason="client_has_no_string_obligation"
             )
         try:
-            async with chain_tx_lock(self._chain_name):
+            # The same lock every other submission from this wallet takes, so
+            # none of them races this one for the account's next nonce.
+            async with chain_tx_lock(None):
                 uid = await submit(data, condition_anchor)
         except Exception as exc:  # the pinned client raises untyped errors
             return _classify(exc)

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-import base64
-
 from collections.abc import Mapping
 import json
 from urllib.parse import quote, urlencode
 from typing import Annotated, Any
 
-from arkhai_bare_metal import BARE_METAL_ACCEPTED_BINDING_KIND
+from arkhai_bare_metal import CanonicalPrincipal
+from arkhai_bare_metal.evidence_routes import (
+    EVIDENCE_OPERATION,
+    EVIDENCE_PATH,
+    BareMetalEvidenceContractError,
+    BareMetalEvidenceRouteError,
+    BareMetalEvidenceRouteService,
+    BareMetalSignedLeaseReadyEvidence,
+    evidence_resource,
+)
 from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import (
     EvaluateNegotiateRequest,
@@ -985,84 +992,70 @@ async def teardown_fulfillment(
         ) from exc
 
 
-EVIDENCE_OPERATION = "resolve_bare_metal_lease_ready_evidence"
+def _evidence_route_service(runtime: BareMetalStorefrontRuntime) -> Any:
+    """The evidence route service over this storefront's store, trust, and signer."""
+
+    def canonical(identity: Identity) -> CanonicalPrincipal:
+        return CanonicalPrincipal.model_validate(identity.model_dump(mode="json"))
+
+    composition = runtime.settlement_composition
+    stripe = (
+        composition.config.mechanism_config("stripe") if composition is not None else None
+    )
+    trust = getattr(stripe, "authority", None)
+    return BareMetalEvidenceRouteService(
+        load_evidence=lambda digest: runtime.db.load_bare_metal_lease_ready_evidence(
+            evidence_digest=digest
+        ),
+        seller_principal=canonical(runtime.seller_principal),
+        sign=runtime.marketplace_signer.sign,
+        admin_principals=tuple(
+            canonical(identity) for identity in runtime.admin_principals.identities
+        ),
+        hosted_authority_principals=(
+            tuple(canonical(identity) for identity in trust.principals)
+            if trust is not None
+            else ()
+        ),
+    )
 
 
-def _evidence_readers(
-    runtime: BareMetalStorefrontRuntime, evidence: Any
-) -> dict[str, tuple[Identity, ...]]:
-    """Who may read ``evidence``, by the role each signs as."""
-
-    def identity(principal: Any) -> Identity:
-        return Identity.model_validate(principal.model_dump(mode="json"))
-
-    readers: dict[str, tuple[Identity, ...]] = {
-        "buyer": (identity(evidence.buyer_principal),),
-        "admin": tuple(runtime.admin_principals.identities),
-    }
-    if evidence.accepted_binding_kind == BARE_METAL_ACCEPTED_BINDING_KIND:
-        composition = runtime.settlement_composition
-        stripe = (
-            composition.config.mechanism_config("stripe")
-            if composition is not None
-            else None
-        )
-        trust = getattr(stripe, "authority", None)
-        if trust is not None:
-            readers["authority"] = tuple(trust.principals)
-    return readers
-
-
-@router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
-async def hosted_lease_evidence(
+@router.get(EVIDENCE_PATH, response_model=BareMetalSignedLeaseReadyEvidence)
+async def lease_ready_evidence(
     evidence_digest: str,
     request: Request,
-) -> dict[str, Any]:
-    """Resolve one content-addressed lease-ready document with seller proof.
-
-    An Alkahest deal publishes this document's digest on a public chain, and
-    the document names the deal's parties, so it is served only on a signed
-    request from a caller with a part in that deal: its buyer, the seller's
-    administrator, or, for evidence a hosted settlement bound, the hosted
-    authority the storefront trusts.
-    """
-
-    if len(evidence_digest) != 64 or any(
-        char not in "0123456789abcdef" for char in evidence_digest
-    ):
-        raise HTTPException(status_code=404, detail="evidence not found")
+) -> BareMetalSignedLeaseReadyEvidence:
+    """Resolve one content-addressed lease-ready document with seller proof."""
     runtime = _runtime(request)
-    evidence = await runtime.db.load_bare_metal_lease_ready_evidence(
-        evidence_digest="sha256:" + evidence_digest
-    )
-    if evidence is None:
-        raise HTTPException(status_code=404, detail="evidence not found")
+    service = _evidence_route_service(runtime)
+    try:
+        resource = evidence_resource(evidence_digest)
+    except BareMetalEvidenceContractError as exc:
+        raise HTTPException(status_code=404, detail="evidence not found") from exc
+    # Bound before anything can refuse, so every answer, a refusal included,
+    # carries the storefront's response signature.
+    bind_response_contract(request, operation=EVIDENCE_OPERATION, resource=resource)
+    try:
+        evidence = await service.evidence(evidence_digest)
+    except BareMetalEvidenceRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     role = request.headers.get("X-Market-Role", "")
     if not role:
         raise HTTPException(status_code=401, detail="a signed request is required")
-    allowed = _evidence_readers(runtime, evidence).get(role)
-    if not allowed:
-        raise HTTPException(status_code=403, detail="caller may not read this evidence")
+    # A role with no reader is refused by authentication itself.
+    allowed = tuple(
+        Identity.model_validate(principal.model_dump(mode="json"))
+        for principal in service.readers(evidence).get(role, ())
+    )
     await _principal(
         request=request,
         runtime=runtime,
         operation=EVIDENCE_OPERATION,
-        resource=evidence_digest,
+        resource=resource,
         expected_role=role,
         allowed_principals=allowed,
     )
-    material = evidence.canonical_json().encode("utf-8")
-    proof = (
-        base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
-        .rstrip(b"=")
-        .decode("ascii")
-    )
-    return {
-        "protocol": "arkhai.bare-metal-evidence-signature.v1",
-        "seller_principal": runtime.seller_principal.model_dump(mode="json"),
-        "evidence": evidence.model_dump(mode="json"),
-        "proof": proof,
-    }
+    return service.respond(evidence)
 
 
 @router.get("/health", response_model=BareMetalHealthResponse)

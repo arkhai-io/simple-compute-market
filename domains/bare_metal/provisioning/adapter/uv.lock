@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -44,7 +44,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -119,7 +119,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -130,7 +130,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.6"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -178,12 +178,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.1.6-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -195,7 +195,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]

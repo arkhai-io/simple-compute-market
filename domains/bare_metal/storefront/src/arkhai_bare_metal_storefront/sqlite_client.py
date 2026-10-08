@@ -794,6 +794,33 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
+    async def record_bare_metal_evidence_rejection(self, *, negotiation_id: str) -> int:
+        """Count one refusal of the deal's evidence submission; return the total."""
+
+        def _save() -> int:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    changed = conn.execute(
+                        "UPDATE bare_metal_fulfillment_lifecycle SET "
+                        "evidence_rejections = evidence_rejections + 1, "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).rowcount
+                if changed != 1:
+                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
+                row = conn.execute(
+                    "SELECT evidence_rejections FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                return int(row[0])
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
     async def save_bare_metal_lease_ready_evidence(
         self,
         *,

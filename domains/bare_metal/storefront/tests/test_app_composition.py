@@ -268,3 +268,28 @@ async def test_the_ready_hook_declines_contact_exchange_and_refuses_the_unknown(
         await on_ready(unknown, "w")
     with pytest.raises(RuntimeError, match="unknown.v1"):
         await on_terminal(unknown, "failed", None)
+
+
+async def test_a_root_that_enables_no_payment_reports_settlement_unconfigured(
+    tmp_path,
+) -> None:
+    # The Alkahest section stays configured, for the deals accepted under it,
+    # while nothing is enabled for new ones.
+    runtime = _direct_runtime(
+        tmp_path,
+        seller_evm_address="0x" + "33" * 20,
+        settlement_composition=alkahest_composition(
+            COMPOSITION_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+            enabled=False,
+        ),
+        fulfillment_client=object(),
+    )
+
+    health = await runtime.health()
+
+    assert health["checks"]["commercial_settlement"] == "unconfigured"
+    # A deliberate choice is reported, not counted as a degradation.
+    assert health["status"] == "ok"
+    assert runtime.settlement_worker is not None

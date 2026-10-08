@@ -64,7 +64,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -75,7 +75,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_ansible-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_ansible-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -123,7 +123,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.6"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -134,12 +134,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.1.6-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -151,7 +151,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -228,7 +228,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
@@ -238,7 +238,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.6.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -298,14 +298,14 @@ dev = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -7,9 +7,12 @@ publisher's own logic.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from market_alkahest import AlkahestFulfillmentPublisher, FulfillmentPublication
+from market_alkahest.txlock import chain_tx_lock
 
 
 class StringObligation:
@@ -36,7 +39,7 @@ ESCROW = "0x" + "11" * 32
 
 async def test_a_published_attestation_reports_its_uid_and_submits_exactly_the_data():
     obligation = StringObligation(returns="0xattestation")
-    publisher = AlkahestFulfillmentPublisher(Client(obligation), chain_name="anvil")
+    publisher = AlkahestFulfillmentPublisher(Client(obligation))
 
     result = await publisher.publish(condition_anchor=ESCROW, data=DIGEST)
 
@@ -115,3 +118,25 @@ def test_a_reference_is_reported_exactly_when_published():
         FulfillmentPublication("published")
     with pytest.raises(ValueError):
         FulfillmentPublication("rejected", reference="0xattestation")
+
+
+async def test_publication_waits_for_the_wallets_other_submissions():
+    # Materialize, collect, and reclaim submit from the same wallet under this
+    # lock; a publication that did not take it could reuse their nonce.
+    obligation = StringObligation(returns="0xattestation")
+    publisher = AlkahestFulfillmentPublisher(Client(obligation))
+    held = chain_tx_lock(None)
+
+    async with held:
+        pending = asyncio.create_task(
+            publisher.publish(condition_anchor=ESCROW, data=DIGEST)
+        )
+        # Yield to the loop until the task has run as far as it can.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert not pending.done()
+        assert obligation.calls == [], "publication must wait for the held lock"
+    result = await pending
+
+    assert result.outcome == "published"
+    assert obligation.calls == [(DIGEST, ESCROW)]
