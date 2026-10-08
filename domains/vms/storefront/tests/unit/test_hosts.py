@@ -455,6 +455,34 @@ class TestCapacityEnforcement:
 
         asyncio.run(_run())
 
+    def test_deleted_slices_do_not_consume_capacity(self, client):
+        """A deleted slice no longer counts against its host."""
+        async def _run():
+            await client.upsert_host(name="h", total_gpu_count=2)
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            await client.upsert_resource(
+                resource_id="s2", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            await client.upsert_resource(
+                resource_id="s2", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="deleted",
+                attributes=self._attrs("h"),
+            )
+            # Fits only because the deleted slice is left out of the host's total.
+            await client.upsert_resource(
+                resource_id="s3", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+
+        asyncio.run(_run())
+
     def test_csv_import_surfaces_capacity_error_per_row(self, client, tmp_path):
         """An over-committed slice in CSV becomes a row-level error, not a fatal."""
         hosts = tmp_path / "hosts.csv"

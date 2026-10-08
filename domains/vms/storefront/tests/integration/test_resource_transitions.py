@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -32,6 +34,17 @@ def _events(client: SQLiteClient) -> list[tuple]:
         conn.close()
 
 
+def _occurred_at(client: SQLiteClient, event_id: str) -> str:
+    conn = sqlite3.connect(client.db_path)
+    try:
+        return conn.execute(
+            "SELECT occurred_at FROM resource_transition_events WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
 def _state(client: SQLiteClient, resource_id: str) -> tuple[str, str]:
     conn = sqlite3.connect(client.db_path)
     try:
@@ -54,14 +67,21 @@ async def _release(client: SQLiteClient, resource_id: str, key: str) -> dict:
 
 async def test_a_transition_records_one_event_and_sets_the_state(client):
     await client.upsert_resource(resource_id="r1", resource_type="compute.gpu", state="leased")
+    started = datetime.now(timezone.utc)
 
     result = await _release(client, "r1", "release-r1")
 
+    finished = datetime.now(timezone.utc)
     assert result["applied"] is True and result["duplicate"] is False
     assert _state(client, "r1")[0] == "available"
     assert _events(client) == [
         (result["event_id"], "r1", "reservation_released_by_admin", "available", "release-r1")
     ]
+    assert str(uuid.UUID(result["event_id"])) == result["event_id"]
+    occurred_at = datetime.strptime(
+        _occurred_at(client, result["event_id"]), "%Y-%m-%dT%H:%M:%S.%fZ"
+    ).replace(tzinfo=timezone.utc)
+    assert started.replace(microsecond=0) <= occurred_at <= finished
 
 
 async def test_a_repeated_idempotency_key_changes_nothing(client):

@@ -16,7 +16,8 @@ recorded.
 
 ## Validation environment
 
-Suites ran on 2026-10-08 after `make dist`. The storefront environment could
+Suites ran on 2026-10-08 after `make dist`, and the storefront suites ran
+again after the implementation review's test additions. The storefront environment could
 not run `make reinit`, because this environment's network policy blocks
 `download.pytorch.org`, the index for the storefront's optional `rl` extra.
 Instead it was synced from its committed lock with
@@ -27,7 +28,7 @@ The other projects used their own Makefile targets.
 
 | Suite | Result |
 |---|---|
-| `domains/vms/storefront` unit | 1061 passed, 1 skipped |
+| `domains/vms/storefront` unit | 1062 passed, 1 skipped |
 | `domains/vms/storefront` integration | 382 passed, 2 failed; see below |
 | `core/storefront-client` (`make test`) | 60 passed |
 | `kit/site` (`make test`) | 281 passed |
@@ -73,7 +74,10 @@ findings, and all seven exist unchanged on the base commit.
         retired IDs' history byte-identical.
       - A release transition writes no allocation row.
 
-      Against the pre-change schema code, 5 of its 6 cases fail. The fresh
+      The histories are hand-built, era-shaped schemas, not restored release
+      databases: this pins the freeze contract and is not a full upgrade
+      acceptance test. Against the pre-change schema code, 5 of its 6 cases
+      fail. The fresh
       transition case passes either way, because a fresh table has no rows.
       The unit file lost its two allocation schema tests and the allocation
       assertions in its pre-compute-inventory test.
@@ -96,6 +100,10 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions this change authorizes.
       - The three capacity-check tests that used `host_capacity_remaining`
         now assert the `CapacityExceededError` violations, including
         `used_excluding_this`.
+      - A new `test_deleted_slices_do_not_consume_capacity` keeps the
+        invariant `TestCapacityRemaining` used to cover: a deleted slice does
+        not count against its host. It fails if the validator stops
+        excluding deleted rows.
       - `get_host`, `_HOST_COLUMNS`, and `_host_row_to_dict` remain for
         `resource_capacity_validator`.
 - [x] 3.2 Removed the routes and everything only they used:
@@ -129,7 +137,8 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions this change authorizes.
       - `test_capacity_reservation_boundary.py` asserts that `host_id` is
         stripped along with the other placement fields, and its comments say
         so.
-- [x] 3.6 The diff of `fulfill_vm_obligation` only removes lines. Its
+- [x] 3.6 In `fulfill_vm_obligation`, the diff removes the `vm_host` lines and
+      rewrites the `_record_fulfillment_id` docstring (task 4.1). Its
       committed-claim reads and commit-time lease window are unchanged.
 - [x] 3.7 The storefront and `core/storefront-client` suites and
       `tests/unit/test_storefront_client_parity.py` pass.
@@ -150,7 +159,9 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions this change authorizes.
 
       Task 3.5 still owns `reserved_vm_host`.
 - [x] 3.9 Deleted `SQLiteClient.get_resource`.
-      - `test_settle_controller.py` keeps its site-capacity assertion.
+      - `test_settle_controller.py` still checks that evaluation leaves both
+        the local row (read through `list_resources`) and the site's capacity
+        unreserved.
       - The provisioning lease-lifecycle test no longer stubs
         `patch_resource`.
 - [x] 3.10 `apply_resource_transition` takes `resource_id`, `event_type`,
@@ -158,7 +169,8 @@ Tasks 3.3 and 3.4 are transferred scope, not deletions this change authorizes.
       `apply_resource_set_transition`. It keeps one transaction, reports a
       duplicate key as a no-op, rolls back on a missing resource, and
       generates the event ID with the current time.
-      `tests/integration/test_resource_transitions.py` covers it.
+      `tests/integration/test_resource_transitions.py` covers each guarantee,
+      including the event ID's UUID form and its timestamp.
 - [x] 3.11 Rewrote the `CapacityReservation` docstring in
       `kit/site/src/market_site/db.py` to describe the row as it is.
 - [x] 3.12 The provisioning service unit suite and the `kit/site` suite pass.
@@ -186,26 +198,60 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `docs/development/ROADMAP.md` now records that the surfaces are gone,
       and the change's gap row is removed.
 - [x] 4.6 **Campaign index currency.** This change's row in
-      `openspec/changes/README.md` reads "implemented 2026-10-08; local suites
-      pass; end-to-end evidence pending". It moves to complete, leaving the
-      dependency graph, once task 4.9 records evidence.
+      `openspec/changes/README.md` records it as complete, and the change has
+      left the dependency graph's independent line.
 - [x] 4.7 **Documentation citations.**
       `make check-doc-citations CHANGE=remove-dead-storefront-physical-surfaces`
       passes.
 - [x] 4.8 **Packaging.** `make check-packaging` passes on 2026-10-08. The lock,
       install-derivation, Python-version, and project-layout checks are all
       OK.
-- [ ] 4.9 **End-to-end pipeline.** Run the E2E workflow (`e2e.yml`) on this
-      branch and record the run and its result. Its VM full-deal scenarios
-      exercise what this change retains: provisioning, teardown, the
-      `capacity_released` callback, and `admin_release_reservations` cleanup
-      on a database without `compute_allocations`. If the pipeline cannot run
-      for a reason unrelated to this change, record an explicit blocker
-      naming the cause and the change that owns it, and treat the
-      validations it gates as unrun.
+- [x] 4.9 **End-to-end pipeline.** E2E workflow run 303 (`e2e.yml`,
+      `workflow_dispatch` on this branch at the implementation commit,
+      2026-10-08) passed.
+      - **`e2e-vm`:** 135 passed, 3 skipped, 65 deselected. The skips are in
+        `apicredits/test_credits_payment_deal.py`, which this change does not
+        touch.
+      - **Full-deal scenarios:** both `test_full_deal.py` and
+        `test_full_deal_buyer_cli.py` passed stage `00h`, with
+        `storefront_auth=ok`. They also passed stages 09a–11b: lease expiry,
+        teardown dispatch and convergence, and lease and capacity release.
+      - **Cleanup:** `admin_release_reservations` answered 14 calls with 200
+        on databases without `compute_allocations`, and the module teardown
+        released two leftover site reservations.
+      - **Storefront responses:** no storefront request returned a 4xx.
+      - **`e2e-bare-metal`:** 16 passed.
+
+      The job log was read through the GitHub API's 4,999-line window, which
+      contains the complete pytest session.
+      The test-only additions from the implementation review came after this
+      run and were validated by the local suites.
 - [x] 4.10 **Promotion.** `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
       "Migrations at startup" now states the frozen-table and
       migration-retirement rule. The record below is complete.
+
+## Implementation review disposition
+
+The 2026-10-08 implementation review found no correctness defect. Its
+findings were dispositioned as follows:
+
+- **Settle-controller local read-only assertion:** restored (task 3.9).
+- **Deleted-slice capacity exclusion:** covered by a new test (task 3.1).
+- **Stale `release_reserved_resources` fixture docstring in
+  `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`:** rewritten to
+  describe fleet-wide cleanup and the production `capacity_released` path.
+- **Task 3.6's record:** corrected.
+- **Event identifier and timestamp checks:** added (task 3.10).
+- **Freeze tests as upgrade acceptance:** qualified in task 2.4.
+- **A negative test that the removed resource routes are absent:**
+  declined here. `POST /api/v1/admin/portfolio/resources/import` is still
+  mounted, so the meaningful guard is that no storefront route administers
+  physical resources. That guard is the test of
+  `pools-9-retire-local-physical-authority`'s "Storefront holds no
+  physical-resource authority" requirement. It is deferred to that change's
+  task 5.7, where the import route also leaves. A test pinning only the two
+  paths removed here would record this change's history rather than a
+  current contract.
 
 ## Design promotion record
 

@@ -308,7 +308,12 @@ class TestEvaluateSettle:
         job = await db.load_escrow(escrow_uid="no-write-eval-uid")
         assert job is None, "evaluate_settle must not write settlement_jobs rows"
 
-        # The site still holds the capacity: evaluation reserves nothing.
+        # Evaluation reserves nothing, locally or at the site.
+        states = {r["resource_id"]: r["state"] for r in await db.list_resources()}
+        assert states["r-eval-1"] == "available", (
+            f"evaluate_settle reserved a resource (state={states['r-eval-1']!r}) "
+            "— it must use reserve=False (read-only inventory selection)."
+        )
         assert capacity_site._available("r-eval-1") == 1
 
     async def test_with_matching_inventory_returns_would_submit_true(

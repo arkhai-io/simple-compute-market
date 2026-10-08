@@ -203,6 +203,12 @@ provisioning can trust two principals leaves it with no listing source.
       `test_multi_registry.py`'s Alice seeding and removed her local-path opt-out.
       Preserve that completed work and migrate the remaining CSV consumers
       identified by re-grounding, including Bob's local import where it remains.
+- [ ] 5.7 Once 5.2 removes the import route, add an in-process application test
+      that the storefront mounts no route under `/api/v1/admin/portfolio/resources`.
+      It is the route-level evidence for "Storefront holds no physical-resource
+      authority". `remove-dead-storefront-physical-surfaces` deferred this guard
+      here: while the import route remains, only a test of the specific paths it
+      removed was possible, and that would record history rather than a contract.
 
 ## 6. Freeze migration and validation
 
