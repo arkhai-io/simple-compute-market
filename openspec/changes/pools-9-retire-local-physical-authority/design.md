@@ -115,7 +115,7 @@ Drift from the earlier plan:
   `openspec/specs/storefront-publication/architecture.md`, by
   `openspec/specs/settlement-configuration/architecture.md`, by
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, and by the seller quickstart
-  (open decision D3).
+  (decided: "The CSV pricing migration retires with CSV import").
 - **Bare metal shares the status surface.** The bare-metal storefront reports
   its own top-level `resource_count` (open, unpaused bare-metal listings) and
   builds the shared `ProjectionFamilyStatus` from a version-only fetch that
@@ -348,6 +348,44 @@ kit's own status test imports the constant. The VM composition root passes
 the projection read that replaces `listing_source_projection()` as the
 override service's source.
 
+### The CSV pricing migration retires with CSV import
+
+`market-storefront config migrate --scope publication --inventory <csv>`
+(`migrate_publication_csv`) rewrites a resource CSV's legacy `min_price` and
+`token` into a `settlements` column. Once CSV import retires nothing reads
+that file, so the migration has no consumer. Its one remaining use, preparing
+values before an upgrade, runs on the pre-upgrade version, which still ships
+it. Its rows are per resource while overrides are per site, pool, and offering
+mode, so its output does not map onto override records either; a direct
+converter was already rejected (see the legacy-tier decision above).
+
+`--inventory`, `migrate_publication_csv`, and its CSV-only cases retire here.
+The TOML publication migration and its shared helpers stay. Two requirements
+are modified rather than left describing a retired input:
+
+- "Publication pricing migration is preview-first and atomic" covers TOML
+  configuration only. Its conflict list names per-model legacy pricing, which
+  the TOML migration refuses, in place of per-row pricing and conflicting
+  config and row values, which only CSV rows could produce.
+- "Per-resource settlement input uses the common clause contract" is replaced
+  by "Settlement input uses the common clause contract", which no longer lists
+  imported resource records. Its scenario becomes a storefront pool override's
+  clauses replacing the configured defaults for that pool's listings, the
+  behaviour the CSV row used to supply. A modified requirement cannot drop
+  its only scenario, so this is a replacement under a new name, as with the
+  override requirement above.
+
+Alternatives:
+
+- *Keep `--inventory` as a standalone converter.* Rejected: its output has no
+  reader, and two requirements would keep describing a retired format.
+- *Retire it in a follow-up change.* Rejected: between the two changes the
+  contract would describe an input the system no longer supports.
+
+Operator guidance says to run any CSV pricing migration on the current version
+before upgrading if its output is wanted as a reference for re-entering
+values through `pool-override set`.
+
 ### Local diagnostics and cleanup retire with the cutover
 
 The design review of `remove-dead-storefront-physical-surfaces` transferred
@@ -475,14 +513,10 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-Open decisions raised by the 2026-10-08 re-grounding (D1 and D2 are decided
+Open decisions raised by the 2026-10-08 re-grounding (D1–D3 are decided
 above). Each gates the tasks named; no task prescribes an answer until the
 decision is recorded above.
 
-- **D3 — the CSV pricing migration.** Whether `config migrate --scope
-  publication --inventory` and `migrate_publication_csv` retire with CSV
-  import, and how the two requirements describing CSV input change. Gates
-  Section 5.
 - **D4 — status scope.** How the top-level `resource_count` removal and the
   per-family count apply to the shared core status model, the shared typed
   client, and bare metal's own status. Gates tasks 3.4 and 3.8 and the delta's

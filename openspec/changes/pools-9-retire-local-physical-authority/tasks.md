@@ -28,9 +28,9 @@ is resolved in `design.md` as per-site, per-family projection counts:
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-Tasks 3.4, 3.8, 4.4, 4.5, 6.1, 6.2, and Section 5 are gated on the open
-decisions D3–D6 in `design.md`'s Open Questions; they are amended when each
-decision is recorded. D2 is decided and folded into task 4.3.
+Tasks 3.4, 3.8, 4.4, 4.5, 6.1, and 6.2 are gated on the open decisions D4–D6
+in `design.md`'s Open Questions; they are amended when each decision is
+recorded. D2 is decided and folded into task 4.3, D3 into task 5.7.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -278,6 +278,14 @@ provisioning can trust two principals leaves it with no listing source.
       Preserve that completed work and migrate the remaining CSV consumers
       identified by re-grounding, including Bob's local import where it remains.
 
+- [ ] 5.7 Retire the CSV pricing migration (`design.md`, "The CSV pricing
+      migration retires with CSV import"): remove `--inventory` and its
+      `--scope` checks from `groups/config.py`, `migrate_publication_csv` and
+      any helper only it uses from `publication_migration.py`, and the CSV
+      cases in `tests/unit/test_publication_migration.py`. Keep
+      `migrate_publication_config` and its tests, including
+      `tests/unit/cli/test_config.py`'s publication case, passing unchanged.
+
 ## 6. Freeze migration and validation
 
 - [ ] 6.1 Add the freeze-then-redirect migration covering every table and
@@ -342,6 +350,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `docs/development/VALIDATION_RUNBOOK.md` to diagnose inventory by site,
       family, state, and count; diagnose import failures at provisioning and
       sellable listings through publication diagnostics and catalogue checks.
+      Correct the CSV-input descriptions the retired pricing migration
+      leaves: `openspec/specs/storefront-publication/architecture.md`'s
+      "Settlement option reconciliation",
+      `openspec/specs/settlement-configuration/architecture.md`'s migration
+      paragraph, `docs/development/DEPLOYMENT_AND_CONFIG.md`'s publication
+      migration paragraph and `--inventory` commands, and
+      `docs/seller-quickstart.md`'s `--inventory` commands. Reconcile the
+      spec Evidence entry naming `test_resource_csv_importer.py`.
       Promote the fresh-versus-upgraded persistence boundary to
       `openspec/specs/storefront-publication/spec.md`'s "Storefront holds no
       physical-resource authority" and explain inert history in its
@@ -390,6 +406,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
 | `kit/pool-overrides` defines exactly the contract's four override states; its projection source is never `None` | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier"; companion `architecture.md` — "Storefront pool overrides"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Storefront listing shapes and pool overrides" |
 | Why the kit drops `inactive` rather than tolerating `None` | This change's `design.md`, "The pool-override kit loses `inactive`" |
+| Publication pricing migration takes TOML configuration only; settlement clauses for a pool come from configuration, hints, or a pool override, never an imported resource record | `openspec/specs/storefront-publication/spec.md` — "Publication pricing migration is preview-first and atomic" (modified) and "Settlement input uses the common clause contract" (replacing "Per-resource settlement input uses the common clause contract"); companion `architecture.md` — "Settlement option reconciliation"; `openspec/specs/settlement-configuration/architecture.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Why the CSV pricing migration retires with import rather than surviving as a converter | This change's `design.md`, "The CSV pricing migration retires with CSV import" |
 | Local resource-count diagnosis and local reservation normalization retire with their inventory source | Temporary sequencing decision in this change's `design.md` |
 | Complete the separate multi-storefront repair first; retire the local inventory contract, its writers and consumers, and fresh-schema creation together | Temporary sequencing decision in this change's `design.md`; dependency/status in `openspec/changes/README.md` |
 | `remove-dead-storefront-physical-surfaces` lands before this change, so this freeze covers only the local inventory tables | Temporary sequencing decision in this change's `design.md`, "The zero-caller removal lands first"; dependency/status in `openspec/changes/README.md` |

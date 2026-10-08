@@ -95,6 +95,12 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
   `test_bundled_inventory.py`, and `docs/seller-quickstart.md`. An operator
   upgrading past this change must have declared inventory at the provisioning
   site first, so migration guidance is part of the change.
+- Retire the CSV pricing migration: `market-storefront config migrate --scope
+  publication --inventory` and `migrate_publication_csv`. The TOML publication
+  migration stays. "Publication pricing migration is preview-first and
+  atomic" becomes TOML-only, and "Per-resource settlement input uses the
+  common clause contract" is replaced by "Settlement input uses the common
+  clause contract", which drops imported resource records.
 - Remove the CLI import surface: `market-storefront portfolio import-csv`, its
   `cli_portfolio.py` module and `add_typer` registration in `cli.py`, and
   `domains/vms/storefront/scripts/import_resources_csv.py`.
@@ -141,7 +147,9 @@ None.
   or physical-allocation authority; projection-backed derivation is the only
   listing-candidate path; the site-scoped override store is the only
   storefront override tier, so the home-site legacy record, the `inactive`
-  override state, and the local-table scenarios leave the contract.
+  override state, and the local-table scenarios leave the contract; publication
+  pricing migration and settlement-clause input no longer accept resource CSV
+  input.
 
 ## Non-Goals
 

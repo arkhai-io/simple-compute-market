@@ -306,3 +306,62 @@ MUST NOT yield listings from any other source in its place.
   fetched
 - **THEN** those listings stay open and unchanged, and the run reports the site as unknown
 - **AND** every other configured site is reconciled as usual
+
+### Requirement: Publication pricing migration is preview-first and atomic
+
+Storefront publication migration MUST support TOML configuration input through
+explicit check and write modes. Check mode MUST produce a deterministic preview
+without changing the source or creating a backup. Write mode MUST require a
+backup, preserve an exact pre-migration copy, validate the complete proposed
+document through the current structured clause model and every selected
+mechanism's typed publication-input validator, and replace the source
+atomically with restrictive permissions. A failed validation or write MUST
+leave the source unchanged. Rechecking an already migrated input MUST be
+idempotent.
+
+Automatic conversion MUST occur only when one enabled mechanism, its asset
+scale, and every legacy pricing input have one complete interpretation.
+Dual-mechanism pricing, hidden reserves, per-model legacy pricing, a missing
+asset scale, malformed legacy values, and any other ambiguous population MUST
+be reported as conflicts without mutation. Migration MUST NOT guess units,
+synthesize partial clauses, or reinterpret `min_price` or
+`default_token_address` as a settlement rate or asset.
+
+#### Scenario: Operator previews publication migration
+
+- **WHEN** the operator runs check mode against a storefront TOML file
+- **THEN** the tool reports the deterministic proposed changes and conflicts while the input bytes and backup set remain unchanged
+
+#### Scenario: Unambiguous publication input is written
+
+- **WHEN** one enabled mechanism and authoritative asset scale make every legacy price unambiguous and the operator requests write with backup
+- **THEN** the tool fully validates the typed result, saves the exact original bytes, and atomically installs the restrictive-permission replacement
+
+#### Scenario: Legacy pricing has competing interpretations
+
+- **WHEN** dual mechanisms, hidden reserve pricing, per-model legacy pricing, or a missing scale could produce different clauses
+- **THEN** check and write modes report the conflict and neither the source nor any existing backup is changed
+
+#### Scenario: Generated clause fails typed mechanism validation
+
+- **WHEN** a proposed migration contains an unknown field, invalid rate, unsupported asset, or invalid mechanism-owned input
+- **THEN** migration fails before backup or mutation rather than persisting a partially validated document
+
+## REMOVED Requirements
+
+### Requirement: Per-resource settlement input uses the common clause contract
+
+**Reason**: It lists imported resource records among settlement inputs, and its only scenario has one imported resource record replace the configured defaults. Resource import retires with this change, and a modified requirement cannot drop its scenario, so it is replaced.
+
+**Migration**: Replaced by "Settlement input uses the common clause contract" below, which carries the parsing and failure rule forward for configured defaults, pool-declared hints, storefront pool overrides, and reconciliation inputs. Per-pool settlement clauses formerly supplied by a CSV row are entered as a storefront pool override.
+
+## ADDED Requirements
+
+### Requirement: Settlement input uses the common clause contract
+
+Configured defaults, pool-declared hints, storefront pool overrides, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
+
+#### Scenario: A pool override's clauses replace settlement defaults
+
+- **WHEN** a storefront pool override for one site's pool supplies complete settlement clauses
+- **THEN** those clauses replace the configured defaults for that pool's listings and are validated through the same grammar and registrations
