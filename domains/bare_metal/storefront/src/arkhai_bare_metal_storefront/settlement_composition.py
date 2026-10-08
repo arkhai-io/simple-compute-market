@@ -123,6 +123,17 @@ class BareMetalStorefrontSettlementComposition:
             return {}
         return {ARKHAI_PAYMENTS_MECHANISM: lambda agreement: stage.settlement_data(agreement).to_wire()}
 
+    def configures(self, mechanism_id: str) -> bool:
+        """Whether the settlement root has a section for ``mechanism_id``.
+
+        A configured section may be disabled for new deals and still owns the
+        obligations accepted while it was enabled, so whatever services them
+        is built for every configured section, not only the enabled ones.
+        """
+
+        config_key = self.registry.registration(mechanism_id).config_key
+        return config_key in self.config.mechanisms
+
     async def readiness(
         self,
         *,

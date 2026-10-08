@@ -26,6 +26,7 @@ from market_identity import (
 )
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from settlement_compositions import alkahest_composition
 from source_sites import SourceSite, SourceSites, listing_source_projection
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -93,6 +94,11 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
+        settlement_composition=alkahest_composition(
+            SELLER_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+        ),
         plan_builder=lambda **kwargs: {
             "settlement_plan": {
                 "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),

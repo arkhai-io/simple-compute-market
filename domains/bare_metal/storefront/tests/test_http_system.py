@@ -7,7 +7,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, TrustedIdentitySet
-from market_settlement_runtime import SettlementServicingWorker
 
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
@@ -22,6 +21,7 @@ from arkhai_bare_metal_storefront.server import (
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from settlement_compositions import alkahest_composition
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -290,12 +290,12 @@ class _RecordingCycle:
         self._name = name
         self._gate = gate
 
-    async def run(self) -> dict[str, object]:
-        self._log.append(f"start {self._name}")
+    async def run(self, *, dry_run: bool = False) -> dict[str, object]:
+        self._log.append(f"start {self._name}" + (" (dry run)" if dry_run else ""))
         if self._gate is not None:
             await self._gate.wait()
         self._log.append(f"end {self._name}")
-        return {"dry_run": False, "actions": [{"action": "publish"}], "counts": {"publish": 1}}
+        return {"dry_run": dry_run, "actions": [{"action": "publish"}], "counts": {"publish": 1}}
 
 
 def _stepped_runtime(path: str, log: list[str], gate: asyncio.Event | None = None):
@@ -409,16 +409,22 @@ class _NothingDue:
 
 
 def _runtime_with_servicing(path: str) -> tuple[BareMetalStorefrontRuntime, _NothingDue]:
-    """A runtime whose settlement servicing is the real worker over a repository
-    with nothing due, on an interval no test waits out."""
+    """A runtime whose settlement servicing is its own composed worker, sweeping a
+    repository with nothing due, on an interval no test waits out."""
     repository = _NothingDue()
-    worker = SettlementServicingWorker(
-        runtime=object(),
-        repository=repository,
-        worker_id="test",
-        interval_seconds=3600,
+    runtime = dataclasses.replace(
+        _runtime(path),
+        settlement_composition=alkahest_composition(
+            SELLER_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+        ),
+        settlement_servicing_interval_seconds=3600,
     )
-    return dataclasses.replace(_runtime(path), settlement_worker=worker), repository
+    # The worker's sweep reads its repository; counting sweeps there shows a
+    # step runs exactly one cycle.
+    runtime.settlement_worker._repository = repository
+    return runtime, repository
 
 
 async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path) -> None:
@@ -465,17 +471,16 @@ async def test_the_lifecycle_pause_refuses_an_unsigned_request(tmp_path) -> None
     assert not runtime.loops.is_pause_requested()
 
 
-async def test_publication_offers_no_preview(tmp_path) -> None:
+async def test_the_publication_preview_runs_one_dry_pass(tmp_path) -> None:
     log: list[str] = []
     app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log))
 
     async with app.router.lifespan_context(app):
         async with _admin_client(app) as admin:
-            with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_dry_run_lifecycle_cycle("publication")
+            preview = await admin.admin_dry_run_lifecycle_cycle("publication")
 
-    assert refused.value.status_code == 404
-    assert log == []
+    assert preview["dry_run"] is True
+    assert log == ["start first (dry run)", "end first"]
 
 
 async def test_startup_registers_exactly_the_loops_it_starts(tmp_path) -> None:

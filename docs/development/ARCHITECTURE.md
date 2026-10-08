@@ -821,4 +821,3 @@ The fulfillment kit owns provider-neutral acceptance orchestration. It loads an 
 ### Atomic workload-lifecycle cutovers
 
 A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.
-

@@ -826,6 +826,15 @@ window, including those revealed under the longer one. The window is published t
 buyers; deletion and disclosure behaviour are specified in
 [contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md).
 
+### Bare-metal role configuration
+
+`arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains registry URLs, authority trust pins, and bounded public defaults; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared storefront transport.
+
+The bare-metal storefront requires one strict shared settlement JSON root through `BARE_METAL_STOREFRONT_SETTLEMENT` and refuses to start without it. A configured Alkahest section, enabled or disabled, requires the seller's public address (`BARE_METAL_STOREFRONT_EVM_ADDRESS`), at least one chain (`BARE_METAL_STOREFRONT_CHAINS`, a JSON object mapping each chain name to its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY`). Disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. Publication additionally requires authenticated registry trust, exact typed clauses, fresh selected-site projections, and a maximum lease duration.
+
+The Compose wrapper forwards `BARE_METAL_STOREFRONT_CHAINS_JSON` as the chains and reads the wallet key from an optional `BARE_METAL_STOREFRONT_WALLET_ENV_FILE`, separate from the identity credential file (Compose 2.24 or later supports the optional file). The Helm chart mounts the settlement JSON from an existing Secret. Its `sellerEvmAddress`, `chains`, and `walletKeySecret` are set together or left empty together; rendering fails otherwise. `walletKeySecret` references an existing Secret rather than rendering key material, and `alkahestAddressBook` mounts an existing ConfigMap read-only.
+
+The selected-site authority owns inventory, executor routing, provisioning credentials, and teardown. The payments authority owns financial state. Buyer, storefront, site, and payment credentials retain their separate authority boundaries.
 
 ## Current limits
 

@@ -232,4 +232,3 @@ Alkahest options MUST carry their escrow policy in mechanism-owned parameters; l
 
 - **WHEN** a seller publishes an `arkhai.payments.v1` option
 - **THEN** the option identifies its payee account, declared hold window, and agreement-deposit setting while core exposes only the shared option envelope
-

@@ -14,6 +14,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
 from market_alkahest.dev_chain import anvil_address_book_path

@@ -1,4 +1,4 @@
-"""Commercial settlement verification without fulfillment claims."""
+"""Commercial settlement verification, whose adoption starts fulfillment."""
 
 from __future__ import annotations
 
@@ -66,7 +66,6 @@ class SettlementRequestError(ValueError):
 
 
 VerifyEscrow = Callable[..., Awaitable[int]]
-PlanBuilder = Callable[..., dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -75,11 +74,25 @@ class BareMetalSettlementService:
     seller_wallet: str | None
     chain_clients: Mapping[str, Any]
     chain_config_paths: Mapping[str, str | None]
-    build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
     settlement_runtime: SettlementRuntime
     arkhai_payments_stage: PaymentSellerStage | None = None
     begin_fulfillment: BeginFulfillment | None = None
+    # Steps an adopted obligation once, so fulfillment starts without waiting
+    # for the worker's next pass; the worker remains its only retry path.
+    service_obligation: Callable[[str], Awaitable[None]] | None = None
+
+    async def _step(self, obligation_ref: str) -> None:
+        if self.service_obligation is None:
+            return
+        try:
+            await self.service_obligation(obligation_ref)
+        except Exception:
+            # The adoption stands; the worker's schedule retries the step.
+            logger.exception(
+                "stepping a verified bare-metal settlement failed",
+                extra={"obligation_ref": obligation_ref},
+            )
 
     @staticmethod
     def _response(
@@ -450,19 +463,15 @@ class BareMetalSettlementService:
                 "escrow identity already belongs to another state"
             )
 
-        try:
-            artifacts = self.build_plan(
-                proposal=proposal,
-                agreed_amount=int(agreed_amount),
-                duration_seconds=terms.duration_seconds,
-                buyer_principal=buyer_principal,
-                seller_principal=Identity.model_validate(thread["seller_principal"]),
-                seller_wallet_address=self.seller_wallet or "",
-                chain_config_paths=self.chain_config_paths,
+        # The plan the buyer funded is the one committed at acceptance; one
+        # rebuilt from today's configuration could name another wallet or chain.
+        committed = thread.get("settlement_plan")
+        if not committed:
+            raise SettlementRequestError(
+                "the accepted agreement has no committed settlement plan"
             )
-            plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
-        except SettlementRequestError:
-            raise
+        try:
+            plan = SettlementPlan.model_validate(committed)
         except Exception as exc:
             raise SettlementRequestError(
                 "settlement verification failed",
@@ -495,6 +504,7 @@ class BareMetalSettlementService:
                 and record.materialization_state == "materialized"
             ]
             if len(adopted) == 1:
+                await self._step(adopted[0].obligation_ref)
                 return self._response(
                     escrow_uid=escrow_uid,
                     negotiation_id=request.negotiation_id,
@@ -593,6 +603,7 @@ class BareMetalSettlementService:
                     or raced.get("status") != "settlement_verified"
                 ):
                     raise SettlementRequestError("conflicting escrow settlement")
+        await self._step(records[matched_index].obligation_ref)
         return self._response(
             escrow_uid=escrow_uid,
             negotiation_id=request.negotiation_id,
@@ -659,7 +670,7 @@ class BareMetalSettlementService:
             if obligation.mechanism_ref == escrow_uid
             and obligation.materialization_state == "materialized"
         ]
-        if len(adopted) != 1 or adopted[0].fulfillment_ref is not None:
+        if len(adopted) != 1:
             raise SettlementRequestError(
                 "verified settlement lifecycle is inconsistent"
             )

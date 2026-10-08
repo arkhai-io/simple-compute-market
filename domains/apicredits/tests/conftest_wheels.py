@@ -46,6 +46,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "core" / "storefront",
             "arkhai_core_storefront-*.whl",
         ),
+        "core_storefront_client": (
+            REPO / "core" / "storefront-client",
+            "arkhai_core_storefront_client-*.whl",
+        ),
         "core_registry_client": (
             REPO / "core" / "registry-client",
             "arkhai_core_registry_client-*.whl",

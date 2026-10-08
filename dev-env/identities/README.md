@@ -67,6 +67,7 @@ interchangeable:
 | `storefront-alice-admin.eip191` | 7 (`0x14dc7996…`) | `storefront.alice.toml` `[Identity.administrators.operator]` |
 | `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
 | `api-credits.wallet.env` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
+| `bare-metal.wallet.env` | 2 (`0x3C44CdDd…`) | `BARE_METAL_STOREFRONT_EVM_ADDRESS` in `make e2e-bare-metal-dev-env` |
 
 The three administrator credentials are separate principals from the sellers
 and services they administer. A storefront's `Identity.principal` publishes
