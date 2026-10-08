@@ -39,6 +39,19 @@ class SettlementManualRequired(RuntimeError):
         self.code = code
 
 
+#: Receipt fields of a domain fulfillment that publishes evidence to an
+#: authority with no stable operation identity. The submission is recorded
+#: before the publication and the reference it created after it, each once; an
+#: attempt that finds the first without the second cannot tell whether the
+#: authority holds a publication and must not publish again.
+FULFILLMENT_SUBMISSION_KEY = "submission"
+FULFILLMENT_REFERENCE_KEY = "reference"
+
+
+class SettlementOperationConflict(ValueError):
+    """An operation was asked to record a different value than it holds."""
+
+
 class SettlementRuntime:
     """Registers plans and executes principal-authorized obligation operations."""
 
@@ -211,7 +224,16 @@ class SettlementRuntime:
                 receipt=receipt,
             )
             return self._outcome(record, "fulfill", "succeeded", receipt)
-        return self._outcome(record, "fulfill", "pending")
+        # A pending reservation reports what earlier attempts recorded, so a
+        # step that publishes outside this journal resumes from it rather than
+        # publishing again.
+        return self._outcome(
+            record,
+            "fulfill",
+            "pending",
+            reserved.get("receipt"),
+            attempts=int(reserved.get("attempts") or 0),
+        )
 
     async def complete_fulfillment(
         self,
@@ -272,6 +294,135 @@ class SettlementRuntime:
             error,
             uncertain=True,
         )
+
+    async def record_fulfillment_submission(
+        self,
+        obligation_ref: str,
+        submission: Mapping[str, Any],
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        """Record, before publishing, what the held fulfillment will publish.
+
+        First write wins: the same submission again changes nothing, and a
+        different one raises ``SettlementOperationConflict``. The operation is
+        marked uncertain, since from here on the authority may hold a
+        publication this journal has not seen.
+        """
+
+        await self._write_fulfillment_field(
+            obligation_ref,
+            FULFILLMENT_SUBMISSION_KEY,
+            dict(submission),
+            local_principal=local_principal,
+            worker_id=worker_id,
+        )
+
+    async def record_fulfillment_publication(
+        self,
+        obligation_ref: str,
+        reference: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        """Record the reference a publication created, before completing.
+
+        First write wins, as for the submission. Recording it before
+        ``complete_fulfillment`` lets an attempt that stopped in between
+        complete with it instead of publishing again.
+        """
+
+        if not isinstance(reference, str) or not reference.strip():
+            raise ValueError("a publication reference must be a non-empty string")
+        await self._write_fulfillment_field(
+            obligation_ref,
+            FULFILLMENT_REFERENCE_KEY,
+            reference,
+            local_principal=local_principal,
+            worker_id=worker_id,
+        )
+
+    async def clear_fulfillment_submission(
+        self,
+        obligation_ref: str,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        """Withdraw a submission the authority provably does not hold.
+
+        Only for a publisher that reported nothing was submitted, or that the
+        authority refused it. A submission whose reference is recorded is never
+        withdrawn.
+        """
+
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        result = await self._repository.clear_operation_receipt_field(
+            obligation_ref=obligation_ref,
+            operation="fulfill",
+            lease_owner=worker_id,
+            key=FULFILLMENT_SUBMISSION_KEY,
+            unless_key=FULFILLMENT_REFERENCE_KEY,
+        )
+        if result == "lost":
+            raise RuntimeError("settlement operation lease was lost")
+        if result == "refused":
+            raise SettlementOperationConflict(
+                "a fulfillment whose publication is recorded keeps its submission"
+            )
+
+    async def park_fulfillment(
+        self,
+        obligation_ref: str,
+        error: Exception,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> SettlementOperationOutcome:
+        """Stop servicing a fulfillment that needs an operator.
+
+        The operation becomes ``manual_required``, so the worker no longer
+        schedules it, and ``error``'s ``code`` joins the mechanism state as the
+        reason.
+        """
+
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        return await self._finish_manual(record, "fulfill", worker_id, error)
+
+    async def manual_required_count(self) -> int:
+        """Return how many obligations wait for an operator."""
+
+        return await self._repository.count_manual_required()
+
+    async def _write_fulfillment_field(
+        self,
+        obligation_ref: str,
+        key: str,
+        value: Any,
+        *,
+        local_principal: Identity,
+        worker_id: str,
+    ) -> None:
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "claimant")
+        result = await self._repository.write_operation_receipt_field(
+            obligation_ref=obligation_ref,
+            operation="fulfill",
+            lease_owner=worker_id,
+            key=key,
+            value=value,
+            uncertain_acknowledgement=True,
+        )
+        if result == "lost":
+            raise RuntimeError("settlement operation lease was lost")
+        if result == "conflict":
+            raise SettlementOperationConflict(
+                f"fulfillment {key} differs from the one already recorded"
+            )
 
     async def reserve_cleanup(
         self,
@@ -752,6 +903,8 @@ class SettlementRuntime:
     def _keep_parked_reason(
         record: SettlementObligationRecord,
         mechanism_state: dict[str, Any] | None,
+        *,
+        fulfillment_parked: bool = False,
     ) -> dict[str, Any] | None:
         """Carry a park's reason across writes that do not name one.
 
@@ -768,7 +921,7 @@ class SettlementRuntime:
 
         if mechanism_state is None or MANUAL_REASON_KEY in mechanism_state:
             return mechanism_state
-        parked = "manual_required" in {
+        parked = fulfillment_parked or "manual_required" in {
             record.materialization_state,
             record.condition_state,
             record.collection_state,
@@ -787,8 +940,26 @@ class SettlementRuntime:
         **values: Any,
     ) -> None:
         if "mechanism_state" in values:
+            # A parked fulfillment has no lifecycle column on the record, so
+            # its park is read from the journal, and only when there is a
+            # reason that could be lost.
+            fulfillment_parked = False
+            if (
+                operation != "fulfill"
+                and record.mechanism_state.get(MANUAL_REASON_KEY)
+                and values["mechanism_state"] is not None
+                and MANUAL_REASON_KEY not in values["mechanism_state"]
+            ):
+                fulfill = await self._repository.load_settlement_operation(
+                    record.obligation_ref, "fulfill"
+                )
+                fulfillment_parked = (
+                    fulfill is not None and fulfill.get("state") == "manual_required"
+                )
             values["mechanism_state"] = self._keep_parked_reason(
-                record, values["mechanism_state"]
+                record,
+                values["mechanism_state"],
+                fulfillment_parked=fulfillment_parked,
             )
         saved = await self._repository.finish_settlement_operation(
             obligation_ref=record.obligation_ref,
@@ -902,6 +1073,7 @@ class SettlementRuntime:
         receipt: dict[str, Any] | None = None,
         *,
         action: dict[str, Any] | None = None,
+        attempts: int | None = None,
     ) -> SettlementOperationOutcome:
         return SettlementOperationOutcome.model_validate(
             {
@@ -910,6 +1082,7 @@ class SettlementRuntime:
                 "status": status,
                 "receipt": receipt,
                 "action": action,
+                "attempts": attempts,
             }
         )
 

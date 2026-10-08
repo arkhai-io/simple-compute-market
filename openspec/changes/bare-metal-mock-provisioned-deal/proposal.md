@@ -28,12 +28,8 @@ VM's. What stands in the way:
   outside it, so escrow verification and settlement servicing disagree about which
   mechanisms exist, and the Helm chart and production Compose supply no Alkahest chain or
   wallet key at all.
-- **Every domain starts fulfillment two ways and publishes evidence its own way.** The
-  kit runs Alkahest fulfillment in an in-process task and hosted fulfillment through the
-  durable servicing worker; VM finishes interrupted Alkahest work with its own resume
-  pass, and bare metal has none. The evidence publisher is declared three times. VM
-  publishes a buyer's host, port, and user on chain and stores them and the tenant
-  password, which bare metal and API credits do not; no domain requires the difference.
+- **A bare-metal Alkahest escrow is never collected.** Nothing publishes fulfillment
+  evidence for it or binds a fulfillment the worker could check and collect.
 - **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
   a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
 - **No scenario exists**, and stage definitions are VM's alone.
@@ -74,16 +70,12 @@ API-credit deal runs inside the VM lane.
   mechanism's resources from it; the implicit Alkahest fallback is retired. The Helm chart
   and production Compose carry the chain and wallet inputs Alkahest needs, and the chart's
   `alkahestEnabled` flag, which restated the settlement configuration, is removed.
-- Make the servicing worker's ready step the one way every domain starts fulfillment,
-  composed in kit from mechanism contributions (an evidence publisher, or none for
-  self-binding contact exchange) and domain contributions (deliver, end service). Retire
-  `SettlementJobCoordinator`, VM's resume pass, and every domain's hosted fulfillment
-  body. One kit verify step registers the plan committed at acceptance for every domain.
-- One kit evidence envelope, published through the mechanism (`kit/alkahest` gains a
-  string-obligation publisher), carries no endpoint, credential, or secret. Buyer access
-  material reaches only the authenticated buyer through a kit access route, fetched live
-  where an authority can serve it again: VM stops storing and returning coordinates and
-  the tenant password. An ambiguous on-chain evidence submission is resubmitted.
+- Deliver a bare-metal Alkahest deal through the worker: once the lease is active, the
+  storefront stores its credential-free lease-ready evidence, publishes only its digest
+  on chain through a new `kit/alkahest` fulfillment publisher, and binds the attestation
+  so the worker can check and collect. An evidence submission whose outcome is unknown is
+  never repeated: the obligation waits for an operator, and the administrator's status
+  counts the obligations waiting. The evidence route authenticates its caller.
 - Make the lease lifecycle the only owner of release for every offering mode: lease
   release delegates to durable fulfillment teardown, buyer teardown goes through lease
   termination, and the storefront's direct site release is removed.
@@ -189,7 +181,12 @@ None.
   and bare-metal teardown releases capacity through the site's lease lifecycle; the
   inventory guard's recheck runs before every seller round and acceptance, and a backed
   bare-metal listing is checked for availability; an accepted thread is successful only
-  once its agreement and plan are recorded, rather than persisted atomically.
+  once its agreement and plan are recorded, rather than persisted atomically; a
+  bare-metal Alkahest fulfillment publishes only its evidence's digest on chain, and the
+  evidence route authenticates its caller.
+- `settlement-servicing`: a fulfillment submission whose outcome is unknown is never
+  repeated; it parks the obligation for an operator, and the parked obligations are
+  counted.
 
 ## Non-Goals
 
@@ -256,16 +253,10 @@ None.
   Alkahest fallback must supply one.
 - `helm/charts/bare-metal-storefront` and `compose.bare-metal.yml`: chain and wallet-key
   inputs; the chart's `alkahestEnabled` value removed.
-- `kit/settlement-runtime`: the composed ready and terminal steps, the verify step, the
-  evidence port and envelope, the access route service; `SettlementJobCoordinator`
-  removed. `kit/alkahest`: the evidence publisher. `kit/hosted-settlement`: its publisher
-  on the kit port.
-- `domains/vms/storefront`, `domains/vms/settlement`, `domains/vms/buyer`: VM on the kit
-  path; its resume pass, its evidence publisher, and stored access material removed;
-  settle status no longer returns coordinates or credentials, and the buyer reads them
-  from the access route.
-- `domains/apicredits/storefront`: API credits on the kit path; its evidence publisher
-  declaration removed.
+- `kit/settlement-runtime`: recording a fulfillment's submission intent, parking a
+  fulfillment for an operator, and counting the obligations parked. `kit/alkahest`: the
+  fulfillment publisher. `core/storefront-client`: the status model's count.
+- `domains/bare_metal`: the lease-ready evidence's Alkahest binding.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
 - `e2e-tests`: shared compute deal stages, VM's scenario moved onto them, the bare-metal
   scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets; the
@@ -285,8 +276,8 @@ None.
       distributions), the deal-control route services in the kit layers, the five-piece
       route pattern, the compute-provisioning executor table and mock mechanism, release
       ownership (mode-agnostic), `VersionedEnvelope`'s home in core, and the bare-metal
-      fulfillment hook statement, which is stale today; the one fulfillment start path,
-      the evidence envelope and publisher port, and the access rule.
+      fulfillment hook statement, which is stale today; bare-metal settlement-started
+      fulfillment and its digest-only Alkahest evidence.
 - [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
       open gap, and the findings recorded under "Controls and routes (5B.8)".
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
@@ -298,8 +289,7 @@ None.
       Compose file.
 - [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
       `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`,
-      `compute-provisioning-contract`, `resource-pool-management`, `settlement-servicing`,
-      `vm-storefront-fulfillment`.
+      `compute-provisioning-contract`, `resource-pool-management`, `settlement-servicing`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -328,12 +318,12 @@ None.
 - Bare-metal fulfillment starts at settlement verification, through one servicing worker
   whose ready and terminal hooks dispatch by mechanism —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
-- One fulfillment start path composed in kit; one evidence envelope without access
-  material; one access rule; resubmission after an ambiguous on-chain submission; one
-  verify step on the committed plan —
-  `openspec/specs/settlement-servicing/spec.md`,
-  `openspec/specs/vm-storefront-fulfillment/spec.md`,
-  `docs/development/ARCHITECTURE.md`.
+- A fulfillment submission whose outcome is unknown is never repeated; it parks the
+  obligation for an operator, which status counts —
+  `openspec/specs/settlement-servicing/spec.md`.
+- Bare-metal Alkahest delivery publishes only its evidence's digest on chain, and the
+  evidence route authenticates its caller —
+  `openspec/specs/storefront-publication/spec.md`.
 - The bare-metal storefront requires its settlement configuration and its deployment
   surfaces carry the Alkahest chain and wallet inputs (enforcing the existing
   "Peer mechanism configuration hierarchy" requirement, not adding one) —

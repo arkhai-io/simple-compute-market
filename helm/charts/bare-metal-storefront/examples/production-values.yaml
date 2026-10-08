@@ -26,7 +26,14 @@ sitePlacement: round_robin
 
 publicUrl: https://bare-metal.example.com
 sellerEvmAddress: ""
-alkahestEnabled: false
+chains: {}
+walletKeySecret:
+  name: ""
+  key: private-key
+alkahestAddressBook:
+  configMapName: ""
+  key: alkahest_addresses.json
+  mountPath: /etc/arkhai/alkahest
 settlementConfigSecret:
   name: bare-metal-storefront-settlement
   key: settlement.json

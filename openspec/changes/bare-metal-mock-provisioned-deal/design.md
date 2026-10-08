@@ -2366,10 +2366,13 @@ Decisions:
    whenever its section is configured, not only while it is enabled, because
    "Mechanism configuration cannot reinterpret durable plans" requires recovery after an
    operator disables a mechanism for new deals.
-   - **Alkahest.** Enabled: the seller address, at least one chain, and the wallet key
-     are required, or startup refuses. Configured but disabled: they are built when
-     supplied; otherwise the runtime has no Alkahest client and startup logs that
-     obligations under it cannot be serviced, as VM's composition does.
+   - **Alkahest.** While the section is configured, enabled or not, the seller address,
+     at least one chain, and the wallet key are required, or startup refuses. VM's
+     composition omits a disabled mechanism's client when its resources are missing;
+     that still abandons its obligations, so bare metal does not follow it.
+   - **No section.** Alkahest resources supplied without an Alkahest section (the seller
+     address, chains, or wallet key) are refused at startup: they would be a second,
+     stale statement of what the one settlement root says.
    - **Hosted.** The hosted lifecycle callbacks are built whenever the Stripe section is
      configured.
    - **Verify** follows the plan committed at acceptance whether or not Alkahest is still
@@ -2382,14 +2385,12 @@ Decisions:
    registration sees it and the settlement-servicing step exists on every path. This
    replaces "a worker for every mechanism", which described one worker per mechanism.
 4. **The ready hook dispatches through an explicit table**, built in `runtime.py`, the
-   composition root, keyed on the record's mechanism. *Superseded by decision 8 of "Section
-   7 design: one fulfillment path for every domain (2026-10-07)": the kit composes the
-   hook, and the rows below become mechanism and domain contributions.*
+   composition root, keyed on the record's mechanism:
 
    | Mechanism | Ready hook |
    |---|---|
    | `fiat.stripe.v1` | The hosted lifecycle's `fulfill`, unchanged |
-   | `alkahest.v1` | Reserve the obligation's fulfillment, start fulfillment through the fulfillment service from the committed plan, then complete it or record a retry |
+   | `alkahest.v1` | Bare metal's Alkahest step: decision 9 of "Section 7 design: bare-metal Alkahest delivery, scope narrowed (2026-10-07)" |
    | `contact-exchange.v1` | Decline without reserving: the reveal registers, materializes, binds, checks, and collects the obligation itself, and every step is idempotent |
    | Anything else | Raise |
 
@@ -2401,13 +2402,11 @@ Decisions:
    closeout task 2.6. The final row is a guard: the registry admits only installed
    mechanisms, and an obligation whose mechanism section was removed fails earlier, at
    the status step, for want of a client.
-5. **The terminal hook dispatches by mechanism too.** *Superseded by decision 8 of
-   "Section 7 design: one fulfillment path for every domain (2026-10-07)": the kit
-   composes the hook, and bare metal's Alkahest row becomes its `end_service`.*
+5. **The terminal hook dispatches by mechanism too.**
    - **Hosted:** the hosted `cleanup`, unchanged.
    - **Alkahest:** an obligation that ends uncollected with its fulfillment started has
-     its lease terminated through the selected site's lease terminate, the client 7.2
-     adds and 7.4's teardown uses; a repeated termination returns the same lease. This
+     its lease terminated through the selected site's lease terminate, the client the
+     teardown uses; a repeated termination returns the same lease. This
      follows VM, whose terminal hook ends the lease of every uncollected obligation. With
      no fulfillment started there is nothing to release, since bare metal reserves only
      when fulfillment starts (Section 6, decision 1). A collected obligation needs nothing.
@@ -2432,7 +2431,7 @@ Decisions:
 
      `sellerEvmAddress`, `chains`, and `walletKeySecret` are one group: all set or all
      empty, or rendering fails. The runtime checks the group against the Secret's
-     enabled set (decision 2).
+     configured sections (decision 2).
    - **Production Compose** forwards the chains and an optional wallet credential file,
      kept apart from the identity file as API credits keeps it. The local overlay then
      supplies the lane's values through those inputs instead of setting them itself.
@@ -2465,136 +2464,143 @@ Routed to closeout task 2.6:
   read. Both are kit-level and VM carries both; the bare-metal surfaces carry them as
   the runtime reads them today.
 
-What this changes beyond Section 7's plan: Section 7 is replanned in five parts (see
-"Section 7 design: one fulfillment path for every domain (2026-10-07)", Scope); these
-decisions are 7B's, and its tests migrate as decision 6 says. The lease client (7E) comes
-before bare metal's `end_service`. The `storefront-publication` delta gains the
-settlement-started fulfillment and its terminal handling as scenarios of "Complete
-bare-metal seller lifecycle", written with the plan.
+What this changes in Section 7's plan: these decisions are 7B's and 7C's, and the tests
+that build the fallback migrate as decision 6 says. The lease client comes before the
+Alkahest terminal branch. The `storefront-publication` delta gains the settlement-started
+fulfillment and its terminal handling as scenarios of "Complete bare-metal seller
+lifecycle".
 
-### Section 7 design: one fulfillment path for every domain (2026-10-07)
+### Section 7 design: bare-metal Alkahest delivery, scope narrowed (2026-10-07)
 
 Planning Section 7 found that nothing makes a bare-metal Alkahest escrow collectable. The
 worker collects only through a bound fulfillment reference, which for Alkahest must be an
-on-chain fulfillment attestation, and stage 09bb requires the claim. The maintainer asked
-why payment and delivery differ between VM and bare metal at all. The audit below answers
-that they differ only by history. Decided with the maintainer: unify the path in kit,
-adopt bare metal's delivery posture for every domain, and do it in this change (scope A),
-with VM and API credits rebound to it as 6A rebound them. The decisions continue the
-numbering of "Section 7 design: one explicit settlement composition (2026-10-07)".
+on-chain attestation, and stage 09bb requires the claim. An audit of how every domain
+gets from a ready obligation to a bound fulfillment then showed that the kit starts
+fulfillment two ways (an in-process `SettlementJobCoordinator` task for Alkahest, the
+durable servicing worker for hosted settlement), that each domain wrote the step between
+them itself, and that VM publishes and stores buyer access material the other domains do
+not. The maintainer first chose to unify that path in this change; a design review then
+showed that the unification overlaps three active changes and is unfinished in four
+places, and the maintainer narrowed the scope.
 
-| Finding | Consequence |
-|---|---|
-| The kit has two ways to start fulfillment. `SettlementJobCoordinator` (`kit/settlement-runtime`, `jobs.py`) runs fulfillment in an in-process asyncio task that nothing makes durable; the servicing worker's ready hook is durable and retried. Every domain uses both | Decision 8 |
-| VM, Alkahest: the settle route starts the coordinator, whose task runs `fulfill_vm_settlement`. The domain's fulfillment hook provisions and then publishes `connection_details` on chain as a string obligation. Deferred or interrupted work is finished by VM's own resume pass (`services/fulfillment_resume_runtime.py`) | Decisions 8 and 12 |
-| VM, hosted: the worker's `on_ready` calls `ensure_hosted_fulfillment`, which runs the same `fulfill_vm_settlement` with the hosted evidence client | Decision 8 |
-| API credits: Alkahest through the coordinator (`fulfill_api_credit_settlement`); hosted through `on_ready` and its own `ensure_hosted_fulfillment`, which publishes signed, secret-free issuance evidence through the portable resolver | Decisions 8 and 10 |
-| Bare metal: hosted through `on_ready` and the hosted lifecycle's `fulfill`, which publishes lease-ready evidence through the portable resolver; Alkahest through the buyer's `begin`, which provisions but never publishes evidence, binds a fulfillment, or collects | Decision 8 |
-| The port `publish_fulfillment(condition_anchor, evidence)` is declared three times: in `kit/hosted-settlement`'s adapter, in `arkhai_vms_settlement.fulfillment`, and in API credits' `services/issuance_evidence.py` | Decision 9 |
-| VM's `prepare_vm_settlement` verifies the escrow and then rebuilds the obligations from current configuration (the seller wallet and chain paths), not from the plan committed at acceptance: the defect Section 6's decision 7 fixed for bare metal. Escrow verification is written twice, there and in bare metal's `settlement_service.py` | Decision 13 |
-| Delivery. VM puts host, port, and user on chain, and stores them on the escrow row and the listing's fulfillment resource; it stores the tenant password on the escrow row; settle status (`serialize_settlement_job`) returns both, and VM's buyer prints them. API credits publishes secret-free evidence and keeps the bearer secret in a private result store behind an authenticated route. Bare metal publishes credential-free evidence and serves coordinates live through the authenticated `/access`; its stored result holds none | Decisions 10 and 11 |
-| Provisioning serves an active fulfillment's credentials live and uncached (`docs/development/ARCHITECTURE.md`, "Fulfillment status and results"), so VM's stored copies are not needed. API credits' bearer secret has no authority that could serve it again | Decision 11 |
-| No condition reads evidence content: oracle gating is off in every configuration, no oracle implementation exists in this repository, and the Alkahest check decides by arbiter kind | Decision 10 |
-| Two permanent requirements describe the VM-owned path this replaces: `openspec/specs/vm-storefront-fulfillment/spec.md`'s "Full settlement convergence ownership" and "Foreground and restart convergence" (VM's resume worker) and its "Ambiguous on-chain submission safety" (no blind resubmission) | Decisions 8 and 12 |
+Moved out of this change (maintainer, 2026-10-07):
+
+- **The unified fulfillment path** (one start path composed in kit, mechanism-owned
+  evidence publishers behind one port, an evidence envelope, one access rule, one
+  verification step, VM's and API credits' rebinding) goes to
+  `kit-owned-listing-and-fulfillment-lifecycles`, which already owns restart-safe
+  fulfillment convergence. Its design carries the audit, the proposed decisions, and the
+  review's corrections: the envelope wraps each domain's public evidence rather than
+  replacing it, because API credits' hosted condition verifies its issuance evidence
+  field by field; verification needs a mechanism-neutral contract on the registration,
+  since the registration's `settlement_verifier` has a mechanism-specific signature; the
+  kit orchestrates access while each domain owns its typed access result; and VM's
+  access cutover needs scenarios for deals in flight.
+- **VM's plan rebuild.** `prepare_vm_settlement` registers obligations rebuilt from
+  current configuration rather than the plan committed at acceptance. It goes with the
+  verification contract.
+- **Refusing startup while a mechanism with no configured section has unfinished
+  obligations**, for all three domains together.
+- **Resubmission after an ambiguous on-chain submission** is withdrawn: it contradicted
+  the permanent "Ambiguous on-chain submission safety" requirement and the active
+  `add-alkahest-attestation-reference-query`, which owns reconciling that window.
 
 Decisions:
 
-8. **One start path: the worker's ready step, for every mechanism and domain.**
-   `kit/settlement-runtime` composes the worker's ready and terminal hooks from
-   contributions, so no domain writes either hook.
-   - **Mechanism contribution:** each registration declares how its fulfillment is
-     bound. *Domain-started* mechanisms (Alkahest and hosted) supply an evidence
-     publisher (decision 9); *self-binding* mechanisms (contact exchange, whose reveal
-     registers, materializes, binds, checks, and collects its obligation) supply none.
-   - **Domain contribution:** a delivery port. `deliver(record)` starts or resumes
-     delivery for one obligation, idempotently, and reports either pending or delivered
-     with its result (decision 10). `end_service(record, reason)` ends the service of an
-     obligation that ended uncollected after delivery started.
-   - **The ready step:** for a domain-started mechanism, reserve the obligation's
-     fulfillment, then `deliver`; pending defers the fulfillment; delivered builds the
-     evidence, publishes it through the mechanism, and completes the fulfillment with the
-     returned reference; a failure records a retry and raises, so the worker's backoff
-     governs it. A self-binding mechanism declines without reserving. Any other
-     mechanism raises.
-   - **The terminal step:** an uncollected terminal obligation whose delivery started
-     goes to `end_service`; a collected one, or a self-binding one, needs nothing.
-   - **Entry:** settle verify (decision 13) and the hosted start route adopt the
-     obligation and step it once through `service_obligation`; every retry is the
-     worker's.
-   - **Retired:** `SettlementJobCoordinator` and `FulfillmentOutcome`; VM's resume pass;
-     every domain's `ensure_hosted_fulfillment` and the bodies of their hosted `fulfill`
-     callbacks, since the kit hosted route service's fulfillment step becomes the ready
-     step; bare metal's `begin`.
+8. **Bare metal's Alkahest step is an interim domain step on kit pieces.** The ready and
+   terminal dispatch tables of decisions 4 and 5 stand. Their Alkahest rows are bare
+   metal's own step until `kit-owned-listing-and-fulfillment-lifecycles` composes the
+   step in kit; it is built from the pieces that change will keep (the runtime's
+   fulfillment operations, the `kit/alkahest` publisher), so what it absorbs is the
+   sequence, not a mechanism.
+9. **The Alkahest step.** Reserve the obligation's fulfillment; start fulfillment, or
+   find it started, through the fulfillment service, which is idempotent by negotiation;
+   defer while the lease is not yet active; once it is, build the lease-ready evidence,
+   store it, publish its digest on chain (decision 11), and complete the fulfillment with
+   the attestation's UID. The worker's check and collect then claim the escrow. A failure
+   before publication records a retry; publication's outcomes are decision 11's.
+10. **One evidence model, two accepted bindings.** The lease-ready evidence's accepted
+    binding becomes one of two kinds: the hosted binding, unchanged, so stored hosted
+    evidence and its digests are unaffected; and an Alkahest binding, built from the
+    accepted thread, the plan committed at acceptance, the parties, and the escrow as
+    condition anchor. Both are stored in the storefront's evidence store.
+11. **Only the digest goes on chain, and publication is never ambiguous to the worker.**
+    - The attestation's data is the evidence's `sha256:` digest, as a string obligation
+      referencing the escrow. The body names the buyer, seller, and claimant principals
+      and the lease result, and a chain is public and permanent; the arbiter decides by
+      kind, so nothing on chain needs the body.
+    - `kit/alkahest` gains a fulfillment publisher with four outcomes: *published* with
+      the attestation UID; *not submitted*, when the failure provably preceded the
+      transaction, which is retried; *outcome unknown*, when the transaction may have
+      been sent; and *rejected*, when the chain refused it. A failure the pinned client
+      does not let the publisher place is an unknown outcome.
+    - Before submitting, the step records its submission intent on the obligation's
+      fulfillment operation, through `kit/settlement-runtime`. The intent is
+      first-write-wins: recording the same intent again changes nothing, a different
+      intent for the same operation is refused, and the intent is cleared only under the
+      held lease after a proven *not submitted*. The intent carries the evidence digest,
+      which the future attestation lookup matches against.
+    - On *published*, the step records the attestation UID in the same operation, also
+      first-write-wins, and only then completes the fulfillment with it. A later attempt
+      therefore finds one of three states: an intent and a UID, which completes with
+      that UID and never submits; an intent and no UID, which parks the obligation for
+      an operator (`manual_required`, reason `alkahest_submission_outcome_unknown`) and
+      never submits; or neither, which may submit. A crash after the chain accepted the
+      submission but before the UID was recorded lands in the second state, which is
+      the window the lookup resolves.
+    - *Outcome unknown* parks the obligation in the same way.
+    - *Rejected* means the chain refused the transaction and no attestation exists, so a
+      retry cannot duplicate one: the step clears its intent and records a retry, as
+      for *not submitted*, until the operation's journal attempts reach a small bound,
+      after which it parks the obligation (`alkahest_submission_rejected`). A transient
+      revert recovers by itself; a deterministic one is a defect, reported by the
+      status count (decision 13). The maintainer preferred an operator resolution
+      path, but not one `add-alkahest-attestation-reference-query` already plans to
+      remove for VM.
+    - This keeps the property of "Ambiguous on-chain submission safety" for bare metal,
+      and the attestation lookup `add-alkahest-attestation-reference-query` adds becomes
+      the way out of the unknown-outcome park for both domains.
+12. **Evidence resolution authenticates its caller, by binding.** With the digest
+    public, anyone could read the body from the storefront's unauthenticated evidence
+    route. The route requires a signed request, as API credits' resolver does, loads the
+    evidence, and admits callers by its accepted binding: the evidence's buyer and
+    claimant and the seller's administrator for either kind, and the hosted authority's
+    principals (role `authority`, from the Stripe section's trust) only for evidence with
+    the hosted binding, since no hosted authority takes part in an Alkahest deal.
+13. **Status reports what needs an operator.** The administrator's
+    `/api/v1/system/status` carries `settlement_manual_required`: the number of
+    obligations parked for an operator, by mechanism status or by any operation.
+    `kit/settlement-runtime`'s repository counts them; the canonical storefront client's
+    status model gains the field.
 
-   This supersedes the per-domain dispatch tables of decisions 4 and 5. What they
-   decided becomes contributions: contact exchange is self-binding, and bare metal's
-   `end_service` terminates the lease through the selected site, as decision 5 says.
-   It also supersedes the VM-owned convergence the two `vm-storefront-fulfillment`
-   requirements describe: VM's physical resumption rules ("Physical fulfillment
-   resumption") stay, as properties of VM's `deliver`.
-9. **Publishing evidence belongs to the mechanism.** The one `FulfillmentPublisher` port
-   lives in `kit/settlement-runtime`. `kit/alkahest` gains a publisher that submits the
-   evidence as a string obligation referencing the escrow (the condition anchor is the
-   escrow UID), signed by the seller's wallet; `kit/hosted-settlement`'s publisher
-   implements the kit port unchanged. The VM and API-credit declarations are deleted.
-10. **One evidence envelope, carrying no access material.** A kit-owned envelope, signed
-    by the marketplace signer, names the agreement, the obligation, the condition anchor,
-    the fulfillment identity, and the domain's result kind and digest. The domain
-    contributes its typed result body, whose digest the envelope carries. No envelope
-    carries an endpoint, credential, secret, or provider payload. Bare metal's lease-ready
-    evidence and API credits' issuance evidence become instances of it, and VM gains one.
-    On Alkahest the envelope is the string obligation's data; on hosted it is served by
-    the configured resolver, as today. To be confirmed in planning: the hosted evidence
-    modes (`eas.v1`, `portable-remote.v1`) accept the envelope with no change to the
-    hosted contract. This generalises the existing "Secret-free fulfillment projection"
-    requirement from hosted VM evidence to every mechanism and domain.
-11. **One access rule.** Buyer access material reaches only the authenticated buyer,
-    through an access route. Where an authority can serve it again it is fetched live
-    and never stored (VM and bare metal, from provisioning's delivery); where none can,
-    it is persisted privately (API credits' bearer secret, as today). The access route
-    service is kit-owned and bound by VM and bare metal; bare metal's `/access` becomes
-    its binding. VM stops storing `connection_details` and `tenant_credentials` on the
-    escrow row and the listing's fulfillment resource, and settle status stops returning
-    them; a VM storefront migration clears stored values; VM's buyer reads coordinates
-    and credentials from the access route. What VM has already published on chain stays
-    public; nothing can remove it.
-12. **An ambiguous on-chain submission is resubmitted.** If a process stops after
-    submitting evidence on chain and before recording its UID, the next attempt submits
-    again. The duplicate carries only the envelope, which is public by construction, the
-    escrow is collected once, and the cost is one transaction in a rare window, where the
-    rule it replaces left a paid escrow waiting on an operator. This reverses the
-    permanent requirement "Ambiguous on-chain submission safety"; the reversal is
-    deliberate and is written as a delta with the plan. An alternative for review:
-    `kit/alkahest` discovers the attestation by scanning the seller's `Attested` events
-    and decoding their `refUID`, which keeps the requirement's property without an
-    operator, at the cost of log scanning against every supported chain.
-13. **One verify step.** Each domain's escrow verification becomes one kit step in
-    `kit/settlement-runtime`: load the accepted agreement through a domain hook (the
-    committed plan and the domain's check of its terms), verify the escrow through the
-    mechanism's verifier (the Alkahest registration's `settlement_verifier`), register
-    the committed plan, adopt the matched obligation, and step it once (decision 8). VM
-    therefore verifies the plan committed at acceptance, as bare metal does, and refuses
-    a thread with none, as bare metal does under the maintainer's ruling. The kit
-    settlement admin route service's verify, evaluate, and wait hooks bind to this step.
+Composition decision 2 is tightened by the review: a configured mechanism's recovery
+resources are required whether or not it is enabled, since logging that obligations
+cannot be serviced is still abandoning them.
 
-Scope. Taking VM and API credits in this change was chosen deliberately over a follow-up
-change; see "Risks / Trade-offs". Section 7 is replanned in five parts, each ending with
-both lanes green:
+Design review of this section (2026-10-07), with the maintainer's dispositions:
 
-- **7A, kit:** decisions 8 to 10 and 13 in `kit/settlement-runtime` and `kit/alkahest`,
-  with `kit/hosted-settlement` on the kit port, and the access route service (decision
-  11).
-- **7B, bare metal:** decisions 1 to 7 of the composition design and both bare-metal
-  mechanisms on the kit path.
-- **7C, VM:** VM on the kit path and the access rule, its resume pass and stored access
-  material retired.
-- **7D, API credits:** API credits on the kit path.
-- **7E, the rest of the original Section 7:** the lease client and the committed plan
-  (7.2), teardown through lease termination and the deal controls (7.4), the
-  publication dry run (7.5), and the restart tests (7.7).
+| Review point | Disposition |
+|---|---|
+| The deltas and plan did not describe the design | Written with this plan |
+| A common evidence envelope must preserve API credits' semantic evidence | Moved, with the correction, to `kit-owned-listing-and-fulfillment-lifecycles` |
+| Resubmission contradicts a permanent requirement and an active change | Withdrawn; the publisher distinguishes an unknown outcome and parks it (decision 11) |
+| The verify step has no mechanism-neutral interface | Moved, with the correction; bare metal's verify reads its committed plan in place |
+| Scope A collides with active changes; split | Accepted: the unification moves to `kit-owned-listing-and-fulfillment-lifecycles` |
+| Access ownership and VM's cutover are undesigned | Moved, with the correction |
+| A configured but disabled mechanism may still strand obligations | Accepted: recovery resources are required while configured; the startup refusal for an unconfigured mechanism moves, for all three domains |
+| Validation must grow with the scope | Moot for the moved work; this plan validates its own pieces |
+| The Zone.Identifier files remain | They are tombstoned in the fileset and deleted after packaging |
 
-Routed changes. Closeout task 2.6's item on what a storefront keeps of a delivery (from
-"5B.12 implementation audit (2026-10-06)", row 9) is resolved here by decision 11.
+Second design review of this section (2026-10-07), with the maintainer's dispositions:
+
+| Review point | Disposition |
+|---|---|
+| The `settlement-servicing` delta imposed the Alkahest protocol on hosted publication, whose adapter already retries under a stable operation identity (`request_id` from the condition anchor and evidence digest) | Accepted: the requirement states the invariant (a stable operation identity, or recorded intent and no blind resubmission); the four outcomes are the contract of a publisher with no stable identity |
+| Submission intent needs an immutable recovery contract and an explicit UID ordering | Accepted (decision 11): first-write-wins intent and UID, both in the kit journal rather than a bare-metal column, the UID recorded before completion, and the three restart states tested |
+| A rejection has no recovery path | Accepted: a rejection is a known non-submission, retried up to a bound and then parked (decision 11); an operator resolution path was declined because the attestation-query change plans to remove VM's |
+| Evidence authorization should follow the evidence's binding | Accepted (decision 12) |
+| The attestation-query change's tasks remain VM-only | Accepted: its tasks now cover the shared publisher and bare metal |
+| Composition decision 7 said "enabled set" for "configured sections"; stale Alkahest resources without a section | Accepted: corrected, and such resources are refused at startup (decision 2) |
 
 ### Bare-metal publication has a dry run
 
@@ -2817,15 +2823,12 @@ Earlier:
   change index).
 - **Image artifact size** → one compressed artifact kept for a day; if transfer time
   rivals build time, a registry-backed cache is the fallback.
-- **Section 7 widened to every domain's fulfillment path** (Section 7 design, scope A):
-  the change takes on a kit mechanism and rebinds VM and API credits rather than leaving
-  that to a follow-up change, which the closeout guidance names as a signal to consider
-  splitting. Chosen deliberately: fixing bare metal alone would add a fourth copy of the
-  start-deliver-publish-bind step. Mitigation: 7A to 7E each end with both lanes green;
-  VM moves after bare metal has proved the kit path on both mechanisms.
-- **VM's delivery changes for its buyers** → VM's settle status stops returning
-  coordinates and the tenant password, and stored copies are cleared. VM's buyer moves to
-  the access route in the same part (7C), and VM's lane is the gate.
+- **Bare metal's Alkahest step is a temporary domain copy** of the step every domain
+  writes (Section 7 design, decision 8) → `kit-owned-listing-and-fulfillment-lifecycles`
+  absorbs it; it is built only from the pieces that change keeps.
+- **A parked Alkahest submission waits for an operator** → rare (a process stopping
+  between submission and recording its UID), reported by the administrator's status, and
+  reconciled automatically once `add-alkahest-attestation-reference-query` lands.
 - **Admin reserve's VM path** (`/api/v1/admin/portfolio/reservations`) carries VM
   vocabulary; it is kept for client compatibility. `remove-dead-storefront-physical-surfaces`
   does not retire it (checked 2026-10-01).

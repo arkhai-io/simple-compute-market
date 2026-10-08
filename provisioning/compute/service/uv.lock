@@ -263,7 +263,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.17.1"
+version = "0.17.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -321,7 +321,7 @@ requires-dist = [
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.4.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront-client", specifier = "==0.24.0" },
+    { name = "arkhai-core-storefront-client", specifier = "==0.25.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.5.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
@@ -372,14 +372,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.24.0"
+version = "0.25.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.24.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.25.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -403,7 +403,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.5"
+version = "0.1.6"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -414,7 +414,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.1.5-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.1.6-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -489,7 +489,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -497,7 +497,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

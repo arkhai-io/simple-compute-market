@@ -11,6 +11,10 @@ from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
 from core_storefront.domain_registry import StorefrontDomainRegistryError
 
 import arkhai_bare_metal_storefront.runtime as runtime_module
+from market_identity import Eip191Signer, TrustedIdentitySet
+from settlement_compositions import alkahest_composition
+from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
+from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 import arkhai_bare_metal_storefront.server as server_module
 from arkhai_bare_metal_storefront.contribution import (
     BARE_METAL_STOREFRONT_CONTRIBUTION,
@@ -21,6 +25,9 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+
+
+COMPOSITION_SIGNER = Eip191Signer(bytes.fromhex("66" * 32))
 
 
 def _registry(domain=None):
@@ -180,3 +187,56 @@ def test_installed_contribution_exposes_complete_bare_metal_contract() -> None:
     assert contract.settlement is not None
     assert contract.fulfillment is not None
     assert contract.fulfillment.fulfill is fulfill_bare_metal
+
+
+def _direct_runtime(tmp_path, **overrides):
+    domain = get_market_domain_contract()
+    values = dict(
+        db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
+        domain=domain,
+        seller_principal=COMPOSITION_SIGNER.identity,
+        admin_principals=TrustedIdentitySet(identities=(COMPOSITION_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        marketplace_signer=COMPOSITION_SIGNER,
+    )
+    values.update(overrides)
+    return BareMetalStorefrontRuntime(**values)
+
+
+async def test_a_runtime_without_a_settlement_composition_has_no_settlement(
+    tmp_path,
+) -> None:
+    runtime = _direct_runtime(
+        tmp_path, seller_evm_address="0x" + "33" * 20
+    )
+
+    assert runtime.settlement_worker is None
+    assert runtime.hosted_domain_callbacks is None
+    assert "settlement-servicing" not in runtime.loops.step_routes()
+    with pytest.raises(RuntimeError, match="not configured"):
+        runtime.settlement_service()
+    health = await runtime.health()
+    assert health["checks"]["commercial_settlement"] == "unavailable"
+
+
+async def test_an_alkahest_only_runtime_composes_the_worker_and_its_step(
+    tmp_path,
+) -> None:
+    chain_clients = {"anvil": object()}
+    runtime = _direct_runtime(
+        tmp_path,
+        seller_evm_address="0x" + "33" * 20,
+        settlement_composition=alkahest_composition(
+            COMPOSITION_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients=chain_clients,
+        ),
+    )
+
+    assert runtime.settlement_worker is not None
+    assert runtime.hosted_domain_callbacks is None
+    assert "settlement-servicing" in runtime.loops.step_routes()
+    service = runtime.settlement_service()
+    assert service.chain_clients == chain_clients
+    health = await runtime.health()
+    assert health["checks"]["commercial_settlement"] == "ok"

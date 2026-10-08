@@ -3833,70 +3833,319 @@ bare-metal storefront's force-accept and continuation.
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
-**Replanned (2026-10-07).** "Section 7 design: one explicit settlement composition
-(2026-10-07)" and "Section 7 design: one fulfillment path for every domain (2026-10-07)"
-replace this section's premise: one kit fulfillment path for every domain, built in kit
-and bound by bare metal, VM, and API credits, in parts 7A to 7E. The plan rewrites the
-unchecked tasks below; implement none of them as written.
+**Planned 2026-10-07.** Decisions: "Section 7 design: one explicit settlement composition
+(2026-10-07)" (composition decisions 1 to 7) and "Section 7 design: bare-metal Alkahest
+delivery, scope narrowed (2026-10-07)" (decisions 8 to 13), on top of the decisions named
+above. The unified fulfillment path those designs considered belongs to
+`kit-owned-listing-and-fulfillment-lifecycles`. 7A to 7D each end with a gate and a
+checkpoint; the order is 7A, 7B, 7C, 7D.
 
-Decisions: "Settlement starts fulfillment", "The lease lifecycle owns release for every
-offering mode", "The Alkahest path commits the lease window and registers the lease",
-"Bare-metal publication has a dry run", "Restart recovery is proven at integration level,
-as VM's is". Reviewable alone: the bare-metal storefront's settlement and fulfillment
-paths and provider-neutral release in provisioning.
-
-- [ ] 7.1 Servicing worker for every mechanism: `runtime.py` composes
-      `SettlementServicingWorker` whenever a settlement mechanism is registered, not only
-      `fiat.stripe.v1`; its `on_ready` dispatches by the obligation's mechanism, hosted
-      to the existing lifecycle callbacks and Alkahest to `fulfillment_service.py`;
-      `lifecycle_steps.py` then registers the settlement-servicing step on the Alkahest
-      path too. `settlement_service.py`'s `verify` wakes the worker for the adopted
-      obligation and calls `service_obligation` once, and `status` drops its
-      no-fulfillment assertion. Remove `POST /api/v1/fulfillments/begin` from `api.py`
-      and `BareMetalFulfillRequest` from `models.py`; remove `begin()` from
-      `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
-- [ ] 7.2 Lease client and the committed plan. Amended 2026-10-07 (`design.md`, "Section 6
-      design: bare metal on the negotiation runtime (2026-10-07)"): the commit this task
-      planned is done, since 5B.12.D made the Alkahest path commit before fulfillment,
-      and the registration it planned no longer exists; its finding that the family's
-      lease reads should count only registered leases is superseded, because a lease
-      begins at commit for every domain, which is what those reads count. What remains:
-      - `site_clients.py`'s `SelectedSiteFulfillmentClient` gains `get_lease` and
-        `terminate_lease` over `compute_provisioning_client`, routed by the reservation's
-        recorded site;
-      - `settlement_service.py`'s `verify` reads the plan committed at acceptance
-        (decision 7) instead of rebuilding it, and refuses a thread with none; 6B's
-        equality test becomes a test that verify registers exactly the committed plan.
+- [x] 7.1 **Superseded** by 7B.1 (the worker composed inside the runtime) and 7C.3 to
+      7C.5 (the dispatch tables, verify stepping the worker, `begin` removed).
+- [x] 7.2 **Superseded** by 7C.1 (the lease client) and 7C.4 (verify registers the
+      committed plan).
 - [x] 7.3 **Migrated** to 5B.8.B.3 (`design.md`, "Controls and routes (5B.8)", decision
       1): provider-neutral release lands with the mode-agnostic lease lifecycle.
-- [ ] 7.4 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
-      the site's contract lease terminate and returns the lease operation; `status()`
-      no longer calls `capacity_client.site(...).release(...)`; the lifecycle records
-      `released` only from the capacity-released callback, bound in `api.py` through the
-      Section 5 capacity-publication route service with the site's authority principal
-      verified as the caller. `api.py` also binds settle verify, evaluate-settle (a
-      bare-metal `FulfillmentPreviewHook` previewing scheduling and materialization with
-      no writes), settle wait, and admin reserve.
-- [ ] 7.5 Publication dry run: `lifecycle_steps.py` registers a preview for
+- [x] 7.4 **Superseded** by 7D.1 and 7D.2.
+- [x] 7.5 **Superseded** by 7D.3.
+- [x] 7.6 **Superseded** by the test tasks of 7A to 7D.
+- [x] 7.7 **Superseded** by 7D.4.
+- [x] 7.8 **Superseded** by the gates of 7A to 7D.
+
+### 7A. Kit: parked fulfillment, the Alkahest publisher, and the status count
+
+Decisions 11 and 13. Reviewable alone: `kit/settlement-runtime`, `kit/alkahest`, and
+`core/storefront-client`; no domain uses the new surfaces yet.
+
+- [x] 7A.1 Settlement runtime (`kit/settlement-runtime`, 0.3.0 → 0.4.0):
+      - `runtime.py`, under the held `fulfill` lease:
+        `record_fulfillment_submission(obligation_ref, *, local_principal, worker_id,
+        submission)` writes a submission intent (a mechanism-neutral mapping the step
+        supplies, such as the evidence digest) into the operation's receipt and sets its
+        uncertain acknowledgement, first-write-wins: the same intent again is a no-op and
+        a different one raises; `record_fulfillment_publication(obligation_ref, reference,
+        ...)` writes the created reference beside it, first-write-wins the same way;
+        `clear_fulfillment_submission` removes an intent with no reference, for a
+        not-submitted or rejected outcome; `park_fulfillment(obligation_ref, error, ...)`
+        finishes the operation as `manual_required` through `_finish_manual`, so its
+        reason code joins the mechanism state; `reserve_fulfillment`'s pending outcome
+        carries the recorded intent, reference, and attempt count, so the step can see
+        them; `manual_required_count()` delegates to the repository;
+      - `sqlite_repository.py`: `count_manual_required()`, the number of distinct
+        obligations whose `mechanism_status` or any operation's state is
+        `manual_required`;
+      - `__init__.py` exports what is new.
+- [x] 7A.2 Alkahest kit (`kit/alkahest`, 0.3.0 → 0.4.0): a new
+      `src/market_alkahest/fulfillment_publisher.py`:
+      - `FulfillmentPublication`, a frozen result whose outcome is `published` (with the
+        attestation UID), `not_submitted`, `outcome_unknown`, or `rejected` (each with a
+        reason code);
+      - `AlkahestFulfillmentPublisher`, over one chain client, whose
+        `publish(*, condition_anchor, data)` submits `data` as a string obligation
+        referencing the escrow (`client.string_obligation.do_obligation`) and classifies
+        the result: a failure raised before the client is called, or one the pinned client
+        reports as never sent, is `not_submitted`; a revert the client reports is
+        `rejected`; anything else, including a timeout or a lost receipt, is
+        `outcome_unknown`;
+      - `__init__.py` exports both. No discovery of an existing attestation: that is
+        `add-alkahest-attestation-reference-query`'s.
+- [x] 7A.3 Storefront client (`core/storefront-client`, 0.24.0 → 0.25.0): `models.py`'s
+      `HealthResponse` gains `settlement_manual_required: int | None` (present on
+      `/api/v1/system/status` only) and reads it in `from_dict`.
+- [x] 7A.4 Tests:
+      - `kit/settlement-runtime/tests/integration`, against the real repository: an intent
+        and a reference recorded under a lease survive an expired lease and a new
+        reservation sees them; a repeated identical intent or reference is a no-op and a
+        different one is refused with the recorded value unchanged; a cleared intent is
+        gone, and an intent with a reference cannot be cleared; a write without the lease
+        is refused; a parked fulfillment is `manual_required` with its reason code and is
+        not listed as due; `count_manual_required` counts an
+        obligation once whether it is parked by mechanism status, one operation, or both;
+      - `kit/alkahest/tests/unit/test_fulfillment_publisher.py`: each outcome from a
+        chain-client double (published, refused before the call, revert, timeout after
+        the call), and the submitted data is exactly what was passed;
+      - `core/storefront-client/tests`: the field round-trips and is `None` when absent.
+- [x] 7A.5 Delta: `specs/settlement-servicing/spec.md` adds "A fulfillment submission with
+      an unknown outcome is never repeated" (written with this plan). It states the
+      invariant for any external publication; hosted publication already satisfies it
+      through its stable operation identity and changes nothing.
+- [x] 7A.6 Versions and locks: the three bumps, cascaded through `cascade_pins.py`;
+      hand-locked projects relocked by `handlock.py`; `e2e-tests` relocked.
+- [ ] 7A.7 **Gate.** The settlement-runtime, Alkahest, and storefront-client suites, the
+      root aggregate, `make check-packaging`, comment hygiene, documentation citations,
+      OpenSpec strict validation (1.14.0), pyflakes on edited modules, and the VM and
+      bare-metal lanes unchanged.
+  - Notes (2026-10-07; the lanes have not run):
+    - Versions: arkhai-kit-settlement-runtime 0.4.0, arkhai-kit-alkahest 0.4.0,
+      arkhai-core-storefront-client 0.25.0; cascaded to arkhai-kit-config 0.1.6,
+      arkhai-kit-hosted-settlement 0.1.8, arkhai-kit-contact-exchange 0.2.3,
+      arkhai-core-buyer 0.3.6, arkhai-vms-buyer 0.6.1, arkhai-bare-metal-buyer 0.4.3,
+      arkhai-compute-provisioning-service 0.17.2, arkhai-vms-storefront 0.15.3, and
+      arkhai-bare-metal-storefront 0.11.2. Four projects were hand-locked (the VM and
+      bare-metal storefronts, the VM buyer, the API-credit storefront) and 21 relocked;
+      `kit/config`'s relock added a `typing-extensions` marker, restored to the
+      previous line.
+    - 7A.1: a fulfillment has no lifecycle column, so parking one did not record its
+      reason. The repository's finish now writes it into the mechanism state for a
+      parked `fulfill`, and a later status write keeps it, reading the journal only
+      when there is a reason to lose.
+    - 7A.2: the pinned client reports failures only as messages. A refusal or revert
+      (`revert`, `insufficient funds`, `nonce too low`, and the gas refusals) is
+      *rejected*; `already known` is deliberately not, since that transaction may
+      still be mined; anything else is *outcome unknown*.
+    - Results: settlement runtime 135 passed (9 new integration tests), Alkahest kit
+      unit 193, storefront client 46. The root aggregate passed 48 suites; its
+      failures were the known ones (VM's two `test_alkahest` tests, the API-credit
+      middleware's Rust toolchain). `make check-packaging`, comment hygiene, and
+      pyflakes (nothing new) pass.
+
+### 7B. Bare metal: one explicit settlement composition and its deployment inputs
+
+Composition decisions 1, 2, 3, 6, and 7. Reviewable alone: the bare-metal storefront's
+startup and composition, its Helm chart, its Compose files, and their documentation; the
+Alkahest path still waits for `begin`.
+
+- [x] 7B.1 `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/runtime.py`:
+      - `build_runtime_from_environment` refuses to start without
+        `BARE_METAL_STOREFRONT_SETTLEMENT`; Alkahest resources (the seller address, the
+        chains, the wallet key) are built whenever the Alkahest section is configured and
+        required then, enabled or not, and refused when supplied with no Alkahest section
+        (first confirming nothing else reads those variables without one); the hosted lifecycle callbacks are built whenever
+        the Stripe section is configured; an empty `BARE_METAL_STOREFRONT_CHAINS` reads as
+        absent;
+      - `__post_init__` composes the `SettlementServicingWorker` whenever the runtime has
+        a settlement composition, before the lifecycle steps are registered, and the
+        builder no longer attaches one afterwards;
+      - with no composition: `accepted_obligation_dispatch` is empty (the
+        `default_hosted_selection_dispatch()` fallback goes), `settlement_service()`
+        reports settlement unavailable, `health()` reports commercial settlement
+        unavailable, and no worker is composed;
+      - the escrow verifier takes its chain clients from the composition's resources.
+- [x] 7B.2 Helm chart (`helm/charts/bare-metal-storefront`, chart 0.1.0 → 0.2.0):
+      `values.yaml`, `values.schema.json`, and `examples/production-values.yaml` drop
+      `alkahestEnabled` and gain `chains` (an object keyed by chain name, as
+      `BARE_METAL_STOREFRONT_CHAINS` reads it), `walletKeySecret` (a name and key of an
+      existing Secret), and `alkahestAddressBook` (an optional existing ConfigMap name,
+      key, and mount path); `templates/deployment.yaml` renders
+      `BARE_METAL_STOREFRONT_EVM_ADDRESS`, `BARE_METAL_STOREFRONT_CHAINS`, and
+      `BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY` (through `secretKeyRef`) only when the
+      group is set, mounts the address book read-only when given, and fails rendering
+      when `sellerEvmAddress`, `chains`, and `walletKeySecret` are not all set or all
+      empty.
+- [x] 7B.3 Compose: `compose.bare-metal.yml` forwards
+      `BARE_METAL_STOREFRONT_CHAINS=${BARE_METAL_STOREFRONT_CHAINS_JSON:-}` and reads an
+      optional wallet credential file (`BARE_METAL_STOREFRONT_WALLET_ENV_FILE`, long-form
+      `env_file` with `required: false`), apart from the identity file;
+      `compose.bare-metal-local.yml` stops setting the chains and the wallet key itself;
+      the root `Makefile`'s `e2e-bare-metal-dev-env` writes the lane's wallet file and
+      passes its path.
+- [x] 7B.4 Tests:
+      - `tests/test_runtime_environment.py`: the normal fixture carries a settlement
+        configuration; a missing configuration is refused; a configured Alkahest section
+        missing its address, chains, or key is refused whether enabled or not; any of them
+        supplied with no Alkahest section is refused; the hosted
+        callbacks exist for a configured, disabled Stripe section;
+      - `tests/test_http_settlement.py` (including its restart test) and
+        `tests/test_settlement.py` build the real `BareMetalStorefrontSettlementComposition`
+        with the Alkahest client's chain clients doubled at the chain boundary; the
+        assertion that the restarted runtime has no clients goes;
+      - `tests/test_app_composition.py`: an Alkahest-only storefront composes the worker
+        and registers the settlement-servicing lifecycle step; a runtime with no
+        composition has no worker, an empty dispatch, and unavailable settlement;
+      - `tests/test_http_negotiation.py`, `tests/test_http_system.py`, and
+        `tests/test_selection_dispatch.py`: those that relied on the hosted fallback gain
+        a composition; those that only negotiate keep none;
+      - `helm/charts/bare-metal-storefront/tests/test_render.py`: the hosted-only example
+        renders none of the Alkahest inputs; a full group renders all three and the
+        mount; a partial group fails;
+      - `scripts/tests/test_bare_metal_compose.py` and
+        `e2e-tests/tests/unit/test_domain_stack_configuration.py`, for the forwarded
+        chains and the wallet file.
+- [x] 7B.5 Documentation: `docs/development/DEPLOYMENT_AND_CONFIG.md` (the settlement
+      root is required; the chart's and Compose's Alkahest inputs);
+      `docs/bare-metal-seller-quickstart.md` (the Alkahest inputs are required while the
+      section is configured; the wallet file; Compose 2.24 or later for the optional
+      file).
+- [x] 7B.6 Versions and locks: `arkhai-bare-metal-storefront` 0.11.2 → 0.12.0, cascaded;
+      the storefront hand-locked; `e2e-tests` relocked.
+- [ ] 7B.7 **Gate.** The bare-metal storefront suite, the chart's render tests (or, if
+      `helm` cannot run here, recorded as unrun), the Compose and e2e unit tests, the root
+      aggregate, `make check-packaging`, comment hygiene, documentation citations,
+      OpenSpec strict validation, pyflakes, and both lanes.
+  - Notes (2026-10-07; the lanes have not run):
+    - Versions: arkhai-bare-metal-storefront 0.12.0, cascaded to arkhai-vms-storefront
+      0.15.4; both storefronts hand-locked, `e2e-tests` relocked.
+    - 7B.1: the hosted lifecycle and the worker are composed in `__post_init__`, and
+      both stay injectable fields (`test_http_system` injects a worker). Until 7C the
+      ready hook declines an Alkahest or contact-exchange obligation without reserving
+      it (Alkahest still starts through `begin`); an unknown mechanism raises.
+      `default_hosted_selection_dispatch` is no longer imported.
+    - 7B.4: a disabled Stripe section is checked at the composition
+      (`configures`), since constructing its hosted client needs a complete
+      authority configuration; the runtime builds the hosted lifecycle on the same
+      check. `tests/settlement_compositions.py` builds the real hosted and Alkahest
+      compositions for the negotiation and settlement tests.
+    - Results: bare-metal storefront 273 passed; VM storefront unit 1103 and
+      integration 360 (the two known `test_alkahest` failures); e2e unit 236 (the known
+      `test_hosted_public_boundary` failure) and collection 162. Unrun here: the chart's
+      render tests (no `helm`) and `scripts/tests/test_bare_metal_compose.py` (no
+      Compose; it skips).
+
+### 7C. Bare metal: Alkahest delivery through the worker
+
+Composition decisions 4 and 5, and decisions 8 to 13. Reviewable alone: bare-metal
+settlement, fulfillment, and evidence; teardown still releases directly.
+
+- [ ] 7C.1 `site_clients.py`: `SelectedSiteFulfillmentClient` gains `get_lease` and
+      `terminate_lease` over `compute_provisioning_client`, routed by the reservation's
+      recorded site.
+- [ ] 7C.2 Domain (`domains/bare_metal`, 0.9.0 → 0.10.0): `evidence.py` and
+      `hosted_contract.py` give the lease-ready evidence a choice of accepted binding:
+      `bare_metal.accepted-hosted-binding.v1`, unchanged, and a new
+      `bare_metal.accepted-alkahest-binding.v1` built from the accepted thread, the
+      committed plan, the parties, and the escrow as condition anchor;
+      `build_bare_metal_lease_ready_evidence` takes either.
+- [ ] 7C.3 The Alkahest step: a new storefront module `alkahest_lifecycle.py`.
+      Reserve the obligation's fulfillment, then by what the reservation reports:
+      - an intent and a UID: complete the fulfillment with that UID; never submit;
+      - an intent and no UID: park (`alkahest_submission_outcome_unknown`); never submit;
+      - neither: start or find the fulfillment through `fulfillment_service.py`
+        (idempotent by negotiation); defer while the lease is not active; once active,
+        build and store the evidence, record the intent (its digest), and publish the
+        digest through `AlkahestFulfillmentPublisher`.
+
+      On `published`, record the UID and then complete the fulfillment with it;
+      `not_submitted` clears the intent and records a retry; `rejected` clears the intent
+      and records a retry until the operation's attempts reach the bound (a module
+      constant, 3), then parks (`alkahest_submission_rejected`); `outcome_unknown` parks.
+      Storage: `migrations.py` adds the evidence JSON and its digest (unique) to
+      `bare_metal_fulfillment_lifecycle`; the attestation UID lives only in the kit
+      journal and, once bound, as the obligation's fulfillment reference.
+      `sqlite_client.py` stores the evidence, and `load_bare_metal_hosted_evidence`
+      becomes `load_bare_metal_lease_ready_evidence`, resolving a digest from either
+      lifecycle table.
+- [ ] 7C.4 Dispatch and settlement: `runtime.py` builds the ready table (hosted to the
+      existing callbacks, Alkahest to 7C.3, contact exchange declined without reserving,
+      anything else raises) and the terminal table (hosted to `cleanup`; an uncollected
+      Alkahest obligation whose fulfillment started terminates its lease through 7C.1;
+      collected and contact exchange need nothing; anything else raises).
+      `settlement_service.py`'s `verify` reads the plan committed at acceptance and
+      refuses a thread with none, registers it, adopts the matched obligation, wakes the
+      worker, and calls `service_obligation` once; `status` drops its no-fulfillment
+      assertion.
+- [ ] 7C.5 Routes: `api.py` removes `POST /api/v1/fulfillments/begin` (and
+      `models.py` `BareMetalFulfillRequest`); the evidence route requires a signed
+      request, loads the evidence, and admits by its binding: the evidence's buyer and
+      claimant and the seller's administrator for either kind, and the hosted
+      authority's principals (role `authority`, from the Stripe section's trust) only for
+      the hosted binding; `/api/v1/system/status` adds `settlement_manual_required` from the
+      runtime's count (`models.py`'s `BareMetalHealthResponse` gains it). The buyer
+      (`domains/bare_metal/buyer`, 0.4.2 → 0.5.0) removes `begin()` from
+      `fulfillment.py`.
+- [ ] 7C.6 Delta: `specs/storefront-publication/spec.md`'s "Complete bare-metal seller
+      lifecycle" gains the startup, evidence, unknown-outcome, resolution, and
+      uncollected-terminal scenarios (written with this plan).
+- [ ] 7C.7 Tests:
+      - `tests/test_http_settlement.py`: verify registers exactly the committed plan
+        (replacing 6B's `test_the_plan_settled_is_the_plan_accepted`) and refuses a
+        thread with none; verify steps the worker once; a failed first attempt is retried
+        by the worker's schedule and by nothing else; `begin` is gone;
+      - a new `tests/test_alkahest_lifecycle.py`, through the real composition and
+        repository with the publisher's chain client doubled: pending until active;
+        published binds the UID and the worker checks and collects; only the digest is
+        submitted; not-submitted retries; a rejection retries and parks at the bound;
+        unknown parks; a restart with an intent and no UID parks without submitting; a
+        restart with an intent and a recorded UID completes with it without submitting;
+        status counts the parked obligations;
+      - `tests/test_hosted_lifecycle.py`: hosted dispatch unchanged; a contact-exchange
+        obligation is declined; an uncollected Alkahest terminal terminates the lease once;
+      - `tests/test_site_clients.py`: the lease client routes by recorded site;
+      - the evidence route: unsigned refused; buyer, claimant, and administrator served
+        for both bindings; the hosted authority served for hosted evidence and refused
+        for Alkahest evidence; another principal refused;
+      - `domains/bare_metal/tests/test_evidence.py`: both bindings; hosted digests
+        unchanged;
+      - `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
+- [ ] 7C.8 Versions and locks: `arkhai-bare-metal` 0.10.0,
+      `arkhai-bare-metal-storefront` 0.13.0, `arkhai-bare-metal-buyer` 0.5.0, cascaded;
+      the storefront hand-locked; `e2e-tests` relocked.
+- [ ] 7C.9 **Gate.** The bare-metal domain, storefront, and buyer suites, the root
+      aggregate, `make check-packaging`, comment hygiene, documentation citations,
+      OpenSpec strict validation, pyflakes, and both lanes.
+
+### 7D. Bare metal: teardown, deal controls, the publication dry run, and restart
+
+The rest of the original Section 7. Reviewable alone: release and deal controls.
+
+- [ ] 7D.1 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
+      7C.1's `terminate_lease` and returns the lease operation; `status()` no longer
+      calls `capacity_client.site(...).release(...)`; the lifecycle records `released`
+      only from the capacity-released callback, bound in `api.py` through the
+      capacity-publication route service with the site's authority principal verified as
+      the caller.
+- [ ] 7D.2 Deal controls: `api.py` binds settle verify, evaluate-settle (a bare-metal
+      `FulfillmentPreviewHook` previewing scheduling and materialization with no
+      writes), settle wait, and admin reserve through the kit's
+      `SettlementAdminRouteService` and `CapacityAdminRouteService`.
+- [ ] 7D.3 Publication dry run: `lifecycle_steps.py` registers a preview for
       `publication` reporting the opens, closes, refreshes, and holds one pass would
       make; `publication_composition.py` and `publication.py` expose the non-publishing
       pass it needs.
-- [ ] 7.6 Tests: `test_settlement.py` and `test_http_settlement.py` (verify wakes and
-      steps the worker; a failed first attempt is retried by the worker's schedule and
-      by nothing else; an Alkahest-only storefront has a settlement-servicing step;
-      `begin` is gone; verify registers the committed plan and refuses a thread with
-      none); `test_fulfillment_service.py` (commit with window, teardown through
-      terminate, repeated teardown returns the same lease, release only on callback);
-      `test_hosted_lifecycle.py` (hosted dispatch unchanged); `test_site_clients.py`;
-      `test_publication_cycle.py` (preview applies nothing); `test_app_composition.py`;
-      `domains/bare_metal/buyer/tests/test_buyer_composition.py`. The bare-metal expiry
-      through the aggregate is proven in 5B.8.B.3's `test_lease_release_api.py`.
-- [ ] 7.7 Restart integration tests (task 3.5; 3.6 is withdrawn):
-      `domains/bare_metal/storefront/tests/test_restart_recovery.py` rebuilds the
-      production application over one database file with a loopback site
-      (`tests/loopback.py`).
-- [ ] 7.8 **Gate.** The bare-metal storefront, buyer, provisioning, and
-      provisioning-service suites pass; the VM and bare-metal lanes pass unchanged.
+- [ ] 7D.4 Restart integration tests (task 3.5; 3.6 is withdrawn): a new
+      `tests/test_restart_recovery.py` rebuilds the production application over one
+      database file with a loopback site (`tests/loopback.py`), across a stop after
+      verify, after fulfillment began, after evidence was submitted, and after teardown
+      was requested.
+- [ ] 7D.5 Tests: `tests/test_fulfillment_service.py` (teardown through terminate, a
+      repeated teardown returns the same lease, release only on the callback);
+      `tests/test_publication_cycle.py` (the preview applies nothing); the deal-control
+      routes through the canonical client. The bare-metal expiry through the aggregate
+      is proven in 5B.8.B.3's `test_lease_release_api.py`.
+- [ ] 7D.6 Versions and locks: `arkhai-bare-metal-storefront` 0.14.0, cascaded.
+- [ ] 7D.7 **Gate.** The bare-metal storefront, buyer, provisioning, and
+      provisioning-service suites, the root aggregate, `make check-packaging`, comment
+      hygiene, documentation citations, OpenSpec strict validation, pyflakes, and both
+      lanes.
 
 ## 8. Shared compute deal stages and the VM scenario
 
@@ -4017,19 +4266,25 @@ service code.
       through a check each domain contributes, and that a thread is successful only once
       its agreement and plan are recorded; "Operator lifecycle controls" names the kit's
       process-local trading pause beside the loop pause.
+      From Section 7: the fulfillment-hook paragraph states that both bare-metal
+      mechanisms start fulfillment through the servicing worker, that an Alkahest
+      fulfillment publishes only its evidence's digest, and that an evidence submission
+      whose outcome is unknown parks its obligation for an operator.
 - [ ] 11.2 `docs/development/TESTING.md`: three lanes on images built once; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
       "blocked—not mocked" bare-metal statement replaced by the pipeline deal and the
       protected lane's distinct role.
 - [ ] 11.3 `docs/development/DEPLOYMENT_AND_CONFIG.md`: the compose file list names the
-      per-market overlays.
+      per-market overlays. (The bare-metal settlement root and Alkahest inputs land with
+      7B.5.)
 - [ ] 11.4 Promote the deltas into `openspec/specs/test-compatibility/spec.md`,
       `market-composition/spec.md`, `physical-provisioning/spec.md`,
       `storefront-publication/spec.md`, `site-capacity/spec.md`, `fulfillment/spec.md`
       (and its ownership list, which names versioned envelopes),
       `compute-provisioning-contract/spec.md` (and its purpose statement, which names
-      action submission), and `resource-pool-management/spec.md`.
+      action submission), `resource-pool-management/spec.md`, and
+      `settlement-servicing/spec.md`.
 - [ ] 11.5 `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md`
       name the four new distributions wherever their siblings are listed.
 
@@ -4114,9 +4369,8 @@ service code.
       release-by-escrow on the escrow, a settlement identity hosted deals lack, while jobs
       now correlate on the capacity reservation; weigh the site's storefront-facing
       correlation the same way. What a storefront keeps of a delivery, and when it stops
-      serving it, is resolved in this change by Section 7's design ("Section 7 design: one
-      fulfillment path for every domain (2026-10-07)", decision 11); confirm at closeout
-      that no domain still stores access material an authority can serve again.
+      serving it, belongs to `kit-owned-listing-and-fulfillment-lifecycles`, whose design
+      now carries the access rule; confirm at closeout that its design still does.
       Found in 5B.12.C's audit (rows 6 and 10): the VM storefront's admin usage-started
       event has no production sender and records nothing of its `host_id`; decide whether
       the route stays, and drop the field either way. VM's operator `create_vm` route checks
@@ -4195,12 +4449,10 @@ service code.
 | Bare metal composes the kit negotiation runtime | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime" |
 | Lease release delegates to durable fulfillment teardown for every offering mode; storefront teardown goes through lease termination | `openspec/specs/physical-provisioning/spec.md` — "Lease release delegates to durable fulfillment teardown", "Storefront teardown goes through lease termination"; `docs/development/ARCHITECTURE.md` "Release" |
 | Settlement starts bare-metal fulfillment through one mechanism-neutral servicing worker whose ready and terminal hooks dispatch by mechanism; the Alkahest path commits its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
-| One fulfillment start path, the servicing worker's ready step, composed in kit from mechanism and domain contributions; the coordinator and VM's resume pass retired | `openspec/specs/settlement-servicing/spec.md` (requirement added with the plan); `openspec/specs/vm-storefront-fulfillment/spec.md` — "Full settlement convergence ownership", "Foreground and restart convergence" (modified); `docs/development/ARCHITECTURE.md` — "Settlement servicing" |
-| Evidence publishing is mechanism-owned behind one kit port, and one kit evidence envelope carries no access material | `openspec/specs/settlement-servicing/spec.md` — "Secret-free fulfillment projection" (generalised); `docs/development/ARCHITECTURE.md` |
-| Buyer access material reaches only the authenticated buyer through a kit access route, live where an authority can serve it again | `openspec/specs/vm-storefront-fulfillment/spec.md` and `openspec/specs/storefront-publication/spec.md` (requirements added or modified with the plan); `docs/development/ARCHITECTURE.md` |
-| An ambiguous on-chain evidence submission is resubmitted | `openspec/specs/vm-storefront-fulfillment/spec.md` — "Ambiguous on-chain submission safety" (reversed; moves to `settlement-servicing` with the kit publisher) |
-| One kit verify step registers the plan committed at acceptance, for every domain | `openspec/specs/settlement-servicing/spec.md` — "Negotiation-to-plan handoff" |
-| The bare-metal storefront requires its settlement configuration, builds a configured mechanism's resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal hosted role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
+| A fulfillment submission whose outcome is unknown is never repeated; it parks the obligation, which status counts | `openspec/specs/settlement-servicing/spec.md` — "A fulfillment submission with an unknown outcome is never repeated" |
+| Bare-metal Alkahest delivery publishes only its evidence's digest on chain, and evidence resolution authenticates its caller | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
+| The unified fulfillment path, VM's plan rebuild, and the unconfigured-mechanism startup refusal are another change's | `openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/design.md`; nothing permanent from this change |
+| The bare-metal storefront requires its settlement configuration, requires a configured mechanism's recovery resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal hosted role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
 | A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
 | The job authority persists result and credential envelopes and an opaque execution handle, owns retry timing while executors classify retryability and redact, and never lets a late outcome undo cancellation | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities", "A cancelled job stays cancelled"; `docs/development/ARCHITECTURE.md` |

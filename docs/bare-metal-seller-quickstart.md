@@ -24,7 +24,7 @@ the distinction between shipped support and completed external qualification.
 
 ## Prerequisites
 
-- Docker/Podman with Compose v2 on a Linux host.
+- Docker/Podman with Compose v2.24 or later on a Linux host.
 - The staged internal wheels and the images built from this checkout.
 - Canonical marketplace principals and matching role-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
@@ -32,7 +32,7 @@ the distinction between shipped support and completed external qualification.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration. Hosted-only roles require the signed released hosted manifest/client/API capability pins, public authority trust and environment scope, seller account binding, exact profiles/currency/country/condition policy, and no wallet/RPC secret. Alkahest roles require the ordinary chain configuration and funded public seller address. Never put a wallet private key, Stripe credential, payer binding, or provider object in Compose or this document.
+- One strict shared settlement configuration. Hosted-only roles require the signed released hosted manifest/client/API capability pins, public authority trust and environment scope, seller account binding, exact profiles/currency/country/condition policy, and no wallet/RPC secret. Alkahest roles require the chain configuration, the funded public seller address, and the seller wallet's key in its own credential file. Never put a wallet private key, Stripe credential, payer binding, or provider object in Compose or this document.
 
 The installed `arkhai-bare-metal-buyer` contribution supplies the `market bare-metal` discovery, negotiation, hosted start/status/reclaim, and recovery commands. A running seller stack is not end-to-end evidence until that public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
@@ -145,7 +145,9 @@ export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
 export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
 export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
-export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
+export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>   # Alkahest only
+export BARE_METAL_STOREFRONT_CHAINS_JSON='{"<chain>":{"rpc_url":"<rpc-url>"}}'   # Alkahest only
+export BARE_METAL_STOREFRONT_WALLET_ENV_FILE=/run/operator/wallet.env   # Alkahest only; holds BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
 export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
 export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
 export BARE_METAL_FUNDING_DEADLINES_JSON='{"card.v1":900,"us_bank_transfer.v1":86400,"us_ach_debit.v1":432000}'
@@ -275,7 +277,7 @@ reason), hold, refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+The storefront refuses to start without its settlement configuration. While that configuration has an Alkahest section, enabled or not, the seller address, the chains, and the wallet file are required, since a disabled section still services the deals accepted while it was enabled; with no Alkahest section they must be absent. Hosted-only startup supplies none of them and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
 
 ### Resetting the storefront database
 

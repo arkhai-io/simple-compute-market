@@ -70,9 +70,14 @@ from .site_clients import (
 )
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
+    HOSTED_MECHANISM,
     BareMetalStorefrontSettlementComposition,
-    default_hosted_selection_dispatch,
 )
+
+# Mechanisms whose obligations the servicing worker reaches but whose
+# fulfillment this storefront starts elsewhere: contact exchange's reveal binds
+# its own obligation, and an Alkahest fulfillment has its own start.
+_FULFILLED_ELSEWHERE = frozenset({ALKAHEST_MECHANISM, CONTACT_MECHANISM})
 
 
 def _portable_evidence_reference(
@@ -134,6 +139,7 @@ class BareMetalStorefrontRuntime:
         default=None,
         repr=False,
     )
+    settlement_servicing_interval_seconds: float = 30.0
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
     capacity_client: Any | None = field(default=None, repr=False)
@@ -217,16 +223,105 @@ class BareMetalStorefrontRuntime:
                 ),
                 trading_pause=self.trading_pause,
                 plan_builder=self.plan_builder,
+                # No settlement composition means no settlement: nothing an
+                # accepted selection could be built into.
                 accepted_obligation_dispatch=(
                     self.settlement_composition.accepted_obligation_dispatch()
                     if self.settlement_composition is not None
-                    else default_hosted_selection_dispatch()
+                    else {}
                 ),
                 seller_wallet_address=self.seller_evm_address,
                 chain_config_paths=self.chain_config_paths,
             ),
         )
+        self._compose_settlement_servicing()
         register_bare_metal_lifecycle_steps(self)
+
+    def _compose_settlement_servicing(self) -> None:
+        """Compose the hosted lifecycle and the one servicing worker.
+
+        Both are built here, before the lifecycle steps are registered, so the
+        settlement-servicing step exists whenever settlement does. Either may be
+        injected instead. With no settlement composition there is neither.
+        """
+
+        composition = self.settlement_composition
+        if composition is None:
+            return
+        if self.hosted_domain_callbacks is None and composition.configures(
+            HOSTED_MECHANISM
+        ):
+            object.__setattr__(
+                self, "hosted_domain_callbacks", self._hosted_lifecycle_callbacks()
+            )
+        if self.settlement_worker is not None:
+            return
+        callbacks = self.hosted_domain_callbacks
+
+        async def on_ready(record: Any, worker_id: str) -> None:
+            mechanism = str(record.obligation.get("mechanism") or "")
+            if mechanism == HOSTED_MECHANISM and callbacks is not None:
+                await callbacks.fulfill(record, worker_id)
+                return
+            if mechanism in _FULFILLED_ELSEWHERE:
+                # Contact exchange's reveal binds its own obligation; an
+                # Alkahest fulfillment is started by its own path. Neither is
+                # reserved here, so nothing this hook does competes with them.
+                return
+            raise RuntimeError(
+                f"no bare-metal fulfillment is composed for {mechanism!r}"
+            )
+
+        async def on_terminal(record: Any, state: str, reason: str | None) -> None:
+            mechanism = str(record.obligation.get("mechanism") or "")
+            if mechanism == HOSTED_MECHANISM and callbacks is not None:
+                if state != "collected":
+                    await callbacks.cleanup(record.agreement_ref, reason or state)
+                return
+            if mechanism in _FULFILLED_ELSEWHERE:
+                return
+            raise RuntimeError(
+                f"no bare-metal terminal handling is composed for {mechanism!r}"
+            )
+
+        object.__setattr__(
+            self,
+            "settlement_worker",
+            SettlementServicingWorker(
+                self.settlement_runtime,
+                self.settlement_repository,
+                worker_id=f"bare-metal-storefront:{self.seller_principal.identifier}",
+                interval_seconds=self.settlement_servicing_interval_seconds,
+                on_ready=on_ready,
+                on_terminal=on_terminal,
+            ),
+        )
+
+    def _hosted_lifecycle_callbacks(self) -> BareMetalHostedDomainCallbacks:
+        db = self.db
+
+        async def publish_evidence(evidence: Any) -> str:
+            lifecycle = await db.load_bare_metal_hosted_lifecycle(
+                obligation_ref=evidence.obligation_ref
+            )
+            if lifecycle is None:
+                raise RuntimeError("hosted evidence lifecycle is unavailable")
+            publisher = self.settlement_clients[HOSTED_MECHANISM]
+            return await _publish_portable_evidence_reference(
+                lifecycle,
+                evidence,
+                publisher,
+            )
+
+        lifecycle = BareMetalHostedLifecycleCallbacks(
+            db=db,
+            runtime=self.settlement_runtime,
+            local_principal=self.seller_principal,
+            capacity_client=self.capacity_client,
+            fulfillment_client=self.fulfillment_client,
+            publish_evidence=publish_evidence,
+        )
+        return lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
 
     def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
         """Hand a fresh reveal to the configured seller-side dispatch, if any."""
@@ -242,13 +337,23 @@ class BareMetalStorefrontRuntime:
         return binding.site_id
 
     def settlement_service(self) -> BareMetalSettlementService:
-        """Build commercial verification from explicitly configured chains."""
-        if not self.seller_evm_address:
+        """Build commercial verification from the configured Alkahest section.
+
+        The chain clients are the composition's own resources, the ones its
+        Alkahest servicing client was built with, so verification and
+        servicing agree about which chains exist.
+        """
+        composition = self.settlement_composition
+        if (
+            composition is None
+            or not composition.configures(ALKAHEST_MECHANISM)
+            or not self.seller_evm_address
+        ):
             raise RuntimeError("Alkahest settlement is not configured")
         return BareMetalSettlementService(
             db=self.db,
             seller_wallet=self.seller_evm_address,
-            chain_clients=self.chain_clients,
+            chain_clients=composition.resources.get("clients") or {},
             chain_config_paths=self.chain_config_paths,
             build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
@@ -328,9 +433,7 @@ class BareMetalStorefrontRuntime:
             "api": "ok",
             "database": "ok",
             "commercial_settlement": (
-                "ok"
-                if self.settlement_composition is not None or self.chain_clients
-                else "unavailable"
+                "ok" if self.settlement_composition is not None else "unavailable"
             ),
             "fulfillment": (
                 "ok" if self.fulfillment_client is not None else "unavailable"
@@ -489,59 +592,67 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_PUBLIC_URL is required for listing ownership",
         )
-    raw_settlement = os.environ.get("BARE_METAL_STOREFRONT_SETTLEMENT")
-    settlement_config: dict[str, Any] | None = None
-    settlement_composition: BareMetalStorefrontSettlementComposition | None = None
-    if raw_settlement:
-        try:
-            parsed_settlement = json.loads(raw_settlement)
-            if not isinstance(parsed_settlement, dict):
-                raise TypeError("settlement config must be a JSON object")
-            settlement_config = parsed_settlement
-            settlement_composition = (
-                BareMetalStorefrontSettlementComposition.from_raw_config(
-                    settlement_config,
-                    resources={
-                        "marketplace_signer": signer,
-                        "claimant_principal": principal,
-                    },
-                )
-            )
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"
-            ) from exc
-    alkahest_enabled = (
-        settlement_composition is None
-        or ALKAHEST_MECHANISM in settlement_composition.enabled_mechanisms
-    )
+    raw_settlement = os.environ.get("BARE_METAL_STOREFRONT_SETTLEMENT", "").strip()
+    if not raw_settlement:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_SETTLEMENT is required: the storefront enables "
+            "no settlement mechanism implicitly"
+        )
+    try:
+        settlement_config = json.loads(raw_settlement)
+        if not isinstance(settlement_config, dict):
+            raise TypeError("settlement config must be a JSON object")
+        section_check = BareMetalStorefrontSettlementComposition.from_raw_config(
+            settlement_config,
+            resources={"marketplace_signer": signer, "claimant_principal": principal},
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"
+        ) from exc
+    # A configured Alkahest section, enabled or not, owns the obligations
+    # accepted under it, so its recovery resources are required whenever the
+    # section exists; with no section they would be a second, stale statement
+    # of what the settlement root says.
+    alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
     seller_evm_address = os.environ.get(
         "BARE_METAL_STOREFRONT_EVM_ADDRESS",
         "",
     ).strip()
-    if alkahest_enabled and not seller_evm_address:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required when Alkahest is enabled",
-        )
-    if alkahest_enabled:
+    raw_chains = os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "").strip()
+    private_key = os.environ.get("BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY", "").strip()
+    supplied = {
+        "BARE_METAL_STOREFRONT_EVM_ADDRESS": bool(seller_evm_address),
+        "BARE_METAL_STOREFRONT_CHAINS": raw_chains not in ("", "{}"),
+        "BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY": bool(private_key),
+    }
+    if alkahest_configured:
+        missing = [name for name, present in supplied.items() if not present]
+        if missing:
+            raise RuntimeError(
+                "a configured Alkahest settlement section, enabled or not, requires "
+                + ", ".join(missing)
+            )
         chain_clients, chain_config_paths = _build_chain_clients_from_environment()
     else:
-        chain_clients, chain_config_paths = {}, {}
-    if settlement_config is not None:
-        raw_chains = json.loads(os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}"))
-        settlement_composition = (
-            BareMetalStorefrontSettlementComposition.from_raw_config(
-                settlement_config,
-                resources={
-                    "marketplace_signer": signer,
-                    "claimant_principal": principal,
-                    "wallet": seller_evm_address or None,
-                    "wallet_ready": bool(seller_evm_address),
-                    "clients": chain_clients,
-                    "chains": raw_chains,
-                },
+        stale = [name for name, present in supplied.items() if present]
+        if stale:
+            raise RuntimeError(
+                "Alkahest inputs are set but the settlement configuration has no "
+                "Alkahest section: " + ", ".join(stale)
             )
-        )
+        chain_clients, chain_config_paths = {}, {}
+    settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+        settlement_config,
+        resources={
+            "marketplace_signer": signer,
+            "claimant_principal": principal,
+            "wallet": seller_evm_address or None,
+            "wallet_ready": bool(seller_evm_address),
+            "clients": chain_clients,
+            "chains": json.loads(raw_chains) if raw_chains else {},
+        },
+    )
     try:
         site_bindings = parse_site_bindings(
             os.environ["BARE_METAL_STOREFRONT_SITES"],
@@ -607,64 +718,8 @@ def build_runtime_from_environment(
         site_bindings=site_bindings,
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
+        settlement_servicing_interval_seconds=float(
+            os.environ.get("BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS", "30")
+        ),
     )
-    if settlement_composition is not None and "fiat.stripe.v1" in (
-        settlement_composition.enabled_mechanisms
-    ):
-
-        async def publish_evidence(evidence: Any) -> str:
-            lifecycle = await db.load_bare_metal_hosted_lifecycle(
-                obligation_ref=evidence.obligation_ref
-            )
-            if lifecycle is None:
-                raise RuntimeError("hosted evidence lifecycle is unavailable")
-            publisher = runtime.settlement_clients["fiat.stripe.v1"]
-            return await _publish_portable_evidence_reference(
-                lifecycle,
-                evidence,
-                publisher,
-            )
-
-        lifecycle = BareMetalHostedLifecycleCallbacks(
-            db=db,
-            runtime=runtime.settlement_runtime,
-            local_principal=principal,
-            capacity_client=capacity_client,
-            fulfillment_client=fulfillment_client,
-            publish_evidence=publish_evidence,
-        )
-        callbacks = lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
-        object.__setattr__(runtime, "hosted_domain_callbacks", callbacks)
-
-        async def on_ready(record: Any, worker_id: str) -> None:
-            await callbacks.fulfill(record, worker_id)
-
-        async def on_terminal(
-            record: Any,
-            state: str,
-            reason: str | None,
-        ) -> None:
-            if state != "collected":
-                await callbacks.cleanup(
-                    record.agreement_ref,
-                    reason or state,
-                )
-
-        object.__setattr__(
-            runtime,
-            "settlement_worker",
-            SettlementServicingWorker(
-                runtime.settlement_runtime,
-                runtime.settlement_repository,
-                worker_id=f"bare-metal-storefront:{principal.identifier}",
-                interval_seconds=float(
-                    os.environ.get(
-                        "BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS",
-                        "30",
-                    )
-                ),
-                on_ready=on_ready,
-                on_terminal=on_terminal,
-            ),
-        )
     return runtime

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.17.1"
+version = "0.17.2"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
@@ -14,7 +14,7 @@ dependencies = [
     "arkhai-kit-fulfillment>=0.5.0",
     "arkhai-compute-provisioning>=0.19.0",
     "arkhai-compute-provisioning-ansible>=0.4.0",
-    "arkhai-core-storefront-client==0.24.0",
+    "arkhai-core-storefront-client==0.25.0",
     "arkhai-kit-identity==0.3.0",
     "dynaconf>=3.0.0",
     "fastapi>=0.115.0",

@@ -90,8 +90,11 @@ from .ports import (
     SettlementServicingRepository,
 )
 from .runtime import (
+    FULFILLMENT_REFERENCE_KEY,
+    FULFILLMENT_SUBMISSION_KEY,
     MANUAL_REASON_KEY,
     SettlementManualRequired,
+    SettlementOperationConflict,
     SettlementRuntime,
     settlement_operation_ref,
 )
@@ -173,8 +176,11 @@ __all__ = [
     "SettlementConfigurationError",
     "SettlementConfigurationRegistry",
     "SettlementJobCoordinator",
+    "FULFILLMENT_REFERENCE_KEY",
+    "FULFILLMENT_SUBMISSION_KEY",
     "MANUAL_REASON_KEY",
     "SettlementManualRequired",
+    "SettlementOperationConflict",
     "SettlementMigration",
     "SettlementObligationRecord",
     "SettlementOperationOutcome",

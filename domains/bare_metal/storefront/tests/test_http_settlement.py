@@ -36,6 +36,7 @@ from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
 from seeded_threads import seed_thread
+from settlement_compositions import alkahest_composition
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -167,6 +168,15 @@ def _plan(**kwargs):
     }
 
 
+def _alkahest():
+    """The production Alkahest composition over a doubled chain client."""
+    return alkahest_composition(
+        SELLER_SIGNER,
+        wallet="0x3333333333333333333333333333333333333333",
+        chain_clients={"anvil": object()},
+    )
+
+
 async def _accepted_runtime(
     path: str, verifier
 ) -> tuple[BareMetalStorefrontRuntime, str]:
@@ -183,7 +193,7 @@ async def _accepted_runtime(
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=_plan,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -273,7 +283,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         marketplace_signer=runtime.marketplace_signer,
         seller_evm_address=runtime.seller_evm_address,
         plan_builder=_plan,
-        chain_clients={},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -308,7 +318,9 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert (first.provisioning_job_id, first.fulfillment_id) == (None, None)
     assert not ({"tenant_credentials", "receipt", "result"} & first.extra.keys())
     assert _settled(restart_retry) == expected
-    assert restarted.settlement_runtime._clients == {}
+    # The restarted process services the obligation through the same
+    # composition the first one verified it with.
+    assert set(restarted.settlement_runtime._clients) == {"alkahest.v1"}
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
     obligations = SettlementPlan.model_validate(
@@ -703,7 +715,7 @@ async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=recording_builder,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": str(anvil_address_book_path())},
         escrow_verifier=verifier,
         capacity_client=SourceSites(),

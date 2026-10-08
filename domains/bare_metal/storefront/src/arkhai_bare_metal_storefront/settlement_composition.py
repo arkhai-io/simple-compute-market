@@ -16,10 +16,7 @@ from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
 from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
-from market_hosted_settlement import (
-    create_stripe_registration,
-    default_hosted_selection_dispatch,
-)
+from market_hosted_settlement import create_stripe_registration
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -81,6 +78,17 @@ class BareMetalStorefrontSettlementComposition:
     @property
     def hosted_only(self) -> bool:
         return self.config.priority == (HOSTED_MECHANISM,)
+
+    def configures(self, mechanism_id: str) -> bool:
+        """Whether the settlement root has a section for ``mechanism_id``.
+
+        A configured section may be disabled for new deals and still owns the
+        obligations accepted while it was enabled, so whatever services them
+        is built for every configured section, not only the enabled ones.
+        """
+
+        config_key = self.registry.registration(mechanism_id).config_key
+        return config_key in self.config.mechanisms
 
     async def readiness(
         self,
@@ -230,5 +238,4 @@ __all__ = [
     "HOSTED_MECHANISM",
     "BareMetalStorefrontSettlementComposition",
     "build_bare_metal_settlement_registry",
-    "default_hosted_selection_dispatch",
 ]

@@ -46,6 +46,7 @@ from arkhai_bare_metal_storefront.server import (
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from settlement_compositions import hosted_composition
 from source_sites import SourceSite, SourceSites, listing_source_projection
 
 
@@ -114,6 +115,8 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
+        # Hosted selections are accepted only where hosted settlement is composed.
+        settlement_composition=hosted_composition(SELLER_SIGNER),
         plan_builder=lambda **kwargs: {
             "settlement_plan": {
                 "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),

@@ -609,8 +609,7 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
 	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
 	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
-	@# Anvil account 2's published development key, as bob.identity.env holds it.
-	@echo 'BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a'
+	@echo 'BARE_METAL_STOREFRONT_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/bare-metal.wallet.env'
 	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
 	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
 	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
