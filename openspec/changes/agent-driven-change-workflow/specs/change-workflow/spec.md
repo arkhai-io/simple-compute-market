@@ -192,7 +192,22 @@ able to run, and a Helm end-to-end run of the scenarios the pipeline runs. A ski
 chart-to-loader check MUST fail validation. A pipeline scenario the charts cannot
 serve MAY be excluded from the Helm run only by an explicit list naming the
 missing service, and MUST be reported as not run, never as passed. Validation MUST
-NOT fix what it finds.
+NOT fix what it finds in the commit. Its result MUST be `passed`, `failed` — a
+failure caused by the commit or of unknown cause — or `inconclusive`, when no
+failure is caused by the commit but a part produced no evidence for an
+environmental reason. A failure diagnosed as environmental MUST be put to the
+repository owner with its remedy before the record is written, and its part rerun
+on the owner's word; every attempt's evidence MUST be kept. The Helm end-to-end run
+MUST start from no persistent state left by an earlier deployment. The record MUST
+name the end-to-end scenarios that exercise the change, with the basis for each.
+
+#### Scenario: A deploy fails on volumes left by an earlier install
+
+- **WHEN** the Helm part finds a release volume that survived the uninstall, or a
+  deploy fails on persistent state another commit wrote
+- **THEN** validation tells the owner the evidence and the remedy, reruns the part
+  as a new attempt once the owner has acted or named the action, and the failure is
+  not a triage finding
 
 #### Scenario: A lockfile is stale
 
@@ -233,14 +248,16 @@ MUST NOT repair it.
 
 The implementation review, the validation of the same commit, and the owner's own
 notes on it MUST be triaged together, in a session that is not the implementing
-session. Each validation failure MUST be presented as a finding, with its diagnosis
-checked against the logs. The owner's notes MUST be saved verbatim as a review
+session. Each validation failure caused by the commit, or of unknown cause, MUST be
+presented as a finding, with its diagnosis checked against the logs; an
+`inconclusive` part MUST be read as missing evidence, never as a finding. The owner's notes MUST be saved verbatim as a review
 record and triaged like any review: the triaging agent MUST state its own position
 on each point rather than carry it out as an instruction, and each disposition
 MUST be logged to the intervention ledger. Accepted fixes MUST pass the checks a
 section passes before they are committed, and the commit MUST be validated again.
 A pre-closeout review MUST NOT run, and its gate MUST NOT pass, unless the latest
-validation names `HEAD` and passed, except where the owner overrides it.
+validation names `HEAD` and its result is `passed`, except where the owner
+overrides it.
 
 #### Scenario: The owner's note is contradicted by the files
 

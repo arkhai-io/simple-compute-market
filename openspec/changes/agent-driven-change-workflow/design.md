@@ -419,8 +419,80 @@ deployment change.
 
 The validation skill reads failing scenarios from the logs rather than reporting
 only an exit status, diagnoses each, and writes `reviews/NN-validation.md`. It
-fixes nothing. Its failures are triaged with the implementation round they belong
-to, and the fix commit is validated again.
+fixes nothing in the commit. Its failures caused by the commit are triaged with the
+implementation round they belong to, and the fix commit is validated again.
+
+### Validation controls the environment and settles environmental failures
+
+Validation assumes full control of the developer's environment: the Docker daemon,
+the kube context it is allowed, the release it deploys, the port-forwards, and the
+wheelhouse. It stops a port-forward or uninstalls a release it finds without
+asking. Running validations of several changes at once, each in an environment of
+its own, is a later version of this workflow.
+
+"Fixes nothing" protects the commit, not the machine. Deleting stale volumes,
+restarting a daemon, or freeing a port changes nothing that is validated; it lets
+the observation happen. So when the diagnosis of a failure says environment with
+good confidence, the skill stops, tells the owner the failure, its evidence, and
+the remedy, and on the owner's word — the owner acting, or naming the action for
+the skill to take — reruns that part as a new attempt. A failure of unknown cause
+is never treated as environmental. Only failures caused by the commit, or of
+unknown cause, become findings for triage; an environmental failure is never a
+finding about the change. Defects in the validation tooling itself are reported in
+the record's own section about the validation, not to the triage of the change
+being validated.
+
+Each part keeps every attempt: its logs and summary go to
+`.snapshot/validation/<short commit>/<part>/<n>/`, numbered, so the rerun that tells
+a flake from a failure never overwrites the first result.
+
+The record's result, overall and per part, is one of three:
+
+| Result | Meaning |
+|---|---|
+| `passed` | Every part ran and passed |
+| `failed` | At least one failure is caused by the commit, or its cause is unknown |
+| `inconclusive` | No failure is caused by the commit, but some part produced no evidence for an environmental reason the owner declined or could not remedy |
+
+The script reports each step's pass or fail; only the diagnosis can tell a
+credential timeout from a broken build, so the result is the skill's, in the
+record. Triage reads an `inconclusive` part as missing evidence, never as a
+finding.
+
+**A fresh Helm state on every run.** The chart PVCs carry
+`helm.sh/resource-policy: keep`, so that `helm uninstall` never destroys a
+deployment's data; reused, they let a run start from state a different commit
+wrote. Each persistent chart therefore takes `persistence.retainOnUninstall`,
+`true` by default, and `helm/local-values.yaml` sets it `false` for local
+deployments. The Helm part uninstalls any existing release, waits until its PVCs
+are gone, and deploys with `make -C helm deploy-local`; a release PVC that survives
+the uninstall — one created before the overlay — stops validation and is settled
+with the owner as above. Validation keeps the `default` namespace and the Secrets
+already in it. A namespace per validation, and chart Secrets that are optional
+with the ordinary values overlays as fallback, are larger questions about
+bootstrapping a local deployment; where they belong is decided at the close of the
+first pilot change.
+
+**Preflights.** Each fails before anything slow runs and names what to fix: `gh`
+authentication before the push; the Docker daemon, a `Ready` kube node, the chart's
+out-of-band Secrets (`make -C helm check-local-secrets`), no release PVC left after
+the uninstall, and the forwarded ports free once `unforward` has run. The Docker
+credential helper answering within a few seconds is a warning only: its failure
+was intermittent, so passing proves little.
+
+**Coverage of the change.** The record names the end-to-end scenarios that
+exercise the change's behaviour, with the basis for each claim and its result per
+lane, and says plainly when none does. Planning names the scenarios each section's
+verification point relies on, and the implementing session confirms or corrects
+them in the section's task notes before it commits, so validation reads coverage
+from the change rather than inferring it; its own reading of the diff adds what the
+notes miss.
+
+**Re-establishing the exclusion list.** `make validate CHANGE=<change>
+HELM_ALL_SCENARIOS=1` carries the instruction into the session, which runs every
+pipeline scenario on Helm and records which fail only for a service the charts do
+not provide. The instruction travels with the invocation because the skill reads
+the change being validated, not the one whose plan asked for the check.
 
 `make fetch-e2e-logs` selects the newest `e2e.yml` run whose head branch is the
 current branch, among the latest hundred. Runs on different branches therefore do
@@ -467,9 +539,10 @@ context the workflow has stopped trusting.
 - **Validation results are triaged, not reviewed.** A reviewer given them would
   have to wait for the pipeline, adding an hour to every review; it could fix
   nothing; and its judgement of the code does not depend on the pipeline's result.
-  Each validation failure is presented as a finding — lens `testing`, basis
-  `evidence`, severity `blocking` — whose diagnosis triage checks against the logs
-  rather than trusting. A reviewer still reads the validation record of its commit
+  Each validation failure caused by the commit, or of unknown cause, is presented
+  as a finding — lens `testing`, basis `evidence`, severity `blocking` — whose
+  diagnosis triage checks against the logs rather than trusting; an
+  `inconclusive` part is missing evidence, not a finding. A reviewer still reads the validation record of its commit
   when one already exists. Fixes for failures and for review findings often touch
   the same code, which is why one session handles both.
 - **The owner's notes are evaluated, not obeyed.** The owner pastes them into the
@@ -492,7 +565,7 @@ context the workflow has stopped trusting.
 An implementation review does not wait for validation, since the two run side by
 side. A pre-closeout review does: it asks whether the change is ready for closeout,
 which a failing pipeline answers. `make review KIND=pre-closeout` refuses unless the
-latest validation record names `HEAD` and passed, unless the owner overrides it
+latest validation record names `HEAD` and its result is `passed`, unless the owner overrides it
 (`UNVALIDATED=1`), and triage does not pass the pre-closeout gate without one.
 
 Records produced in parallel take their numbers when they are written, not when

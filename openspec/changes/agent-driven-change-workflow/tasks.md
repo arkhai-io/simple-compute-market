@@ -356,6 +356,13 @@ in that form rather than converted.
       afterwards set `HELM_EXCLUSIONS` in `scripts/validate_slice.py` to what the
       run shows, as a commit of this change. Both parts run `make dist-clean`, so
       no other session should be building in the checkout meanwhile.
+      Attempt 1 (`capacity-shape-envelope`'s `09-validation.md`, commit
+      `75c121de`): local and pipeline passed; Helm produced no scenario evidence —
+      a Docker credential-helper timeout, then provisioning crash-looping on a
+      volume another commit's migration had rewritten. The skill ran with the
+      exclusions, because the instruction sat in this change, not the one validated.
+      The owner's review of that record produced 8.8–8.14; re-run after them, as
+      `make validate CHANGE=capacity-shape-envelope HELM_ALL_SCENARIOS=1`.
 - [x] 8.7 Propose a change bringing the Helm charts and `make forward` to the
       pipeline's compose topology, using the compose configuration the pipeline
       runs, so the exclusion list empties; add its row to
@@ -364,6 +371,44 @@ in that form rather than converted.
       end-to-end stack campaign, with `skip_specs` set as `add-full-stack-ci-job`
       has; like it, `openspec validate --strict` reports the missing delta until
       design either adds one or confirms none is owed.
+- [ ] 8.8 Validation outcomes and attempts: the record's result, overall and per
+      part, is `passed`, `failed`, or `inconclusive` (`design.md`, "Validation
+      controls the environment and settles environmental failures");
+      `validate_slice.py` writes each attempt to
+      `.snapshot/validation/<short commit>/<part>/<n>/` and prints its path; tests
+      for attempt numbering. Amend `change-validate`'s record template and
+      `run_change_review.py`'s pre-closeout check (9.3) to accept only `passed`.
+- [ ] 8.9 Environmental failures in the session: amend `change-validate` to stop on
+      a failure diagnosed as environmental with good confidence, put the evidence
+      and remedy to the owner, rerun the part as a new attempt on the owner's word,
+      record `inconclusive` when the owner declines, never treat an unknown cause
+      as environmental, and report validation-tooling defects in a section of the
+      record about the validation. State the full-control premise in the skill.
+- [ ] 8.10 Fresh Helm state: add `persistence.retainOnUninstall` (default `true`)
+      to the storefront, provisioning, registry, and bare-metal storefront charts,
+      rendering `helm.sh/resource-policy: keep` only when it is true, with render
+      tests for both settings; add `helm/local-values.yaml` setting it `false` and
+      `make -C helm deploy-local`; the Helm part uninstalls an existing release,
+      waits for its PVCs to go, stops on a surviving one, and deploys with
+      `deploy-local`. Tests for the sequence and the surviving-PVC stop.
+- [ ] 8.11 Preflights: `gh auth status` before the push (skill); in the Helm part,
+      `docker info`, a `Ready` node, `make -C helm check-local-secrets` (a new
+      target over the chart's eight out-of-band Secret names, with a test that each
+      name appears in `helm/values.yaml`), and the forwarded ports free after
+      `unforward`; a credential-helper response check that warns only. Tests for
+      each refusal and the warning.
+- [ ] 8.12 Coverage: amend `change-validate` to write the record's coverage section
+      (scenario, basis, lane, result; or that none covers the change), reading the
+      scenarios from the change's task notes and adding what the diff shows; amend
+      `change-plan` to name the end-to-end scenarios each section's verification
+      point relies on, and `change-implement` to confirm or correct them in the
+      section's notes before committing.
+- [ ] 8.13 `make validate CHANGE=<change> HELM_ALL_SCENARIOS=1` passes the
+      instruction into the session's prompt, and `change-validate` runs the Helm
+      part with it and records which scenarios fail only for a missing service.
+- [ ] 8.14 Record for `capacity-shape-envelope`'s closeout (10.3), to place there:
+      a namespace per validation, and chart Secrets made optional with the ordinary
+      values overlays as fallback.
 
 ## 8A. Reconcile the development-branch merge
 
