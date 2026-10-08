@@ -529,6 +529,16 @@ deployment topology:
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
 
+A frozen storefront table is never dropped. Fresh databases stop creating
+it, existing databases keep it as it is, and no code writes to it. A
+migration whose only effect is on a frozen table leaves the storefront's
+migration chain rather than staying as a function that does nothing. Its ID
+stays recorded wherever it was applied, because the migration engine skips
+recorded IDs it no longer lists. The ID is never reused. A database that had
+not yet applied it never does, so the frozen table keeps whichever shape it
+already had. The VM storefront's `compute_allocations` table is frozen this
+way.
+
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
 history transactionally while preserving public cross-service and operation

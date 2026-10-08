@@ -58,103 +58,6 @@ async def _seed_fungible_compute_pool(client: SQLiteClient) -> None:
         )
 
 
-def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
-    conn = sqlite3.connect(client.db_path)
-    try:
-        cols = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
-        }
-    finally:
-        conn.close()
-
-    assert {
-        "provider_id",
-        "provider_job_id",
-        "provider_lease_id",
-        "provider_resource_id",
-        "vm_host",
-        "vm_target",
-        "lease_end_utc",
-        "failure_reason",
-        "failure_message",
-        "logs_ref",
-        "vm_remove_job_id",
-    } <= cols
-
-
-def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_path):
-    db_path = tmp_path / "legacy-agent.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE resources (
-              resource_id TEXT PRIMARY KEY,
-              resource_type TEXT,
-              resource_subtype TEXT,
-              unit TEXT,
-              value NUMERIC,
-              state TEXT,
-              attributes TEXT,
-              updated_at TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE compute_allocations (
-              allocation_id TEXT PRIMARY KEY,
-              resource_id TEXT NOT NULL,
-              listing_id TEXT,
-              escrow_uid TEXT,
-              gpu_count INTEGER NOT NULL,
-              state TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              released_at TEXT
-            )
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    SQLiteClient(db_path=str(db_path), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-
-    conn = sqlite3.connect(db_path)
-    try:
-        cols = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
-        }
-        migration_ids = {
-            row[0]
-            for row in conn.execute("SELECT id FROM schema_migrations").fetchall()
-        }
-    finally:
-        conn.close()
-
-    assert {
-        "provider_id",
-        "provider_job_id",
-        "provider_lease_id",
-        "provider_resource_id",
-        "vm_host",
-        "vm_target",
-        "lease_end_utc",
-        "failure_reason",
-        "failure_message",
-        "logs_ref",
-        "vm_remove_job_id",
-    } <= cols
-    assert "20260604_001_compute_allocation_callback_metadata" in migration_ids
-
-
 def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
     db_path = tmp_path / "pre-compute-agent.db"
     conn = sqlite3.connect(db_path)
@@ -196,12 +99,6 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
         resource_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(resources)").fetchall()
         }
-        allocation_cols = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
-        }
         migration_ids = {
             row[0]
             for row in conn.execute("SELECT id FROM schema_migrations").fetchall()
@@ -211,14 +108,7 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
 
     assert {"created_at", "updated_at"} <= listing_cols
     assert {"created_at", "updated_at"} <= resource_cols
-    assert {
-        "provider_id",
-        "provider_job_id",
-        "provider_lease_id",
-        "provider_resource_id",
-    } <= allocation_cols
     assert "20260604_000_listing_resource_timestamps" in migration_ids
-    assert "20260604_001_compute_allocation_callback_metadata" in migration_ids
 
 
 

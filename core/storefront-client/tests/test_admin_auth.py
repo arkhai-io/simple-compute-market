@@ -46,8 +46,6 @@ def _response_context(request: httpx.Request) -> tuple[str, str]:
     path = request.url.path
     if path == _EXAMPLE_PATH:
         return _EXAMPLE_OPERATION, _EXAMPLE_RESOURCE
-    if request.method == "PATCH":
-        return "admin_patch_resource", "resource-1"
     if path.endswith("/identity/rotations"):
         intent = body["intent"]
         resource = "/".join(
@@ -177,72 +175,6 @@ def _envelope(request: httpx.Request, *, operation: str, resource: str, body):
             value=request.headers[SIGNATURE_HEADER],
         ),
     )
-
-
-def test_admin_patch_sync_async_contract_is_byte_equivalent(monkeypatch):
-    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
-    async_transport = _AsyncTransport()
-    sync_transport = _SyncTransport()
-
-    async def run() -> None:
-        async with StorefrontClient(
-            "http://test",
-            signer=_SIGNER,
-            caller_role="admin",
-            expected_publishers=TrustedIdentitySet(
-                identities=(_PUBLISHER.identity,)
-            ),
-            transport=async_transport,
-        ) as client:
-            await client.patch_resource(
-                "resource-1",
-                state="available",
-                attributes={"lease_end_utc": None},
-                request_id="admin-patch-1",
-            )
-
-    asyncio.run(run())
-    with SyncStorefrontClient(
-        "http://test",
-        signer=_SIGNER,
-        caller_role="admin",
-        expected_publishers=TrustedIdentitySet(
-            identities=(_PUBLISHER.identity,)
-        ),
-        transport=sync_transport,
-    ) as client:
-        client.patch_resource(
-            "resource-1",
-            state="available",
-            attributes={"lease_end_utc": None},
-            request_id="admin-patch-1",
-        )
-
-    async_request = async_transport.requests[0]
-    sync_request = sync_transport.requests[0]
-    assert async_request.content == sync_request.content
-    for name in AUTH_HEADERS:
-        assert async_request.headers[name] == sync_request.headers[name]
-    body = json.loads(async_request.content)
-    result = verify_request(
-        _envelope(
-            async_request,
-            operation="admin_patch_resource",
-            resource="resource-1",
-            body=body,
-        ),
-        body=body,
-        now=1_000,
-        max_skew=0,
-        expected_role="admin",
-        expected_method="PATCH",
-        expected_operation="admin_patch_resource",
-        expected_resource="resource-1",
-        expected_principals=TrustedIdentitySet(
-            identities=(_SIGNER.identity,)
-        ),
-    )
-    assert result.verified
 
 
 def test_admin_list_negotiations_binds_effective_canonical_query(monkeypatch):

@@ -59,26 +59,19 @@ async def _do_provision(
     ssh_public_key: str,
     sqlite_client: Any,
     *,
-    vm_host: str | None,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
     capacity_reservation_id: str,
     escrow_uid: str,
 ) -> dict:
     """Schedule and begin durable fulfillment for this VM, then poll to completion.
 
-    ``vm_host`` is accepted for call-site compatibility with the
-    ``provision_vm`` seam ``fulfill_vm_obligation`` calls through, and may
-    legitimately be ``None`` -- the opaque capacity-reservation boundary
-    does not guarantee it. ``vm_host`` is not used to select a resource
-    here: ``schedule_resource`` re-confirms (or fairness-reassigns) the
-    settlement resource from the reservation itself, independent of which
-    host the reservation happened to bind at reserve time. The storefront
-    escrow identity is used only for local progress persistence and does
-    not enter the generic fulfillment request.
+    The storefront names no host: ``schedule_resource`` selects the
+    settlement resource from the reservation itself. The storefront escrow
+    identity is used only for local progress persistence and does not enter
+    the generic fulfillment request.
 
     ``on_job_submitted`` runs once ``begin_fulfillment`` returns a durable
-    ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
-    hook this replaces.
+    ``fulfillment_id`` but before polling starts.
     """
     escrow = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
     if escrow is None or not escrow.get("negotiation_id"):

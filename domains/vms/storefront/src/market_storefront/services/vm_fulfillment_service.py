@@ -352,7 +352,6 @@ async def fulfill_vm_obligation(
     connection_details: str | None = None
     reserved_capacity_reservation_id: str | None = None
     reserved_resource_id: str | None = None
-    reserved_vm_host: str | None = None
     order_id: str | None = None
 
     logger.info(
@@ -424,13 +423,6 @@ async def fulfill_vm_obligation(
         # is worse than an absent value if anything ever persisted it.
         # Kept only as best-effort stage_event telemetry.
         reserved_resource_id = reserved.get("resource_id")
-        # vm_host is unconditionally stripped from the reservation
-        # response (kit/site's opaque-reservation boundary -- see
-        # openspec/specs/site-capacity/spec.md); reserved.get("vm_host")
-        # is therefore always None. Kept as a variable, not deleted,
-        # because provision_vm treats it as an accepted-but-unused
-        # compatibility parameter (documented on _do_provision).
-        reserved_vm_host = reserved.get("vm_host")
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
             escrow_uid=escrow_uid,
@@ -472,16 +464,13 @@ async def fulfill_vm_obligation(
         async def _record_fulfillment_id(fulfillment_id: str) -> None:
             """Persist the durable fulfillment identity as soon as it's known.
 
-            Named for what it now carries: ``provision_vm``'s
-            ``on_job_submitted`` hook is invoked with a durable
-            ``fulfillment_id`` (from ``begin_fulfillment``), not an
-            ephemeral executor job id -- distinct from ``fulfillment_uid``
-            (the on-chain settlement-claim identity), which may already be
-            set on the same row. ``capacity_reservation_id`` is persisted
-            alongside it here since both are durable and known by this
-            point. This is identity persistence only -- nothing yet reads
-            these values back to resume an in-progress fulfillment after a
-            storefront restart; that capability does not exist yet.
+            ``provision_vm``'s ``on_job_submitted`` hook is invoked with the
+            durable ``fulfillment_id`` from ``begin_fulfillment`` -- distinct
+            from ``fulfillment_uid`` (the on-chain settlement-claim
+            identity), which may already be set on the same row.
+            ``capacity_reservation_id`` is persisted alongside it, so a
+            restarted storefront resumes the fulfillment from these values
+            rather than beginning another.
             """
             await persist_escrow_fields_with_retry(
                 get_sqlite_client,
@@ -500,7 +489,6 @@ async def fulfill_vm_obligation(
 
         provision_result = await provision_vm(
             ssh_public_key,
-            vm_host=reserved_vm_host,
             capacity_reservation_id=reserved_capacity_reservation_id,
             escrow_uid=escrow_uid,
             on_job_submitted=_record_fulfillment_id,

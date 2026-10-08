@@ -557,43 +557,6 @@ class StorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"GET {url} returned non-object JSON")
         return payload
 
-    async def _authenticated_patch(
-        self,
-        path: str,
-        body: dict[str, Any],
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="PATCH",
-            operation=operation,
-            resource=resource,
-            body=body,
-            request_id=request_id,
-        )
-        url = self._url(path)
-        resp = await self._client.patch(
-            path,
-            content=signed.content,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        try:
-            payload = resp.json()
-        except ValueError as exc:
-            raise StorefrontClientError(
-                f"PATCH {url} returned non-JSON response authentication body"
-            ) from exc
-        self._verify_response(resp, signed, payload)
-        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        if not isinstance(payload, dict):
-            raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
-        return payload
-
     async def authenticated_request(
         self,
         method: str,
@@ -1285,21 +1248,6 @@ class StorefrontClient(_StorefrontClientBase):
             )
         )
 
-    async def get_resource(
-        self,
-        resource_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> dict:
-        """GET /api/v1/admin/portfolio/resources/{resource_id}."""
-        return await self._authenticated_get(
-            f"/api/v1/admin/portfolio/resources/{resource_id}",
-            role="admin",
-            operation="admin_get_resource",
-            resource=resource_id,
-            request_id=request_id,
-        )
-
     async def notify_capacity_released(
         self,
         capacity_reservation_id: str,
@@ -1432,33 +1380,6 @@ class StorefrontClient(_StorefrontClientBase):
             role="service",
             operation="fulfillment_failed",
             resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
-    async def patch_resource(
-        self,
-        resource_id: str,
-        *,
-        state: str | None = None,
-        attributes: "dict | None" = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """PATCH /api/v1/admin/portfolio/resources/{resource_id}.
-
-        Partial update of a resource row. Only supplied (non-None) fields are
-        written. Returns the full resource row after the patch.
-        """
-        body: dict = {}
-        if state is not None:
-            body["state"] = state
-        if attributes is not None:
-            body["attributes"] = attributes
-        return await self._authenticated_patch(
-            f"/api/v1/admin/portfolio/resources/{resource_id}",
-            body,
-            role="admin",
-            operation="admin_patch_resource",
-            resource=resource_id,
             request_id=request_id,
         )
 
@@ -2045,43 +1966,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._raise_for_status("GET", url, resp.status_code, resp.text)
         if not isinstance(payload, dict):
             raise StorefrontClientError(f"GET {url} returned non-object JSON")
-        return payload
-
-    def _authenticated_patch(
-        self,
-        path: str,
-        body: dict[str, Any],
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="PATCH",
-            operation=operation,
-            resource=resource,
-            body=body,
-            request_id=request_id,
-        )
-        url = self._url(path)
-        resp = self._client.patch(
-            path,
-            content=signed.content,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        try:
-            payload = resp.json()
-        except ValueError as exc:
-            raise StorefrontClientError(
-                f"PATCH {url} returned non-JSON response authentication body"
-            ) from exc
-        self._verify_response(resp, signed, payload)
-        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        if not isinstance(payload, dict):
-            raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
     def authenticated_request(
@@ -2766,21 +2650,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             )
         )
 
-    def get_resource(
-        self,
-        resource_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> dict:
-        """GET /api/v1/admin/portfolio/resources/{resource_id}."""
-        return self._authenticated_get(
-            f"/api/v1/admin/portfolio/resources/{resource_id}",
-            role="admin",
-            operation="admin_get_resource",
-            resource=resource_id,
-            request_id=request_id,
-        )
-
     def notify_capacity_released(
         self,
         capacity_reservation_id: str,
@@ -2892,40 +2761,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             role="service",
             operation="fulfillment_failed",
             resource=capacity_reservation_id,
-            request_id=request_id,
-        )
-
-    def patch_resource(
-        self,
-        resource_id: str,
-        *,
-        state: str | None = None,
-        attributes: "dict | None" = None,
-        request_id: str | None = None,
-    ) -> dict:
-        """PATCH /api/v1/admin/portfolio/resources/{resource_id}.
-
-        Partial update of a resource row. Only supplied (non-None) fields are
-        written; unspecified fields are left unchanged. Returns the full
-        resource row after the patch.
-
-        Primary use cases:
-          - Release a lease: ``patch_resource(id, state='available', attributes={'lease_end_utc': None})``
-          - Force a state transition for testing or operator recovery.
-
-        Returns the raw response dict from the endpoint.
-        """
-        body: dict = {}
-        if state is not None:
-            body["state"] = state
-        if attributes is not None:
-            body["attributes"] = attributes
-        return self._authenticated_patch(
-            f"/api/v1/admin/portfolio/resources/{resource_id}",
-            body,
-            role="admin",
-            operation="admin_patch_resource",
-            resource=resource_id,
             request_id=request_id,
         )
 

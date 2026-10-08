@@ -213,53 +213,6 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
             )
             """
         )
-        # Compute allocation ledger. Resource rows describe advertised or
-        # import-time capacity; this table records execution holds against
-        # that capacity so a 4x GPU pool can satisfy smaller leases without
-        # treating the entire row as unavailable.
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS compute_allocations (
-              allocation_id TEXT PRIMARY KEY,
-              pool_id TEXT,
-              member_id TEXT,
-              resource_id TEXT NOT NULL,
-              listing_id TEXT,
-              escrow_uid TEXT,
-              gpu_count INTEGER NOT NULL,
-              state TEXT NOT NULL,
-              provider_id TEXT,
-              provider_job_id TEXT,
-              provider_lease_id TEXT,
-              provider_resource_id TEXT,
-              vm_host TEXT,
-              vm_target TEXT,
-              lease_end_utc TEXT,
-              hold_expires_at TEXT,
-              failure_reason TEXT,
-              failure_message TEXT,
-              logs_ref TEXT,
-              vm_remove_job_id TEXT,
-              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-              updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-              released_at TEXT,
-              FOREIGN KEY(resource_id) REFERENCES resources(resource_id)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_compute_allocations_updated_at
-            AFTER UPDATE ON compute_allocations
-            FOR EACH ROW
-            WHEN NEW.updated_at = OLD.updated_at
-            BEGIN
-              UPDATE compute_allocations
-              SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-              WHERE allocation_id = NEW.allocation_id;
-            END
-            """
-        )
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
         cur.execute(
@@ -279,18 +232,6 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_type_time ON resource_transition_events(event_type, occurred_at)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_compute_allocations_resource_state ON compute_allocations(resource_id, state)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_compute_allocations_pool_state ON compute_allocations(pool_id, state)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_compute_allocations_member_state ON compute_allocations(member_id, state)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_compute_allocations_escrow_uid ON compute_allocations(escrow_uid)"
         )
 
     async def upsert_resource(
@@ -511,104 +452,6 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_load)
-
-    async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
-        """Fetch a single resource row by resource_id."""
-
-        def _load_one() -> dict[str, Any] | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT resource_id, resource_type, resource_subtype, unit, value,
-                           state, attributes, min_price, token, max_duration_seconds,
-                           accepted_escrows, settlements, created_at, updated_at
-                    FROM resources
-                    WHERE resource_id = ?
-                    LIMIT 1
-                    """,
-                    (resource_id,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    return None
-
-                (
-                    row_resource_id,
-                    row_resource_type,
-                    row_resource_subtype,
-                    row_unit,
-                    row_value,
-                    row_state,
-                    row_attributes,
-                    row_min_price,
-                    row_token,
-                    row_max_duration_seconds,
-                    row_accepted_escrows,
-                    row_settlements,
-                    row_created_at,
-                    row_updated_at,
-                ) = row
-                attrs: dict[str, Any] = {}
-                if isinstance(row_attributes, str) and row_attributes.strip():
-                    try:
-                        parsed = json.loads(row_attributes)
-                        if isinstance(parsed, dict):
-                            attrs = parsed
-                    except Exception:
-                        attrs = {}
-                accepted = (
-                    json.loads(row_accepted_escrows)
-                    if isinstance(row_accepted_escrows, str)
-                    and row_accepted_escrows.strip()
-                    else None
-                )
-                settlements = (
-                    json.loads(row_settlements)
-                    if isinstance(row_settlements, str) and row_settlements.strip()
-                    else None
-                )
-                return {
-                    "resource_id": row_resource_id,
-                    "resource_type": row_resource_type,
-                    "resource_subtype": row_resource_subtype,
-                    "unit": row_unit,
-                    "value": row_value,
-                    "state": row_state,
-                    "attributes": attrs,
-                    "min_price": row_min_price,
-                    "token": row_token,
-                    "max_duration_seconds": row_max_duration_seconds,
-                    "accepted_escrows": accepted,
-                    "settlements": settlements,
-                    "created_at": row_created_at,
-                    "updated_at": row_updated_at,
-                }
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load_one)
-
-    async def delete_resource(
-        self,
-        *,
-        resource_id: str,
-        idempotency_key: str | None = None,
-        event_type: str = "delete_resource",
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        """Delete a resource by transitioning it to state='deleted'."""
-        set_attribute: dict[str, Any] | None = None
-        if reason:
-            set_attribute = {"$.deleted_reason": reason}
-        return await self.apply_resource_set_transition(
-            resource_id=resource_id,
-            event_type=event_type,
-            idempotency_key=idempotency_key or f"delete_resource:{resource_id}",
-            set_state="deleted",
-            set_attribute=set_attribute,
-        )
 
     async def upsert_resources_from_csv(
         self,
@@ -850,158 +693,22 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
-    async def list_hosts(
-        self,
-        *,
-        enabled_only: bool = True,
-    ) -> list[dict[str, Any]]:
-        """List host rows. Defaults to enabled hosts only."""
-        cols = ", ".join(self._HOST_COLUMNS)
-
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                where = "WHERE enabled = 1" if enabled_only else ""
-                cur.execute(f"SELECT {cols} FROM hosts {where} ORDER BY name")
-                return [self._host_row_to_dict(r) for r in cur.fetchall()]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def host_capacity_remaining(self, *, name: str) -> dict[str, Any] | None:
-        """Compute remaining capacity for a host: host totals minus the sum
-        of active (non-deleted) compute slices currently allocated.
-
-        Returns ``None`` if the host doesn't exist. Returns a dict with the
-        four capacity dimensions (gpu_count, vcpu_count, ram_gb, disk_gb)
-        plus their host limits and the sum of currently-allocated values.
-        """
-        host = await self.get_host(name=name)
-        if host is None:
-            return None
-
-        def _sum_allocations() -> dict[str, int]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT value, attributes
-                    FROM resources
-                    WHERE resource_type = 'compute.gpu'
-                      AND (state IS NULL OR state != 'deleted')
-                    """
-                )
-                totals = {"gpu_count": 0, "vcpu_count": 0, "ram_gb": 0, "disk_gb": 0}
-                for row_value, row_attrs in cur.fetchall():
-                    attrs = {}
-                    if isinstance(row_attrs, str) and row_attrs.strip():
-                        try:
-                            attrs = json.loads(row_attrs)
-                        except json.JSONDecodeError:
-                            continue
-                    if attrs.get("vm_host") != name:
-                        continue
-                    if row_value is not None:
-                        totals["gpu_count"] += int(row_value)
-                    for k in ("vcpu_count", "ram_gb", "disk_gb"):
-                        v = attrs.get(k)
-                        if v is not None:
-                            totals[k] += int(v)
-                return totals
-            finally:
-                conn.close()
-
-        used = await asyncio.to_thread(_sum_allocations)
-        return {
-            "host_name": name,
-            "limits": {
-                "gpu_count": host.get("total_gpu_count"),
-                "vcpu_count": host.get("host_cpu_cores"),
-                "ram_gb": host.get("host_ram_gb"),
-                "disk_gb": host.get("host_disk_gb"),
-            },
-            "used": used,
-            "remaining": {
-                k: (host_limit - used[k])
-                if (
-                    host_limit := host.get(
-                        {
-                            "gpu_count": "total_gpu_count",
-                            "vcpu_count": "host_cpu_cores",
-                            "ram_gb": "host_ram_gb",
-                            "disk_gb": "host_disk_gb",
-                        }[k]
-                    )
-                )
-                is not None
-                else None
-                for k in ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
-            },
-        }
-
-    def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
-        """Seed default resources only when the resources table is empty."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM resources")
-            count = int(cur.fetchone()[0] or 0)
-            if count > 0:
-                return
-
-            now_iso = datetime.now().isoformat()
-            for resource in resources:
-                cur.execute(
-                    """
-                    INSERT INTO resources(
-                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        resource.get("resource_id"),
-                        resource.get("resource_type"),
-                        resource.get("resource_subtype"),
-                        resource.get("unit"),
-                        resource.get("value"),
-                        resource.get("state"),
-                        json.dumps(resource.get("attributes"))
-                        if isinstance(resource.get("attributes"), dict)
-                        else None,
-                        now_iso,
-                        now_iso,
-                    ),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-
     async def apply_resource_transition(
         self,
         *,
         resource_id: str,
         event_type: str,
         idempotency_key: str,
-        set_value: int | float | None = None,
-        set_state: str | None = None,
-        set_attribute: dict[str, Any] | None = None,
-        event_id: str | None = None,
-        occurred_at: str | None = None,
+        set_state: str,
     ) -> dict[str, Any]:
-        """Insert one transition event and apply one resource snapshot update.
+        """Record one state-transition event and set the resource's state.
 
-        Supports direct-set semantics only: set_value, set_state, set_attribute.
+        The event insert and the row update commit together. A repeated
+        ``idempotency_key`` changes nothing and reports ``duplicate``; an
+        unknown ``resource_id`` raises ``ValueError`` and rolls the event
+        back, so no event outlives the row it describes.
         """
-        if set_value is None and set_state is None and not set_attribute:
-            raise ValueError(
-                "Transition must include set_value, set_state, or set_attribute"
-            )
-
-        resolved_event_id = event_id or str(uuid.uuid4())
-        set_attribute_json = json.dumps(set_attribute) if set_attribute else None
+        event_id = str(uuid.uuid4())
 
         def _apply() -> dict[str, Any]:
             conn = sqlite3.connect(self.db_path)
@@ -1010,109 +717,41 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
                 cur.execute(
                     """
                     INSERT INTO resource_transition_events(
-                      event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                      event_id, resource_id, event_type, set_state, idempotency_key
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')))
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(idempotency_key) DO NOTHING
                     """,
-                    (
-                        resolved_event_id,
-                        resource_id,
-                        event_type,
-                        set_value,
-                        set_state,
-                        set_attribute_json,
-                        idempotency_key,
-                        occurred_at,
-                    ),
+                    (event_id, resource_id, event_type, set_state, idempotency_key),
                 )
-
-                # Duplicate command retry: already applied.
                 if cur.rowcount == 0:
                     conn.rollback()
                     return {
                         "applied": False,
                         "duplicate": True,
                         "resource_id": resource_id,
-                        "event_id": resolved_event_id,
+                        "event_id": event_id,
                         "idempotency_key": idempotency_key,
                     }
 
-                updates: list[str] = []
-                values: list[Any] = []
-
-                if set_value is not None:
-                    updates.append("value = ?")
-                    values.append(set_value)
-
-                if set_state is not None:
-                    updates.append("state = ?")
-                    values.append(set_state)
-
-                if set_attribute:
-                    attr_expr = "COALESCE(attributes, '{}')"
-                    for path, path_value in set_attribute.items():
-                        if not isinstance(path, str) or not path.startswith("$."):
-                            raise ValueError(
-                                f"Invalid JSON path for set_attribute: {path}"
-                            )
-                        if path in ("$.allocation_id", "$.compute_allocation_id"):
-                            continue
-                        attr_expr = f"json_set({attr_expr}, ?, json(?))"
-                        values.append(path)
-                        values.append(json.dumps(path_value))
-                    updates.append(f"attributes = {attr_expr}")
-
-                updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
-
                 cur.execute(
-                    f"UPDATE resources SET {', '.join(updates)} WHERE resource_id = ?",
-                    (*values, resource_id),
+                    """
+                    UPDATE resources
+                    SET state = ?,
+                        updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    WHERE resource_id = ?
+                    """,
+                    (set_state, resource_id),
                 )
                 if cur.rowcount == 0:
                     raise ValueError(f"Resource not found: {resource_id}")
-
-                if set_state == "available":
-                    allocation_id = None
-                    if set_attribute:
-                        raw_allocation_id = set_attribute.get(
-                            "$.allocation_id"
-                        ) or set_attribute.get("$.compute_allocation_id")
-                        if (
-                            isinstance(raw_allocation_id, str)
-                            and raw_allocation_id.strip()
-                        ):
-                            allocation_id = raw_allocation_id.strip()
-                    if allocation_id:
-                        cur.execute(
-                            """
-                            UPDATE compute_allocations
-                            SET state = 'released',
-                                released_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                            WHERE allocation_id = ?
-                              AND resource_id = ?
-                              AND state IN ('reserved', 'provisioning', 'leased', 'releasing', 'held')
-                            """,
-                            (allocation_id, resource_id),
-                        )
-                    else:
-                        cur.execute(
-                            """
-                            UPDATE compute_allocations
-                            SET state = 'released',
-                                released_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                            WHERE resource_id = ?
-                              AND state IN ('reserved', 'provisioning', 'leased', 'releasing', 'held')
-                            """,
-                            (resource_id,),
-                        )
 
                 conn.commit()
                 return {
                     "applied": True,
                     "duplicate": False,
                     "resource_id": resource_id,
-                    "event_id": resolved_event_id,
+                    "event_id": event_id,
                     "idempotency_key": idempotency_key,
                 }
             except Exception:
@@ -1122,30 +761,6 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_apply)
-
-    async def apply_resource_set_transition(
-        self,
-        *,
-        resource_id: str,
-        event_type: str,
-        idempotency_key: str,
-        set_value: int | float | None = None,
-        set_state: str | None = None,
-        set_attribute: dict[str, Any] | None = None,
-        event_id: str | None = None,
-        occurred_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Convenience wrapper for absolute-value transitions."""
-        return await self.apply_resource_transition(
-            resource_id=resource_id,
-            event_type=event_type,
-            idempotency_key=idempotency_key,
-            set_value=set_value,
-            set_state=set_state,
-            set_attribute=set_attribute,
-            event_id=event_id,
-            occurred_at=occurred_at,
-        )
 
     @classmethod
     def _sync_compute_pool_for_resource(
