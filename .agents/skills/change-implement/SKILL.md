@@ -65,8 +65,13 @@ Work through the section's tasks in order. For each:
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
   what the code used to be (`AGENTS.md`, "Python comments and docstrings").
-- Mark the task `[x]` when its evidence passes, with a short note: the suite and its
-  result, and anything that differed from the plan.
+- Mark the task `[x]` when its evidence passes, with a short note: each suite, its
+  level as `TESTING.md` defines them — unit, library integration (a real component
+  against real storage, no application), application integration (the running
+  application through its typed client), or system — and its result, and anything
+  that differed from the plan. Name a suite by what it actually exercises: a test
+  that calls the reconciler directly is not application integration, and a test that
+  shows a listing becomes a candidate to close does not show it closes.
 
 Never delete or rewrite a completed task; amend it with a correction note when
 something it established changes.
@@ -95,6 +100,9 @@ Run each of these, and fix what it reports:
 - `make lock` when the section changed a dependency, then `make check-packaging`;
 - the focused suites the section's verification point names, and every suite that
   covers code the section changed;
+- `make test`, whatever the section touched: a change to a shared package, a
+  dependency, or a lock reaches projects no focused suite covers, and the full
+  suite is cheap beside a review round spent finding that;
 - `make check-comment-hygiene`;
 - `make check-doc-citations CHANGE=<change>`;
 - `make check-agent-skills` if the section touched `.agents/`, `.claude/`, or
@@ -107,7 +115,8 @@ untracked files), and this instruction — read `AGENTS.md` and every document i
 requires, plus the specs and architecture companions of the capabilities the diff
 touches; then report every place the diff breaks that guidance — layering,
 comments, test level, documentation placement, packaging — with file and line, and
-say plainly when it finds none. Fix what it finds that is right, and say what you
+every evidence claim in the section's task notes that overstates what its tests
+exercise, and say plainly when it finds none. Fix what it finds that is right, and say what you
 declined and why. Run it again after substantial fixes.
 
 ## 6. Record the handoff

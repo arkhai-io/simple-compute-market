@@ -353,20 +353,24 @@ before it starts and after it finishes, and fails rather than repairs.
 Relocking is the clearest case. `make lock` rewrites lockfiles; run during
 validation it would silently repair a stale lock that `make check-packaging`'s lock
 check exists to report. Relocking belongs to `change-implement`, which runs
-`make lock` and `make check-packaging` before it commits a slice. A stale lock found
-by validation sends the slice back to implementation.
+`make lock` and `make check-packaging` before it commits a slice, together with
+`make test` for every section whatever it touched: a change to a shared package, a
+dependency, or a lock reaches projects no focused suite covers, as the first pilot
+showed when a hand-maintained wheel list in another project's test fixture broke. A
+stale lock found by validation sends the slice back to implementation.
 
 The local part — `make check-packaging` and `make test` — is one target that stops
-at the first failure and writes a summary. The Helm part is owed when a slice
-touches `helm/`, an image build input, or a service's configuration surface, and is
-optional otherwise. It runs `make -C helm test-render` with the VM storefront
+at the first failure and writes a summary. The Helm part runs on every validation,
+at the owner's direction: the images and charts are what is deployed, and a change
+whose diff never names them still reaches them through its packages. It runs `make -C helm test-render` with the VM storefront
 environment present, because that is the only place the chart-to-loader check runs
 — no CI job has both Helm and that environment — and then `make build-dev`,
 `make deploy` and `make forward` in `helm/`, `make test-module` in `e2e-tests/`
 against the forwarded services, and always `make unforward` afterwards. A render
 pass is not deployment evidence and a deployment pass does not prove the render
-contracts, so neither replaces the other. The remote part pushes the branch,
-triggers the end-to-end workflow, and fetches its logs.
+contracts, so neither replaces the other. The remote part pushes every commit of the
+branch, triggers the end-to-end workflow, and fetches its logs. Failures found by
+any part go back to implementation to be fixed and the validation runs again.
 
 The validation skill reads failing scenarios from the logs rather than reporting
 only an exit status, and writes `reviews/NN-validation.md`, which the reviewer

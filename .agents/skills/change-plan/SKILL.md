@@ -92,9 +92,13 @@ design.
 - is sized to be implemented in one fresh session without the session compacting:
   a section that crosses several package layers, or needs more tasks than one
   session can hold in mind with the guidance documents, is split;
-- ends at a verification point — the focused suites that prove it, at the lowest
-  level that can (`docs/development/TESTING.md`), and the packaging check when it
-  changes a dependency or lock;
+- ends at a verification point — the focused suites that prove it, each named with
+  its level as `docs/development/TESTING.md` defines them (unit, library
+  integration, application integration through the typed client, system), at the
+  lowest level that can prove the behavior; `make test`; and the packaging check
+  when it changes a dependency or lock. A section whose title promises a behavior
+  of the running application — publication, a write refused — includes at least one
+  application-integration case for it, not only lower-level evidence of its parts;
 - states when it owes the Helm checks: when it touches `helm/`, an image build
   input, or a service's configuration surface.
 

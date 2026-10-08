@@ -183,10 +183,9 @@ modify the checkout: it MUST fail if the worktree is not clean when it starts or
 when it finishes, and MUST NOT regenerate lockfiles or any other tracked file. A
 condition validation could repair, such as a stale lock, MUST fail validation and
 return the slice to implementation. End-to-end evidence MUST come from a pipeline
-run whose head commit is the commit under validation. When a slice touches the Helm
-charts, an image build input, or a service's configuration surface, validation MUST
-include the Helm render checks, with the chart-to-loader check able to run, and a
-Helm end-to-end run.
+run whose head commit is the commit under validation. Validation MUST also build the
+service images and include the Helm render checks, with the chart-to-loader check
+able to run, and a Helm end-to-end run.
 
 #### Scenario: A lockfile is stale
 

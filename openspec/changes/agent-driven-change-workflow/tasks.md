@@ -224,7 +224,13 @@ to repair by hand.
       the start (`make implement SECTIONS=1-3`) or on the owner's word after a
       section is committed, and one implementation review may cover every
       section committed since the last; each section is still checked, handed
-      off, and committed on its own.
+      off, and committed on its own. After the first multi-section run (sections
+      2–4 in one session, 404k tokens, no compaction, compliance findings
+      decreasing per section): every section now runs `make test` before
+      commit; task notes and plans name each suite's level as `TESTING.md`
+      defines them, and the fresh-context check verifies those claims. The
+      pilot's sections were committed to this change's branch at the owner's
+      direction; the two changes merge together.
 - [x] 7.2 Add a committed Claude Code project hook that, when a session resumes
       after compaction, re-reads the required guidance documents and restates the
       change and section being worked.
@@ -250,7 +256,8 @@ to repair by hand.
 - [ ] 8.3 Make end-to-end log fetching select the run whose head commit is the
       local `HEAD`, waiting with a bound for a just-dispatched run to appear,
       instead of the newest run on the branch, with tests for both gaps.
-- [ ] 8.4 Write the `change-validate` skill: the local target; when owed, the Helm
+- [ ] 8.4 Write the `change-validate` skill, the Helm part on every run and a
+      failure returned to implementation and validated again: the local target; the Helm
       part (`make -C helm test-render` with the VM storefront environment present,
       `make build-dev`, `helm/` deploy and forward, `e2e-tests/` test-module,
       unforward); `make check-push-ready`, pushing exactly `HEAD` unforced, the
