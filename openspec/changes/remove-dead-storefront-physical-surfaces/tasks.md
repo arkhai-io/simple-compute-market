@@ -62,25 +62,41 @@ storefront suites cover it.
       - In `_migrate_compute_inventory_pools`, remove the two
         `idx_compute_allocations_*` statements. In `_backfill_compute_pools`,
         remove the trailing allocation `UPDATE`.
-- [ ] 2.4 In `domains/vms/storefront/tests/unit/test_compute_allocations.py`,
-      replace the three allocation schema tests with freeze tests:
+- [ ] 2.4 Add `domains/vms/storefront/tests/integration/test_compute_allocations_freeze.py`.
+      Its tests run against the real migration engine through `SQLiteClient`
+      initialization.
       - A fresh database has no `compute_allocations` table, trigger, or
-        index, and does not record either removed migration ID.
-      - A database with an existing allocation table and rows keeps the
-        table's columns and rows exactly as they were through initialization
-        and a second initialization, and does not record the removed IDs.
-      - On both databases, a resource transition to `available` succeeds and
-        writes no allocation row.
+        index, and records neither retired migration ID.
+      - Parametrize over three existing-table histories:
+        - both retired IDs recorded, with the table in its current shape;
+        - only `20260604_001_compute_allocation_callback_metadata` recorded,
+          with the table in its 001-era shape;
+        - neither recorded, with the table in its pre-001 shape.
 
-      Keep the pre-compute-inventory test's listing and resource assertions.
-      Keep the local derivation, member availability, cross-site identity,
-      and hold-persistence tests as they are.
+        Seed each history with rows. Snapshot the table's, indexes', and
+        trigger's `sqlite_master` definitions, the table's rows, and the
+        retired IDs' `schema_migrations` entries. Initialize twice. Assert
+        every snapshot is byte-identical and neither retired ID is newly
+        recorded.
+      - On a fresh database and on an existing-table database, a resource
+        transition to `available` succeeds and writes no allocation row.
+
+      In `domains/vms/storefront/tests/unit/test_compute_allocations.py`,
+      delete the two allocation schema tests. Remove the allocation-column and
+      `001` assertions from the pre-compute-inventory test, keeping its
+      listing and resource assertions. The local derivation, member
+      availability, cross-site identity, and hold-persistence tests stay as
+      they are.
 - [ ] 2.5 Add `TestReleaseReservations` to
-      `domains/vms/storefront/tests/integration/test_admin_api.py`. It covers
-      the endpoint's live cleanup through the typed client:
+      `domains/vms/storefront/tests/integration/test_admin_api.py`. It uses
+      that file's `client` fixture: the canonical `StorefrontClient` over
+      `httpx.ASGITransport` against the real application. It calls
+      `admin_release_reservations()`, with no raw HTTP. It covers the
+      endpoint's live cleanup:
       - On a fresh database, a held local row is released and reported.
       - Existing allocation rows are left untouched.
       - Rows in other states are not changed.
+      - A second call releases nothing new.
 
       These are also the focused cases that
       `pools-9-retire-local-physical-authority`'s task 3.3 updates.
@@ -211,6 +227,14 @@ The surfaces in this change's scope have no production caller. Tasks 3.3 and
         handling. The `resource_transition_events` columns stay, and are
         written as `NULL` and as the generated ID.
       - Point `release_reservations` at the folded method.
+      - Keep the guarantees `design.md` lists: one transaction for the event
+        and the row, a duplicate idempotency key reported as a no-op, a
+        missing resource raising with the event rolled back, and a generated
+        event ID stamped with the current time.
+      - Add `domains/vms/storefront/tests/integration/test_resource_transitions.py`
+        with integration tests against a real database:
+        - a duplicate key leaves one event row and the resource unchanged;
+        - a missing resource raises and leaves no event row.
 - [ ] 3.11 Rewrite the `CapacityReservation` docstring in
       `kit/site/src/market_site/db.py`. Describe the row as it is, with no
       comparison to the storefront's `compute_allocations`, `vm_leases`, or

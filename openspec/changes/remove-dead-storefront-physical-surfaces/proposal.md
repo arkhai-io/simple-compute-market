@@ -126,7 +126,9 @@ helpers. The existing operator-visible acceptance requirement and its
   - Storefront unit tests: `test_compute_allocations.py`, `test_hosts.py`,
     `test_identity_dispatch.py`, and `test_fulfillment_provisioning.py`.
   - Storefront integration tests: `test_admin_api.py`,
-    `test_settle_controller.py`, and `test_capacity_reservation_boundary.py`.
+    `test_settle_controller.py`, and `test_capacity_reservation_boundary.py`,
+    plus new `test_compute_allocations_freeze.py` and
+    `test_resource_transitions.py`.
   - `core/storefront-client/tests/test_admin_auth.py`.
   - Provisioning: `test_ledger_lease_lifecycle.py`, where only a test stub
     changes.
@@ -139,9 +141,13 @@ helpers. The existing operator-visible acceptance requirement and its
       `pools-9-retire-local-physical-authority`'s.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change.
+- [x] Other permanent documentation:
+  - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Migrations at startup"
+    gains the migration-retirement rule.
+  - `docs/development/ROADMAP.md` Goal 1 is brought current at closeout.
 
-`docs/development/DEPLOYMENT_AND_CONFIG.md` gains one paragraph, and
-`docs/development/ROADMAP.md`'s Goal 1 is brought current at closeout.
+  The terminal authority requirement stays
+  `pools-9-retire-local-physical-authority`'s.
 
 ### Knowledge to promote
 

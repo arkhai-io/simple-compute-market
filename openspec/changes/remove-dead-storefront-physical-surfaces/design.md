@@ -38,7 +38,25 @@ Schema code touches the table in five places:
 The migration engine skips recorded IDs and ignores recorded IDs it no
 longer lists.
 
-No test exercises `release_reservations` or the release-`UPDATE`.
+VM is the only domain launched to date, so deployed storefront databases are
+VM storefront databases. Their allocation history takes one of three forms:
+
+- Both column migrations are recorded. This covers every database
+  initialized since 2026-06-11.
+- Only `001` is recorded. This covers databases last initialized between
+  2026-06-04 and 2026-06-11.
+- Neither is recorded. This covers older databases, whose table has the
+  narrower historical shape.
+
+No other storefront ever created the table, so the freeze needs no
+cross-domain handling.
+
+No test exercises `release_reservations`, the release-`UPDATE`, or
+`apply_resource_transition`'s transaction and idempotency behavior. The
+existing allocation schema tests sit under `tests/unit` against a real
+database. The newer storefront migration tests sit under
+`tests/integration`, where `docs/development/TESTING.md` places behavior at a
+database boundary.
 
 **The physical-identity plumbing carries a key that no longer exists.**
 `kit/site` names a host `host_id` and its reservation route strips `host_id`
@@ -173,6 +191,19 @@ belongs to `pools-9-retire-local-physical-authority`. What remains is narrowed
 to the state transition that loop performs. The pass-through
 `apply_resource_set_transition` wrapper is folded into it.
 
+Narrowing removes parameters, not guarantees. The retained transition still
+behaves as follows:
+
+- It inserts the event and updates the resource row in one transaction.
+- A repeated idempotency key changes nothing and reports a duplicate.
+- A missing resource raises and rolls back the event row.
+- It generates the event identifier and stamps the current time. No caller
+  supplies either.
+- A repeated cleanup run is a no-op once the rows are `available`.
+
+Integration tests against a real database pin the first three, because
+nothing covers them today.
+
 The rule applies to code outside the storefront where the removal makes a
 reference stale. `test_ledger_lease_lifecycle.py` drops its `patch_resource`
 stub, and the `kit/site` `CapacityReservation` docstring describes the row as
@@ -210,12 +241,30 @@ The freeze has these parts:
 - The release-`UPDATE` and its attribute-path special case leave
   `apply_resource_transition`, so no runtime path writes the table.
 
-A fresh database, a database with an existing allocation table and rows, and
-repeated initialization must all satisfy the freeze. `release_reservations`
-must succeed on a fresh database and leave existing allocation rows untouched.
-The local derivation, member availability, cross-site identity, and
-hold-persistence coverage in `test_compute_allocations.py` survives. Its
-allocation schema tests are replaced by these freeze assertions.
+Validation covers four kinds of database:
+
+- a fresh database;
+- an existing allocation table with both retired IDs recorded;
+- an existing table with only `001` recorded;
+- an existing table with neither recorded, created in its historical shape.
+
+For each existing table, two initializations leave the following
+byte-identical: the table's, indexes', and trigger's `sqlite_master`
+definitions, the table's rows, and the retired IDs' migration history.
+Neither retired ID is ever newly recorded. Preserving rows alone is a weaker
+guarantee than preserving the schema, because the historical shape differs
+from the latest definition.
+
+`release_reservations` must succeed on a fresh database and leave existing
+allocation rows untouched. It is exercised through the canonical
+`StorefrontClient` over the real application, so a client/route mismatch
+cannot pass.
+
+These are integration tests against the real migration engine. They live in a
+new `tests/integration/test_compute_allocations_freeze.py`, and the allocation
+schema tests leave `tests/unit/test_compute_allocations.py`. That file keeps
+its local derivation, member availability, cross-site identity, and
+hold-persistence tests.
 
 ### Remove the routes rather than deprecate them
 
@@ -293,6 +342,15 @@ Re-grounded on 2026-10-08. The review accepted three things:
 Planning amended `tasks.md` to match this document. It also added the
 migration-retirement rule's promotion and the Helm values comment, which
 planning found.
+
+The plan review added three things, all accepted:
+
+- the three migration-history cases and byte-identical schema snapshots,
+  placed at the integration level;
+- an explicit typed-client boundary for the release tests;
+- the retained transition guarantees and their tests.
+
+It also flagged a duplicated sentence in task 3.1, which is not present.
 
 This change's task 3.8 and `pools-9-retire-local-physical-authority`'s task
 3.8 are different tasks that share a number. `pools-9` claims only tasks 3.1,
