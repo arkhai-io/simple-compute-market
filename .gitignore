@@ -240,3 +240,8 @@ pi-session-*.html
 mise.local.toml
 .claude/skills/implement-change/SKILL.md
 openspec/changes/*/reviews/*
+
+# Windows download metadata (an NTFS alternate data stream that some copy and
+# archive tools write out as a separate file). It records where a file was
+# downloaded from, which can be a private local path.
+*:Zone.Identifier
