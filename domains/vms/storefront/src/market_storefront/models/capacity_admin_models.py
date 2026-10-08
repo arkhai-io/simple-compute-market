@@ -62,35 +62,6 @@ class ImportResourcesResponse(BaseModel):
     errors: list[ImportRowError] = []
 
 
-class ResourcePatchRequest(BaseModel):
-    """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    state: str | None = Field(
-        default=None,
-        description="New resource state. Only written if provided.",
-    )
-    attributes: dict | None = Field(
-        default=None,
-        description=(
-            "Partial attribute patch. Keys present in this dict are merged "
-            "into the existing attributes JSON; absent keys are untouched. "
-            "Pass null values to clear individual attribute keys."
-        ),
-    )
-
-
-class ResourcePatchResponse(BaseModel):
-    """Response from PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    resource_id: str
-    state: str | None = None
-    attributes: dict | None = None
-    updated: bool = Field(
-        description="True if any field was actually changed; False if the "
-        "row was already in the requested state (idempotent call)."
-    )
-
-
 class FulfillmentStartedEventRequest(BaseModel):
     capacity_reservation_id: str
     site_id: str

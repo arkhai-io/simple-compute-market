@@ -161,7 +161,6 @@ class TestDoProvision:
         result = await fs._do_provision(
             "ssh-ed25519 AAAA",
             sqlite_client=sqlite_client,
-            vm_host="kvm1",
             on_job_submitted=_on_job_submitted,
             capacity_reservation_id="res-1",
             escrow_uid="escrow-1",
@@ -241,7 +240,7 @@ class TestDoProvision:
         )
 
         await fs._do_provision(
-            "ssh-ed25519 AAAA", vm_host="kvm1",
+            "ssh-ed25519 AAAA",
             sqlite_client=sqlite_client,
             capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
@@ -272,7 +271,7 @@ class TestDoProvision:
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
-                "ssh-ed25519 AAAA", vm_host="kvm1",
+                "ssh-ed25519 AAAA",
                 sqlite_client=sqlite_client,
                 capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
@@ -455,6 +454,7 @@ async def test_the_storefront_names_no_guest_and_writes_the_lease_only_at_commit
     }
     assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
     assert "vm_target" not in observed["provision"]
+    assert "vm_host" not in observed["provision"]
     # The lease begins at the one commit before provisioning, which records
     # the deal's escrow; nothing writes the lease afterwards.
     assert observed["commits_before_provisioning"] == capacity.commit.await_count == 1
@@ -474,9 +474,9 @@ async def test_the_commit_does_not_require_resource_id(
     reservation response -- the capacity boundary negotiates on pooled
     capacity, not a pinned physical resource, so ``reserve()`` legitimately
     returns without them. The previous test above exercises a ``reserve()``
-    double that (unrealistically) still supplies ``resource_id``/``vm_host``,
-    so it cannot catch a regression where the commit that begins the lease is
-    gated on those fields being present. This test uses the real, opaque
+    double that (unrealistically) still supplies ``resource_id``, so it
+    cannot catch a regression where the commit that begins the lease is
+    gated on that field being present. This test uses the real, opaque
     shape and asserts the commit still fires.
     """
     plan = SimpleNamespace(
@@ -500,7 +500,7 @@ async def test_the_commit_does_not_require_resource_id(
     capacity = SimpleNamespace(
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
-            # No resource_id/vm_host -- the real opaque-reservation shape.
+            # No resource_id -- the real opaque-reservation shape.
             "site": "site-1",
         }),
         commit=AsyncMock(return_value={

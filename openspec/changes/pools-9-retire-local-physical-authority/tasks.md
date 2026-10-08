@@ -61,12 +61,13 @@ path, with its own routes, clients, CLI, and precedence contract.
 
 ## 2. Retire `compute_allocations`
 
-Owned by [`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/tasks.md),
-tasks 2.1–2.5 under the same numbers.
+Delivered by [`remove-dead-storefront-physical-surfaces`](../archive/2026-10-08-remove-dead-storefront-physical-surfaces/tasks.md)
+(archived 2026-10-08), tasks 2.1–2.6 under the same numbers.
 
 ## 3. Remove dead physical surfaces
 
-Tasks 3.1, 3.2, and 3.5–3.7 belong to the same change under the same numbers.
+Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change under the same
+numbers.
 Former tasks 3.3 (local-row reservation cleanup) and 3.4 (`resource_count`)
 are transferred here and retire with Section 4's local listing path and
 Section 5's CSV contract. The site-ledger half of `release_reservations`
@@ -203,13 +204,19 @@ provisioning can trust two principals leaves it with no listing source.
       `test_multi_registry.py`'s Alice seeding and removed her local-path opt-out.
       Preserve that completed work and migrate the remaining CSV consumers
       identified by re-grounding, including Bob's local import where it remains.
+- [ ] 5.7 Once 5.2 removes the import route, add an in-process application test
+      that the storefront mounts no route under `/api/v1/admin/portfolio/resources`.
+      It is the route-level evidence for "Storefront holds no physical-resource
+      authority". `remove-dead-storefront-physical-surfaces` deferred this guard
+      here: while the import route remains, only a test of the specific paths it
+      removed was possible, and that would record history rather than a contract.
 
 ## 6. Freeze migration and validation
 
 - [ ] 6.1 Add the freeze-then-redirect migration covering every table and
-      column frozen in Section 4 (and, if it has not landed first, the
-      `compute_allocations` freeze `remove-dead-storefront-physical-surfaces`
-      owns). Stop writing; redirect reads; no `DROP`.
+      column frozen in Section 4. `compute_allocations` is already frozen, by
+      `remove-dead-storefront-physical-surfaces`. Stop writing; redirect reads;
+      no `DROP`.
 - [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
       Extend `domains/vms/storefront/tests/unit/test_migrations.py` to prove
@@ -233,7 +240,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       arrangement that no longer exists, and stale docstrings are what kept
       these surfaces alive past their callers. `release_reservations`' local
       cleanup and its operator description are part of this cutover;
-      `patch_resource` belongs to `remove-dead-storefront-physical-surfaces`.
+      `patch_resource` is already gone, removed by
+      `remove-dead-storefront-physical-surfaces`.
 - [ ] 7.2 **Import placement.** Review imports this change adds or touches;
       relocate function-level imports where no genuine circular import or
       documented lazy-load reason applies, verified against the real suite.

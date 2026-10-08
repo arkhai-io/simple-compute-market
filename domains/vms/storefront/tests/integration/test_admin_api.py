@@ -1291,78 +1291,81 @@ class TestStreamEvents:
 
 
 
-class TestPatchResource:
-    """Tests for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
+class TestReleaseReservations:
+    """POST /api/v1/admin/portfolio/release-reservations, through the typed client.
 
-    async def _seed_leased_resource(self, db: SQLiteClient, resource_id: str = "compute-patch-001") -> None:
-        # Use resource_type other than compute.gpu or omit vm_host to skip capacity gate
+    No site authority is configured here, so these cover the local-row
+    cleanup: held local rows return to ``available`` on a database the
+    storefront created without an allocation ledger, and an allocation
+    ledger an older database still holds is left exactly as it was.
+    """
+
+    async def _seed(self, db: SQLiteClient, resource_id: str, state: str) -> None:
         await db.upsert_resource(
-            resource_id=resource_id,
-            resource_type="compute.gpu",
-            state="leased",
-            # No attributes.vm_host → capacity gate skipped
+            resource_id=resource_id, resource_type="compute.gpu", state=state
         )
 
-    async def test_rejects_untrusted_principal(self, client_untrusted):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_untrusted.patch_resource(
-                "compute-patch-001", state="available"
+    @staticmethod
+    def _states(db: SQLiteClient) -> dict[str, str]:
+        with sqlite3.connect(db.db_path) as conn:
+            return dict(conn.execute("SELECT resource_id, state FROM resources"))
+
+    async def test_releases_held_rows_on_a_database_without_the_ledger(self, client):
+        c, db = client
+        await self._seed(db, "held-reserved", "reserved")
+        await self._seed(db, "held-leased", "leased")
+        await self._seed(db, "idle", "available")
+        await self._seed(db, "gone", "deleted")
+        with sqlite3.connect(db.db_path) as conn:
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'compute_allocations'"
+            ).fetchone() is None
+
+        result = await c.admin_release_reservations()
+
+        assert sorted(result.resource_ids) == ["held-leased", "held-reserved"]
+        assert result.released_count == 2
+        assert self._states(db) == {
+            "held-reserved": "available",
+            "held-leased": "available",
+            "idle": "available",
+            "gone": "deleted",
+        }
+
+    async def test_a_second_call_releases_nothing_new(self, client):
+        c, db = client
+        await self._seed(db, "held", "leased")
+        await c.admin_release_reservations()
+
+        again = await c.admin_release_reservations()
+
+        assert again.released_count == 0
+        assert again.resource_ids == []
+
+    async def test_leaves_an_existing_allocation_ledger_untouched(self, client):
+        c, db = client
+        await self._seed(db, "held", "leased")
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE compute_allocations ("
+                " allocation_id TEXT PRIMARY KEY, resource_id TEXT NOT NULL,"
+                " gpu_count INTEGER NOT NULL, state TEXT NOT NULL,"
+                " released_at TEXT)"
             )
-        assert exc_info.value.status_code == 403
+            conn.execute(
+                "INSERT INTO compute_allocations VALUES ('alloc-1', 'held', 1, 'leased', NULL)"
+            )
+        before = self._allocations(db)
 
-    async def test_patch_state_to_available(self, client):
-        c, db = client
-        await self._seed_leased_resource(db)
-        result = await c.patch_resource("compute-patch-001", state="available")
-        assert result["state"] == "available"
-        assert result["updated"] is True
+        await c.admin_release_reservations()
 
-    async def test_patch_is_idempotent_when_state_unchanged(self, client):
-        c, db = client
-        await self._seed_leased_resource(db)
-        await c.patch_resource("compute-patch-001", state="available")
-        result = await c.patch_resource("compute-patch-001", state="available")
-        assert result["updated"] is False
+        assert self._states(db)["held"] == "available"
+        assert self._allocations(db) == before == [("alloc-1", "held", 1, "leased", None)]
 
-    async def test_patch_clears_attribute(self, client):
-        c, db = client
-        await db.upsert_resource(
-            resource_id="compute-patch-002",
-            resource_type="compute.gpu",
-            state="leased",
-            attributes={"lease_end_utc": "2025-01-01 00:00"},
-        )
-        result = await c.patch_resource(
-            "compute-patch-002",
-            state="available",
-            attributes={"lease_end_utc": None},
-        )
-        assert result["state"] == "available"
-        assert result["attributes"].get("lease_end_utc") is None
-
-    async def test_patch_nonexistent_returns_404(self, client):
-        c, db = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.patch_resource("no-such-resource", state="available")
-        assert exc_info.value.status_code == 404
-
-    async def test_patch_preserves_unspecified_fields(self, client):
-        c, db = client
-        await db.upsert_resource(
-            resource_id="compute-patch-003",
-            resource_type="compute.gpu",
-            state="leased",
-            attributes={"gpu_model": "RTX 5080", "lease_end_utc": "2025-01-01 00:00"},
-        )
-        result = await c.patch_resource(
-            "compute-patch-003",
-            attributes={"lease_end_utc": None},
-        )
-        # state not specified → should remain leased
-        assert result["state"] == "leased"
-        # gpu_model not in patch → should be preserved
-        assert result["attributes"].get("gpu_model") == "RTX 5080"
-        assert result["attributes"].get("lease_end_utc") is None
+    @staticmethod
+    def _allocations(db: SQLiteClient) -> list[tuple]:
+        with sqlite3.connect(db.db_path) as conn:
+            return conn.execute("SELECT * FROM compute_allocations").fetchall()
 
 
 # ---------------------------------------------------------------------------

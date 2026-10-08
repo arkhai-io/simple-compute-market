@@ -40,14 +40,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-HELD_ALLOCATION_STATES = {
-    "reserved",
-    "provisioning",
-    "leased",
-    "releasing",
-    "held",
-}
-
 
 def positive_gpu_count(value: Any) -> int | None:
     """A usable enumeration quantity, or ``None``.
@@ -116,33 +108,6 @@ def pool_id_for_listing(db_path: str, listing_id: str) -> str | None:
     finally:
         conn.close()
     return str(row[0]) if row and row[0] else None
-
-
-def allocation_table_exists(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_allocations'"
-    ).fetchone()
-    return row is not None
-
-
-def held_gpu_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    if not allocation_table_exists(conn):
-        return {}
-    placeholders = ", ".join("?" for _ in HELD_ALLOCATION_STATES)
-    rows = conn.execute(
-        f"""
-        SELECT resource_id, COALESCE(SUM(gpu_count), 0)
-        FROM compute_allocations
-        WHERE state IN ({placeholders})
-        GROUP BY resource_id
-        """,
-        tuple(sorted(HELD_ALLOCATION_STATES)),
-    ).fetchall()
-    return {str(resource_id): int(total or 0) for resource_id, total in rows}
-
-
-def held_gpu_counts_by_resource(conn: sqlite3.Connection) -> dict[str, int]:
-    return held_gpu_counts(conn)
 
 
 def _member_available_units(
