@@ -79,7 +79,6 @@ def test_runnable_http_contract_includes_fulfillment_claims() -> None:
         "/api/v1/negotiate/{negotiation_id}",
         "/api/v1/settle/{escrow_uid}",
         "/api/v1/settle/{escrow_uid}/status",
-        "/api/v1/fulfillments/begin",
         "/api/v1/fulfillments/{negotiation_id}/status",
         "/api/v1/fulfillments/{negotiation_id}/result",
         "/api/v1/fulfillments/{negotiation_id}/teardown",
@@ -88,6 +87,8 @@ def test_runnable_http_contract_includes_fulfillment_claims() -> None:
         "/api/v1/system/status",
         "/health",
     } <= paths
+    # Settlement starts fulfillment; no buyer request begins it.
+    assert "/api/v1/fulfillments/begin" not in paths
     assert DomainCapability.FULFILLMENT in (
         get_market_domain_contract().declared_capabilities
     )
@@ -240,3 +241,30 @@ async def test_an_alkahest_only_runtime_composes_the_worker_and_its_step(
     assert service.chain_clients == chain_clients
     health = await runtime.health()
     assert health["checks"]["commercial_settlement"] == "ok"
+
+
+async def test_the_ready_hook_declines_contact_exchange_and_refuses_the_unknown(
+    tmp_path,
+) -> None:
+    runtime = _direct_runtime(
+        tmp_path,
+        seller_evm_address="0x" + "33" * 20,
+        settlement_composition=alkahest_composition(
+            COMPOSITION_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+        ),
+    )
+    on_ready = runtime.settlement_worker._on_ready
+    on_terminal = runtime.settlement_worker._on_terminal
+
+    contact = SimpleNamespace(obligation={"mechanism": "contact-exchange.v1"})
+    unknown = SimpleNamespace(obligation={"mechanism": "unknown.v1"})
+
+    # Contact exchange's reveal binds its own obligation; nothing is reserved.
+    assert await on_ready(contact, "w") is None
+    assert await on_terminal(contact, "failed", None) is None
+    with pytest.raises(RuntimeError, match="unknown.v1"):
+        await on_ready(unknown, "w")
+    with pytest.raises(RuntimeError, match="unknown.v1"):
+        await on_terminal(unknown, "failed", None)

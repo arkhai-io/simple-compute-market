@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-bare-metal-buyer"
-version = "0.4.3"
+version = "0.5.0"
 license = "MIT"
 description = "Bare-metal buyer contribution for the core Arkhai market CLI."
 requires-python = ">=3.12,<3.14"

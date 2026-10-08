@@ -1,8 +1,11 @@
 """Bare-metal market domain schema."""
 
 from .evidence import (
+    BARE_METAL_ACCEPTED_ALKAHEST_BINDING_KIND,
     BARE_METAL_LEASE_READY_EVIDENCE_KIND,
     BARE_METAL_LEASE_READY_RESULT_KIND,
+    BareMetalAcceptedAlkahestBinding,
+    BareMetalAcceptedBinding,
     BareMetalLeaseReadyEvidence,
     BareMetalLeaseReadyResult,
     build_bare_metal_lease_ready_evidence,
@@ -127,6 +130,7 @@ __all__ = [
     "classify_bare_metal_resources",
     "compare_bare_metal_listing",
     "listing_terms",
+    "BARE_METAL_ACCEPTED_ALKAHEST_BINDING_KIND",
     "BARE_METAL_ACCEPTED_BINDING_KIND",
     "BARE_METAL_LEASE_READY_EVIDENCE_KIND",
     "BARE_METAL_LEASE_READY_RESULT_KIND",
@@ -150,6 +154,8 @@ __all__ = [
     "SOURCE_UNAVAILABLE",
     "SSH_ACCESS_METHOD",
     "UNITS_DIMENSION",
+    "BareMetalAcceptedAlkahestBinding",
+    "BareMetalAcceptedBinding",
     "BareMetalAcceptedHostedBinding",
     "BareMetalResult",
     "BareMetalLeaseReadyEvidence",

@@ -9,6 +9,7 @@ import json
 from urllib.parse import quote, urlencode
 from typing import Annotated, Any
 
+from arkhai_bare_metal import BARE_METAL_ACCEPTED_BINDING_KIND
 from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import (
     EvaluateNegotiateRequest,
@@ -64,13 +65,23 @@ from market_storefront_kit import (
     get_storefront_container,
     opening_proposal,
 )
+from market_capacity_publication import CapacityAdminRouteError
 from market_settlement_runtime import (
+    MAX_WAIT_SECONDS,
     HostedSettlementRouteError,
     HostedSettlementStart,
+    SettlementAdminRouteError,
 )
 from .models import (
     BareMetalAccessDeliveryResponse,
-    BareMetalFulfillRequest,
+    BareMetalCapacityEventResponse,
+    BareMetalCapacityReleasedEvent,
+    BareMetalEvaluateSettleRequest,
+    BareMetalEvaluateSettleResponse,
+    BareMetalReserveCapacityRequest,
+    BareMetalSettleWaitResponse,
+    BareMetalVerifyEscrowRequest,
+    BareMetalVerifyEscrowResponse,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
     BareMetalHealthResponse,
@@ -78,6 +89,7 @@ from .models import (
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
+from .deal_controls import capacity_admin_routes, settlement_admin_routes
 from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .runtime import BareMetalStorefrontRuntime
@@ -836,37 +848,6 @@ async def _fulfillment_identity(
     )
 
 
-@router.post(
-    "/api/v1/fulfillments/begin",
-    response_model=BareMetalFulfillmentResponse,
-)
-async def begin_fulfillment(
-    body: BareMetalFulfillRequest,
-    request: Request,
-) -> BareMetalFulfillmentResponse:
-    runtime = _runtime(request)
-    try:
-        identity = await _buyer(
-            request=request,
-            runtime=runtime,
-            operation="bare_metal_fulfillment_begin",
-            resource=body.negotiation_id,
-            expected_principal=body.buyer_principal,
-            body=await _request_body(request),
-        )
-        lifecycle = await runtime.fulfillment_service().begin(
-            negotiation_id=body.negotiation_id,
-            escrow_uid=body.escrow_uid,
-            buyer_principal=identity,
-        )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
-    except BareMetalFulfillmentError as exc:
-        raise HTTPException(
-            status_code=exc.status_code,
-            detail=exc.detail,
-        ) from exc
-
-
 @router.get(
     "/api/v1/fulfillments/{negotiation_id}/status",
     response_model=BareMetalFulfillmentResponse,
@@ -1004,23 +985,72 @@ async def teardown_fulfillment(
         ) from exc
 
 
+EVIDENCE_OPERATION = "resolve_bare_metal_lease_ready_evidence"
+
+
+def _evidence_readers(
+    runtime: BareMetalStorefrontRuntime, evidence: Any
+) -> dict[str, tuple[Identity, ...]]:
+    """Who may read ``evidence``, by the role each signs as."""
+
+    def identity(principal: Any) -> Identity:
+        return Identity.model_validate(principal.model_dump(mode="json"))
+
+    readers: dict[str, tuple[Identity, ...]] = {
+        "buyer": (identity(evidence.buyer_principal),),
+        "admin": tuple(runtime.admin_principals.identities),
+    }
+    if evidence.accepted_binding_kind == BARE_METAL_ACCEPTED_BINDING_KIND:
+        composition = runtime.settlement_composition
+        stripe = (
+            composition.config.mechanism_config("stripe")
+            if composition is not None
+            else None
+        )
+        trust = getattr(stripe, "authority", None)
+        if trust is not None:
+            readers["authority"] = tuple(trust.principals)
+    return readers
+
+
 @router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
 async def hosted_lease_evidence(
     evidence_digest: str,
     request: Request,
 ) -> dict[str, Any]:
-    """Resolve one content-addressed lease-ready document with seller proof."""
+    """Resolve one content-addressed lease-ready document with seller proof.
+
+    An Alkahest deal publishes this document's digest on a public chain, and
+    the document names the deal's parties, so it is served only on a signed
+    request from a caller with a part in that deal: its buyer, the seller's
+    administrator, or, for evidence a hosted settlement bound, the hosted
+    authority the storefront trusts.
+    """
 
     if len(evidence_digest) != 64 or any(
         char not in "0123456789abcdef" for char in evidence_digest
     ):
         raise HTTPException(status_code=404, detail="evidence not found")
     runtime = _runtime(request)
-    evidence = await runtime.db.load_bare_metal_hosted_evidence(
+    evidence = await runtime.db.load_bare_metal_lease_ready_evidence(
         evidence_digest="sha256:" + evidence_digest
     )
     if evidence is None:
         raise HTTPException(status_code=404, detail="evidence not found")
+    role = request.headers.get("X-Market-Role", "")
+    if not role:
+        raise HTTPException(status_code=401, detail="a signed request is required")
+    allowed = _evidence_readers(runtime, evidence).get(role)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="caller may not read this evidence")
+    await _principal(
+        request=request,
+        runtime=runtime,
+        operation=EVIDENCE_OPERATION,
+        resource=evidence_digest,
+        expected_role=role,
+        allowed_principals=allowed,
+    )
     material = evidence.canonical_json().encode("utf-8")
     proof = (
         base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
@@ -1054,7 +1084,149 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     overrides = runtime.pool_override_service()
     if overrides is not None:
         status["pool_overrides"] = await overrides.statuses()
+    status["settlement_manual_required"] = (
+        await runtime.settlement_runtime.manual_required_count()
+    )
     return BareMetalHealthResponse.model_validate(status)
+
+
+# -- deal controls ------------------------------------------------------------
+# The kit's route services own these contracts; ``deal_controls`` supplies what
+# is bare metal's own. Each route authenticates the signed contract the
+# canonical storefront client sends.
+
+
+@router.post(
+    "/api/v1/admin/settle/{escrow_uid}/verify",
+    response_model=BareMetalVerifyEscrowResponse,
+)
+async def admin_verify_settlement(
+    escrow_uid: str, body: BareMetalVerifyEscrowRequest, request: Request
+) -> BareMetalVerifyEscrowResponse:
+    """Read the escrow from chain against a listing's terms, writing nothing."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_verify_settlement",
+        resource=escrow_uid,
+        body=await _request_body(request),
+    )
+    try:
+        result = await settlement_admin_routes(runtime).verify(
+            escrow_uid, body.model_dump(mode="python")
+        )
+    except SettlementAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return BareMetalVerifyEscrowResponse.model_validate(result)
+
+
+@router.post(
+    "/api/v1/admin/settle/{escrow_uid}/evaluate",
+    response_model=BareMetalEvaluateSettleResponse,
+)
+async def admin_evaluate_settlement(
+    escrow_uid: str, body: BareMetalEvaluateSettleRequest, request: Request
+) -> BareMetalEvaluateSettleResponse:
+    """Preview the fulfillment settlement would start, writing nothing."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_evaluate_settlement",
+        resource=escrow_uid,
+        body=await _request_body(request),
+    )
+    try:
+        result = await settlement_admin_routes(runtime).evaluate(
+            escrow_uid, body.model_dump(mode="python")
+        )
+    except SettlementAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return BareMetalEvaluateSettleResponse.model_validate(result)
+
+
+@router.get(
+    "/api/v1/admin/settle/{escrow_uid}/wait",
+    response_model=BareMetalSettleWaitResponse,
+)
+async def admin_settle_wait(
+    escrow_uid: str,
+    request: Request,
+    timeout: float = Query(default=60.0, gt=0, le=MAX_WAIT_SECONDS),
+) -> BareMetalSettleWaitResponse:
+    """Block until the settlement's fulfillment is delivered or cannot be."""
+    runtime = _runtime(request)
+    raw_timeout = request.query_params.get("timeout", "60.0")
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_settle_wait",
+        resource=f"{escrow_uid}?timeout={raw_timeout}",
+    )
+    waited = await settlement_admin_routes(runtime).wait(escrow_uid, timeout=timeout)
+    return BareMetalSettleWaitResponse.model_validate(waited)
+
+
+@router.post("/api/v1/admin/portfolio/reservations")
+async def admin_reserve_capacity(
+    body: BareMetalReserveCapacityRequest, request: Request
+) -> dict[str, Any]:
+    """Reserve a listing's machine administratively, without negotiating."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_reserve_capacity",
+        resource=body.listing_id or body.escrow_uid or "",
+        body=await _request_body(request),
+    )
+    try:
+        return await capacity_admin_routes(runtime).reserve(
+            body.model_dump(mode="python")
+        )
+    except CapacityAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post(
+    "/api/v1/admin/fulfillment/events/capacity-released",
+    response_model=BareMetalCapacityEventResponse,
+)
+async def capacity_released(
+    body: BareMetalCapacityReleasedEvent, request: Request
+) -> BareMetalCapacityEventResponse:
+    """Record a site's report that a reservation's capacity is free again.
+
+    Only the authority of the site the event names may send it, signed as the
+    service that site runs.
+    """
+    runtime = _runtime(request)
+    caller = await _principal(
+        request=request,
+        runtime=runtime,
+        operation="fulfillment_capacity_released",
+        resource=body.capacity_reservation_id,
+        expected_role="service",
+        allowed_principals=tuple(
+            binding.authority_principal for binding in runtime.site_bindings
+        ),
+        body=await _request_body(request),
+    )
+    if not any(
+        binding.site_id == body.site_id and binding.authority_principal == caller
+        for binding in runtime.site_bindings
+    ):
+        raise HTTPException(
+            status_code=403, detail="only the named site's authority may report it"
+        )
+    try:
+        recorded = await capacity_admin_routes(runtime).capacity_released(
+            body.model_dump(mode="python", exclude_none=True)
+        )
+    except CapacityAdminRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return BareMetalCapacityEventResponse.model_validate(recorded)
 
 
 # -- storefront pool overrides ----------------------------------------------

@@ -477,6 +477,27 @@ def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS bare_metal_operator_state")
 
 
+def _add_alkahest_lease_ready_evidence(conn: sqlite3.Connection) -> None:
+    """Keep an Alkahest fulfillment's lease-ready evidence beside its lifecycle.
+
+    The chain holds only the evidence's digest, so the storefront keeps the body
+    the digest names and resolves it to an authorized caller.
+    """
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN lease_ready_evidence_json TEXT"
+    )
+    conn.execute(
+        "ALTER TABLE bare_metal_fulfillment_lifecycle "
+        "ADD COLUMN lease_ready_evidence_digest TEXT"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_bare_metal_fulfillment_evidence_digest "
+        "ON bare_metal_fulfillment_lifecycle(lease_ready_evidence_digest) "
+        "WHERE lease_ready_evidence_digest IS NOT NULL"
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -528,5 +549,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0012-retire-storefront-negotiation",
         apply=_retire_storefront_negotiation,
+    ),
+    Migration(
+        id="bare-metal-storefront-0013-alkahest-lease-ready-evidence",
+        apply=_add_alkahest_lease_ready_evidence,
     ),
 )

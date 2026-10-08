@@ -551,6 +551,49 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
+    async def load_bare_metal_fulfillment_lifecycle_by_reservation(
+        self,
+        *,
+        capacity_reservation_id: str,
+    ) -> dict[str, Any] | None:
+        """The fulfillment lifecycle holding ``capacity_reservation_id``, if any."""
+
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE capacity_reservation_id = ?",
+                    (capacity_reservation_id,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_bare_metal_hosted_reservation_state(
+        self,
+        *,
+        capacity_reservation_id: str,
+    ) -> str | None:
+        """The physical state of the hosted deal holding the reservation, if any."""
+
+        def _load() -> str | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT physical_state FROM bare_metal_hosted_lifecycle "
+                    "WHERE capacity_reservation_id = ?",
+                    (capacity_reservation_id,),
+                ).fetchone()
+                return str(row[0]) if row is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
     async def update_bare_metal_fulfillment_lifecycle(
         self,
         *,
@@ -725,31 +768,68 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
-    async def load_bare_metal_hosted_evidence(
+    async def load_bare_metal_lease_ready_evidence(
         self,
         *,
         evidence_digest: str,
     ) -> BareMetalLeaseReadyEvidence | None:
-        """Resolve one content-addressed public evidence document."""
+        """Resolve one content-addressed lease-ready document, either mechanism's."""
 
         def _load() -> BareMetalLeaseReadyEvidence | None:
             conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
             try:
                 row = conn.execute(
                     "SELECT portable_evidence_json FROM bare_metal_hosted_lifecycle "
-                    "WHERE portable_evidence_digest = ?",
-                    (evidence_digest,),
+                    "WHERE portable_evidence_digest = ? "
+                    "UNION ALL "
+                    "SELECT lease_ready_evidence_json FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE lease_ready_evidence_digest = ?",
+                    (evidence_digest, evidence_digest),
                 ).fetchone()
-                if row is None or row["portable_evidence_json"] is None:
+                if row is None or row[0] is None:
                     return None
-                return BareMetalLeaseReadyEvidence.model_validate_json(
-                    str(row["portable_evidence_json"])
-                )
+                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    async def save_bare_metal_lease_ready_evidence(
+        self,
+        *,
+        negotiation_id: str,
+        evidence: BareMetalLeaseReadyEvidence,
+    ) -> BareMetalLeaseReadyEvidence:
+        """Record an Alkahest fulfillment's evidence once; a retry finds it.
+
+        The first evidence recorded is the one whose digest may already be on
+        chain, so a later attempt reuses it rather than writing a different one.
+        """
+
+        def _save() -> BareMetalLeaseReadyEvidence:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE bare_metal_fulfillment_lifecycle SET "
+                        "lease_ready_evidence_json = ?, "
+                        "lease_ready_evidence_digest = ?, "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ? AND lease_ready_evidence_json IS NULL",
+                        (evidence.canonical_json(), evidence.evidence_digest, negotiation_id),
+                    )
+                row = conn.execute(
+                    "SELECT lease_ready_evidence_json FROM bare_metal_fulfillment_lifecycle "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
+                return BareMetalLeaseReadyEvidence.model_validate_json(str(row[0]))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
 
     async def load_bare_metal_hosted_lifecycle_for_agreement(
         self,

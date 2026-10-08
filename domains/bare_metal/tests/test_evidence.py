@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -7,6 +8,7 @@ from market_core.schemas import RateValue, SettlementOption, derive_settlement_o
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
+    BareMetalAcceptedAlkahestBinding,
     BareMetalAcceptedHostedBinding,
     BareMetalHostedOptionFacts,
     BareMetalLeaseReadyEvidence,
@@ -159,3 +161,79 @@ def test_changed_result_digest_and_unknown_evidence_fields_fail_closed() -> None
     payload["action_url"] = "https://provider.invalid/action"
     with pytest.raises(ValidationError):
         BareMetalLeaseReadyEvidence.model_validate(payload)
+
+
+def alkahest_binding(**changes) -> BareMetalAcceptedAlkahestBinding:
+    values = dict(
+        agreement_ref="negotiation-a",
+        negotiation_id="negotiation-a",
+        listing_id="listing-a",
+        obligation_ref="obligation-a",
+        escrow_uid="0x" + "ab" * 32,
+        accepted_plan_digest=DIGEST,
+        buyer_principal=BUYER,
+        seller_principal=SELLER,
+        claimant_principal=SELLER,
+        site_id="site-a",
+        resource_selection="specific",
+        physical_resource_id="resource-a",
+        pool_id="pool-a",
+    )
+    values.update(changes)
+    return BareMetalAcceptedAlkahestBinding(**values)
+
+
+def test_alkahest_evidence_binds_the_escrow_plan_and_parties() -> None:
+    binding = alkahest_binding()
+
+    evidence = build_bare_metal_lease_ready_evidence(
+        binding=binding,
+        condition_anchor=binding.escrow_uid,
+        result=lease_ready_result(),
+    )
+
+    assert evidence.accepted_binding_kind == "bare_metal.accepted-alkahest-binding.v1"
+    assert evidence.accepted_binding_digest == binding.binding_digest
+    assert evidence.condition_anchor == binding.escrow_uid
+    assert evidence.fulfillment_identity == derive_bare_metal_fulfillment_identity(
+        binding
+    )
+    assert evidence.buyer_principal == BUYER
+    assert evidence.claimant_principal == SELLER
+    assert (
+        BareMetalLeaseReadyEvidence.model_validate_json(evidence.canonical_json())
+        == evidence
+    )
+
+
+def test_alkahest_evidence_refuses_a_result_from_another_resource() -> None:
+    with pytest.raises(ValueError, match="Physical Resource"):
+        build_bare_metal_lease_ready_evidence(
+            binding=alkahest_binding(physical_resource_id="resource-b"),
+            condition_anchor="0x" + "ab" * 32,
+            result=lease_ready_result(),
+        )
+
+
+def test_an_alkahest_binding_states_its_resource_selection_consistently() -> None:
+    with pytest.raises(ValidationError):
+        alkahest_binding(resource_selection="fungible")
+    with pytest.raises(ValidationError):
+        alkahest_binding(physical_resource_id=None)
+
+
+def test_hosted_evidence_keeps_its_canonical_form() -> None:
+    evidence = build_bare_metal_lease_ready_evidence(
+        binding=accepted_binding(),
+        condition_anchor="condition-a",
+        result=lease_ready_result(),
+    )
+
+    assert evidence.accepted_binding_kind == "bare_metal.accepted-hosted-binding.v1"
+    stored = json.loads(evidence.canonical_json())
+    stored.pop("accepted_binding_kind")
+    # Evidence stored before the Alkahest kind existed reads back unchanged.
+    assert (
+        BareMetalLeaseReadyEvidence.model_validate_json(json.dumps(stored)).evidence_digest
+        == evidence.evidence_digest
+    )

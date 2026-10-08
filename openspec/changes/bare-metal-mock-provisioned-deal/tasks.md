@@ -4036,16 +4036,16 @@ Alkahest path still waits for `begin`.
 Composition decisions 4 and 5, and decisions 8 to 13. Reviewable alone: bare-metal
 settlement, fulfillment, and evidence; teardown still releases directly.
 
-- [ ] 7C.1 `site_clients.py`: `SelectedSiteFulfillmentClient` gains `get_lease` and
+- [x] 7C.1 `site_clients.py`: `SelectedSiteFulfillmentClient` gains `get_lease` and
       `terminate_lease` over `compute_provisioning_client`, routed by the reservation's
       recorded site.
-- [ ] 7C.2 Domain (`domains/bare_metal`, 0.9.0 → 0.10.0): `evidence.py` and
+- [x] 7C.2 Domain (`domains/bare_metal`, 0.9.0 → 0.10.0): `evidence.py` and
       `hosted_contract.py` give the lease-ready evidence a choice of accepted binding:
       `bare_metal.accepted-hosted-binding.v1`, unchanged, and a new
       `bare_metal.accepted-alkahest-binding.v1` built from the accepted thread, the
       committed plan, the parties, and the escrow as condition anchor;
       `build_bare_metal_lease_ready_evidence` takes either.
-- [ ] 7C.3 The Alkahest step: a new storefront module `alkahest_lifecycle.py`.
+- [x] 7C.3 The Alkahest step: a new storefront module `alkahest_lifecycle.py`.
       Reserve the obligation's fulfillment, then by what the reservation reports:
       - an intent and a UID: complete the fulfillment with that UID; never submit;
       - an intent and no UID: park (`alkahest_submission_outcome_unknown`); never submit;
@@ -4064,7 +4064,7 @@ settlement, fulfillment, and evidence; teardown still releases directly.
       `sqlite_client.py` stores the evidence, and `load_bare_metal_hosted_evidence`
       becomes `load_bare_metal_lease_ready_evidence`, resolving a digest from either
       lifecycle table.
-- [ ] 7C.4 Dispatch and settlement: `runtime.py` builds the ready table (hosted to the
+- [x] 7C.4 Dispatch and settlement: `runtime.py` builds the ready table (hosted to the
       existing callbacks, Alkahest to 7C.3, contact exchange declined without reserving,
       anything else raises) and the terminal table (hosted to `cleanup`; an uncollected
       Alkahest obligation whose fulfillment started terminates its lease through 7C.1;
@@ -4073,7 +4073,7 @@ settlement, fulfillment, and evidence; teardown still releases directly.
       refuses a thread with none, registers it, adopts the matched obligation, wakes the
       worker, and calls `service_obligation` once; `status` drops its no-fulfillment
       assertion.
-- [ ] 7C.5 Routes: `api.py` removes `POST /api/v1/fulfillments/begin` (and
+- [x] 7C.5 Routes: `api.py` removes `POST /api/v1/fulfillments/begin` (and
       `models.py` `BareMetalFulfillRequest`); the evidence route requires a signed
       request, loads the evidence, and admits by its binding: the evidence's buyer and
       claimant and the seller's administrator for either kind, and the hosted
@@ -4082,10 +4082,10 @@ settlement, fulfillment, and evidence; teardown still releases directly.
       runtime's count (`models.py`'s `BareMetalHealthResponse` gains it). The buyer
       (`domains/bare_metal/buyer`, 0.4.2 → 0.5.0) removes `begin()` from
       `fulfillment.py`.
-- [ ] 7C.6 Delta: `specs/storefront-publication/spec.md`'s "Complete bare-metal seller
+- [x] 7C.6 Delta: `specs/storefront-publication/spec.md`'s "Complete bare-metal seller
       lifecycle" gains the startup, evidence, unknown-outcome, resolution, and
       uncollected-terminal scenarios (written with this plan).
-- [ ] 7C.7 Tests:
+- [x] 7C.7 Tests:
       - `tests/test_http_settlement.py`: verify registers exactly the committed plan
         (replacing 6B's `test_the_plan_settled_is_the_plan_accepted`) and refuses a
         thread with none; verify steps the worker once; a failed first attempt is retried
@@ -4106,46 +4106,101 @@ settlement, fulfillment, and evidence; teardown still releases directly.
       - `domains/bare_metal/tests/test_evidence.py`: both bindings; hosted digests
         unchanged;
       - `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
-- [ ] 7C.8 Versions and locks: `arkhai-bare-metal` 0.10.0,
+- [x] 7C.8 Versions and locks: `arkhai-bare-metal` 0.10.0,
       `arkhai-bare-metal-storefront` 0.13.0, `arkhai-bare-metal-buyer` 0.5.0, cascaded;
       the storefront hand-locked; `e2e-tests` relocked.
 - [ ] 7C.9 **Gate.** The bare-metal domain, storefront, and buyer suites, the root
       aggregate, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation, pyflakes, and both lanes.
+  - Notes (2026-10-07; the lanes have not run):
+    - Versions: arkhai-bare-metal 0.10.0, arkhai-bare-metal-storefront 0.13.0 (floors
+      raised to the domain 0.10.0, the settlement runtime and Alkahest kit 0.4.0, and
+      the storefront client 0.25.0), arkhai-bare-metal-buyer 0.5.0, cascaded to
+      arkhai-vms-storefront 0.15.5. Both storefronts hand-locked; five projects
+      relocked with no marker change.
+    - 7C.3: the step reads what the reservation reports, and the evidence is stored
+      once (`save_bare_metal_lease_ready_evidence` is first-write-wins), so a retry
+      publishes the digest an earlier attempt may already have submitted.
+    - 7C.4: the hosted lifecycle, the Alkahest step, and the worker are composed in
+      `__post_init__` and are no longer constructor fields: a runtime copied with
+      other site clients composes its own instead of keeping one bound to the old
+      clients. `test_http_system` counts sweeps on the composed worker's repository.
+    - 7C.5: an unsigned evidence request is refused 401. Nothing in this repository
+      calls the evidence route; the hosted path hands its evidence body to the hosted
+      authority directly, so the hosted authority's signed read is unexercised here.
+    - 7C.7: `tests/seeded_threads.py` commits a plan with an accepted thread, as the
+      runtime does. With a plan committed, the startup backfill adopts a recorded
+      verified escrow, so the fail-closed status test seeds none.
+      `tests/settlement_compositions.py` gains doubles for the Alkahest mechanism
+      client (`EscrowOnChain`) and the chain client's string obligations.
+    - Results: bare-metal storefront 288 passed (13 in the new
+      `test_alkahest_lifecycle.py`), domain 137, buyer 13; e2e unit 236 (the known
+      `test_hosted_public_boundary` failure) and collection 162; pyflakes reports
+      nothing new.
 
 ### 7D. Bare metal: teardown, deal controls, the publication dry run, and restart
 
 The rest of the original Section 7. Reviewable alone: release and deal controls.
 
-- [ ] 7D.1 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
+- [x] 7D.1 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
       7C.1's `terminate_lease` and returns the lease operation; `status()` no longer
       calls `capacity_client.site(...).release(...)`; the lifecycle records `released`
       only from the capacity-released callback, bound in `api.py` through the
       capacity-publication route service with the site's authority principal verified as
       the caller.
-- [ ] 7D.2 Deal controls: `api.py` binds settle verify, evaluate-settle (a bare-metal
+- [x] 7D.2 Deal controls: `api.py` binds settle verify, evaluate-settle (a bare-metal
       `FulfillmentPreviewHook` previewing scheduling and materialization with no
       writes), settle wait, and admin reserve through the kit's
       `SettlementAdminRouteService` and `CapacityAdminRouteService`.
-- [ ] 7D.3 Publication dry run: `lifecycle_steps.py` registers a preview for
+- [x] 7D.3 Publication dry run: `lifecycle_steps.py` registers a preview for
       `publication` reporting the opens, closes, refreshes, and holds one pass would
       make; `publication_composition.py` and `publication.py` expose the non-publishing
       pass it needs.
-- [ ] 7D.4 Restart integration tests (task 3.5; 3.6 is withdrawn): a new
+- [x] 7D.4 Restart integration tests (task 3.5; 3.6 is withdrawn): a new
       `tests/test_restart_recovery.py` rebuilds the production application over one
       database file with a loopback site (`tests/loopback.py`), across a stop after
       verify, after fulfillment began, after evidence was submitted, and after teardown
       was requested.
-- [ ] 7D.5 Tests: `tests/test_fulfillment_service.py` (teardown through terminate, a
+- [x] 7D.5 Tests: `tests/test_fulfillment_service.py` (teardown through terminate, a
       repeated teardown returns the same lease, release only on the callback);
       `tests/test_publication_cycle.py` (the preview applies nothing); the deal-control
       routes through the canonical client. The bare-metal expiry through the aggregate
       is proven in 5B.8.B.3's `test_lease_release_api.py`.
-- [ ] 7D.6 Versions and locks: `arkhai-bare-metal-storefront` 0.14.0, cascaded.
+- [x] 7D.6 Versions and locks: `arkhai-bare-metal-storefront` 0.14.0, cascaded.
 - [ ] 7D.7 **Gate.** The bare-metal storefront, buyer, provisioning, and
       provisioning-service suites, the root aggregate, `make check-packaging`, comment
       hygiene, documentation citations, OpenSpec strict validation, pyflakes, and both
       lanes.
+  - Notes (2026-10-07; the lanes have not run):
+    - Versions: arkhai-bare-metal-storefront 0.14.0, cascaded to arkhai-vms-storefront
+      0.15.6; both storefronts hand-locked, `e2e-tests` relocked.
+    - 7D.1: teardown and an Alkahest settlement that ends uncollected both go
+      through `BareMetalFulfillmentService.end_lease`, which terminates the lease at
+      the reservation's site and records the lifecycle `terminating`. The teardown
+      route returns the lifecycle projection rather than the lease, so the buyer's
+      teardown response keeps its shape. The capacity-released callback
+      authenticates against the configured site authorities and then requires the
+      authority of the site the event names; a hosted deal's reservation is
+      acknowledged unchanged, since its lifecycle releases its own capacity.
+    - 7D.2: `deal_controls.py` supplies the hooks; the four routes take the
+      contracts the canonical client already signs (`admin_verify_settlement`,
+      `admin_evaluate_settlement`, `admin_settle_wait`, `admin_reserve_capacity`).
+    - 7D.3: `BareMetalPublicationCycle.run(dry_run=True)` records no accepted
+      generation and makes no close, listing write, publication, or registry
+      repair; it reports the publishes, closes, refreshes, reopens, and holds a pass
+      would make. The publication step registers it as its preview.
+    - 7D.4: `tests/test_restart_recovery.py` rebuilds the application over the same
+      database file with the same site and chain doubles, after verification, after a
+      recorded publication, and after teardown. (`tests/loopback.py` serves the
+      application; the site is doubled at its clients.)
+    - Results: bare-metal storefront 298 passed (5 in `test_deal_controls.py`, 3 in
+      `test_restart_recovery.py`, 2 new dry-run tests); VM storefront unit 1103 and
+      integration 360 (the two known `test_alkahest` failures); e2e unit 236 (the known
+      `test_hosted_public_boundary` failure). The root aggregate, run after 7D and so
+      covering 7C, passed 48 suites with only the known failures (VM's
+      `test_alkahest`, the API-credit middleware's Rust toolchain); the locks it
+      rewrote were restored. `make check-packaging`, comment hygiene, documentation
+      citations, OpenSpec strict validation (1.14.0), and pyflakes (nothing new) pass.
 
 ## 8. Shared compute deal stages and the VM scenario
 

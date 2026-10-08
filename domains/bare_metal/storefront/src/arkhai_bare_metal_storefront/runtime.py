@@ -49,6 +49,7 @@ from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
+from .alkahest_lifecycle import BareMetalAlkahestLifecycle
 from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
 from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
@@ -74,10 +75,6 @@ from .settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 
-# Mechanisms whose obligations the servicing worker reaches but whose
-# fulfillment this storefront starts elsewhere: contact exchange's reveal binds
-# its own obligation, and an Alkahest fulfillment has its own start.
-_FULFILLED_ELSEWHERE = frozenset({ALKAHEST_MECHANISM, CONTACT_MECHANISM})
 
 
 def _portable_evidence_reference(
@@ -131,15 +128,18 @@ class BareMetalStorefrontRuntime:
         default=None,
         repr=False,
     )
+    # Composed from the settlement composition in ``__post_init__``, never
+    # passed in, so a runtime copied with other clients composes its own.
     hosted_domain_callbacks: BareMetalHostedDomainCallbacks | None = field(
-        default=None,
-        repr=False,
+        default=None, init=False, repr=False
     )
     settlement_worker: SettlementServicingWorker | None = field(
-        default=None,
-        repr=False,
+        default=None, init=False, repr=False
     )
     settlement_servicing_interval_seconds: float = 30.0
+    alkahest_lifecycle: BareMetalAlkahestLifecycle | None = field(
+        default=None, init=False, repr=False
+    )
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
     capacity_client: Any | None = field(default=None, repr=False)
@@ -238,51 +238,61 @@ class BareMetalStorefrontRuntime:
         register_bare_metal_lifecycle_steps(self)
 
     def _compose_settlement_servicing(self) -> None:
-        """Compose the hosted lifecycle and the one servicing worker.
+        """Compose the hosted lifecycle, the Alkahest step, and the one worker.
 
-        Both are built here, before the lifecycle steps are registered, so the
-        settlement-servicing step exists whenever settlement does. Either may be
-        injected instead. With no settlement composition there is neither.
+        They are built here, before the lifecycle steps are registered, so the
+        settlement-servicing step exists whenever settlement does. With no
+        settlement composition there is none of them.
         """
 
         composition = self.settlement_composition
         if composition is None:
             return
-        if self.hosted_domain_callbacks is None and composition.configures(
-            HOSTED_MECHANISM
-        ):
+        if composition.configures(HOSTED_MECHANISM):
             object.__setattr__(
                 self, "hosted_domain_callbacks", self._hosted_lifecycle_callbacks()
             )
-        if self.settlement_worker is not None:
-            return
+        if composition.configures(ALKAHEST_MECHANISM):
+            object.__setattr__(
+                self,
+                "alkahest_lifecycle",
+                BareMetalAlkahestLifecycle(
+                    db=self.db,
+                    runtime=self.settlement_runtime,
+                    local_principal=self.seller_principal,
+                    fulfillment_service=self.fulfillment_service,
+                    chain_clients=composition.resources.get("clients") or {},
+                ),
+            )
         callbacks = self.hosted_domain_callbacks
+        alkahest = self.alkahest_lifecycle
 
+        # Each mechanism's fulfillment is started by whatever owns it. Contact
+        # exchange's reveal binds its own obligation, so it is declined without
+        # being reserved; an obligation under any other mechanism has nothing
+        # here that could deliver it.
         async def on_ready(record: Any, worker_id: str) -> None:
             mechanism = str(record.obligation.get("mechanism") or "")
             if mechanism == HOSTED_MECHANISM and callbacks is not None:
                 await callbacks.fulfill(record, worker_id)
-                return
-            if mechanism in _FULFILLED_ELSEWHERE:
-                # Contact exchange's reveal binds its own obligation; an
-                # Alkahest fulfillment is started by its own path. Neither is
-                # reserved here, so nothing this hook does competes with them.
-                return
-            raise RuntimeError(
-                f"no bare-metal fulfillment is composed for {mechanism!r}"
-            )
+            elif mechanism == ALKAHEST_MECHANISM and alkahest is not None:
+                await alkahest.fulfill(record, worker_id)
+            elif mechanism != CONTACT_MECHANISM:
+                raise RuntimeError(
+                    f"no bare-metal fulfillment is composed for {mechanism!r}"
+                )
 
         async def on_terminal(record: Any, state: str, reason: str | None) -> None:
             mechanism = str(record.obligation.get("mechanism") or "")
             if mechanism == HOSTED_MECHANISM and callbacks is not None:
                 if state != "collected":
                     await callbacks.cleanup(record.agreement_ref, reason or state)
-                return
-            if mechanism in _FULFILLED_ELSEWHERE:
-                return
-            raise RuntimeError(
-                f"no bare-metal terminal handling is composed for {mechanism!r}"
-            )
+            elif mechanism == ALKAHEST_MECHANISM and alkahest is not None:
+                await alkahest.end_service(record, state, reason)
+            elif mechanism != CONTACT_MECHANISM:
+                raise RuntimeError(
+                    f"no bare-metal terminal handling is composed for {mechanism!r}"
+                )
 
         object.__setattr__(
             self,
@@ -355,9 +365,13 @@ class BareMetalStorefrontRuntime:
             seller_wallet=self.seller_evm_address,
             chain_clients=composition.resources.get("clients") or {},
             chain_config_paths=self.chain_config_paths,
-            build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
+            service_obligation=(
+                self.settlement_worker.service_obligation
+                if self.settlement_worker is not None
+                else None
+            ),
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
