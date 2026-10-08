@@ -28,9 +28,9 @@ is resolved in `design.md` as per-site, per-family projection counts:
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-Tasks 3.4, 3.8, 4.3, 4.4, 4.5, 6.1, 6.2, and Section 5 are gated on the open
-decisions D2–D6 in `design.md`'s Open Questions; they are amended when each
-decision is recorded.
+Tasks 3.4, 3.8, 4.4, 4.5, 6.1, 6.2, and Section 5 are gated on the open
+decisions D3–D6 in `design.md`'s Open Questions; they are amended when each
+decision is recorded. D2 is decided and folded into task 4.3.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -163,11 +163,22 @@ provisioning can trust two principals leaves it with no listing source.
       state and its local-table judgment from the pool-override status
       provider. No values are carried into the site-scoped store (decision in
       `design.md`).
+      In `kit/pool-overrides` (`design.md`, "The pool-override kit loses
+      `inactive`"): delete `OVERRIDE_INACTIVE` from
+      `src/market_pool_overrides/service.py` and `__init__.py`, make
+      `ProjectionSource` and `override_state()`'s `projection` non-optional,
+      remove the `None` branch, and replace the two `None` cases in
+      `tests/unit/test_status.py` with a `{}` case reporting `unknown`. Pass a
+      non-optional projection read from `server.py`, and correct the state list
+      in `models/system_status_models.py`'s `pool_overrides` comment.
 - [ ] 4.3a Focused tests: a home-site pool with a legacy row and no
       site-scoped override resolves each commercial field from the pool hint
       then the configured default; system status no longer reports a legacy
       value or an `inactive` override; the two removed scenarios' tests are
-      deleted rather than kept green against dead code.
+      deleted rather than kept green against dead code. Run
+      `kit/pool-overrides`' unit and integration suites and bare metal's
+      `test_pool_overrides_api.py` to confirm its override status is
+      unchanged.
 - [ ] 4.4 Freeze `resources`, `hosts`, `compute_pool_members`, and
       `resource_transition_events`, and `compute_capacity_pools` as a whole
       (its commercial columns retire with the tier in 4.3, and
@@ -319,7 +330,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `unbacked-listing-publication` promoted them; retiring the local-table path
       (Section 4) makes them true of every listing. Also strike the
       `storefront-publication` architecture companion's description of the
-      legacy override record and the `inactive` state, if it carries one.
+      legacy override record and the `inactive` state ("Storefront pool
+      overrides"), and `docs/development/DEPLOYMENT_AND_CONFIG.md`'s state
+      list and legacy-terms bullet in "Storefront listing shapes and pool
+      overrides".
       Replace the "Operator-visible acceptance state" requirement with the
       delta's "Operator-visible acceptance and projection state", reconcile
       its Evidence entry, and promote the count interpretation to
@@ -374,6 +388,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Fresh databases omit retired schema; upgrades retain inert schema and rows for rollback or operator provisioning seeding, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
 | Rollback requires earlier code and reconciliation against live site state; retained rows are historical seeding input, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
+| `kit/pool-overrides` defines exactly the contract's four override states; its projection source is never `None` | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier"; companion `architecture.md` — "Storefront pool overrides"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Storefront listing shapes and pool overrides" |
+| Why the kit drops `inactive` rather than tolerating `None` | This change's `design.md`, "The pool-override kit loses `inactive`" |
 | Local resource-count diagnosis and local reservation normalization retire with their inventory source | Temporary sequencing decision in this change's `design.md` |
 | Complete the separate multi-storefront repair first; retire the local inventory contract, its writers and consumers, and fresh-schema creation together | Temporary sequencing decision in this change's `design.md`; dependency/status in `openspec/changes/README.md` |
 | `remove-dead-storefront-physical-surfaces` lands before this change, so this freeze covers only the local inventory tables | Temporary sequencing decision in this change's `design.md`, "The zero-caller removal lands first"; dependency/status in `openspec/changes/README.md` |

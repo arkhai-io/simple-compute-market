@@ -183,8 +183,11 @@ None.
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - Deployment: Helm, compose, both seller TOMLs, the storefront and Helm
   Makefiles, and the seller quickstart lose the CSV contract.
+- `kit/pool-overrides` loses the `inactive` state: `OVERRIDE_INACTIVE` is
+  deleted and its projection source is never `None` (`design.md`, "The
+  pool-override kit loses `inactive`").
 - Not affected: `kit/resource-pools`, the pool-override store, routes, clients,
-  and CLI (only the `inactive` state leaves `kit/pool-overrides`), the
+  and CLI, the
   region/SLA/pricing hint mechanism, bare-metal publication. Bare metal shares
   the status models and typed client this change edits, so its status output
   is checked for regressions.

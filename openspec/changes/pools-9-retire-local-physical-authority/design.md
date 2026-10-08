@@ -106,7 +106,7 @@ Drift from the earlier plan:
   `ProjectionSource` type that admits `None`, `override_state()`, the package
   exports, and the kit's status unit test carry it. Bare metal's projection
   source never returns `None`. The earlier claim that `kit/pool-overrides` is
-  unaffected was wrong (open decision D2).
+  unaffected was wrong (decided: "The pool-override kit loses `inactive`").
 - **A CSV pricing migration exists.** `market-storefront config migrate --scope
   publication --inventory <csv>` (`migrate_publication_csv`) rewrites legacy
   prices inside a resource CSV. It is described by the "Publication pricing
@@ -322,6 +322,32 @@ only the methods whose remaining callers this change removes:
 `release_reservations`' local loop, the status count, the validator, and the
 importers.
 
+### The pool-override kit loses `inactive`
+
+`kit/pool-overrides` drops the `inactive` state entirely: `OVERRIDE_INACTIVE`
+and its export are deleted, and `ProjectionSource` and `override_state()`'s
+`projection` argument stop admitting `None`. The only producer of `None` was
+the VM storefront's local-path selection, which this change deletes; bare
+metal's source already returns a mapping, `{}` when no generation is
+recorded. A storefront holding no projection passes `{}`, and every override
+it stores then reads `unknown`, which is true. The kit's states then match the
+contract's four exactly.
+
+Alternatives:
+
+- *Keep `None` and treat it as `{}`.* Rejected: it keeps a nullable contract no
+  caller uses, and a composition that wires a source returning `None` by
+  mistake would report a believable `unknown` instead of failing.
+- *Keep `inactive` in the kit and retire it only from the VM contract.*
+  Rejected: the kit would define a state the contract does not list, against
+  its rule that every override is in exactly one of the listed states, and
+  keep a branch nothing exercises.
+
+Consequences: a small breaking change to an internal pre-1.0 wheel. Only the
+kit's own status test imports the constant. The VM composition root passes
+the projection read that replaces `listing_source_projection()` as the
+override service's source.
+
 ### Local diagnostics and cleanup retire with the cutover
 
 The design review of `remove-dead-storefront-physical-surfaces` transferred
@@ -449,12 +475,10 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-Open decisions raised by the 2026-10-08 re-grounding. Each gates the tasks
-named; no task prescribes an answer until the decision is recorded above.
+Open decisions raised by the 2026-10-08 re-grounding (D1 and D2 are decided
+above). Each gates the tasks named; no task prescribes an answer until the
+decision is recorded above.
 
-- **D2 — `inactive` in `kit/pool-overrides`.** Whether the kit drops the state
-  and its nullable projection source, or keeps them for another consumer.
-  Gates task 4.3.
 - **D3 — the CSV pricing migration.** Whether `config migrate --scope
   publication --inventory` and `migrate_publication_csv` retire with CSV
   import, and how the two requirements describing CSV input change. Gates
