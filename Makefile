@@ -1053,8 +1053,8 @@ HELM_CONTEXT ?= docker-desktop
 validate-local: ## Validate HEAD without changing the checkout: check-packaging, then make test
 	@python3 scripts/validate_slice.py local
 
-validate-helm: ## Validate HEAD on the Helm charts: render checks, images, deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop)
-	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)"
+validate-helm: ## Validate HEAD on the Helm charts: render checks, images, deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
 
 check-push-ready: ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@python3 scripts/check_push_ready.py check
@@ -1079,12 +1079,14 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=
 E2E_COMMIT ?=
+E2E_AFTER_RUN ?=
 
 fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
 		--output-dir "$(E2E_LOG_DIR)" \
 		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
-		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)")
+		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
+		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py

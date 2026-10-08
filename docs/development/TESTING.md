@@ -286,7 +286,10 @@ To run both lanes in GitHub Actions, push the current branch and run
 local `HEAD` (or `E2E_COMMIT`), among the 100 most recent workflow runs, and waits
 up to three minutes for a just-dispatched run to be listed. Matching the commit is
 what makes it safe straight after `make run-e2e`: the new run may not be listed
-yet, and the branch's previous run tested a different commit. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+yet, and the branch's previous run tested a different commit. `E2E_COMMIT` may be
+a short ID or a ref. When the commit already has a run, pass the newest run ID seen
+before dispatching as `E2E_AFTER_RUN`, so the earlier run is not taken while the
+new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
 `actions.log`, `e2e-vm-logs/compose-logs.txt`, and
 `e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
 Each successful fetch also creates `<run-id>.zip` beside the run directory,

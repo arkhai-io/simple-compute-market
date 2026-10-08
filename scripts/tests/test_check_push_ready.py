@@ -96,19 +96,26 @@ def test_a_remote_that_moved_on_rejects_the_push_rather_than_being_forced(
 def test_a_detached_head_is_refused(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _git(repo, "checkout", "-q", "--detach")
 
+    head = _git(repo, "rev-parse", "HEAD")
+
     assert guard.main(["push"], root=repo) == 1
     assert "detached" in capsys.readouterr().err
     assert _remote_head(repo, "feat/change") == ""
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _git(repo, "branch", "--show-current") == ""
 
 
 @pytest.mark.parametrize("branch", ["main", "dev"])
 def test_a_protected_branch_is_refused(repo: Path, branch: str) -> None:
     _git(repo, "checkout", "-q", "-B", branch)
+    before = _remote_head(repo, branch)
 
     target, problems = guard.check(repo)
 
     assert target is None
     assert any("protected" in problem for problem in problems)
+    assert guard.main(["push"], root=repo) == 1
+    assert _remote_head(repo, branch) == before
 
 
 @pytest.mark.parametrize("dirt", ["tracked", "untracked"])
@@ -133,6 +140,8 @@ def test_an_upstream_of_another_name_is_refused(
     assert guard.main(["push"], root=repo) == 1
     assert "tracks origin/dev" in capsys.readouterr().err
     assert _git(repo, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/dev"
+    assert _remote_head(repo, "feat/change") == ""
+    assert _remote_head(repo, "dev") != _git(repo, "rev-parse", "HEAD")
 
 
 def test_every_refusal_is_reported_at_once(repo: Path) -> None:

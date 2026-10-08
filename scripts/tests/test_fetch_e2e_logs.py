@@ -63,8 +63,10 @@ class FakeRunner:
 
         if args == ["git", "branch", "--show-current"]:
             return subprocess.CompletedProcess(args, 0, "feature/test\n", "")
-        if args == ["git", "rev-parse", "HEAD"]:
-            return subprocess.CompletedProcess(args, 0, HEAD + "\n", "")
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            revision = args[3].removesuffix("^{commit}")
+            full = {"HEAD": HEAD, EARLIER[:7]: EARLIER}.get(revision, revision)
+            return subprocess.CompletedProcess(args, 0, full + "\n", "")
         if args[:3] == ["gh", "run", "list"]:
             runs = self.listings.pop(0) if self.listings else self.runs
             return subprocess.CompletedProcess(args, 0, json.dumps(runs), "")
@@ -217,6 +219,34 @@ def test_the_newest_of_several_runs_of_the_commit_is_taken(
     assert ["gh", "run", "watch", "44"] in runner.commands
 
 
+def test_a_repeated_dispatch_of_one_commit_waits_for_the_new_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    previous = {"databaseId": 43, "headBranch": "feature/test", "headSha": HEAD}
+    redispatched = {"databaseId": 47, "headBranch": "feature/test", "headSha": HEAD}
+    runner = FakeRunner(listings=[[previous], [redispatched, previous]])
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+    now = iter([0.0, 1.0, 2.0])
+
+    fetcher.fetch_logs(
+        workflow="e2e.yml",
+        output_root=tmp_path,
+        run_id=None,
+        wait_seconds=60,
+        after_run=43,
+        sleep=lambda seconds: None,
+        clock=lambda: next(now),
+    )
+
+    assert ["gh", "run", "watch", "47"] in runner.commands
+    assert ["gh", "run", "watch", "43"] not in runner.commands
+
+
+def test_a_run_id_cannot_be_combined_with_commit_selection(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77", "--commit", HEAD])
+
+
 def test_an_explicit_commit_replaces_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -225,9 +255,8 @@ def test_an_explicit_commit_replaces_head(
     )
     monkeypatch.setattr(fetcher.subprocess, "run", runner)
 
-    assert fetcher.main(["--output-dir", str(tmp_path), "--commit", EARLIER]) == 0
+    assert fetcher.main(["--output-dir", str(tmp_path), "--commit", EARLIER[:7]]) == 0
     assert ["gh", "run", "watch", "41"] in runner.commands
-    assert ["git", "rev-parse", "HEAD"] not in runner.commands
 
 
 def test_make_target_delegates_to_python_helper() -> None:
@@ -236,6 +265,7 @@ def test_make_target_delegates_to_python_helper() -> None:
 
     assert "$(CURDIR)/scripts/fetch-e2e-logs.py" in target
     assert '--commit "$(E2E_COMMIT)"' in target
+    assert '--after-run "$(E2E_AFTER_RUN)"' in target
     assert "gh run" not in target
 
 

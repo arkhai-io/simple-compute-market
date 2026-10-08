@@ -5,7 +5,10 @@ Without a run ID, the run is the newest one on the current branch whose head com
 is the commit asked for, local HEAD by default. Matching the commit, not only the
 branch, is what makes the fetch safe straight after a dispatch: the new run may not
 be listed yet, and the previous, finished run on the branch tested another commit.
-A just-dispatched run is waited for, with a bound.
+A just-dispatched run is waited for, with a bound. When the commit already has a
+run — validation repeated on one commit — the earlier run matches before the new
+one is listed, so the caller passes the newest run ID it saw before dispatching
+(`--after-run`) and only later runs are considered; run IDs only increase.
 """
 
 from __future__ import annotations
@@ -75,11 +78,16 @@ def _current_branch() -> str:
     return branch
 
 
-def _head_commit() -> str:
-    return _run(["git", "rev-parse", "HEAD"], capture_output=True).stdout.strip()
+def _full_commit(revision: str) -> str:
+    # Runs report full commit IDs, so a short ID or a ref is resolved first.
+    return _run(
+        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"], capture_output=True
+    ).stdout.strip()
 
 
-def _matching_run_id(workflow: str, branch: str, commit: str) -> str | None:
+def _matching_run_id(
+    workflow: str, branch: str, commit: str, after_run: int | None = None
+) -> str | None:
     payload = _json_output(
         [
             "gh",
@@ -107,7 +115,8 @@ def _matching_run_id(workflow: str, branch: str, commit: str) -> str | None:
             if isinstance(run_id, int) or (
                 isinstance(run_id, str) and run_id.isdigit()
             ):
-                return str(run_id)
+                if after_run is None or int(run_id) > after_run:
+                    return str(run_id)
     return None
 
 
@@ -117,12 +126,13 @@ def _run_id_for_commit(
     commit: str,
     *,
     wait_seconds: float,
+    after_run: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str:
     deadline = clock() + wait_seconds
     while True:
-        run_id = _matching_run_id(workflow, branch, commit)
+        run_id = _matching_run_id(workflow, branch, commit, after_run)
         if run_id is not None:
             return run_id
         if clock() >= deadline:
@@ -215,14 +225,16 @@ def fetch_logs(
     run_id: str | None,
     commit: str | None = None,
     wait_seconds: float = DEFAULT_WAIT_SECONDS,
+    after_run: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> Path:
     selected_run = run_id or _run_id_for_commit(
         workflow,
         _current_branch(),
-        commit or _head_commit(),
+        _full_commit(commit or "HEAD"),
         wait_seconds=wait_seconds,
+        after_run=after_run,
         sleep=sleep,
         clock=clock,
     )
@@ -273,7 +285,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULT_WAIT_SECONDS,
         help="how long to wait for the commit's run to be listed",
     )
+    parser.add_argument(
+        "--after-run",
+        type=int,
+        help="consider only runs with a higher ID: the newest run before dispatching",
+    )
     args = parser.parse_args(argv)
+    if args.run_id and (args.commit or args.after_run is not None):
+        parser.error("--run-id names the run; it cannot be combined with --commit or --after-run")
 
     run_id = args.run_id.strip() if args.run_id else None
     try:
@@ -283,6 +302,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_id=run_id,
             commit=args.commit.strip() if args.commit else None,
             wait_seconds=args.wait_seconds,
+            after_run=args.after_run,
         )
     except FetchError as exc:
         print(f"fetch-e2e-logs: {exc}", file=sys.stderr)

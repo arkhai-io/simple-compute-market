@@ -69,7 +69,8 @@ def check(root: Path = ROOT) -> tuple[PushTarget | None, list[str]]:
         if not remote and not merge:
             target = PushTarget(branch, DEFAULT_REMOTE, set_upstream=True)
         elif merge != f"refs/heads/{branch}" or not remote or remote == ".":
-            upstream = f"{remote}/{merge.removeprefix('refs/heads/')}" if remote else merge
+            upstream = (f"{remote}/{merge.removeprefix('refs/heads/')}" if remote and merge
+                        else remote or merge)
             problems.append(f"{branch} tracks {upstream}, not a branch of its own name")
         else:
             target = PushTarget(branch, remote, set_upstream=False)

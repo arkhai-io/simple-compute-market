@@ -51,7 +51,7 @@ class Fake:
         command = list(command)
         if command == ["git", "rev-parse", "HEAD"]:
             return COMMIT + "\n"
-        if command[:2] == ["git", "status"]:
+        if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
             return "\n".join(self.dirty)
         if command == ["kubectl", "config", "current-context"]:
             return self.context + "\n"
@@ -93,7 +93,7 @@ def test_local_runs_packaging_then_tests_and_writes_a_summary(tmp_path: Path) ->
     summary = validator.validate_local(_validation(tmp_path, fake, "local"))
 
     assert summary.passed
-    assert fake.ran() == ["make check-packaging", "make test"]
+    assert fake.ran() == ["make dist-clean", "make check-packaging", "make test"]
     log_dir = tmp_path / ".snapshot/validation" / COMMIT[:12] / "local"
     written = json.loads((log_dir / "summary.json").read_text("utf-8"))
     assert written["commit"] == COMMIT and written["passed"] is True
@@ -105,7 +105,7 @@ def test_local_stops_at_the_first_failure_with_its_output_tail(tmp_path: Path) -
     summary = validator.validate_local(_validation(tmp_path, fake, "local"))
 
     assert not summary.passed
-    assert fake.ran() == ["make check-packaging"]
+    assert fake.ran() == ["make dist-clean", "make check-packaging"]
     failed = next(step for step in summary.steps if step.name == "check-packaging")
     assert failed.tail == ["lock is stale"]
     assert "lock is stale" in validator.render(summary)
@@ -139,8 +139,10 @@ def test_helm_runs_every_step_and_the_pipeline_scenarios_it_can_serve(tmp_path: 
 
     assert summary.passed
     assert fake.ran() == [
-        "make -C helm test-render",
+        "make dist-clean",
         "make build-dev",
+        "make -C domains/vms/storefront reinit",
+        "make -C helm test-render",
         "make -C helm deploy",
         "make -C helm forward",
         "make -C e2e-tests test-module MODULE=e2e_deal or e2e_listing_shapes",
@@ -178,7 +180,7 @@ def test_a_skipped_render_check_fails_validation(tmp_path: Path) -> None:
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
-    assert fake.ran() == ["make -C helm test-render"]
+    assert fake.ran()[-1] == "make -C helm test-render"
     render = next(step for step in summary.steps if step.name == "test-render")
     assert render.result == "failed" and render.tail == [skip]
 
@@ -212,7 +214,8 @@ def test_a_deploy_failure_does_not_forward(tmp_path: Path) -> None:
     summary = _helm(tmp_path, fake)
 
     assert not summary.passed
-    assert fake.ran() == ["make -C helm test-render", "make build-dev", "make -C helm deploy"]
+    assert fake.ran()[-1] == "make -C helm deploy"
+    assert "make -C helm forward" not in fake.ran()
 
 
 def test_a_marker_list_that_is_not_a_plain_disjunction_is_refused(tmp_path: Path) -> None:
@@ -234,8 +237,19 @@ def test_the_pipeline_marker_variables_exist_and_are_plain_disjunctions() -> Non
     assert set(validator.HELM_EXCLUSIONS) <= set(markers)
 
 
+def test_all_scenarios_runs_the_excluded_ones_too(tmp_path: Path) -> None:
+    _storefront_env(tmp_path)
+    fake = Fake()
+    summary = _helm(tmp_path, fake, exclusions={})
+
+    assert summary.not_run == {}
+    assert ("make -C e2e-tests test-module MODULE=e2e_deal or multi_registry or "
+            "e2e_listing_shapes or e2e_bare_metal_publication") in fake.ran()
+
+
 def test_make_targets_delegate_to_the_script() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text("utf-8")
 
     assert "scripts/validate_slice.py local" in makefile
     assert 'scripts/validate_slice.py helm --context "$(HELM_CONTEXT)"' in makefile
+    assert "--all-scenarios" in makefile

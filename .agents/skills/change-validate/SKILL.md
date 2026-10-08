@@ -33,9 +33,12 @@ The pipeline is by far the slowest part, so it runs while everything else does:
 
 1. `make push-branch` — the guarded push of exactly `HEAD`, never forced. If it
    refuses, stop and report its reasons.
-2. `make run-e2e` — dispatches the end-to-end workflow on the branch.
-3. `make fetch-e2e-logs`, in the background. It waits for the run of `HEAD` to be
-   listed, then for it to finish, and downloads its logs under
+2. Record the newest end-to-end run ID before dispatching —
+   `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
+   — then `make run-e2e`, which dispatches the workflow on the branch.
+3. `make fetch-e2e-logs E2E_AFTER_RUN=<that ID>`, in the background. It waits for
+   a run of `HEAD` newer than that ID to be listed — so a commit validated before
+   never fetches its earlier run — then for it to finish, and downloads its logs under
    `.snapshot/e2e-logs/<run-id>/`. Its last lines name the run and its
    conclusion; a successful fetch means the logs arrived, not that the run passed.
 
@@ -47,9 +50,14 @@ inside a call that will time out.
 Run them one after the other while the pipeline runs: they share the machine's
 Docker and CPU.
 
-1. `make validate-local` — `make check-packaging`, then `make test`.
-2. `make validate-helm` — the chart render checks with the chart-to-loader check
-   able to run, `make build-dev`, deploy and forward, the pipeline's scenarios
+1. `make validate-local` — `make dist-clean`, so every wheel tested is built from
+   this commit rather than left by another branch, then `make check-packaging`
+   and `make test`. Both parts remove the shared wheelhouse; tell the owner before
+   you start if another session may be building in this checkout.
+2. `make validate-helm` — `make dist-clean` and `make build-dev`, the VM
+   storefront environment reinstalled from the rebuilt wheels, the chart render
+   checks with the chart-to-loader check running against this commit's code,
+   deploy and forward, the pipeline's scenarios
    against the forwarded services, and unforward. It deploys to `HELM_CONTEXT`
    only (`docker-desktop` unless the owner names another) and replaces the
    release running there.
@@ -59,7 +67,7 @@ failure — unless the local part failed because the worktree was not clean, whi
 means the tree is no longer the commit; then stop.
 
 Each part prints a summary and writes it, with every step's log, under
-`.snapshot/validation/<commit>/<part>/`. The Helm part lists the pipeline scenarios
+`.snapshot/validation/<short commit>/<part>/`. The Helm part lists the pipeline scenarios
 it did not run because the charts cannot serve them; those are never passes.
 
 ## 4. Diagnose every failure
@@ -101,7 +109,7 @@ started beside this validation may have taken a number since you began:
 | Step | Result | Duration |
 |---|---|---|
 
-Not run against Helm: <scenario> — <the service the charts do not deploy>; …
+Not run against Helm: <scenario> — <what the charts or `make forward` do not provide>; …
 
 ## Pipeline
 

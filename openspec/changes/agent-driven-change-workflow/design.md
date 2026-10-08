@@ -375,15 +375,30 @@ The local part — `make check-packaging` and `make test` — is one target that
 at the first failure and prints a summary of each step: its result, its duration,
 and the tail of a failing step's output.
 
+Both the local and the Helm part begin with `make dist-clean`. The wheelhouse in
+`.dist` is shared by every branch built in the checkout, and environments sync
+internal packages with an upgrade, so a higher version another branch left behind
+is installed in place of the one this commit builds — rewriting locks and testing
+code the commit does not contain, while `make check-packaging` still passes. Only
+`.dist`, an untracked build directory, is removed; every part rebuilds it from the
+commit. This is the owner's existing practice when changing branches. It removes
+the wheelhouse from under any other session building in the same checkout, which is
+accepted while one change is validated at a time: running the workflow on several
+changes concurrently, each validation in its own worktree with its own wheelhouse,
+is a later change.
+
 The Helm part runs on every validation, at the owner's direction: the images and
 charts are what is deployed, and a change whose diff never names them still reaches
-them through its packages. It runs `make -C helm test-render` with the VM storefront
-environment present, because that is the only place the chart-to-loader check runs
-— no CI job has both Helm and that environment. Validation does not build that
+them through its packages. It runs `make build-dev` first, then reinstalls the VM
+storefront environment from the wheelhouse that build produced, then
+`make -C helm test-render` — so the chart-to-loader check, which runs in that
+environment, loads this commit's code. The render checks run here because this is
+the only place the chart-to-loader check runs — no CI job has both Helm and that
+environment. Validation does not build that
 environment: when it is absent, validation fails before running anything and names
 `make init-storefront`. A skip reported by the loader check also fails validation,
 since a skip is how that check stops running without anyone noticing. The part then
-runs `make build-dev`, `make deploy` and `make forward` in `helm/`, the end-to-end
+runs `make deploy` and `make forward` in `helm/`, the end-to-end
 scenarios against the forwarded services, and `make unforward` afterwards whatever
 failed. It deploys unattended and replaces the release running in the cluster, so
 it refuses a kube context other than `HELM_CONTEXT`, `docker-desktop` by default. A
@@ -415,7 +430,10 @@ dispatch is asynchronous, so the new run may not be listed yet and the previous,
 already finished run on the branch is fetched in its place; and nothing checks that
 the run tested the commit being validated. Selection matches the run's head commit
 to the local `HEAD` and waits, with a bound, for that run to appear; when several
-runs match — a dispatch repeated on one commit — the newest is taken.
+runs match — a dispatch repeated on one commit — the newest is taken. The newest
+listed can still be the earlier run while the repeated dispatch is not yet listed,
+so validation records the newest run ID before it dispatches and selection
+considers only later runs; run IDs only increase.
 
 ### Pushing is guarded by a check that repairs nothing
 

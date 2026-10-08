@@ -250,7 +250,9 @@ to repair by hand.
 Validation observes one commit and edits nothing (`design.md`, "Validation observes
 a committed slice and never alters it"). Every script below is tested in
 `scripts/tests/` with an injected command runner, at unit level, except where a
-real repository is the lowest level that proves the behaviour.
+real repository is the lowest level that proves the behaviour, and except
+`fetch-e2e-logs.py`, whose existing tests patch `subprocess.run` and were extended
+in that form rather than converted.
 
 - [x] 8.1 Add `make validate-local` (`scripts/validate_slice.py`, tests in
       `scripts/tests/test_validate_slice.py`): `make check-packaging`, then
@@ -258,9 +260,13 @@ real repository is the lowest level that proves the behaviour.
       after; stopping at the first failure; each step's log under
       `.snapshot/validation/<commit>/`; and a summary of each step's result,
       duration, and a failing step's output tail.
-      Done. Unit (`test_validate_slice.py`, fake runner and reader injected): the
-      order, first-failure stop with its output tail, a dirty tree before running
-      nothing, and a step that dirties the tree failing the check after it.
+      Done; the part starts with `make dist-clean` (`design.md`), and logs go
+      under `.snapshot/validation/<short commit>/local/`. Unit
+      (`test_validate_slice.py`, fake runner and reader injected): the step order
+      against fakes, the first-failure stop with its output tail, a dirty tree
+      (the fake answers only `git status --porcelain --untracked-files=all`)
+      running nothing, and a step that dirties the tree failing the check after it.
+      Not yet run for real: `make validate-local` is first exercised by 8.6.
 - [x] 8.2 Add `make validate-helm` to the same script: refuse a kube context other
       than `HELM_CONTEXT` (default `docker-desktop`); fail before running anything
       when the VM storefront environment is absent, naming `make init-storefront`;
@@ -271,7 +277,9 @@ real repository is the lowest level that proves the behaviour.
       run with `make test-module` and reported as not run; `make unforward`
       whatever failed; a clean worktree afterwards. The list starts from the
       services the default chart values do not deploy and is confirmed by 8.6.
-      Done, in `validate_slice.py`. Unit: the step order, the exclusions reported as
+      Done, in `validate_slice.py`, also starting with `make dist-clean`, then
+      `make build-dev` and a reinstall of the VM storefront environment before the
+      render checks, so the loader check runs this commit's code. Unit: the step order, the exclusions reported as
       not run, the context refusal and the missing storefront environment running
       nothing, a render `skip:` line failing, a failing scenario and ports that never
       open both still unforwarding, and a marker list that is not a plain `or` list
@@ -282,8 +290,16 @@ real repository is the lowest level that proves the behaviour.
       the forwarded ports to accept connections, because `make forward` starts its
       port-forwards in the background. The exclusion list is
       `HELM_EXCLUSIONS`: `multi_registry`, `e2e_credits_deal`,
-      `e2e_vm_introduction`, and both bare-metal scenarios, each with its missing
-      service. Not yet run against a cluster; that is 8.6.
+      `e2e_vm_introduction` (Mailpit is deployed but not forwarded), and both
+      bare-metal scenarios, each with what is missing. `HELM_ALL_SCENARIOS=1`
+      (`--all-scenarios`) ignores the list, for 8.6; the tests prove the empty
+      list's effect, not the flag's plumbing. 8.6 risk: `build-dev` regenerates
+      the tracked `alkahest_anvil_addresses.json` and syncs the storefront without
+      `--frozen`, so the clean check afterwards fails unless both are
+      reproducible. Not yet run against a cluster; 8.6 should expect
+      `e2e_deal_buyer_cli` and `e2e_buy` may also fail for topology, since the
+      pipeline runs them inside the compose network and this run reaches the
+      storefront through port-forwards.
 - [x] 8.3 Add `make check-push-ready` and `make push-branch`
       (`scripts/check_push_ready.py`, tests against temporary Git repositories):
       refuse a detached `HEAD`, a dirty worktree, `main` or `dev`, and an upstream
@@ -293,7 +309,8 @@ real repository is the lowest level that proves the behaviour.
       Done. `test_check_push_ready.py` drives real Git against a temporary
       repository and bare remote: a new branch pushed and tracking its own name,
       exactly `HEAD` pushed, a remote that moved on rejecting the unforced push,
-      and every refusal leaving the repository as it was.
+      and each refusal (detached, protected, dirty, another upstream) pushing
+      nothing; the detached and dirty cases also leave the checkout as it was.
 - [x] 8.4 Make `scripts/fetch-e2e-logs.py` select the run whose head commit is the
       local `HEAD` (`--commit`, defaulting to `HEAD` when no `--run-id` is given),
       polling with a bound for a just-dispatched run and taking the newest match,
@@ -303,8 +320,12 @@ real repository is the lowest level that proves the behaviour.
       Done. Unit (`test_fetch_e2e_logs.py`, existing fake runner extended): a
       finished run of an earlier commit never fetched, a run listed only on the third
       poll waited for, the newest of several runs of one commit taken, `--commit`
-      replacing `HEAD`, and the bounded wait's error. `E2E_COMMIT` passes `--commit`
-      through `make`; `TESTING.md` describes the selection.
+      replacing `HEAD` (the script asks Git to resolve it; the fake answers), a
+      repeated dispatch of one commit waiting for a run newer than `--after-run`,
+      `--run-id` refusing either selector, and the error when no run appears,
+      tested with a zero wait. `E2E_COMMIT` and `E2E_AFTER_RUN` reach the script
+      through `make` (asserted on the Makefile text); `TESTING.md` describes the
+      selection.
 - [x] 8.5 Write the `change-validate` skill (`.agents/skills/change-validate/`,
       linked for both harnesses) and `make validate CHANGE=`: check the branch
       carries the change; `make push-branch` and `make run-e2e`; the local and Helm
@@ -315,18 +336,34 @@ real repository is the lowest level that proves the behaviour.
       diagnoses. It never edits or fixes. `make check-agent-skills`.
       Done. The skill writes failures as `V<n>` so triage carries them beside review
       findings; it runs the Helm part even after a local failure, unless the
-      worktree was dirty, so one triage sees every failure. Proven only by 8.6.
+      worktree was dirty, so one triage sees every failure. It records the newest
+      run ID before dispatching and fetches only a later run. Proven only by 8.6.
+      Section checks: `make check-packaging` and `make test` passed after
+      `make dist-clean`, with no lock rewritten (before the clean, other
+      branches' wheels in `.dist` made `make test` rewrite six locks and fail
+      `kit/site`); the three new suites, 41 tests, pass; `make
+      check-comment-hygiene` and `make check-agent-skills` pass;
+      `test-release-tooling` fails only
+      `test_settlement_deployment_surfaces.py`'s two tests, as at the section's
+      starting commit. `scripts/tests` is not part of `make test`, so
+      `validate-local` does not run it.
 - [ ] 8.6 Pilot: validate `capacity-shape-envelope` at `HEAD`. The Helm part runs
       the whole scenario set once with no exclusions, and the exclusion list is set
       from what fails for a missing service, as distinct from what fails for a real
       reason.
+      Handoff: run `make validate CHANGE=capacity-shape-envelope` and tell the
+      session to run the Helm part as `make validate-helm HELM_ALL_SCENARIOS=1`;
+      afterwards set `HELM_EXCLUSIONS` in `scripts/validate_slice.py` to what the
+      run shows, as a commit of this change. Both parts run `make dist-clean`, so
+      no other session should be building in the checkout meanwhile.
 - [x] 8.7 Propose a change bringing the Helm charts and `make forward` to the
       pipeline's compose topology, using the compose configuration the pipeline
       runs, so the exclusion list empties; add its row to
       `openspec/changes/README.md`. Proposal only.
       Done: `openspec/changes/helm-e2e-pipeline-parity/proposal.md`, in the local
-      end-to-end stack campaign. Like `add-full-stack-ci-job`, a proposal with no
-      spec delta does not pass `openspec validate --strict` until design adds one.
+      end-to-end stack campaign, with `skip_specs` set as `add-full-stack-ci-job`
+      has; like it, `openspec validate --strict` reports the missing delta until
+      design either adds one or confirms none is owed.
 
 ## 9. Implementation-round triage
 

@@ -180,7 +180,10 @@ partial work.
 
 Validation before an implementation review MUST describe one commit and MUST NOT
 modify the checkout: it MUST fail if the worktree is not clean when it starts or
-when it finishes, and MUST NOT regenerate lockfiles or any other tracked file. A
+when it finishes, MUST NOT itself regenerate lockfiles or any other tracked file,
+and MUST fail when a step it runs changes one. It MUST build the internal packages
+it tests from the commit under validation, never from wheels another branch left in
+the shared wheelhouse. A
 condition validation could repair, such as a stale lock, MUST fail validation and
 return the slice to implementation. End-to-end evidence MUST come from a pipeline
 run whose head commit is the commit under validation. Validation MUST also build the

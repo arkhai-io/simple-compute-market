@@ -8,13 +8,19 @@ starts and after it finishes, and fails rather than repairs. The check afterward
 is not redundant: `make test` and the end-to-end image build both sync project
 environments, which may rewrite a lock.
 
+Both parts start with `make dist-clean`. The wheelhouse in `.dist` is shared by
+every branch built in the checkout, and environments sync internal packages with an
+upgrade, so a higher version another branch left there would be installed in place
+of the one this commit builds. Removing it makes every wheel tested come from the
+commit; it is untracked, so the checkout is unchanged.
+
 - `local` runs `make check-packaging`, then `make test`.
-- `helm` runs the chart render checks with the chart-to-loader check able to run,
-  builds the images, deploys and forwards the charts, runs the end-to-end pipeline's
+- `helm` builds the images, runs the chart render checks with the chart-to-loader
+  check able to run against this commit's code, deploys and forwards the charts, runs the end-to-end pipeline's
   scenarios against the forwarded services, and always unforwards.
 
 Each part stops at its first failure, keeps every step's output under
-`.snapshot/validation/<commit>/<part>/`, prints a summary, and writes it as
+`.snapshot/validation/<short commit>/<part>/`, prints a summary, and writes it as
 `summary.json` beside the logs for the validation report.
 
 Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
@@ -38,7 +44,8 @@ from typing import Callable, Sequence
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/validation")
 DEFAULT_HELM_CONTEXT = "docker-desktop"
-STOREFRONT_PYTHON = Path("domains/vms/storefront/.venv/bin/python")
+STOREFRONT_PROJECT = "domains/vms/storefront"
+STOREFRONT_PYTHON = Path(STOREFRONT_PROJECT, ".venv/bin/python")
 # The end-to-end pipeline's scenario selections, one per lane; the Helm run reads
 # them from e2e-tests/Makefile so the two lists cannot drift apart.
 PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
@@ -49,7 +56,7 @@ PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
 HELM_EXCLUSIONS = {
     "multi_registry": "a second storefront and a second registry",
     "e2e_credits_deal": "the API-credits service, storefront, and registry",
-    "e2e_vm_introduction": "a forwarded Mailpit",
+    "e2e_vm_introduction": "Mailpit forwarded to the host",
     "e2e_bare_metal_publication": "the bare-metal storefront and registry",
     "e2e_bare_metal_introduction": "the bare-metal storefront and registry",
 }
@@ -58,6 +65,7 @@ HELM_EXCLUSIONS = {
 FORWARDED_PORTS = (8545, 8080, 8001, 8081)
 FORWARD_WAIT_SECONDS = 60.0
 TAIL_LINES = 40
+DIST_CLEAN = ("dist-clean", ["make", "dist-clean"])
 _SKIP_LINE = re.compile(r"^skip:.*$", re.M)
 _MARKER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -94,8 +102,12 @@ class Summary:
 
 def _run_logged(command: Sequence[str], log: Path) -> int:
     with log.open("w", encoding="utf-8") as stream:
-        return subprocess.run(list(command), cwd=ROOT, stdin=subprocess.DEVNULL,
-                              stdout=stream, stderr=subprocess.STDOUT).returncode
+        try:
+            return subprocess.run(list(command), cwd=ROOT, stdin=subprocess.DEVNULL,
+                                  stdout=stream, stderr=subprocess.STDOUT).returncode
+        except OSError as exc:
+            stream.write(f"could not run {command[0]}: {exc}\n")
+            return 127
 
 
 def _read(command: Sequence[str]) -> str:
@@ -162,7 +174,11 @@ class Validation:
         self.summary.steps.append(Step(name, "passed", detail=detail))
 
     def clean(self, name: str) -> bool:
-        dirty = dirty_paths(self.read)
+        try:
+            dirty = dirty_paths(self.read)
+        except ValidationError as exc:
+            self.fail(name, str(exc))
+            return False
         if dirty:
             self.fail(name, "the worktree is not clean:\n" + "\n".join(dirty))
             return False
@@ -200,7 +216,8 @@ def _tail(log: Path) -> list[str]:
 def validate_local(validation: Validation) -> Summary:
     if not validation.clean("clean before"):
         return validation.finish()
-    for name, command in (("check-packaging", ["make", "check-packaging"]),
+    for name, command in (DIST_CLEAN,
+                          ("check-packaging", ["make", "check-packaging"]),
                           ("test", ["make", "test"])):
         if validation.step(name, command).result != "passed":
             break
@@ -209,6 +226,7 @@ def validate_local(validation: Validation) -> Summary:
 
 
 def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT,
+                  exclusions: dict[str, str] = HELM_EXCLUSIONS,
                   probe: PortProbe = _port_open, sleep: Callable[[float], None] = time.sleep,
                   forward_wait: float = FORWARD_WAIT_SECONDS) -> Summary:
     if not validation.clean("clean before") or not _helm_preflight(validation, context):
@@ -218,10 +236,21 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
     except ValidationError as exc:
         validation.fail("scenarios", str(exc))
         return validation.finish()
-    selected = [marker for marker in markers if marker not in HELM_EXCLUSIONS]
-    validation.summary.not_run = {marker: f"the charts do not deploy {HELM_EXCLUSIONS[marker]}"
-                                  for marker in markers if marker in HELM_EXCLUSIONS}
+    selected = [marker for marker in markers if marker not in exclusions]
+    validation.summary.not_run = {
+        marker: f"the charts and `make -C helm forward` do not provide {exclusions[marker]}"
+        for marker in markers if marker in exclusions}
 
+    # The loader check runs in the VM storefront's own environment, which holds the
+    # internal wheels it last synced. The images are built first, rebuilding the
+    # wheelhouse from this commit, and the environment is then reinstalled from it,
+    # so the check loads the commit's code rather than another branch's.
+    for name, command in (DIST_CLEAN,
+                          ("build-dev", ["make", "build-dev"]),
+                          ("storefront environment", ["make", "-C", STOREFRONT_PROJECT,
+                                                      "reinit"])):
+        if validation.step(name, command).result != "passed":
+            return _after_helm(validation)
     render = validation.step("test-render", ["make", "-C", "helm", "test-render"])
     if render.result == "passed" and render.log:
         skipped = _SKIP_LINE.findall((validation.root / render.log).read_text("utf-8"))
@@ -233,10 +262,8 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
     if validation.failed:
         return _after_helm(validation)
 
-    for name, command in (("build-dev", ["make", "build-dev"]),
-                          ("deploy", ["make", "-C", "helm", "deploy"])):
-        if validation.step(name, command).result != "passed":
-            return _after_helm(validation)
+    if validation.step("deploy", ["make", "-C", "helm", "deploy"]).result != "passed":
+        return _after_helm(validation)
     try:
         if (validation.step("forward", ["make", "-C", "helm", "forward"]).result == "passed"
                 and _wait_for_ports(validation, probe, sleep, forward_wait)):
@@ -312,13 +339,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("part", choices=("local", "helm"))
     parser.add_argument("--context", default=DEFAULT_HELM_CONTEXT,
                         help="the only kube context the Helm part may deploy to")
+    parser.add_argument("--all-scenarios", action="store_true",
+                        help="run every pipeline scenario on Helm, ignoring the exclusions; "
+                             "for establishing which ones the charts cannot serve")
     args = parser.parse_args(argv)
     try:
         validation = Validation(args.part)
         if args.part == "local":
             summary = validate_local(validation)
         else:
-            summary = validate_helm(validation, context=args.context or DEFAULT_HELM_CONTEXT)
+            summary = validate_helm(validation, context=args.context or DEFAULT_HELM_CONTEXT,
+                                    exclusions={} if args.all_scenarios else HELM_EXCLUSIONS)
     except ValidationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

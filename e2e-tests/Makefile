@@ -90,7 +90,7 @@ test-container-module:
 		-e CONFIG_DIRECTORY=/app/config \
 		-v $(CONFIG_DIRECTORY):/app/config:ro \
 		$(IMAGE_NAME):$(IMAGE_TAG) \
-		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+		.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
 # Tests — buyer machine (in-network, realistic two-machine topology)
