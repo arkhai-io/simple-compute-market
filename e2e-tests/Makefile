@@ -77,10 +77,11 @@ test:
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
 	.venv/bin/pytest $(PYTEST_ARGS)
 
+# MODULE is a pytest marker expression, so it may be `a or b`.
 test-module:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
-	.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+	.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 test-container-module:
 	docker run --rm -it \

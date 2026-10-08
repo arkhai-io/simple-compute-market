@@ -12,6 +12,9 @@ from zipfile import ZipFile
 
 import pytest
 
+HEAD = "1111111111111111111111111111111111111111"
+EARLIER = "2222222222222222222222222222222222222222"
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "fetch-e2e-logs.py"
@@ -27,6 +30,7 @@ class FakeRunner:
         self,
         *,
         runs: list[dict[str, object]] | None = None,
+        listings: list[list[dict[str, object]]] | None = None,
         fail_watch: bool = False,
         fail_actions_log: bool = False,
         fail_artifact: bool = False,
@@ -35,8 +39,10 @@ class FakeRunner:
         self.runs = (
             runs
             if runs is not None
-            else [{"databaseId": 42, "headBranch": "feature/test"}]
+            else [{"databaseId": 42, "headBranch": "feature/test", "headSha": HEAD}]
         )
+        # Successive `gh run list` answers, for a run that is listed only later.
+        self.listings = listings
         self.fail_watch = fail_watch
         self.fail_actions_log = fail_actions_log
         self.fail_artifact = fail_artifact
@@ -57,8 +63,11 @@ class FakeRunner:
 
         if args == ["git", "branch", "--show-current"]:
             return subprocess.CompletedProcess(args, 0, "feature/test\n", "")
+        if args == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(args, 0, HEAD + "\n", "")
         if args[:3] == ["gh", "run", "list"]:
-            return subprocess.CompletedProcess(args, 0, json.dumps(self.runs), "")
+            runs = self.listings.pop(0) if self.listings else self.runs
+            return subprocess.CompletedProcess(args, 0, json.dumps(runs), "")
         if args[:3] == ["gh", "run", "watch"]:
             if self.fail_watch:
                 raise subprocess.CalledProcessError(1, args, stderr="watch failed")
@@ -86,13 +95,13 @@ class FakeRunner:
         raise AssertionError(f"unexpected command: {args}")
 
 
-def test_latest_current_branch_run_is_waited_for_and_downloaded(
+def test_the_head_commits_run_on_the_current_branch_is_waited_for_and_downloaded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = FakeRunner(
         runs=[
-            {"databaseId": 51, "headBranch": "another-branch"},
-            {"databaseId": 42, "headBranch": "feature/test"},
+            {"databaseId": 51, "headBranch": "another-branch", "headSha": HEAD},
+            {"databaseId": 42, "headBranch": "feature/test", "headSha": HEAD},
         ]
     )
     monkeypatch.setattr(fetcher.subprocess, "run", runner)
@@ -140,18 +149,85 @@ def test_wait_failure_stops_before_log_download(
     )
 
 
-def test_missing_current_branch_run_is_reported(
+def test_missing_run_of_the_commit_is_reported_after_the_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    runner = FakeRunner(runs=[{"databaseId": 51, "headBranch": "another-branch"}])
+    runner = FakeRunner(
+        runs=[{"databaseId": 51, "headBranch": "another-branch", "headSha": HEAD}]
+    )
     monkeypatch.setattr(fetcher.subprocess, "run", runner)
 
-    assert fetcher.main(["--output-dir", str(tmp_path)]) == 1
+    assert fetcher.main(["--output-dir", str(tmp_path), "--wait-seconds", "0"]) == 1
 
-    assert (
-        "no e2e.yml workflow run found for branch feature/test"
-        in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert f"no e2e.yml workflow run of commit {HEAD[:12]} on branch feature/test" in error
+    assert not any(command[:3] == ["gh", "run", "watch"] for command in runner.commands)
+
+
+def test_a_finished_run_of_an_earlier_commit_is_never_fetched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner(
+        runs=[{"databaseId": 41, "headBranch": "feature/test", "headSha": EARLIER}]
     )
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--wait-seconds", "0"]) == 1
+
+    assert not any(command[:3] == ["gh", "run", "watch"] for command in runner.commands)
+    assert not (tmp_path / "41").exists()
+
+
+def test_a_just_dispatched_run_is_waited_for_until_it_is_listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    earlier = {"databaseId": 41, "headBranch": "feature/test", "headSha": EARLIER}
+    dispatched = {"databaseId": 43, "headBranch": "feature/test", "headSha": HEAD}
+    runner = FakeRunner(listings=[[earlier], [earlier], [dispatched, earlier]])
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+    slept: list[float] = []
+    now = iter([0.0, 1.0, 2.0, 3.0])
+
+    fetcher.fetch_logs(
+        workflow="e2e.yml",
+        output_root=tmp_path,
+        run_id=None,
+        wait_seconds=60,
+        sleep=slept.append,
+        clock=lambda: next(now),
+    )
+
+    assert len(slept) == 2
+    assert ["gh", "run", "watch", "43"] in runner.commands
+    assert not any("41" in command for command in runner.commands)
+
+
+def test_the_newest_of_several_runs_of_the_commit_is_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner(
+        runs=[
+            {"databaseId": 44, "headBranch": "feature/test", "headSha": HEAD},
+            {"databaseId": 43, "headBranch": "feature/test", "headSha": HEAD},
+        ]
+    )
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+
+    assert fetcher.main(["--output-dir", str(tmp_path)]) == 0
+    assert ["gh", "run", "watch", "44"] in runner.commands
+
+
+def test_an_explicit_commit_replaces_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner(
+        runs=[{"databaseId": 41, "headBranch": "feature/test", "headSha": EARLIER}]
+    )
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--commit", EARLIER]) == 0
+    assert ["gh", "run", "watch", "41"] in runner.commands
+    assert ["git", "rev-parse", "HEAD"] not in runner.commands
 
 
 def test_make_target_delegates_to_python_helper() -> None:
@@ -159,6 +235,7 @@ def test_make_target_delegates_to_python_helper() -> None:
     target = makefile.split("fetch-e2e-logs:", 1)[1].split("prune-tombstones:", 1)[0]
 
     assert "$(CURDIR)/scripts/fetch-e2e-logs.py" in target
+    assert '--commit "$(E2E_COMMIT)"' in target
     assert "gh run" not in target
 
 

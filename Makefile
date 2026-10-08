@@ -60,7 +60,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout check-agent-skills review design-review design implement lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout check-agent-skills review design-review design implement lock validate-local validate-helm check-push-ready push-branch validate
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -1048,6 +1048,25 @@ implement: ## Open a fresh Claude Code session implementing an OpenSpec change (
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
 
+HELM_CONTEXT ?= docker-desktop
+
+validate-local: ## Validate HEAD without changing the checkout: check-packaging, then make test
+	@python3 scripts/validate_slice.py local
+
+validate-helm: ## Validate HEAD on the Helm charts: render checks, images, deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop)
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)"
+
+check-push-ready: ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
+	@python3 scripts/check_push_ready.py check
+
+push-branch: ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
+	@python3 scripts/check_push_ready.py push
+
+validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change>)
+	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
+		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
+	@claude "/change-validate $(CHANGE)"
+
 run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \
 	if [ -z "$$branch" ]; then \
@@ -1059,11 +1078,13 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=
+E2E_COMMIT ?=
 
 fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
 		--output-dir "$(E2E_LOG_DIR)" \
-		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
+		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)")
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
