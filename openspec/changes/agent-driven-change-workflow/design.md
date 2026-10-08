@@ -180,12 +180,15 @@ verified to refuse writes.
 openspec/changes/<change>/reviews/        (untracked)
   01-design.md                review: summary, assessment, questions, findings
   01-design.triage.md         implementing agent's positions + owner dispositions
-  02-validation.md            pre-review validation report
-  03-implementation.md
-  03-implementation.triage.md
+  02-implementation.md        implementation review, run beside 03
+  03-validation.md            pre-review validation of the same commit
+  04-implementation-owner.md  the owner's own notes on the round, verbatim
+  02-implementation.triage.md one triage file beside each record triaged
+  03-validation.triage.md
+  04-implementation-owner.triage.md
   transcripts/
     01-design.log             raw reviewer session, for export only
-    03-implementation.log
+    02-implementation.log
     ...
 openspec/changes/<change>/interventions.jsonl   (tracked)
 ```
@@ -347,8 +350,11 @@ An implementation slice is committed, unreviewed, when its tasks are done; revie
 findings land as later commits. Validation therefore describes one commit, and
 must leave the checkout exactly as it found it: a step that rewrites a tracked file
 would validate a tree that is not the commit, and then push and run end-to-end
-against the commit that was never checked. Validation asserts a clean worktree
-before it starts and after it finishes, and fails rather than repairs.
+against the commit that was never checked. Validation asserts a clean worktree,
+untracked files included, before it starts and after each of its parts, and fails
+rather than repairs. The check after each part is not redundant: `make test`'s
+registry suite and the end-to-end image build both run `scripts/uv_project.py
+reinit`, which may rewrite a lock.
 
 Relocking is the clearest case. `make lock` rewrites lockfiles; run during
 validation it would silently repair a stale lock that `make check-packaging`'s lock
@@ -359,22 +365,47 @@ dependency, or a lock reaches projects no focused suite covers, as the first pil
 showed when a hand-maintained wheel list in another project's test fixture broke. A
 stale lock found by validation sends the slice back to implementation.
 
+Validation has three parts. The remote part starts first: once the push check
+passes, the commit is pushed and the end-to-end workflow dispatched, and the local
+and Helm parts run while the pipeline does, its logs fetched last. The pipeline is
+by far the slowest part, and pushing a commit that a local part later fails costs
+only a red run on the change's own branch.
+
 The local part — `make check-packaging` and `make test` — is one target that stops
-at the first failure and writes a summary. The Helm part runs on every validation,
-at the owner's direction: the images and charts are what is deployed, and a change
-whose diff never names them still reaches them through its packages. It runs `make -C helm test-render` with the VM storefront
+at the first failure and prints a summary of each step: its result, its duration,
+and the tail of a failing step's output.
+
+The Helm part runs on every validation, at the owner's direction: the images and
+charts are what is deployed, and a change whose diff never names them still reaches
+them through its packages. It runs `make -C helm test-render` with the VM storefront
 environment present, because that is the only place the chart-to-loader check runs
-— no CI job has both Helm and that environment — and then `make build-dev`,
-`make deploy` and `make forward` in `helm/`, `make test-module` in `e2e-tests/`
-against the forwarded services, and always `make unforward` afterwards. A render
-pass is not deployment evidence and a deployment pass does not prove the render
-contracts, so neither replaces the other. The remote part pushes every commit of the
-branch, triggers the end-to-end workflow, and fetches its logs. Failures found by
-any part go back to implementation to be fixed and the validation runs again.
+— no CI job has both Helm and that environment. Validation does not build that
+environment: when it is absent, validation fails before running anything and names
+`make init-storefront`. A skip reported by the loader check also fails validation,
+since a skip is how that check stops running without anyone noticing. The part then
+runs `make build-dev`, `make deploy` and `make forward` in `helm/`, the end-to-end
+scenarios against the forwarded services, and `make unforward` afterwards whatever
+failed. It deploys unattended and replaces the release running in the cluster, so
+it refuses a kube context other than `HELM_CONTEXT`, `docker-desktop` by default. A
+render pass is not deployment evidence and a deployment pass does not prove the
+render contracts, so neither replaces the other.
+
+The Helm end-to-end run selects the scenarios the pipeline runs, from the same
+marker variables in `e2e-tests/Makefile`, so the two lists cannot drift. The charts
+do not yet deploy everything the pipeline's compose stacks do — a second
+storefront, the API-credits service, the bare-metal storefront, a forwarded
+Mailpit — so a scenario that needs one of them is excluded from the Helm run by an
+explicit list naming the missing service, and the validation report lists it as
+not run against Helm, never as passed. The list is established by running the whole
+set against the charts once, not by inspection, and shrinks as the charts gain what
+the compose stacks have. Bringing the charts to parity, using the compose
+configuration the pipeline already runs, is its own change: this one makes no
+deployment change.
 
 The validation skill reads failing scenarios from the logs rather than reporting
-only an exit status, and writes `reviews/NN-validation.md`, which the reviewer
-reads as evidence. A failure stops the review unless the owner asks for one anyway.
+only an exit status, diagnoses each, and writes `reviews/NN-validation.md`. It
+fixes nothing. Its failures are triaged with the implementation round they belong
+to, and the fix commit is validated again.
 
 `make fetch-e2e-logs` selects the newest `e2e.yml` run whose head branch is the
 current branch, among the latest hundred. Runs on different branches therefore do
@@ -383,7 +414,8 @@ the same branch. Two gaps make it unsafe to call immediately after `make run-e2e
 dispatch is asynchronous, so the new run may not be listed yet and the previous,
 already finished run on the branch is fetched in its place; and nothing checks that
 the run tested the commit being validated. Selection matches the run's head commit
-to the local `HEAD` and waits, with a bound, for that run to appear.
+to the local `HEAD` and waits, with a bound, for that run to appear; when several
+runs match — a dispatch repeated on one commit — the newest is taken.
 
 ### Pushing is guarded by a check that repairs nothing
 
@@ -394,7 +426,60 @@ unattended push needs a mechanical definition of "the change's own branch", so
 `dev` branch, and an upstream whose name differs from the local branch. The push
 then sends exactly `HEAD` to that branch and is never forced. The check reports and
 never repairs: each refused state means something unexpected happened, and an
-agent fixing it automatically would hide that.
+agent fixing it automatically would hide that. A branch with no upstream yet is
+the one exception that is not a surprise — every new change branch starts that way
+— so it is pushed to the same name on `origin` with its upstream set; an upstream
+of any other name is still refused. `make push-branch` runs the check and the push
+together, so the push command is never composed by hand.
+
+### An implementation round is triaged in a fresh session
+
+After one or more sections are committed, an implementation round makes three
+observations of the same commit in parallel, none of which edits anything: the
+implementation review (`make review`), validation (`make validate`), and the
+owner's own reading of the diff while the pipeline runs. A fresh session opened by
+`make triage` then triages all three together with `change-triage`.
+
+This keeps the owner's established practice — the review, the test and pipeline
+results, and the owner's own notes handed to one agent, with the instruction that
+the advice is non-binding and each change is discussed before it is made — while
+moving it out of the implementation session, which by then is large, and is the
+context the workflow has stopped trusting.
+
+- **Validation results are triaged, not reviewed.** A reviewer given them would
+  have to wait for the pipeline, adding an hour to every review; it could fix
+  nothing; and its judgement of the code does not depend on the pipeline's result.
+  Each validation failure is presented as a finding — lens `testing`, basis
+  `evidence`, severity `blocking` — whose diagnosis triage checks against the logs
+  rather than trusting. A reviewer still reads the validation record of its commit
+  when one already exists. Fixes for failures and for review findings often touch
+  the same code, which is why one session handles both.
+- **The owner's notes are evaluated, not obeyed.** The owner pastes them into the
+  triage session, which saves them verbatim as `NN-implementation-owner.md` and
+  takes a position on each point as on any finding, disagreeing where the files say
+  otherwise. Each point is logged to the ledger: one the owner raised and no
+  reviewer did is the clearest sign of a check missing from the guidance.
+- **Triage fixes what the owner accepts, in the same session.** The fixes are
+  checked as a section is — `change-implement`'s checks, the fresh-context
+  compliance check among them — and committed as one commit, which is then
+  validated again. Whether the fixes also need another review round is the owner's
+  call, as at any gate.
+- **Its own entry point and skill.** Triage of an implementation round is not
+  folded into the start of `change-implement`, the way design triage is folded
+  into `change-design`. Triaging and fixing feedback differs enough from
+  implementing a planned section to need its own instructions, and `change-triage`
+  already holds them for every other review; extending it keeps one copy of the
+  presentation and ledger rules. `make triage CHANGE=` opens it.
+
+An implementation review does not wait for validation, since the two run side by
+side. A pre-closeout review does: it asks whether the change is ready for closeout,
+which a failing pipeline answers. `make review KIND=pre-closeout` refuses unless the
+latest validation record names `HEAD` and passed, unless the owner overrides it
+(`UNVALIDATED=1`), and triage does not pass the pre-closeout gate without one.
+
+Records produced in parallel take their numbers when they are written, not when
+their run starts, so a review and a validation started together never claim the
+same number.
 
 ### The index states each change's phase and whether it can proceed
 

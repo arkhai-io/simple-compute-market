@@ -23,7 +23,7 @@ to repair by hand.
       link resolves to the shared skill of its own name. Amended: there is no
       general check aggregate to wire it into — `check-packaging` aggregates
       packaging checks only — so `change-closeout` runs it among closeout's
-      mechanical checks (9.1).
+      mechanical checks (10.1).
 - [x] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
       included, to `.gitignore`; confirmed for an active and an archived path.
 
@@ -247,74 +247,139 @@ to repair by hand.
 
 ## 8. Pre-review validation
 
-- [ ] 8.1 Add a `make` target running `make check-packaging` and `make test`,
-      failing if the worktree is not clean before or after, and stopping at the
-      first failure with a summary.
-- [ ] 8.2 Add `make check-push-ready`: refuse a detached `HEAD`, a dirty worktree,
-      `main` or `dev`, and an upstream named differently from the local branch;
-      report and never repair.
-- [ ] 8.3 Make end-to-end log fetching select the run whose head commit is the
-      local `HEAD`, waiting with a bound for a just-dispatched run to appear,
-      instead of the newest run on the branch, with tests for both gaps.
-- [ ] 8.4 Write the `change-validate` skill, the Helm part on every run and a
-      failure returned to implementation and validated again: the local target; the Helm
-      part (`make -C helm test-render` with the VM storefront environment present,
-      `make build-dev`, `helm/` deploy and forward, `e2e-tests/` test-module,
-      unforward); `make check-push-ready`, pushing exactly `HEAD` unforced, the
-      end-to-end workflow, and its logs; diagnosis of a failing scenario from its
-      logs; and `reviews/NN-validation.md`.
-- [ ] 8.5 Pilot: validate the 7.3 slice, then run an implementation review and
-      triage on it with the section 4 and 5 skills; the change stays
-      `in implementation`.
+Validation observes one commit and edits nothing (`design.md`, "Validation observes
+a committed slice and never alters it"). Every script below is tested in
+`scripts/tests/` with an injected command runner, at unit level, except where a
+real repository is the lowest level that proves the behaviour.
 
-## 9. Closeout and archival
+- [ ] 8.1 Add `make validate-local` (`scripts/validate_slice.py`, tests in
+      `scripts/tests/test_validate_slice.py`): `make check-packaging`, then
+      `make test`; a clean worktree, untracked files included, asserted before and
+      after; stopping at the first failure; each step's log under
+      `.snapshot/validation/<commit>/`; and a summary of each step's result,
+      duration, and a failing step's output tail.
+- [ ] 8.2 Add `make validate-helm` to the same script: refuse a kube context other
+      than `HELM_CONTEXT` (default `docker-desktop`); fail before running anything
+      when the VM storefront environment is absent, naming `make init-storefront`;
+      `make -C helm test-render`, failing on a loader-check skip; `make build-dev`;
+      `make deploy` and `make forward` in `helm/`; the pipeline's scenarios, read
+      from `e2e-tests/Makefile`'s `E2E_MODULE` and `E2E_BARE_METAL_MODULE`, minus
+      an explicit exclusion list naming each excluded scenario's missing service,
+      run with `make test-module` and reported as not run; `make unforward`
+      whatever failed; a clean worktree afterwards. The list starts from the
+      services the default chart values do not deploy and is confirmed by 8.6.
+- [ ] 8.3 Add `make check-push-ready` and `make push-branch`
+      (`scripts/check_push_ready.py`, tests against temporary Git repositories):
+      refuse a detached `HEAD`, a dirty worktree, `main` or `dev`, and an upstream
+      named differently from the branch; push a branch with no upstream to the
+      same name on `origin` with its upstream set; push exactly `HEAD`, never
+      forced; report and never repair.
+- [ ] 8.4 Make `scripts/fetch-e2e-logs.py` select the run whose head commit is the
+      local `HEAD` (`--commit`, defaulting to `HEAD` when no `--run-id` is given),
+      polling with a bound for a just-dispatched run and taking the newest match,
+      with tests for both gaps: a finished earlier run on the branch, and a run not
+      yet listed. Update the run-selection paragraph of
+      `docs/development/TESTING.md`'s system integration section to match.
+- [ ] 8.5 Write the `change-validate` skill (`.agents/skills/change-validate/`,
+      linked for both harnesses) and `make validate CHANGE=`: check the branch
+      carries the change; `make push-branch` and `make run-e2e`; the local and Helm
+      parts while the pipeline runs; `make fetch-e2e-logs` for `HEAD` and the
+      run's conclusion; a diagnosis of each failing scenario from its logs; and
+      `reviews/NN-validation.md`, numbered when written, naming the commit, each
+      part's result, the Helm exclusions, the run and its conclusion, and the
+      diagnoses. It never edits or fixes. `make check-agent-skills`.
+- [ ] 8.6 Pilot: validate `capacity-shape-envelope` at `HEAD`. The Helm part runs
+      the whole scenario set once with no exclusions, and the exclusion list is set
+      from what fails for a missing service, as distinct from what fails for a real
+      reason.
+- [ ] 8.7 Propose a change bringing the Helm charts and `make forward` to the
+      pipeline's compose topology, using the compose configuration the pipeline
+      runs, so the exclusion list empties; add its row to
+      `openspec/changes/README.md`. Proposal only.
 
-- [ ] 9.1 Write the `change-closeout` skill over the ten parts of
+## 9. Implementation-round triage
+
+The review, validation, and the owner's notes on one commit are triaged together in
+a fresh session (`design.md`, "An implementation round is triaged in a fresh
+session").
+
+- [ ] 9.1 Extend `change-triage` for an implementation round: its inputs are the
+      untriaged implementation reviews, the validation record of their commit, and
+      the owner's notes, pasted and saved verbatim as
+      `NN-implementation-owner.md`; each validation failure is a finding (lens
+      `testing`, basis `evidence`, severity `blocking`) whose diagnosis is checked
+      against the logs; each of the owner's points gets a position like any
+      finding and a ledger entry; after the dispositions, accepted fixes are made
+      in the session, pass `change-implement`'s checks including the fresh-context
+      check, are committed as one commit, and the owner is told to validate it
+      again; the pre-closeout gate does not pass without a passing validation of
+      `HEAD`.
+- [ ] 9.2 Add `make triage CHANGE=`, opening a Claude Code session with
+      `/change-triage <change>`.
+- [ ] 9.3 In `scripts/run_change_review.py`: allocate a record's number when it is
+      written rather than when the run starts, so parallel records never share one;
+      and make `KIND=pre-closeout` refuse unless the latest validation record names
+      `HEAD` and passed, overridden by `UNVALIDATED=1`. Tests in
+      `scripts/tests/test_run_change_review.py`.
+- [ ] 9.4 Amend `change-implement`'s closing report (review and validation in
+      parallel, the owner's notes, then `make triage`) and `change-review`'s inputs
+      (read the validation record of the reviewed commit when one exists; never
+      wait for one).
+- [ ] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
+      `08-implementation-external.md` with 8.6's validation record and the owner's
+      notes, through `make triage`; compare the two reviews for the pilot record;
+      the change stays `in implementation`.
+
+## 10. Closeout and archival
+
+- [ ] 10.1 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
       and reporting the parts that need judgement, including
       `make check-agent-skills`; it moves the index row to
       `in closeout` when closeout starts.
-- [ ] 9.2 Write the `change-ship` skill: archival with the intervention ledger kept
+- [ ] 10.2 Write the `change-ship` skill: archival with the intervention ledger kept
       and `reviews/` deleted, and drafting the commit message and pull request
       description from the proposal, the promotion record, and the validation
       evidence; it moves the index row to `archived`.
-- [ ] 9.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, one
+- [ ] 10.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, one
       session each, then
       pre-closeout review and triage, closeout, closeout review and triage, and
       archival.
 
-## 10. Shared guidance
+## 11. Shared guidance
 
-- [ ] 10.1 Remove the "Generated implementation artifacts" section and the fileset
+- [ ] 11.1 Remove the "Generated implementation artifacts" section and the fileset
       wording from `AGENTS.md`, and the tombstone item from the
       `openspec/README.md` completion checklist. Confirm the browser session
       prompts still carry the whole tombstone convention, including that no
       tombstone survives into production code or permanent documentation.
-- [ ] 10.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
+- [ ] 11.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
       `make review`, the review file layout, and the ledger; link it from
       `AGENTS.md`'s "Agent skills" section.
-- [ ] 10.3 Confirm no committed skill refers to `docs/prompts/`.
+- [ ] 11.3 Confirm no committed skill refers to `docs/prompts/`.
 
-## 11. Closeout
+## 12. Closeout
 
-- [ ] 11.1 Comment hygiene: `make check-comment-hygiene`.
-- [ ] 11.2 Import placement: review the imports this change added or touched,
-      including in `scripts/fetch-e2e-logs.py`.
-- [ ] 11.3 Documentation compliance: re-check this change's decisions against
+- [ ] 12.1 Comment hygiene: `make check-comment-hygiene`.
+- [ ] 12.2 Import placement: review the imports this change added or touched,
+      including in `scripts/fetch-e2e-logs.py`, `scripts/validate_slice.py`, and
+      `scripts/check_push_ready.py`.
+- [ ] 12.3 Documentation compliance: re-check this change's decisions against
       `openspec/README.md`'s placement rules.
-- [ ] 11.4 Narrative compression of completed-task notes.
-- [ ] 11.5 Roadmap currency: record that no roadmap goal is affected, or update it.
-- [ ] 11.6 Campaign index currency: this change's row, including the
+- [ ] 12.4 Narrative compression of completed-task notes.
+- [ ] 12.5 Roadmap currency: record that no roadmap goal is affected, or update it.
+- [ ] 12.6 Campaign index currency: this change's row, including the
       dependency-landing step for any dependent.
-- [ ] 11.7 Documentation citations: `make check-doc-citations CHANGE=agent-driven-change-workflow`.
-- [ ] 11.8 Packaging: `make check-packaging`.
-- [ ] 11.9 End-to-end pipeline: record a passing run and the scenarios it covers,
+- [ ] 12.7 Documentation citations: `make check-doc-citations CHANGE=agent-driven-change-workflow`.
+- [ ] 12.8 Packaging: `make check-packaging`.
+- [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
-- [ ] 11.10 Resolve the open question on exporting session transcripts and review
+- [ ] 12.10 Resolve the open question on exporting session transcripts and review
       logs: how `change-ship` confirms the export ran before `reviews/` is deleted,
       and whether permanent documentation states that they are exported.
-- [ ] 11.11 Promotion: complete the design-promotion record against the proposal's
+- [ ] 12.11 Promotion: complete the design-promotion record against the proposal's
       knowledge-to-promote list — `change-workflow` spec and architecture
       companion, the three `planning-governance` requirements, closeout part 6,
-      `AGENTS.md`, `docs/agents/change-workflow.md`, and a `change-workflow` row
+      `AGENTS.md`, `docs/agents/change-workflow.md`, the run-selection paragraph of
+      `docs/development/TESTING.md`, and a `change-workflow` row
       linking the spec and architecture companion in `openspec/specs/README.md`.

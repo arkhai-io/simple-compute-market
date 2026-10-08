@@ -185,7 +185,11 @@ condition validation could repair, such as a stale lock, MUST fail validation an
 return the slice to implementation. End-to-end evidence MUST come from a pipeline
 run whose head commit is the commit under validation. Validation MUST also build the
 service images and include the Helm render checks, with the chart-to-loader check
-able to run, and a Helm end-to-end run.
+able to run, and a Helm end-to-end run of the scenarios the pipeline runs. A skipped
+chart-to-loader check MUST fail validation. A pipeline scenario the charts cannot
+serve MAY be excluded from the Helm run only by an explicit list naming the
+missing service, and MUST be reported as not run, never as passed. Validation MUST
+NOT fix what it finds.
 
 #### Scenario: A lockfile is stale
 
@@ -200,12 +204,20 @@ able to run, and a Helm end-to-end run.
 - **THEN** validation reports the run whose head commit is the validated commit,
   never the earlier one
 
+#### Scenario: A pipeline scenario needs a service the charts do not deploy
+
+- **WHEN** the Helm end-to-end run reaches a pipeline scenario that needs a service
+  the charts do not deploy
+- **THEN** the scenario is on the exclusion list with that service named, and the
+  validation report lists it as not run against Helm
+
 ### Requirement: Guarded push of a change branch
 
 An agent MAY push a change's own branch without separate approval, only after a
 check confirms that `HEAD` is attached, the worktree is clean, the branch is neither
 `main` nor `dev`, and the branch's upstream has the same name. The push MUST send
-exactly `HEAD` and MUST NOT be forced. The check MUST report a refused state and
+exactly `HEAD` and MUST NOT be forced. A branch with no upstream MAY be pushed to
+the same name, setting that upstream. The check MUST report a refused state and
 MUST NOT repair it.
 
 #### Scenario: The worktree is dirty
@@ -213,6 +225,31 @@ MUST NOT repair it.
 - **WHEN** validation is about to push and the worktree has uncommitted changes
 - **THEN** the push check fails, nothing is pushed, and nothing is committed or
   discarded to make it pass
+
+### Requirement: Triage of an implementation round
+
+The implementation review, the validation of the same commit, and the owner's own
+notes on it MUST be triaged together, in a session that is not the implementing
+session. Each validation failure MUST be presented as a finding, with its diagnosis
+checked against the logs. The owner's notes MUST be saved verbatim as a review
+record and triaged like any review: the triaging agent MUST state its own position
+on each point rather than carry it out as an instruction, and each disposition
+MUST be logged to the intervention ledger. Accepted fixes MUST pass the checks a
+section passes before they are committed, and the commit MUST be validated again.
+A pre-closeout review MUST NOT run, and its gate MUST NOT pass, unless the latest
+validation names `HEAD` and passed, except where the owner overrides it.
+
+#### Scenario: The owner's note is contradicted by the files
+
+- **WHEN** a point in the owner's notes rests on a claim the files contradict
+- **THEN** triage says so, with the evidence, and nothing changes until the owner
+  has recorded a disposition
+
+#### Scenario: Validation fails beside an implementation review
+
+- **WHEN** an implementation round's validation reports a failing scenario
+- **THEN** the failure is triaged as a finding of the round, fixed after the owner's
+  disposition, and the fix commit is validated again
 
 ### Requirement: Harness-neutral agent skills
 

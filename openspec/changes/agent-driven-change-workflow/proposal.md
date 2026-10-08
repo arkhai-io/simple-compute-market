@@ -40,11 +40,16 @@ directly in the repository is told to write tombstones instead of deleting files
   Claude Code hook re-reads the required documents after compaction as a backstop.
 - Record every owner disposition of a finding in the change's tracked intervention
   ledger, which is archived with the change and feeds periodic guidance refinement.
-- Automate the validation run before every implementation review, as an
+- Automate the validation run beside every implementation review, as an
   observation of a committed slice that never alters it: packaging, tests, the
-  Helm render checks and Helm end-to-end run when owed, and the end-to-end
-  pipeline run for exactly the commit under review. Pushing the change's branch
-  is guarded by a check that refuses any state it would have to repair.
+  Helm render checks and a Helm end-to-end run of the pipeline's scenarios on
+  every run, and the end-to-end pipeline run for exactly the commit under review.
+  Pushing the change's branch is guarded by a check that refuses any state it
+  would have to repair.
+- Add `make triage`, which triages an implementation round in a fresh session:
+  the review, the validation record, and the owner's own notes together, each
+  point evaluated with a position rather than obeyed, and the accepted fixes made
+  and checked as a section is.
 - Give every change row in the active-change index a phase-and-state status, a
   `Depends on` column naming which phase each dependency gates, and a `Notes`
   column; when a dependency lands, its dependents' designs are reverified before
@@ -99,13 +104,20 @@ directly in the repository is told to write tombstones instead of deleting files
       process, not system architecture.
 - [x] Existing subsystem specification — `openspec/specs/planning-governance/spec.md`.
 - [x] New subsystem specification — `openspec/specs/change-workflow/spec.md`.
-- [x] Contributor guidance — `AGENTS.md`, `openspec/README.md`, and `docs/agents/`.
+- [x] Contributor guidance — `AGENTS.md`, `openspec/README.md`, `docs/agents/`, and
+      `docs/development/TESTING.md` (end-to-end run selection).
 
 ### Knowledge to promote
 
 - Phases, owner gates, review records, finding lens/basis/severity, triage, the
   intervention ledger, one section per fresh session, observational validation,
-  push guards, and single-source skills — `openspec/specs/change-workflow/spec.md`.
+  triage of an implementation round, push guards, and single-source skills —
+  `openspec/specs/change-workflow/spec.md`.
+- Why validation results go to triage rather than to the reviewer, and why the
+  owner's notes are evaluated rather than obeyed —
+  `openspec/specs/change-workflow/architecture.md`.
+- End-to-end log fetching selects the run for the validated commit —
+  `docs/development/TESTING.md`.
 - Why compliance degrades with session length and why fresh sessions, not a
   re-injected digest, are the remedy — `openspec/specs/change-workflow/architecture.md`.
 - Why lens and basis are separate axes, why reviews are exchanged as files rather
@@ -129,7 +141,12 @@ directly in the repository is told to write tombstones instead of deleting files
   change gains a tracked `interventions.jsonl`.
 - **Index format.** Every change row in `openspec/changes/README.md` is checked
   against its own change and rewritten into `Status`, `Depends on`, and `Notes`.
-- **Tooling.** `scripts/fetch-e2e-logs.py` selects the run for a given commit.
+- **Tooling.** `scripts/fetch-e2e-logs.py` selects the run for a given commit;
+  new targets `validate-local`, `validate-helm`, `check-push-ready`,
+  `push-branch`, `validate`, and `triage`.
+- **Follow-up.** The Helm charts lack services the pipeline's compose stacks run,
+  so some pipeline scenarios are excluded from the Helm run; bringing the charts
+  to parity is a separate change.
 - **External effects.** Validation pushes the change's own branch and triggers the
   end-to-end GitHub Actions workflow against it.
 - No wire, database, deployment, or packaging change.
