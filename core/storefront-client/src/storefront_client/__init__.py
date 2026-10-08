@@ -12,15 +12,19 @@ from storefront_client.client import (
     SyncStorefrontClient,
 )
 from storefront_client.models import (
+    AgreementSettleResponse,
     IdentityBindingStatusResponse,
     IdentitySubjectStatusResponse,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
     StorefrontListingRefundResponse,
+    RefundSettlementResponse,
 )
 
 __all__ = [
+    "AgreementSettleResponse",
+    "RefundSettlementResponse",
     "SignedRequest",
     "StorefrontAuthenticationError",
     "StorefrontClient",

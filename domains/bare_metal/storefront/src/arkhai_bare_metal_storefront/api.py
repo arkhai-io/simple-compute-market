@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-
-from collections.abc import Mapping
 import json
-from urllib.parse import quote, urlencode
+from collections.abc import Mapping
 from typing import Annotated, Any
+from urllib.parse import quote, urlencode
 
 from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import (
@@ -26,9 +24,13 @@ from core_storefront.models.negotiation_models import (
     NegotiationDetailResponse,
     NegotiationListResponse,
 )
-from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP, AdminPauseResponse
-from fastapi import APIRouter, Body, HTTPException, Query, Request
-
+from core_storefront.models.settle_models import RefundSettlementResponse
+from core_storefront.models.system_models import (
+    STAGE_EVENT_PAGE_CAP,
+    AdminPauseResponse,
+)
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
@@ -37,6 +39,12 @@ from market_contact_exchange import (
     IntroductionStart,
 )
 from market_identity import EMPTY_BODY, Identity
+from market_negotiation_runtime import (
+    NegotiationStateError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
     PoolOverrideContractError,
@@ -48,12 +56,6 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
     pool_override_contract,
 )
-from market_negotiation_runtime import (
-    NegotiationStateError,
-    NegotiationUnavailableError,
-    OfferUnfulfillableError,
-    StorefrontPausedError,
-)
 from market_storefront_kit import (
     DealControlRouteError,
     LifecycleRouteError,
@@ -64,26 +66,23 @@ from market_storefront_kit import (
     get_storefront_container,
     opening_proposal,
 )
-from market_settlement_runtime import (
-    HostedSettlementRouteError,
-    HostedSettlementStart,
-)
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
+
+from .fulfillment_service import BareMetalFulfillmentError
 from .models import (
     BareMetalAccessDeliveryResponse,
-    BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
+    BareMetalFulfillRequest,
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
-from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
-from .runtime import BareMetalStorefrontRuntime
-from .settlement_service import SettlementRequestError
-from .hosted_routes import build_bare_metal_hosted_route_service
 from .response_auth import bind_response_auth, bind_response_contract
+from .runtime import BareMetalStorefrontRuntime
+from .settlement_service import PaymentSettleResult, SettlementRequestError
 
 router = APIRouter()
 
@@ -155,6 +154,23 @@ async def _buyer(
         body=body,
         expected_role="buyer",
         expected_principal=expected_principal,
+    )
+
+
+async def _seller(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    operation: str,
+    resource: str,
+) -> Identity:
+    return await _principal(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=resource,
+        expected_role="seller",
+        expected_principal=runtime.seller_principal,
     )
 
 
@@ -230,54 +246,6 @@ async def _request_body(request: Request) -> Any:
         return json.loads(raw)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="request body must be JSON") from exc
-
-
-async def _authorize_hosted_request(
-    request: Request,
-    operation: str,
-    resource: str,
-    expected_principal: Identity,
-    body: Mapping[str, Any] | None,
-) -> Any:
-    runtime = _runtime(request)
-    bind_response_contract(request, operation=operation, resource=resource)
-    try:
-        authenticated = await authenticate_request(
-            headers=request.headers,
-            method=request.method,
-            operation=operation,
-            resource=resource,
-            body=body if body is not None else EMPTY_BODY,
-            expected_role="buyer",
-            replay_store=runtime.db,
-            expected_principal=expected_principal,
-        )
-    except AuthError as exc:
-        raise HostedSettlementRouteError(exc.status_code, exc.detail) from exc
-    bind_response_auth(
-        request,
-        authenticated,
-        operation=operation,
-        resource=resource,
-    )
-    return authenticated
-
-
-def _hosted_service(request: Request) -> Any:
-    runtime = _runtime(request)
-    if runtime.settlement_composition is None:
-        raise HTTPException(status_code=404, detail="hosted settlement is disabled")
-    if runtime.hosted_domain_callbacks is None:
-        raise HTTPException(
-            status_code=503,
-            detail="bare-metal hosted lifecycle is unavailable",
-        )
-    return build_bare_metal_hosted_route_service(
-        repository=runtime.settlement_repository,
-        runtime=runtime.settlement_runtime,
-        domain_callbacks=runtime.hosted_domain_callbacks,
-        authorize_request=_authorize_hosted_request,
-    )
 
 
 async def _authorize_introduction_request(
@@ -370,48 +338,6 @@ async def delete_introduction_payloads(
     if retention is None:
         raise HTTPException(status_code=404, detail="contact exchange is disabled")
     return await retention.delete_one(obligation_ref)
-
-
-@router.post("/api/v1/settlements")
-async def start_hosted_settlement(
-    body: HostedSettlementStart,
-    request: Request,
-) -> Mapping[str, Any]:
-    try:
-        return await _hosted_service(request).start(request, body)
-    except HostedSettlementRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.get("/api/v1/settlements/{settlement_ref}")
-async def hosted_settlement_status(
-    settlement_ref: str,
-    request: Request,
-) -> Mapping[str, Any]:
-    try:
-        return await _hosted_service(request).status(request, settlement_ref)
-    except HostedSettlementRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.post("/api/v1/settlements/{settlement_ref}/reclaim")
-async def reclaim_hosted_settlement(
-    settlement_ref: str,
-    request: Request,
-    mechanism_options: dict[str, Any] | None = Body(default=None),
-) -> Mapping[str, Any]:
-    """Reclaim one eligible expired hosted settlement.
-
-    The body is the mechanism's own vocabulary for this one reclaim -- a
-    push-funded profile needs somewhere to address the payer's return -- so it
-    is relayed opaquely rather than parsed into a model here.
-    """
-    try:
-        return await _hosted_service(request).reclaim(
-            request, settlement_ref, mechanism_options
-        )
-    except HostedSettlementRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def _listing_response(
@@ -753,30 +679,55 @@ async def get_negotiation(
 
 @router.post(
     "/api/v1/settle/{escrow_uid}",
-    response_model=BareMetalSettleResponse,
+    response_model=None,
 )
 async def settle(
     escrow_uid: str,
     body: BareMetalSettleRequest,
     request: Request,
-) -> BareMetalSettleResponse:
+) -> BareMetalSettleResponse | JSONResponse:
     runtime = _runtime(request)
     try:
         identity = await _buyer(
             request=request,
             runtime=runtime,
-            operation="settle_escrow",
+            operation=SETTLE.operation,
             resource=escrow_uid,
             body=await _request_body(request),
             expected_principal=body.buyer_principal,
         )
-        return await runtime.settlement_service().verify(
+        result = await runtime.settlement_service().verify(
             escrow_uid=escrow_uid,
             request=body,
             buyer_principal=identity,
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if isinstance(result, PaymentSettleResult):
+        return JSONResponse(content=result.payload, status_code=result.status_code)
+    return result
+
+
+@router.post(
+    "/api/v1/settlements/{negotiation_id}/refund",
+    response_model=RefundSettlementResponse,
+)
+async def refund_settlement(negotiation_id: str, request: Request) -> JSONResponse:
+    """Reverse an accepted payment deal's held funds; only the seller may ask."""
+    runtime = _runtime(request)
+    await _seller(
+        request=request,
+        runtime=runtime,
+        operation=REFUND.operation,
+        resource=negotiation_id,
+    )
+    try:
+        result = await runtime.settlement_service().refund_payment(
+            negotiation_id=negotiation_id
+        )
+    except SettlementRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return JSONResponse(content=result.payload, status_code=result.status_code)
 
 
 @router.get(
@@ -790,17 +741,20 @@ async def settle_status(
     runtime = _runtime(request)
     try:
         escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
-        if escrow is None:
+        record = await runtime.db.load_bare_metal_settlement_record_by_ref(
+            settlement_ref=escrow_uid
+        ) or await runtime.db.load_bare_metal_settlement_record(negotiation_id=escrow_uid)
+        if escrow is None and record is None:
             raise SettlementRequestError("escrow not found", status_code=404)
         thread = await runtime.db.load_negotiation_thread_row(
-            negotiation_id=str(escrow["negotiation_id"]),
+            negotiation_id=str((escrow or record)["negotiation_id"]),
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
         identity = await _buyer(
             request=request,
             runtime=runtime,
-            operation="settle_status",
+            operation=SETTLE_STATUS.operation,
             expected_principal=Identity.model_validate(thread["buyer_principal"]),
             resource=escrow_uid,
         )
@@ -1002,37 +956,6 @@ async def teardown_fulfillment(
             status_code=exc.status_code,
             detail=exc.detail,
         ) from exc
-
-
-@router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
-async def hosted_lease_evidence(
-    evidence_digest: str,
-    request: Request,
-) -> dict[str, Any]:
-    """Resolve one content-addressed lease-ready document with seller proof."""
-
-    if len(evidence_digest) != 64 or any(
-        char not in "0123456789abcdef" for char in evidence_digest
-    ):
-        raise HTTPException(status_code=404, detail="evidence not found")
-    runtime = _runtime(request)
-    evidence = await runtime.db.load_bare_metal_hosted_evidence(
-        evidence_digest="sha256:" + evidence_digest
-    )
-    if evidence is None:
-        raise HTTPException(status_code=404, detail="evidence not found")
-    material = evidence.canonical_json().encode("utf-8")
-    proof = (
-        base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
-        .rstrip(b"=")
-        .decode("ascii")
-    )
-    return {
-        "protocol": "arkhai.bare-metal-evidence-signature.v1",
-        "seller_principal": runtime.seller_principal.model_dump(mode="json"),
-        "evidence": evidence.model_dump(mode="json"),
-        "proof": proof,
-    }
 
 
 @router.get("/health", response_model=BareMetalHealthResponse)

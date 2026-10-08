@@ -1,19 +1,19 @@
 [project]
 name = "arkhai-bare-metal"
-version = "0.9.0"
+version = "0.10.0"
 license = "MIT"
 description = "Bare-metal market schema and domain vocabulary for Arkhai."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
-    "arkhai-core>=0.2.0",
+    "arkhai-core>=0.4.0",
     "arkhai-compute>=0.1.0",
     "arkhai-kit-capability-shape>=0.2.0",
 ]
 
 [project.optional-dependencies]
 storefront = [
-    "arkhai-core-storefront>=0.6.0",
+    "arkhai-core-storefront>=0.11.0",
 ]
 
 [project.entry-points."market.storefront_domains"]
@@ -32,6 +32,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "arkhai-core-storefront>=0.6.0",
+    "arkhai-core-storefront>=0.11.0",
     "pytest>=8.0",
 ]

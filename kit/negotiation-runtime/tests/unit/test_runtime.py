@@ -1,12 +1,12 @@
 from __future__ import annotations
+import base64
 
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from market_identity import Ed25519Signer, Identity
+from market_identity import Ed25519Signer
 from market_negotiation_runtime import (
     Acceptance,
     AgreementTerms,
@@ -57,9 +57,7 @@ class RecordingRepository:
             {
                 **values,
                 "round": round_number,
-                "sender_principal": values["sender_principal"].model_dump(
-                    mode="json"
-                ),
+                "sender_principal": values["sender_principal"].model_dump(mode="json"),
             }
         )
         return round_number
@@ -154,7 +152,9 @@ class HookHarness:
                 "amount": acceptance.agreed_amount,
                 "terms": dict(acceptance.terms.wire or {}),
                 "buyer": acceptance.buyer_principal.model_dump(mode="json"),
-            }
+            },
+            "agreement_bytes": base64.b64encode(b'{"accepted":true}').decode("ascii"),
+            "settlement_data": {"transaction_id": "a" * 64},
         }
 
     def event(self, component: str, event: str, **fields: Any) -> None:
@@ -310,7 +310,9 @@ async def test_opening_actor_mismatch_fails_before_resolution_or_policy() -> Non
 
 
 @pytest.mark.asyncio
-async def test_continuation_principal_mismatch_fails_before_policy_and_effects() -> None:
+async def test_continuation_principal_mismatch_fails_before_policy_and_effects() -> (
+    None
+):
     repository = RecordingRepository()
     harness = HookHarness()
     runtime = runtime_for(repository, harness)
@@ -346,7 +348,9 @@ async def test_continuation_principal_mismatch_fails_before_policy_and_effects()
 
 
 @pytest.mark.asyncio
-async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects() -> None:
+async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects() -> (
+    None
+):
     repository = RecordingRepository()
     harness = HookHarness()
     runtime = runtime_for(repository, harness)
@@ -375,10 +379,17 @@ async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects(
 
     assert response["accepted_artifact"]["terms"] == {"units": 7}
     assert response["accepted_artifact"]["amount"] == 12
+    assert response["agreement_bytes"] == base64.b64encode(b'{"accepted":true}').decode(
+        "ascii"
+    )
     # The domain sees the buyer's pinned proposal, whose selected option it
     # negotiates from.
     assert harness.reference_calls == [{"price": 10}]
     assert repository.agreements[0]["agreed_price"] == 12
+    assert repository.agreements[0]["agreement_bytes"] == b'{"accepted":true}'
+    assert repository.agreements[0]["settlement_data"] == {"transaction_id": "a" * 64}
+    assert repository.agreements[0]["accepted_at"] == "2026-08-15T00:00:00Z"
+    assert repository.agreements[0]["agreed_start_utc"] == "2026-08-15T00:00:00Z"
     assert repository.threads["neg-fixed"]["terminal_state"] == "success"
     assert repository.effects[-2][0] == "hold"
     assert repository.effects[-1][0] == "artifacts"

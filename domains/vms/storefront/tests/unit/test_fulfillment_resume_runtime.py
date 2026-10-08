@@ -271,20 +271,20 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
 
 
 @pytest.mark.asyncio
-async def test_hosted_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
-    """A hosted deal already has a convergence owner and must keep only one.
+async def test_a_chainless_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
+    """A deal settled off-chain already has a convergence owner and keeps only one.
 
     The settlement runtime reserves fulfillment before it provisions. This
-    sweep takes no such reservation, so converging a hosted escrow here puts
+    sweep takes no such reservation, so converging a chainless escrow here puts
     two owners on one capacity reservation -- observed as a second provisioning
     two seconds behind the first, rejected as ``fulfillment_conflict``.
     """
 
-    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "hosted.db")
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "chainless.db")
     db = lifecycle.reopen()
     escrow = await db.load_escrow(escrow_uid="escrow-1")
     assert escrow is not None
-    hosted = {**escrow, "chain_name": None}
+    chainless = {**escrow, "chain_name": None}
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(),
         begin_fulfillment=AsyncMock(),
@@ -293,7 +293,7 @@ async def test_hosted_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
     )
 
     assert (
-        await converge_escrow_once(hosted, sqlite_client=db, fulfillment_client=remote)
+        await converge_escrow_once(chainless, sqlite_client=db, fulfillment_client=remote)
         is False
     )
     remote.schedule_resource.assert_not_awaited()

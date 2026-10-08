@@ -19,14 +19,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from core_storefront.app_composition import default_storefront_app_config
-from core_storefront.services.negotiation_service import NegotiationService
-from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_core import MarketDomainContract
 from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
 )
+from core_storefront.services.negotiation_service import NegotiationService
+from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_capacity_publication import CapacityRuntime
+from market_core import MarketDomainContract
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
@@ -54,6 +54,7 @@ from market_storefront.middleware.service_peer_auth import (
     initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
+from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.utils.config import (
     AGENT_ID,
     get_evm_wallet_address,
@@ -64,7 +65,6 @@ from market_storefront.utils.config import (
     storefront_domain_registry,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 
 from market_storefront.services.capacity_client import listing_source_projection
 from market_storefront.services.vm_pool_override_contribution import (
@@ -272,6 +272,7 @@ def _build_vm_services(
         accepted_obligation_dispatch=(
             settlement_composition.accepted_obligation_dispatch()
         ),
+        arkhai_payments_stage=settlement_composition.arkhai_payments_stage,
     )
     listing_service = _build_listing_service(
         registry=registry,
@@ -363,6 +364,8 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
 
 
 async def _stop_vm_services(services: VmStorefrontServices) -> None:
+    if services.settlement_composition.payments_coordinator is not None:
+        await services.settlement_composition.payments_coordinator.stop()
     _container.clear_lifespan_state(registry=services.registry)
     logger.info("[SHUTDOWN] Storefront shutting down")
 
@@ -416,6 +419,7 @@ from market_storefront.controllers.settle_controller import (  # noqa: E402
 from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
+
 
 def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
     """Build the VM HTTP application from one explicit frozen registry."""

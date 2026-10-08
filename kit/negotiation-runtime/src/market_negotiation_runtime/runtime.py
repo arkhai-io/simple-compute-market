@@ -8,6 +8,7 @@ interprets listing, message, proposal, terms, or accepted-artifact schemas.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
@@ -144,6 +145,7 @@ class Acceptance:
     seller_principal: Identity
     policy_state: Any = None
     binding: Any = None
+    accepted_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,15 +240,11 @@ AmountFromProposalHook = Callable[[Mapping[str, Any] | None], int | None]
 ProposalFromAmountHook = Callable[
     [Mapping[str, Any] | None, int | None], Mapping[str, Any] | None
 ]
-AgreementHook = Callable[
-    [Any, Mapping[str, Any], NegotiationTerms], AgreementTerms
-]
+AgreementHook = Callable[[Any, Mapping[str, Any], NegotiationTerms], AgreementTerms]
 BuildArtifactsHook = Callable[[Acceptance, bool], Mapping[str, Any]]
 PersistOpeningHook = Callable[[Any, OpeningRecord], Awaitable[None]]
 PlaceHoldHook = Callable[[Any, Acceptance], Awaitable[None]]
-PersistArtifactsHook = Callable[
-    [Any, Acceptance, Mapping[str, Any]], Awaitable[None]
-]
+PersistArtifactsHook = Callable[[Any, Acceptance, Mapping[str, Any]], Awaitable[None]]
 DecisionWireHook = Callable[[NegotiationDecision], Mapping[str, Any]]
 ListingLiveHook = Callable[[Mapping[str, Any]], bool]
 ListingPausedHook = Callable[[Any, str], Awaitable[bool]]
@@ -602,12 +600,19 @@ class NegotiationRuntime:
             binding=resolved.binding,
         )
         accepted = decision.action == "accept"
+        if accepted:
+            # The Agreement records the acceptance instant and the resolved
+            # start, so both are fixed before accepted artifacts are built.
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
+        else:
+            artifacts = dict(hooks.build_artifacts(acceptance, False))
         return _OpeningPlan(
             hooks=hooks,
             evaluation=evaluation,
             acceptance=acceptance,
             accepted=accepted,
-            artifacts=dict(hooks.build_artifacts(acceptance, accepted)),
+            artifacts=artifacts,
             their_amount=their_amount,
             decision_amount=decision_amount,
         )
@@ -656,7 +661,8 @@ class NegotiationRuntime:
             seller_principal=Identity.model_validate(thread.get("seller_principal")),
             binding=resumed.resolved.binding,
         )
-        artifacts = dict(hooks.build_artifacts(acceptance, True))
+        acceptance = self._fix_acceptance_time(acceptance)
+        artifacts = self._accepted_artifacts(hooks, acceptance)
         await self._append_message(
             repository,
             negotiation_id=negotiation_id,
@@ -771,9 +777,7 @@ class NegotiationRuntime:
         expected_buyer = Identity.model_validate(buyer_principal)
         actor = Identity.model_validate(actor_principal)
         if expected_buyer != stored_buyer:
-            raise NegotiationStateError(
-                "buyer principal does not own this negotiation"
-            )
+            raise NegotiationStateError("buyer principal does not own this negotiation")
         if seller_principal is not None:
             expected_seller = Identity.model_validate(seller_principal)
             if expected_seller != stored_seller:
@@ -832,7 +836,8 @@ class NegotiationRuntime:
                 seller_principal=stored_seller,
                 binding=resolved.binding,
             )
-            artifacts = dict(hooks.build_artifacts(acceptance, True))
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
             await self._append_message(
                 repository,
                 negotiation_id=negotiation_id,
@@ -890,20 +895,21 @@ class NegotiationRuntime:
             }
 
         if buyer_action != "counter":
-            raise NegotiationStateError(
-                f"Unsupported buyer action {buyer_action!r}"
-            )
+            raise NegotiationStateError(f"Unsupported buyer action {buyer_action!r}")
         proposal_wire = (
             dict(buyer_proposal) if buyer_proposal is not None else pinned_proposal
         )
         listing_source = await self._listing_source(repository, resolved)
         incoming_round = len(history)
-        round_history = (*history, NegotiationRound(
-            round_number=incoming_round,
-            sender="them",
-            action="counter",
-            proposal=proposal_wire,
-        ))
+        round_history = (
+            *history,
+            NegotiationRound(
+                round_number=incoming_round,
+                sender="them",
+                action="counter",
+                proposal=proposal_wire,
+            ),
+        )
         evaluation = await hooks.evaluate_round(
             RoundRequest(
                 repository=repository,
@@ -957,9 +963,11 @@ class NegotiationRuntime:
             binding=resolved.binding,
         )
         accepted = decision.action == "accept"
-        artifacts = (
-            dict(hooks.build_artifacts(acceptance, True)) if accepted else {}
-        )
+        if accepted:
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
+        else:
+            artifacts = {}
 
         await self._append_message(
             repository,
@@ -1028,6 +1036,42 @@ class NegotiationRuntime:
         if not evaluation.strategy_label:
             raise NegotiationStateError("domain policy returned no strategy label")
 
+    def _fix_acceptance_time(self, acceptance: Acceptance) -> Acceptance:
+        accepted_at = self._now()
+        if accepted_at.tzinfo is None:
+            accepted_at = accepted_at.replace(tzinfo=UTC)
+        else:
+            accepted_at = accepted_at.astimezone(UTC)
+        requested = acceptance.agreement.start_utc
+        if requested is None or requested.strip().lower() in {"", "now"}:
+            start = accepted_at
+        else:
+            try:
+                start = datetime.fromisoformat(requested.strip().replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise NegotiationStateError(
+                    "accepted start_utc is not ISO-8601"
+                ) from exc
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=UTC)
+            else:
+                start = start.astimezone(UTC)
+        return replace(
+            acceptance,
+            agreement=AgreementTerms(
+                duration_seconds=acceptance.agreement.duration_seconds,
+                start_utc=start.isoformat().replace("+00:00", "Z"),
+            ),
+            accepted_at=accepted_at,
+        )
+
+    def _accepted_artifacts(
+        self,
+        hooks: NegotiationDomainHooks,
+        acceptance: Acceptance,
+    ) -> dict[str, Any]:
+        return dict(hooks.build_artifacts(acceptance, True))
+
     async def _commit_acceptance(
         self,
         repository: Any,
@@ -1040,6 +1084,21 @@ class NegotiationRuntime:
             agreed_price=acceptance.agreed_amount,
             agreed_duration_seconds=acceptance.agreement.duration_seconds,
             agreed_start_utc=acceptance.agreement.start_utc,
+            accepted_at=(
+                acceptance.accepted_at.isoformat().replace("+00:00", "Z")
+                if acceptance.accepted_at is not None
+                else None
+            ),
+            agreement_bytes=(
+                base64.b64decode(artifacts["agreement_bytes"], validate=True)
+                if isinstance(artifacts.get("agreement_bytes"), str)
+                else None
+            ),
+            settlement_data=(
+                dict(artifacts["settlement_data"])
+                if isinstance(artifacts.get("settlement_data"), dict)
+                else None
+            ),
         )
         if hooks.place_hold is not None:
             await hooks.place_hold(repository, acceptance)
@@ -1292,9 +1351,9 @@ class NegotiationRuntime:
         )
 
 
-def _stored_action(value: Any) -> Literal[
-    "initial", "counter", "accept", "exit", "reject"
-]:
+def _stored_action(
+    value: Any,
+) -> Literal["initial", "counter", "accept", "exit", "reject"]:
     actions: dict[str, Literal["initial", "counter", "accept", "exit", "reject"]] = {
         "make_offer": "initial",
         "counter_offer": "counter",

@@ -20,6 +20,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import VersionedEnvelope
 from market_identity import Identity
 
@@ -79,9 +80,18 @@ class BareMetalFulfillmentService:
     ) -> None:
         escrow = await self.db.load_escrow(escrow_uid=escrow_uid)
         if (
-            escrow is None
-            or escrow.get("negotiation_id") != negotiation_id
-            or escrow.get("status") != "settlement_verified"
+            escrow is not None
+            and escrow.get("negotiation_id") == negotiation_id
+            and escrow.get("status") == "settlement_verified"
+        ):
+            return
+        record = await self.db.load_bare_metal_settlement_record(
+            negotiation_id=negotiation_id
+        )
+        if (
+            record is None
+            or record.get("status") != "settlement_verified"
+            or record.get("settlement_ref") != escrow_uid
         ):
             raise BareMetalFulfillmentError(
                 "bare-metal settlement is not authoritatively verified"
@@ -124,13 +134,32 @@ class BareMetalFulfillmentService:
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str,
+        escrow_uid: str | None = None,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
         context = await self._owned_context(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
+        if escrow_uid is None:
+            record = await self.db.load_bare_metal_settlement_record(
+                negotiation_id=negotiation_id
+            )
+            if record is not None and record.get("status") == "settlement_verified":
+                escrow_uid = str(record["settlement_ref"])
+            else:
+                primary = await self.db.load_primary_escrow_for_negotiation(
+                    negotiation_id=negotiation_id
+                )
+                if (
+                    primary is not None
+                    and primary.get("status") == "settlement_verified"
+                ):
+                    escrow_uid = str(primary["escrow_uid"])
+        if not escrow_uid:
+            raise BareMetalFulfillmentError(
+                "accepted bare-metal settlement is not verified"
+            )
         await self._verified_escrow(
             negotiation_id=negotiation_id,
             escrow_uid=escrow_uid,
@@ -146,12 +175,24 @@ class BareMetalFulfillmentService:
                 "accepted terms conflict with the trusted resource binding"
             )
 
-        lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
-            negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
-            site_id=str(context["site_id"]),
-            physical_resource_id=str(context["physical_resource_id"]),
-        )
+        identity = {
+            "negotiation_id": negotiation_id,
+            "escrow_uid": escrow_uid,
+            "site_id": str(context["site_id"]),
+            "physical_resource_id": str(context["physical_resource_id"]),
+        }
+        payment = await self.db.load_bare_metal_settlement_record(negotiation_id=negotiation_id)
+        if payment is not None and payment.get("mechanism") == ARKHAI_PAYMENTS_MECHANISM:
+            # Starting delivery is ordered against refund intent in one
+            # transaction, so a refund recorded first stops delivery here.
+            started = await self.db.start_bare_metal_payment_lifecycle(**identity)
+            if started is None:
+                raise BareMetalFulfillmentError(
+                    "the payment was refunded; delivery cannot start", status_code=409
+                )
+            lifecycle = started
+        else:
+            lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(**identity)
         if lifecycle.get("fulfillment_id"):
             return lifecycle
 

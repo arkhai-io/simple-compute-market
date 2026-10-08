@@ -252,14 +252,14 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
 
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
-            first = await buyer.settle(
+            first = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
-            retry = await buyer.settle(
+            retry = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
             with pytest.raises(StorefrontClientError) as conflict:
-                await buyer.settle(
+                await buyer.settle_evm(
                     OTHER_ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -280,7 +280,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     restarted_app = _app(restarted)
     async with restarted_app.router.lifespan_context(restarted_app):
         async with _buyer(restarted_app) as buyer:
-            restart_retry = await buyer.settle(
+            restart_retry = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
             status = await buyer.get_settle_status(ESCROW_UID)
@@ -385,7 +385,7 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
             with pytest.raises(StorefrontClientError) as failed:
-                await buyer.settle(
+                await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -408,7 +408,7 @@ async def test_settlement_rejects_unmatched_obligation_without_registering_claim
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
             with pytest.raises(StorefrontClientError) as refused:
-                await buyer.settle(
+                await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
 
@@ -605,7 +605,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
             caller_role="buyer",
             expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
         ) as storefront:
-            settled = await storefront.settle(
+            settled = await storefront.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
         buyer = _fulfillment_client(base_url)
@@ -766,7 +766,7 @@ async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
-            await buyer.settle(
+            await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
 

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
 SETTLEMENT_SERVICING = "settlement_servicing"
+PAYMENT_RECONCILIATION = "payment_reconciliation"
 CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 
 
@@ -62,6 +63,20 @@ async def settlement_servicing_step() -> Mapping[str, Any]:
         raise LifecycleRouteError(503, "settlement servicing worker is not initialized")
     processed = await worker.run_once()
     return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
+
+
+def payment_reconciliation_service() -> Any | None:
+    """The payment settlement service, or None when payments is not composed."""
+    composition = _container.resolved_settlement_composition
+    return composition.payment_service(_sqlite_client()) if composition is not None else None
+
+
+async def payment_reconciliation_step() -> Mapping[str, Any]:
+    service = payment_reconciliation_service()
+    if service is None:
+        return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
+    done = await service.reconcile_once()
+    return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
 
 
 def _capacity_runtime() -> Any:
@@ -102,6 +117,13 @@ def register_api_credit_lifecycle_steps(loops: StorefrontLoopController) -> None
     loops.register_step(
         SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step
     )
+    # Registered with the loop it steps, which starts only when payments is composed.
+    if payment_reconciliation_service() is not None:
+        loops.register_step(
+            PAYMENT_RECONCILIATION,
+            route="payment-reconciliation",
+            step=payment_reconciliation_step,
+        )
     loops.register_step(
         CAPACITY_EVENTS_POLLER,
         route="capacity-events",
@@ -113,6 +135,7 @@ def register_api_credit_lifecycle_steps(loops: StorefrontLoopController) -> None
 __all__ = [
     "CAPACITY_EVENTS_POLLER",
     "NEGOTIATION_WATCHDOG",
+    "PAYMENT_RECONCILIATION",
     "SETTLEMENT_SERVICING",
     "capacity_site_loop_name",
     "register_api_credit_lifecycle_steps",

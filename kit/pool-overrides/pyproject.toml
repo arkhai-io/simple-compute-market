@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-pool-overrides"
-version = "0.2.0"
+version = "0.2.1"
 description = "Storefront pool overrides: a durable, site-scoped store, the live-site write check, and their status"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -9,7 +9,7 @@ license = "MIT"
 # vocabulary through a contribution. Its typed client needs only a transport
 # offering `authenticated_request`, not the core client package.
 dependencies = [
-    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-identity==0.4.0",
     "arkhai-kit-site-client",
     "pydantic>=2.7",
 ]

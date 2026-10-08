@@ -47,7 +47,7 @@ None.
 ## Impact
 
 - `core/buyer` — the authenticated-response reader shared by every buyer call.
-- `scripts/assemble-hosted-credentials.py` and `e2e-tests` — the registry
+- the hosted credential assembly script (removed with hosted settlement by `settle-through-arkhai-payments`) and `e2e-tests` — the registry
   authorization a development run assembles for itself.
 - No wire, listing, negotiation, obligation, or configuration schema changes.
   Refusal remains refusal: nothing this change does makes an unverifiable

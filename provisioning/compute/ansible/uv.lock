@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.19.0"
+version = "0.19.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -48,12 +48,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.19.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.19.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-ansible"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -74,10 +74,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning", specifier = ">=0.13.0" },
-    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.5.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.19.0" },
+    { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-config", specifier = ">=0.1.2" },
+    { name = "arkhai-kit-config", specifier = ">=0.2.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
     { name = "pydantic", specifier = ">=2" },
 ]
@@ -92,7 +92,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -100,18 +100,18 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -124,7 +124,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.1.5"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -135,12 +135,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.1.5-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -152,12 +152,12 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -167,7 +167,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -199,7 +199,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -207,12 +207,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.10.0"
+version = "0.10.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -224,7 +224,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.10.1-py3-none-any.whl" },
 ]
 
 [[package]]

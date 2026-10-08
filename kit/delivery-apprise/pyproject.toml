@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-kit-delivery-apprise"
-version = "0.1.0"
+version = "0.1.1"
 description = "An Apprise delivery sink: revealed marketplace events to any service Apprise reaches"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-  "arkhai-kit-delivery==0.2.0",
+  "arkhai-kit-delivery==0.2.1",
   "apprise>=1.9,<2",
   "pydantic>=2.7",
 ]

@@ -240,32 +240,6 @@ def test_materialization_to_access_grant_adapts_current_api_request():
     }
 
 
-def test_hosted_materialization_derives_stable_identity_bound_ssh_user():
-    materialization = BareMetalMaterialization(
-        settlement_obligation_ref="obligation-a",
-        host_id="bm-node-1",
-        physical_host_id="host-physical-1",
-        lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
-        ssh_public_key="ssh-ed25519 AAAA buyer",
-    )
-
-    first = materialization_to_access_grant(materialization)
-    replayed = materialization_to_access_grant(materialization)
-    distinct = materialization_to_access_grant(
-        materialization.model_copy(
-            update={"settlement_obligation_ref": "obligation-b"}
-        )
-    )
-
-    assert first.access_ref is not None
-    assert replayed.access_ref is not None
-    assert distinct.access_ref is not None
-    assert first.access_ref["ssh_user"] == replayed.access_ref["ssh_user"]
-    assert first.access_ref["ssh_user"].startswith("arkhai-")
-    assert len(first.access_ref["ssh_user"]) <= 32
-    assert first.access_ref["ssh_user"] != distinct.access_ref["ssh_user"]
-
-
 def test_bare_metal_receipt_is_domain_view_not_executor_result():
     receipt = BareMetalReceipt(
         escrow_uid="0xbm",

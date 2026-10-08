@@ -27,7 +27,7 @@ The storefront's quota snapshot is advisory. It can prevent obviously infeasible
 ## Commercial and usage identity
 
 A canonical marketplace principal authorizes a market purchase or top-up. It
-may be an Ed25519 identity in a wallet-free hosted deployment or an EVM identity
+may be an Ed25519 identity in a wallet-free payment deployment or an EVM identity
 for Alkahest. A bearer secret authorizes API use. These are deliberately
 different identities:
 
@@ -42,7 +42,7 @@ stale and operator controls may bypass ordinary policy.
 
 ## Idempotency boundaries
 
-Alkahest settlement `escrow_uid` and hosted deterministic `fulfillment_id` each
+Alkahest settlement `escrow_uid` and Arkhai payment deterministic `fulfillment_id` each
 identify one credit grant. The credits authority stores the mechanism-neutral
 fulfillment reference plus an immutable canonical request digest; retrying
 unchanged issuance returns the same grant, while changed reuse conflicts before
@@ -107,34 +107,10 @@ API credits intentionally has no compute-provisioning capability. A non-physical
 - [Site capacity](../site-capacity/spec.md)
 - [Storefront publication](../storefront-publication/spec.md)
 
-## Hosted issuance and evidence
+## Payment composition and recovery
 
-The shared servicing worker reaches the API-credit fulfillment callback only
-after the hosted adapter projects authoritative `funded`. The callback submits
-one credits-authority issuance request keyed by
-`derive_credit_fulfillment_id(obligation_ref)`, retrieves by that identity
-after uncertain acknowledgement, then stores the authenticated buyer-only
-credential separately from the public result.
+Alkahest and `arkhai.payments.v1` are peer registrations. The payment path uses Ed25519 marketplace identity and owner-scoped payment credentials without constructing a wallet or chain client. Acceptance stores exact Agreement bytes and the seller-derived mandate in shared negotiation `settlement_data`.
 
-`ApiCreditsIssuanceEvidenceService` signs a canonical evidence body with the
-marketplace seller signer and publishes the same bytes through the configured
-portable resolver. The public fulfillment reference is the evidence digest and
-condition anchor; it contains service, quantity, public key identity, grant and
-attestation references, but never the bearer secret. The shared runtime cannot
-collect until that evidence resolves and satisfies the accepted condition.
+The buyer validates and approves the mandate, polls its deterministic transaction ID, then calls seller settlement with only the negotiation ID. The seller reloads accepted state and verifies the matching signed receipt before credit issuance. A pending transaction returns retryable pending without a grant.
 
-Reclaim runs through the same shared route service. Its API-credit callback
-queries the credits authority before financial reclaim: an unknown grant leaves
-reclaim eligible, a committed grant is completed into durable fulfillment and
-therefore excludes reclaim, and mismatched reuse is a recovery conflict rather
-than permission to issue or collect again.
-
-## Hosted composition
-
-The API-credit buyer registers Alkahest and hosted Stripe through the shared
-settlement configuration registry. A hosted-only policy constructs neither a
-wallet nor a chain client. The API-credit storefront uses
-`HostedSettlementRouteService` with domain callbacks for accepted-state load,
-plan reservation, exact-once issuance, projection, quota cleanup, and
-before-reclaim reconciliation; it does not import VM routes or the hosted
-released client.
+Verified payment progress is recoverable: repeated settle calls return completed state or re-drive nonterminal issuance. Authority lookup and immutable grant digests reconcile acknowledgement loss under one fulfillment identity. Buyer credentials remain in the private result channel, not public payment evidence. Ledger, fees, hold release, disputes, and `reverse` remain payments-service operations.

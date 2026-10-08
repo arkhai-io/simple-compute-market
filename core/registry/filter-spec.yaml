@@ -274,7 +274,7 @@ filters:
 
   # Mechanism filter: option-aware projection (the resolution of the
   # generic-mechanism question, decided with the introduction-market
-  # profile) — ``?mechanism=in:[fiat.stripe.v1]`` matches listings that
+  # profile) — ``?mechanism=in:[alkahest.v1]`` matches listings that
   # advertise at least one option under a named mechanism.
   # `on_missing: pass` keeps escrow-carrier legacy listings visible to
   # mechanism-agnostic buyers.

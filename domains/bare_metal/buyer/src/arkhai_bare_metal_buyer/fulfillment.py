@@ -47,7 +47,7 @@ class BareMetalFulfillmentTransport:
         A standalone bare-metal storefront verifies an escrow without starting
         fulfillment, so the buyer asks it to begin, naming the escrow and itself;
         the storefront reserves the machine and returns the lifecycle projection.
-        A hosted deal needs no call: its storefront begins fulfillment itself.
+        A payment deal needs no call: its settlement begins fulfillment itself.
         Idempotent for the same negotiation and escrow.
         """
         return signed_storefront_json(

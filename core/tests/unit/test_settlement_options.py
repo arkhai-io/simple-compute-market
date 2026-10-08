@@ -21,11 +21,11 @@ def _option() -> SettlementOption:
         "condition": {"protocol": "arkhai.condition.v1"},
     }
     option_id = derive_settlement_option_id(
-        mechanism="fiat.stripe.v1", asset="usd", rates=rates, params=params
+        mechanism="example.payment.v1", asset="usd", rates=rates, params=params
     )
     return SettlementOption(
         option_id=option_id,
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rates=rates,
         params=params,

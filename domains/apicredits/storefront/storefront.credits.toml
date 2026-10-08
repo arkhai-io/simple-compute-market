@@ -57,6 +57,14 @@ trusted_oracle_addresses = []
 # They configure VM spot interruption, which this domain does not sell, and
 # `AlkahestSettlementConfig` defaults both to off.
 
+[settlement.arkhai_payments]
+enabled = false
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+# Enabling payments also requires service_url, Ed25519 service_identity,
+# fee_bps, dispute_authority, the mechanism in `priority`, and an explicit
+# payment publication clause containing payee_account and asset. Never store
+# the WorkOS key here.
+
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
 chain_id = 31337

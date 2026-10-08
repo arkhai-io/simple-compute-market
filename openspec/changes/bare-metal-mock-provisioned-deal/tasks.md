@@ -229,7 +229,7 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
     the VM mock's temporary mutation of its default output. The integration test
     reaches the mock through lease registration rather than fulfillment convergence;
     the scenario covers convergence (Section 9).
-  - Found: `e2e-tests/tests/unit/test_hosted_public_boundary.py::test_buyer_deployment_mounts_separate_profile_state_and_credential`
+  - Found: the hosted public-boundary unit test's `test_buyer_deployment_mounts_separate_profile_state_and_credential` (removed with hosted settlement by `settle-through-arkhai-payments`)
     fails at the baseline too; it reads `compose.vms.yml`, which 10.1 rewrites, and is
     fixed there.
 
@@ -3965,7 +3965,7 @@ service code.
       reference: `compose.vms.yml`, `domains/apicredits/compose.yml`,
       `e2e-tests/Makefile`, `.github/workflows/e2e.yml`,
       `scripts/tests/test_multi_storefront_compose.py`,
-      `e2e-tests/tests/unit/test_hosted_public_boundary.py`,
+      the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`),
       `e2e-tests/tests/e2e/roles/README.md`, `dev-env/identities/README.md`,
       `openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.
 - [ ] 10.2 Lane targets in `e2e-tests/Makefile`: `e2e-vm-run`, `e2e-bare-metal-run`,

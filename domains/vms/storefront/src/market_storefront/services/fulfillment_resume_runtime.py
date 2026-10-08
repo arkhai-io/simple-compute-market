@@ -10,6 +10,7 @@ writes are logged for operator reconciliation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -21,13 +22,20 @@ from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_MECHANISM,
+    MandatePolicyError,
+    SignedReceipt,
+)
+from market_core import VersionedEnvelope
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
 )
-from market_core import VersionedEnvelope
 
+from market_storefront import container as _container
+from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
@@ -40,7 +48,6 @@ from market_storefront.services.vm_fulfillment_service import (
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +262,7 @@ async def converge_post_physical_delivery(
     fulfillment became active.
     """
     escrow_uid = str(escrow["escrow_uid"])
+    payments = context.get("settlement_mechanism") == ARKHAI_PAYMENTS_MECHANISM
     listing_id = context.get("listing_id")
     await _store_fulfillment_credentials(
         sqlite_client=sqlite_client,
@@ -265,18 +273,20 @@ async def converge_post_physical_delivery(
     connection_json = json.dumps(connection_details, sort_keys=True)
     if submit_fulfillment is None and bind_fulfillment_fn is None:
         return True
-    fulfillment_uid = await _ensure_onchain_fulfillment(
-        escrow=escrow,
-        sqlite_client=sqlite_client,
-        submit_fulfillment=submit_fulfillment,
-        alkahest_client=alkahest_client,
-        connection_json=connection_json,
-    )
-    await _bind_recovered_settlement_fulfillment(
-        bind_fulfillment_fn=bind_fulfillment_fn,
-        escrow=escrow,
-        fulfillment_uid=fulfillment_uid,
-    )
+    if payments:
+        fulfillment_uid = escrow.get("fulfillment_id")
+        if not fulfillment_uid:
+            raise RuntimeError("physical fulfillment identity is unavailable")
+    else:
+        fulfillment_uid = await _ensure_onchain_fulfillment(
+            escrow=escrow, sqlite_client=sqlite_client,
+            submit_fulfillment=submit_fulfillment, alkahest_client=alkahest_client,
+            connection_json=connection_json,
+        )
+        await _bind_recovered_settlement_fulfillment(
+            bind_fulfillment_fn=bind_fulfillment_fn, escrow=escrow,
+            fulfillment_uid=fulfillment_uid,
+        )
     await _update_fulfilled_listing(
         sqlite_client=sqlite_client,
         escrow_uid=escrow_uid,
@@ -491,19 +501,43 @@ async def converge_escrow_once(
     """Advance one escrow by at most one externally observable phase."""
     if escrow.get("status") in _TERMINAL_ESCROW_STATUSES:
         return False
-    if not escrow.get("chain_name"):
-        # This sweep converges chain-settled deals, and it ends by submitting an
-        # on-chain fulfillment. A hosted deal has no chain and already has a
-        # convergence owner -- the settlement runtime, which reserves
-        # fulfillment before it provisions. Sweeping it here gives one deal two
-        # owners racing over the same capacity reservation.
-        return False
     context = _validated_context(escrow.get("fulfillment_context"))
     if context is None:
         logger.error(
             "[FULFILLMENT_RESUME] Escrow %s has no supported recovery context",
             escrow.get("escrow_uid"),
         )
+        return False
+    payments = context.get("settlement_mechanism") == ARKHAI_PAYMENTS_MECHANISM
+    if payments:
+        record = await sqlite_client.load_vm_payment_record(
+            negotiation_id=str(escrow.get("negotiation_id") or "")
+        )
+        if record is None or not record.get("receipt"):
+            raise RuntimeError("payment receipt is not verified")
+        thread = await sqlite_client.load_negotiation_thread_row(
+            negotiation_id=str(escrow["negotiation_id"])
+        )
+        raw = thread.get("agreement_bytes") if thread else None
+        composition = _container.resolved_settlement_composition
+        stage = composition.arkhai_payments_stage if composition else None
+        if not isinstance(raw, bytes) or stage is None:
+            raise RuntimeError("accepted payment Agreement or verifier is unavailable")
+        try:
+            agreement, data = stage.accepted(raw, thread.get("settlement_data"))
+        except MandatePolicyError as exc:
+            raise RuntimeError("accepted payment mandate is unavailable") from exc
+        # Recovery re-proves the stored receipt against the exact Agreement before
+        # any physical effect, so a restart cannot provision on stale evidence.
+        if (
+            record["agreement_sha256"] != hashlib.sha256(raw).hexdigest()
+            or record["transaction_id"] != data.transaction_id
+            or not stage.receipt_matches(
+                SignedReceipt.model_validate(record["receipt"]), agreement, data
+            )
+        ):
+            raise RuntimeError("payment evidence does not match accepted Agreement")
+    elif not escrow.get("chain_name"):
         return False
     raw_context = json.loads(escrow["fulfillment_context"])
     negotiation_id = escrow.get("negotiation_id")
@@ -680,6 +714,14 @@ async def resume_incomplete_fulfillments_once(
 _PAUSED_POLL_SECONDS = 0.05
 
 
+async def _reconcile_payment_deals() -> None:
+    """Advance accepted payment deals a buyer has not settled (none without payments)."""
+    composition = _container.resolved_settlement_composition
+    coordinator = getattr(composition, "payments_coordinator", None)
+    if coordinator is not None:
+        await coordinator.reconcile_once()
+
+
 async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
     from market_storefront.utils.config import settings
@@ -695,6 +737,7 @@ async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
                 await asyncio.sleep(_PAUSED_POLL_SECONDS)
                 continue
             await resume_incomplete_fulfillments_once(sqlite_client=db)
+            await _reconcile_payment_deals()
         except asyncio.CancelledError:
             logger.info("[FULFILLMENT_RESUME] cancelled, shutting down")
             break

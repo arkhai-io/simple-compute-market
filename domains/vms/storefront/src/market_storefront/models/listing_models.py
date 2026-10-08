@@ -28,10 +28,8 @@ class VmCapacitySource(BaseModel):
         return self
 
 
-
-
 class VmCreateListingRequest(CreateListingRequest):
-    """VM listing request with hosted-fiat composition validation."""
+    """VM listing request with settlement option validation."""
 
     settlements: list[SettlementPublicationClause] = Field(
         default_factory=list,
@@ -55,6 +53,10 @@ class VmCreateListingRequest(CreateListingRequest):
 
     @model_validator(mode="after")
     def require_settlement_choice(self) -> VmCreateListingRequest:
-        if not self.accepted_escrows and not self.settlements and not self.settlement_options:
+        if (
+            not self.accepted_escrows
+            and not self.settlements
+            and not self.settlement_options
+        ):
             raise ValueError("at least one settlement choice is required")
         return self

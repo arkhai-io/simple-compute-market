@@ -37,7 +37,7 @@ from tests.publication_app import (
 pytestmark = pytest.mark.asyncio
 
 # Alkahest declared as not fulfilled through capacity, so unbacked supply publishes.
-_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "fiat.stripe.v1": True}
+_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
 
 
 @pytest.fixture

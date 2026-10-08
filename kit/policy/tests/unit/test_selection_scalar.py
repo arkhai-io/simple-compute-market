@@ -25,7 +25,7 @@ from market_policy.scalar_policies import (
 
 _SCALAR_OPTION = {
     "option_id": "aa" * 32,
-    "mechanism": "fiat.stripe.v1",
+    "mechanism": "example.payment.v1",
     "asset": "usd",
     "rates": [{"field": "amount", "per": "hour", "value": "100"}],
     "params": {},
@@ -189,12 +189,12 @@ def test_buyer_counter_guard_still_rejects_scalar_counter_without_amount() -> No
 
 _ESCROW_A = {"chain_name": "anvil", "escrow_address": "0x" + "aa" * 20, "rates": []}
 _ESCROW_B = {"chain_name": "anvil", "escrow_address": "0x" + "bb" * 20, "rates": []}
-_OPTION = {"option_id": "o" * 64, "mechanism": "fiat.stripe.v1", "rates": []}
+_OPTION = {"option_id": "o" * 64, "mechanism": "example.rated.v1", "rates": []}
 _TWO_ESCROWS = {"accepted_escrows": [_ESCROW_A, _ESCROW_B], "settlement_options": [_OPTION]}
 
 
 def test_a_settlement_selection_selects_its_option():
-    proposal = {"settlement_selection": {"option_id": "o" * 64, "mechanism": "fiat.stripe.v1"}}
+    proposal = {"settlement_selection": {"option_id": "o" * 64, "mechanism": "example.rated.v1"}}
     assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _OPTION
 
 
@@ -210,7 +210,7 @@ def test_nothing_selected_is_none():
     ) is None
     assert selected_settlement_artifact(
         _TWO_ESCROWS,
-        {"settlement_selection": {"option_id": "x" * 64, "mechanism": "fiat.stripe.v1"}},
+        {"settlement_selection": {"option_id": "x" * 64, "mechanism": "example.rated.v1"}},
     ) is None
 
 

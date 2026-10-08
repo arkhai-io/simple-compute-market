@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-kit-delivery"
-version = "0.2.0"
+version = "0.2.1"
 description = "Recipient-side delivery of revealed marketplace events to locally configured sinks"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-  "arkhai-kit-identity==0.3.0",
+  "arkhai-kit-identity==0.4.0",
   "pydantic>=2.7",
 ]
 

@@ -165,7 +165,7 @@ def test_sync_client_rejects_legacy_or_incompatible_envelope_before_http(legacy)
     assert transport.requests == []
 
 
-_SELECTION = {"mechanism": "fiat.stripe.v1", "option_id": "a" * 64, "expiration_unix": 2_000}
+_SELECTION = {"mechanism": "example.rated.v1", "option_id": "a" * 64, "expiration_unix": 2_000}
 
 
 def _selection_kwargs(envelope, **overrides):
@@ -279,7 +279,7 @@ def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(mon
             # The capturing double signs responses for negotiate_new only, so the
             # settle response is refused after the request has been captured.
             with pytest.raises(StorefrontClientError, match="response authentication"):
-                await client.settle("0x" + "ab" * 32, **kwargs)
+                await client.settle_evm("0x" + "ab" * 32, **kwargs)
 
     asyncio.run(_run())
     with SyncStorefrontClient(
@@ -287,7 +287,7 @@ def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(mon
         expected_publishers=publishers, transport=sync_transport,
     ) as client:
         with pytest.raises(StorefrontClientError, match="response authentication"):
-            client.settle("0x" + "ab" * 32, **kwargs)
+            client.settle_evm("0x" + "ab" * 32, **kwargs)
 
     assert async_transport.requests[0].content == sync_transport.requests[0].content
     body = json.loads(async_transport.requests[0].content)

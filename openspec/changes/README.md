@@ -122,6 +122,8 @@ bare-metal-mock-provisioned-deal ──► bare-metal-and-credits-domain-stacks 
 bare-metal-mock-provisioned-deal ──► apicredits-end-to-end-lane (loop holding in the lane it builds)
 
 kit-owned-settlement-runtime archived 2026-08-10
+settle-through-arkhai-payments archived 2026-10-08
+settle-through-arkhai-payments ──► buyers-use-the-storefront-client
 ```
 
 | Change | Status | Acceptance boundary |
@@ -135,6 +137,7 @@ kit-owned-settlement-runtime archived 2026-08-10
 | [`kit-owned-listing-and-fulfillment-lifecycles`](kit-owned-listing-and-fulfillment-lifecycles/) | design phase; not planned; depends on the shell | Extracts the seller listing lifecycle over the common binding (close, pause, reopen, successor carry-over) and restart-safe fulfillment convergence (obligation resumption, terminal-state driving, executor-result reconciliation), and replaces the VM per-site projection cache with the capacity kit's state |
 | [`kit-owned-storefront-auth-and-persistence`](kit-owned-storefront-auth-and-persistence/) | design phase; not planned; depends on the shell | One core- or kit-owned v2 authentication middleware set applied by the shell, and a stated persistence boundary: core owns market state, a domain's client holds only its own tables |
 | [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; owns moving bare metal's negotiate and listing routes onto the shell (4a.3–4a.6) after `bare-metal-mock-provisioned-deal` composes bare-metal negotiation onto the kit runtime (4a.1, 4a.2, and the runtime half of 4a.3 migrated there 2026-10-01); gained the bare-metal buyer CLI requirements (4b.6–4b.9) from it; the stack and both deal scenarios exist | Moves bare metal's negotiate and listing routes onto the shell, recomposes API credits onto kit, and verifies the bare-metal buyer requirements (clean wheel, independent authorities, package boundary, negotiation ownership). Its deal evidence comes from `bare-metal-mock-provisioned-deal`. Delivers the goal's completion test |
+| [`buyers-use-the-storefront-client`](buyers-use-the-storefront-client/) | design phase; depends on the storefront shell's typed-client placement (its `settle-through-arkhai-payments` dependency is satisfied: archived 2026-10-08) | Production buyers call storefront routes through the typed client instead of `core_buyer` signed-JSON helpers and domain transports, so the route contract has one owner on both sides |
 
 ## Roadmap goal — Make capacity exclusivity compensated
 
@@ -158,6 +161,11 @@ The mechanism work is delivered (`finish-settlement-mechanism-neutrality` and
 `contact-exchange-settlement-mechanism`, archived 2026-08-19 and since pruned; their
 requirements are live in `openspec/specs/`).
 [`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`settle-through-arkhai-payments`](archive/2026-10-08-settle-through-arkhai-payments/) | **archived** 2026-10-08 as delivered; live payment qualification stays with the payments service's end-to-end tests; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning and issuance; buyers settle through the typed client's `settle_agreement` over a shared settlement route contract; attachment policies are owned by each side; refunds are seller-initiated and ordered against delivery start; each domain reconciles approved deals a buyer never settles. `fiat.stripe.v1` and `kit/hosted-settlement` are absent, and the hosted changes built on them are archived as superseded; the escrow-carrier refactor is deferred ([overview](archive/2026-10-08-settle-through-arkhai-payments/overview.html)) |
+| [`spot-deals-through-arkhai-payments`](spot-deals-through-arkhai-payments/) | design phase; depends on payments `rate-parts` and `route-settlement-by-mechanism` | VM interruptible deals settle through an `arkhai.payments.v1` rate part with `until: stop`. The VM payment seller stage tears down by the signed funded-through time or on a stop event, and seller preemption and buyer cancellation issue stops |
 
 Two changes took on what that goal recorded as its remaining gap. `contact-payload-retention` is complete and archived; `compose-contact-exchange-across-compute`, archived, did the rest; `pass-through-storefront-config`, complete, made the VM storefront chart able to deploy a further settlement mechanism.
 
@@ -352,7 +360,7 @@ add-database-migration-commands ──► store-registry-listings-as-published �
 
 **What it adds up to.** Internal dependencies now install from built wheels and packaging checks cover the repository's environments and images. Type checking is advertised but not enforced, and the publisher inventory does not match the packages that exist. The remaining changes restore the checks and reconcile the distribution graph. Not a roadmap goal — no behavior changes — but nothing outside this repository can consume the packages until it is done.
 
-Two changes joined this campaign on 2026-09-02. The first completed and was archived on 2026-09-04: the settlement client is published to the public index, every consuming lockfile resolves it from there, the release gate is off the build and test path, and `.dist` holds only what this repository builds. It left one residual, named below, that no change yet owns. Separately, twenty-eight distributions reach public PyPI on every merge to `main` with no gate — which is how `arkhai-kit-hosted-settlement` 0.1.4 came to be published declaring a dependency PyPI does not carry, uninstallable for everyone outside this repository and, because PyPI is write-once, not correctable in place.
+Two changes joined this campaign on 2026-09-02. The first completed and was archived on 2026-09-04: it resolved the then-hosted settlement client from the public index and took the release gate off the build and test path, so `.dist` holds only what this repository builds; the client has since been removed with the hosted mechanism. It left one residual, named below, that no change yet owns. Separately, twenty-eight distributions reach public PyPI on every merge to `main` with no gate — which is how `arkhai-kit-hosted-settlement` 0.1.4 came to be published declaring a dependency PyPI does not carry, uninstallable for everyone outside this repository and, because PyPI is write-once, not correctable in place.
 
 ```text
 publish-wheels-through-a-gate (its prerequisite archived 2026-09-04)
@@ -451,36 +459,15 @@ seller relay's port; it belongs here if opened.
 The relay and host-key work also serves Goal 1: provisioning owns the physical
 facts and credentials that the storefront previously carried.
 
-## Lesser goal — Hosted fiat settlement
-
-**What it adds up to.** A buyer holding no wallet and no chain resources completes a deal through the shared hosted financial authority, and every refusal that path can produce is nameable from outside it. Four changes carry the funding contract itself: a durable core-owned buyer identity, the expanded signed payer/funding profiles consumed from the authority, and the two domains that compose them. The rest close gaps the protected Stripe lanes surfaced. Three landed and archived on 2026-09-04 — a refusal that names its cause instead of timing out, the return address the authority demands before it will refund a bank transfer, and one coordinate binding the hosted release. Still open are a response the client cannot authenticate, and the projections and partial dispositions those lanes assert on. Not a roadmap goal: the market sells the same things either way. It earns a campaign because these changes share one external dependency surface — an independently produced signed release and protected Stripe inputs this repository cannot supply — and because the lane work is only legible as a group.
-
-```text
-add-persistent-buyer-profiles ──► consume-expanded-stripe-funding ──┬──► add-api-credits-hosted-settlement
-                                                                    └──► add-bare-metal-hosted-settlement
-
-lane legibility:  name-unverifiable-responses
-lifecycle depth:  project-an-authoritative-funding-loss, disburse-a-settlement-disposition
-```
-
-| Change | Status | Acceptance boundary |
-|---|---|---|
-| [`add-persistent-buyer-profiles`](add-persistent-buyer-profiles/) | active; no blocking dependency | A core-owned buyer profile selects a stable local buyer, retains exact signer history across rotation, and associates authority-owned opaque payer bindings without putting secrets in marketplace state |
-| [`consume-expanded-stripe-funding`](consume-expanded-stripe-funding/) | active; depends on `add-persistent-buyer-profiles` and on an externally produced signed release | Exact versioned payer/funding profiles with persistent buyer ownership and off-session authorization, importing no Stripe models and weakening no storefront mediation or fulfillment gate |
-| [`add-api-credits-hosted-settlement`](add-api-credits-hosted-settlement/) | active; local work complete, qualification externally blocked | A non-EVM buyer purchases and tops up API credits through the shared hosted authority by composing the mechanism-neutral seams rather than copying VM lifecycle code. Its open tasks need protected Stripe inputs and a signed producer acceptance record this checkout does not carry |
-| [`add-bare-metal-hosted-settlement`](add-bare-metal-hosted-settlement/) | active; local work complete, qualification externally blocked | Bare-metal hosted settlement. Production qualification waits on operator-supplied signed manifests and protected Stripe inputs, plus a disposable real host on which access and later revocation can be observed |
-| [`name-unverifiable-responses`](name-unverifiable-responses/) | active; no blocking dependency | A client refusing a response it cannot authenticate distinguishes that case from a malformed or legacy one, so an ordinary `404` stops being reported as a protocol fault |
-| [`project-an-authoritative-funding-loss`](project-an-authoritative-funding-loss/) | active; no blocking dependency, and explicitly not externally blocked | Incident and blocked-delivery projections become readable on the public settlement payload rather than dropped by the hosted adapter. Unblocks the two `us_ach_debit.v1` lanes withheld as `loss_projection_unimplemented` |
-| [`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) | active; no blocking dependency | An obligation's amount moves partially and in more than one direction; expiry becomes a mechanism's answer; the hosted rail gates on a declared capability, and rollback stays safe only while every disposition is degenerate |
-
-The two qualification-blocked changes are blocked on inputs, not on each other: local deterministic contracts and generated configuration are complete in both, and neither substitutes for a protected run. `project-an-authoritative-funding-loss` states in its own proposal that nothing external blocks it — the producer release already carries what it consumes — which makes it the cheapest way to retire two permanently-excluded lanes.
-
 ## Independent active changes
 
 Changes with no campaign; each stands alone.
 
 | Change | Status | Audited scope |
 |---|---|---|
+| [`add-persistent-buyer-profiles`](add-persistent-buyer-profiles/) | active; no blocking dependency | A core-owned buyer profile selects a stable local buyer, retains exact signer history across rotation, and associates authority-owned opaque payer bindings without putting secrets in marketplace state |
+| [`name-unverifiable-responses`](name-unverifiable-responses/) | active; no blocking dependency | A client refusing a response it cannot authenticate distinguishes that case from a malformed or legacy one, so an ordinary `404` stops being reported as a protocol fault |
+| [`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) | active; no blocking dependency; re-scoped 2026-10-08 to Alkahest and contact exchange | An obligation's amount moves partially and in more than one direction; expiry becomes a mechanism's answer, and rollback stays safe only while every disposition is degenerate. Whether the early-reclaim relaxation still has a user is open for its owners |
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Also owns refusing new admission and placement against a disabled host while honouring existing assignments and teardown, handed over by `project-capacity-resources-without-hosts`. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
 | [`add-full-stack-ci-job`](add-full-stack-ci-job/) | proposed; design not started; opened by `pass-through-storefront-config` finding 9 | One CI job that runs `make test`, `make build-dev`, and the Helm render tests together, so checks needing both Helm and a service environment — the storefront chart's chart-to-loader check — run rather than skip |
@@ -490,11 +477,26 @@ Changes with no campaign; each stands alone.
 
 ## Archived and superseded
 
+`settle-through-arkhai-payments` was archived on 2026-10-08 as delivered: Arkhai payments is a peer settlement mechanism in all three domains, hosted Stripe settlement is gone, and the change merged with the development branch. Live payment qualification remains with the payments service's own end-to-end tests.
+
 `bare-metal-buyer-domain` and `market-platform-bare-metal-10-storefront-composition` were archived on 2026-09-26 as delivered rather than superseded: the parallel bare-metal producer this repository merged built the buyer package and the seller composition they planned. Their draft requirements were dispositioned one by one — promoted under another heading, dropped as process text, or migrated with a verification task to `bare-metal-and-credits-domain-stacks` and `bare-metal-mock-provisioned-deal` — in [`bare-metal-and-credits-domain-stacks/design.md`](bare-metal-and-credits-domain-stacks/design.md). Their directories are [`archive/2026-09-26-bare-metal-buyer-domain`](archive/2026-09-26-bare-metal-buyer-domain/) and [`archive/2026-09-26-market-platform-bare-metal-10-storefront-composition`](archive/2026-09-26-market-platform-bare-metal-10-storefront-composition/).
 
 `add-buyer-vm-connectivity-terms` was archived as superseded on 2026-09-25 without implementation. Buyer-negotiated relay coordinates in the fulfillment request are forbidden by the contract `relay-vm-access-without-a-dashboard` promoted (`physical-provisioning`'s "Ansible fulfillment adapter": which relay a host dials is a physical fact, never selectable per request), and the mechanism it built has no per-VM relay choice to expose: the buyer-facing tunnel client runs on the host with one `serverAddr` for every rented VM, not in the guest as this change assumed. The seller-operated relay is the bootstrap path to every VM; a buyer wanting their own relay reaches the VM through its relay port once and starts a client inside the guest. A version that avoids the seller relay entirely would be a buyer-supplied first-boot configuration starting a guest-side client — a fresh change under the "Reach hosts" lesser goal, not this one. Its directory is [`archive/2026-09-25-add-buyer-vm-connectivity-terms`](archive/2026-09-25-add-buyer-vm-connectivity-terms/). `structured-capacity-requirements` was re-scoped and renamed to `settle-capacity-claim-vocabulary` the same day; the row above records what landed elsewhere.
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
+
+## Superseded by [`settle-through-arkhai-payments`](archive/2026-10-08-settle-through-arkhai-payments/)
+
+Hosted Stripe settlement (`fiat.stripe.v1`) was removed in favour of Arkhai payments. Four active changes built on it were archived as superseded on 2026-10-08:
+
+- [`consume-expanded-stripe-funding`](archive/2026-10-08-consume-expanded-stripe-funding/)
+- [`add-api-credits-hosted-settlement`](archive/2026-10-08-add-api-credits-hosted-settlement/)
+- [`add-bare-metal-hosted-settlement`](archive/2026-10-08-add-bare-metal-hosted-settlement/)
+- [`project-an-authoritative-funding-loss`](archive/2026-10-08-project-an-authoritative-funding-loss/)
+
+[`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) was re-scoped to Alkahest and contact exchange; its re-scope note records what was removed and what is open for its owners.
+
+`bind-one-hosted-release-coordinate`, `carry-the-payer-return-address`, and `resolve-hosted-client-from-an-index` were archived before the removal and stay archived as history; the requirements they promoted were removed from the permanent specs with the mechanism. The mechanism-scoped reclaim options `carry-the-payer-return-address` added to the settlement runtime's port remain, as a general capability.
 
 `settle-listing-vocabulary` was archived on 2026-09-15. The offering mode is `offering_mode` and a seller's published shape is `listing_resource` on every surface, the provisioning contract is on 2.0 admitting major 2 only, and the requirements it added are live across [`openspec/specs/`](../specs/) -- site-capacity, registry-discovery, storefront-publication, compute-provisioning-contract, resource-pool-management, physical-provisioning and deployment-state. Its directory is [`archive/2026-09-15-settle-listing-vocabulary`](archive/2026-09-15-settle-listing-vocabulary/).
 

@@ -1,15 +1,15 @@
 [project]
 name = "arkhai-vms-negotiation"
-version = "0.4.0"
+version = "0.4.1"
 license = "MIT"
 description = "VM negotiation policies, the seller round, and the RL strategy, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
 # torch is not a dependency: only the RL strategy imports it, lazily, and each
 # consumer opts in through its own `rl` extra, which pins the CPU index.
 dependencies = [
-    "arkhai-vms-listings>=0.4.0",
+    "arkhai-vms-listings>=0.4.1",
     "arkhai-kit-alkahest",
-    "arkhai-kit-policy>=0.3.0",
+    "arkhai-kit-policy>=0.4.0",
 ]
 
 [build-system]

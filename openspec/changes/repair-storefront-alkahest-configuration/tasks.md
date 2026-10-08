@@ -1232,9 +1232,8 @@ failures.
       over-masks: a reader loses nothing, and CI output keeps a key forever.
 
 - [ ] 3ag.3 Candidate refusals the next run will discriminate between, in
-      order of suspicion: the hosted-funding branch demanding
-      `[Settlement.stripe]` when the resolved funding mode is not
-      `interactive`; a missing-config refusal for registry URLs or wallet
+      order of suspicion: (the hosted-funding branch demanding
+      `[Settlement.stripe]` no longer exists: `settle-through-arkhai-payments` removed hosted settlement on 2026-10-08); a missing-config refusal for registry URLs or wallet
       material; and price resolution returning nothing. Read the text first.
 
 ## 3ah. Uint256 amounts do not survive canonical JSON — outside this change

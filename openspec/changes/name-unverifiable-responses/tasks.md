@@ -75,8 +75,9 @@
       every earlier run answered `401`. It did not, on its own, clear this
       refusal.
 - [ ] 3.2 Correct it here if it is a marketplace defect or another harness
-      omission; record it for `add-bare-metal-hosted-settlement` if it belongs to
-      the hosted matrix. A development run qualifies no lane either way.
+      omission. (`settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, and
+      `add-bare-metal-hosted-settlement` was archived as superseded, so there is no
+      hosted matrix to record it for.) A development run qualifies no lane either way.
 
       The refusal is `buyer_auth._verify`: the request's already-authenticated
       principal is not the buyer the agreement records, or is not carrying the
@@ -132,4 +133,4 @@
 | Accepted decision | Permanent location |
 |---|---|
 | A fail-closed refusal names the status and whether the response was authenticated, and never the body | `openspec/specs/storefront-publication/spec.md` (promote at synchronization) |
-| A development run authenticates to the private registry it configures | `docs/development/HOSTED_CREDENTIAL_PAYLOAD.md` |
+| A development run authenticates to the private registry it configures | hosted credential payload guide (removed with hosted settlement by `settle-through-arkhai-payments`) |

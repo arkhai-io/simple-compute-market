@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-kit-alkahest"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Alkahest conditional-escrow runtime adapter, codecs, token helpers, and chain probes"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "pydantic>=2",
-    "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-settlement-runtime>=0.4.0",
     "alkahest-py==1.1.2",
     "web3>=7.14.0",
 ]

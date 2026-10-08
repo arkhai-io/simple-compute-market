@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.9.0"
+version = "0.9.1"
 license = "MIT"
 description = "Wire models and route contracts of the compute provisioning family, without its service code."
 requires-python = ">=3.12"
@@ -10,7 +10,7 @@ dependencies = [
     # VersionedEnvelope.
     "arkhai-core>=0.4.0",
     # The empty-body sentinel the route contracts canonicalize with.
-    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-identity==0.4.0",
     "pydantic>=2",
 ]
 

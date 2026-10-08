@@ -244,7 +244,7 @@ def test_repo_api_credits_spec_loads() -> None:
     assert {declaration.name for declaration in spec.filters} >= {
         "service_name",
         "settlement_mechanism",
-        "funding_profile",
+        "settlement_asset",
     }
 
 

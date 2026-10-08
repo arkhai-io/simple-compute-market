@@ -6,128 +6,61 @@ Define one typed operator and consumer contract for configuring, validating, ins
 
 ## Requirements
 
-### Requirement: Hosted options use exact funding profiles
+### Requirement: Payments configuration separates accounts and credentials
 
-The `fiat.stripe.v1` registration MUST admit only the exact funding profiles `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1`. Each hosted publication clause MUST name exactly one profile, lowercase currency, positive minor-unit rate, interaction capability, and typed condition profile. New options MUST NOT contain `payment_method_types`, free-form provider methods, unversioned aliases, or a recovery-only legacy card value.
+Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, and an API-key environment-variable reference, not the resolved credential. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
 
-The funding profile MUST participate in the complete deterministic option identity and in the immutable accepted settlement projection. Equal resource, rate, currency, parties, and condition under different profiles MUST produce distinct option identities.
+#### Scenario: Credentials stay out of public surfaces
 
-#### Scenario: Card and ACH have the same rate
+- **WHEN** a storefront or buyer is configured for Arkhai payments
+- **THEN** its configuration names the API key's environment variable only, and the credential appears in no public option, Agreement, run log, or status
 
-- **WHEN** a seller configures `card.v1` and `us_ach_debit.v1` with otherwise identical clauses
-- **THEN** publication produces two separately identifiable options whose accepted plans retain their exact profile
+### Requirement: Payment accounts come from domain input and the accepted option
 
-#### Scenario: Unsupported funding string is configured
+Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy: VM uses `[vms].payer_account` and API credits `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `payee_account`, not a service-policy account field.
 
-- **WHEN** a clause contains `card`, `sepa_debit`, a Stripe method type, or another unregistered value
-- **THEN** typed validation fails before readiness, publication, negotiation, or provider I/O
+#### Scenario: Buyer chooses a payer account
 
-### Requirement: Hosted profile readiness is independent and exact
+- **WHEN** an Ed25519 buyer selects `arkhai.payments.v1`
+- **THEN** its account travels in `SettlementSelection.params.payer_account` and Agreement `settlement_params`, while its marketplace signer and owner-scoped API credential remain separate
 
-Hosted preflight MUST verify the exact signed client/API/schema and payer/profile/authorization capabilities plus authority, seller account, condition resolver, currency, country policy, and profile readiness required by each configured clause. It MUST return one safe result per profile. An unready profile MUST suppress only clauses for that profile, while ready hosted profiles and Alkahest remain available. Accepted operations MUST remain recoverable after a profile becomes unready for new materialization.
+### Requirement: Agreement attachment is a policy each side owns
 
-#### Scenario: ACH is unready while card is ready
+The buyer's `attach_agreement` setting, default `false`, MUST be the only control that attaches the Agreement at approval. A seller asks for the Agreement through its payment option's `deposit_agreement` and, when the buyer did not attach it, MUST attach it after verifying the receipt and before any delivery effect.
 
-- **WHEN** the authority reports a safe ACH blocker and valid card capability/readiness
-- **THEN** publication suppresses ACH options, retains card and Alkahest options, and reports no provider identifier or secret
+#### Scenario: A seller configuration sets the buyer's attachment policy
 
-#### Scenario: Manifest lacks a selected profile
+- **WHEN** a seller's `[Settlement.arkhai_payments]` section sets `attach_agreement`
+- **THEN** publication preflight reports a blocker, because the setting belongs to the buyer
 
-- **WHEN** the verified release does not advertise one configured profile or authorization contract
-- **THEN** that profile remains unavailable and no compatible-major or unversioned fallback is used
+#### Scenario: The seller deposits what the buyer did not attach
 
-### Requirement: Buyer hosted compatibility includes local payer readiness
+- **WHEN** the selected option sets `deposit_agreement` and the approved transaction has no Agreement attachment
+- **THEN** the seller attaches the Agreement after recording the verified receipt and before any delivery effect
 
-Buyer compatibility for a hosted option MUST require the exact installed profile capability, supported USD/country policy, required interaction ability under the current action policy, and a selected local buyer profile with an active opaque payer binding ready for that authority/environment. Discovery-time checks MUST use only local profile metadata and advertised option data; they MUST perform no hosted mutation. Compatibility MUST be revalidated immediately before negotiation start and exact authorization.
+### Requirement: The refund failure action is opt-in and follows the accepted mechanism
 
-A setup that the authority reports as awaiting payer-held verification MUST be treated as not yet ready. It MUST NOT be reported as revoked, unavailable, or failed, and it MUST NOT satisfy a saved or off-session mode until the authority reports the instrument ready.
+A seller's `[fulfillment.failure_policy].actions` MAY include `refund`, off by default, meaning "refund the buyer when my own fulfillment fails". The action MUST dispatch on the deal's accepted Agreement: Alkahest keeps its token refund, and Arkhai payments reverses the held payment.
 
-#### Scenario: Buyer selects an ACH interaction mode
+#### Scenario: A payments deal's fulfillment fails before delivery
 
-- **WHEN** an advertised ACH option survives resource filtering and the selected local profile has an active authority/environment binding plus interaction capability
-- **THEN** explicit interactive mode remains compatible without a saved mandate, while saved/off-session mode requires the exact ready instrument and mandate
+- **WHEN** the refund action is enabled and fulfillment of an undelivered payments deal fails
+- **THEN** the seller reverses the held payment and the deal ends `refunded`
 
-#### Scenario: Local readiness changes after discovery
+#### Scenario: A delivered deal is not refunded automatically
 
-- **WHEN** the selected payer binding or instrument readiness becomes revoked before negotiation starts
-- **THEN** revalidation fails without accepting terms or switching to another profile
+- **WHEN** the refund action is enabled and a payments deal had already been delivered
+- **THEN** the action does not run, and a refund stays an operator decision
 
-#### Scenario: A setup is awaiting payer-held verification
+#### Scenario: The reversal fails
 
-- **WHEN** the authority reports a bank-funded setup as pending the payer's own verification evidence
-- **THEN** saved and off-session modes remain incompatible for that instrument, the profile is not reported as revoked or unavailable, and no other funding option is substituted
+- **WHEN** the action's reversal fails
+- **THEN** the deal stays failed with the action's recorded failure, and the operator refund route remains the backstop
 
-### Requirement: Buyer off-session automation policy is explicitly bounded
+#### Scenario: The action is not enabled
 
-Buyer configuration MAY enable off-session authorization only through a typed policy that names the exact authority/environment, funding profile, currency, maximum amount per purchase, maximum aggregate amount over a declared window, and optional seller-principal bounds. Disabled or absent policy MUST require ordinary interactive authorization handling. The policy MUST NOT contain provider IDs, instruments, mandates, action URLs, raw hosted payloads, or blanket seller permission.
-
-Policy evaluation MUST occur only for one accepted obligation and MUST produce a decision to sign that exact authorization or require interaction. It MUST NOT change profile, instrument selection, amount, currency, destination, seller, obligation hash, marketplace operation ID, or expiry.
-
-#### Scenario: Purchase exceeds per-purchase bound
-
-- **WHEN** an accepted obligation exceeds the configured exact profile/currency amount limit
-- **THEN** automation refuses to sign and the buyer follows the interactive action policy without selecting another funding option
-
-#### Scenario: Seller is outside the allowlist
-
-- **WHEN** a seller-controlled obligation otherwise matches but its canonical principal is outside optional policy bounds
-- **THEN** automation refuses and no hosted funding authorization is created automatically
-
-### Requirement: Hosted consumer configuration pins the expanded release
-
-Enabling any expanded hosted profile MUST pin one exact verified hosted manifest, client wheel, API/schema version, payer-profile contract, funding-authorization contract, funding-profile set, identity capability, and service image identity. Buyer and storefront roles MUST agree on those public pins before publication or authorization. Marketplace schemas MUST reject hosted provider, Customer, PaymentMethod, mandate, webhook, database, migration, and administrator fields.
-
-Those pins MUST be taken from the hosted release the run bound. A consumer MUST NOT carry an API version, schema version, or capability set of its own that a bound release is then measured against, because a consumer that names one release in its own configuration cannot admit the next one, and reports a genuine contract disagreement as a configuration edit that was not made. Where a run binds a release, the rendered consumer configuration MUST state that release's coordinates; where no release is bound, no consumer configuration MUST be rendered at all.
-
-Enforcement MUST NOT weaken. A disagreement between the bound release and the composed authority MUST fail closed before publication or authorization exactly as it does when the pins are written down.
-
-#### Scenario: Buyer and storefront pins differ
-
-- **WHEN** the buyer expects a different payer/profile capability or client identity from the publishing storefront's verified authority release
-- **THEN** compatibility fails before terms acceptance or payer authorization
-
-#### Scenario: A run binds a hosted release the consumer has never seen
-
-- **WHEN** a run binds a hosted release whose API version, schema version, or capability set differs from every release bound before it
-- **THEN** the rendered consumer configuration pins that release's own coordinates and the run proceeds, without a change to consumer source
-
-#### Scenario: The composed authority contradicts the bound release
-
-- **WHEN** the authority a run composed serves an API version, schema version, or capability set other than the one the run bound
-- **THEN** the run fails closed before publication or payer authorization and names the disagreement
-
-### Requirement: Peer mechanism configuration hierarchy
-
-Settlement configuration MUST have one root containing a duplicate-free ordered list of canonical mechanism IDs and one typed subsection per installed mechanism. `alkahest.v1` MUST map to `[Settlement.alkahest]` and `fiat.stripe.v1` MUST map to `[Settlement.stripe]`. Identity, wallet, and chain resources MUST remain outside mechanism subsections. New defaults MUST enable no mechanism or implicit priority; initialization MUST require an explicit choice, while legacy migration MUST preserve the effective enabled set and order. Unknown mechanism IDs, unknown keys, duplicate priority entries, and role-inapplicable required fields MUST fail validation.
-
-#### Scenario: Seller enables hosted fiat only
-
-- **WHEN** `[Settlement].priority` contains `fiat.stripe.v1`, the Stripe subsection is valid/enabled, and Alkahest is disabled
-- **THEN** seller configuration is valid with no wallet or chain section
-
-#### Scenario: Priority names an uninstalled mechanism
-
-- **WHEN** configuration names a mechanism for which the composition root has no registration
-- **THEN** startup and publication fail with the unknown canonical mechanism ID
-
-#### Scenario: New config has no mechanism choice
-
-- **WHEN** an operator generates or starts from defaults without selecting a settlement mechanism
-- **THEN** no mechanism is enabled or preferred and publication/settlement remains unavailable until configuration is explicit
-
-### Requirement: Mechanism-owned typed registration
-
-Each installed mechanism MUST register its canonical ID, configuration key and schema, applicable roles, preflight, client factory, listing-option builder, buyer compatibility hook, typed public settlement-clause projections, and any mechanism-specific operator commands. Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and MUST declare their applicable roles, operators, and value types. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition; it MUST NOT interpret chain-, provider-, arbiter-, condition-, or financial-authority fields.
-
-#### Scenario: Stripe readiness is evaluated
-
-- **WHEN** the common status command preflights `fiat.stripe.v1`
-- **THEN** the hosted adapter validates its trust/account/condition contract and returns a common sanitized result without shared code importing provider behavior
-
-#### Scenario: Stripe clause field is evaluated
-
-- **WHEN** a buyer clause uses an allowlisted `stripe`-qualified field
-- **THEN** the hosted registration validates and projects that public value while shared selection compares the typed projection without reading opaque hosted parameters
+- **WHEN** a seller has not enabled the refund action
+- **THEN** a failed fulfillment refunds nothing automatically
 
 ### Requirement: Common sanitized mechanism readiness
 
@@ -161,34 +94,6 @@ A mechanism's settlement-clause projection MUST derive only deterministic public
 - **WHEN** buyer discovery evaluates mechanism-qualified predicates across advertised options
 - **THEN** evaluation is deterministic from listing data and performs no chain or provider I/O
 
-### Requirement: Mechanism-specific utilities stay namespaced
-
-Seller and buyer CLIs MUST expose common settlement status and normal lifecycle commands without mechanism-specific flags. Setup, diagnostics, raw inspection, and raw mutation operations that are genuinely mechanism-specific MUST live under `settlement <mechanism>` and MAY consume only that registration's typed configuration and resources. A mechanism namespace MUST NOT create a separate publication path, settlement lifecycle, priority model, or accepted-plan interpretation.
-
-#### Scenario: Seller completes Stripe onboarding
-
-- **WHEN** the seller invokes `market-storefront settlement stripe onboard`
-- **THEN** the mechanism-owned utility uses the configured hosted client while normal `publish` remains mechanism-neutral
-
-#### Scenario: Buyer inspects an Alkahest escrow
-
-- **WHEN** the buyer invokes the raw escrow inspection utility
-- **THEN** it resolves under `market settlement alkahest` and no raw escrow command remains at the top level
-
-### Requirement: Unified seller settlement commands
-
-The storefront CLI MUST expose one `settlement status` summary and mechanism-owned subcommands under `settlement <mechanism>`. Stripe onboarding/status MUST use the released hosted client and the configured marketplace signer. Alkahest checks MUST use its configured wallet/chains only when invoked or enabled. A separate hosted seller executable and top-level mechanism-specific publication flow MUST NOT remain after cutover.
-
-#### Scenario: Seller onboards Stripe
-
-- **WHEN** the seller invokes `market-storefront settlement stripe onboard`
-- **THEN** the storefront client performs owner-authorized hosted onboarding, treats the Account Link as transient, and reports authoritative readiness without exposing provider IDs or retaining the URL
-
-#### Scenario: Seller requests common status
-
-- **WHEN** both mechanisms are installed
-- **THEN** one machine-readable response contains a common result for each in configured order plus mechanism-owned sanitized blockers
-
 ### Requirement: Uniform configuration precedence and secret placement
 
 Resolution MUST apply declared CLI overrides, then environment/Secret overlay, then role/user TOML, then committed defaults; a higher-layer list MUST replace the lower list. Public identity, authority, manifest, capability, account reference, currency, condition profile, chain name, and deployed-address configuration MAY be ordinary values. Private identity/wallet/request credentials MUST come from approved secret files or environment/Secret overlays and MUST never appear in generated public templates, ConfigMaps, status, source reports, logs, or release artifacts. Hosted provider/admin/webhook secrets MUST be rejected by marketplace schemas.
@@ -200,7 +105,7 @@ Resolution MUST apply declared CLI overrides, then environment/Secret overlay, t
 
 ### Requirement: Explicit atomic configuration migration
 
-Each affected role MUST provide a dry-run and write mode that maps legacy hosted and Alkahest settlement settings to the typed hierarchy, derives canonical priority, leaves identity/wallet/chains in their owning namespaces, preserves unrelated configuration, redacts secrets, refuses conflicting old/new values, validates the complete result, writes and backs up with restrictive permissions, and replaces atomically. Repeating migration MUST be a no-op. Runtime and config editing MUST reject legacy paths after cutover with the exact migration command.
+Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`.
 
 #### Scenario: Migration preview is requested
 
@@ -209,7 +114,7 @@ Each affected role MUST provide a dry-run and write mode that maps legacy hosted
 
 #### Scenario: Old and new values conflict
 
-- **WHEN** a legacy key and its destination both exist with different values
+- **WHEN** a legacy Alkahest key and its destination both exist with different values
 - **THEN** migration aborts without modifying the source or backup and identifies both key paths
 
 #### Scenario: Migration is repeated
@@ -217,53 +122,114 @@ Each affected role MUST provide a dry-run and write mode that maps legacy hosted
 - **WHEN** a successfully migrated file is processed again
 - **THEN** the tool reports no changes and preserves byte-equivalent effective configuration
 
-### Requirement: Recovery uses pinned mechanism identity
+#### Scenario: Stripe settings are encountered
 
-Run logs MAY record configuration-schema version, public resolved mechanism set, selected funding profile, safe funding-authorization reference, and source-free fingerprints, but MUST NOT store secrets, stable payer/instrument refs, provider data, or raw actions. Recovery MUST use the accepted plan's canonical mechanism, exact funding profile, obligation, funding authorization, and operation identities rather than current priority, current profile readiness, current automation policy, or another mechanism/profile's readiness.
+- **WHEN** migration encounters `fiat.stripe.v1` or `[Settlement.stripe]`
+- **THEN** it refuses to map those values to Arkhai payments and reports that the obsolete settings must be removed
 
-#### Scenario: Priority changes during a funded obligation
+### Requirement: Settlement configuration selects explicit peer mechanisms
 
-- **WHEN** recovery resumes an obligation after another mechanism becomes first priority
-- **THEN** it resumes the originally pinned mechanism, funding profile, authorization, and stable operation identity without fallback
+Settlement configuration MUST have one root with a duplicate-free ordered list of mechanism IDs and one typed subsection per installed mechanism (`alkahest.v1` as `[Settlement.alkahest]`, `arkhai.payments.v1` as `[Settlement.arkhai_payments]`). `fiat.stripe.v1` MUST NOT be registered, aliased, or mapped to Arkhai payments. Identity, wallet, and chain resources MUST stay outside mechanism subsections. Unknown IDs or keys, duplicates, and role-inapplicable required fields MUST fail validation.
 
-#### Scenario: Profile is disabled during pending funding
+#### Scenario: Seller enables Arkhai payments only
 
-- **WHEN** recovery resumes an accepted bank operation after operators disable that profile for new deals
-- **THEN** it continues status/reclaim under the accepted profile and never converts the obligation to card or Alkahest
+- **WHEN** `[Settlement].priority` contains `arkhai.payments.v1`, its typed subsection is valid and enabled, and Alkahest is disabled
+- **THEN** seller configuration is valid without a wallet or chain section
 
-### Requirement: A payer submits its own instrument setup verification
+#### Scenario: Priority names an uninstalled mechanism
 
-Where the bound hosted release declares the direct payer instrument setup capability, a buyer MUST be able to complete a bank-funded instrument setup by submitting the verification evidence the payer's own bank made available to them, without a browser session and without an operator acting on the payer's behalf.
+- **WHEN** configuration names a mechanism for which the composition root has no registration, including `fiat.stripe.v1`
+- **THEN** startup and publication fail with the unknown canonical mechanism ID and do not substitute another mechanism
 
-One submission MUST name exactly one pending setup under exactly one opaque payer binding, and MUST carry exactly one form of evidence: either the deposited minor-unit amounts, or the descriptor code. Carrying both, or neither, MUST fail before any hosted mutation.
+### Requirement: New configuration chooses no mechanism
 
-The submission and its result MUST carry no provider identifier, Customer, PaymentMethod, mandate, bank or card detail, client secret, action URL, or raw provider payload, and marketplace persistence MUST NOT retain the submitted evidence. The result MUST expose only the opaque setup reference, public readiness, and any transient action the authority returns.
+New defaults MUST enable no mechanism and no implicit priority; initialization MUST require an explicit choice, while migration of still-supported settings MUST preserve the effective enabled set and order.
 
-Starting a setup that the payer will answer directly MAY carry one opaque provider token naming the instrument the payer already holds, because an authority given no instrument issues a hosted page instead and the setup is no longer one the payer can answer. That token MUST be transient on the same terms as an action URL: passed to the authority, never persisted in a marketplace row, never projected, and never reported. Marketplace configuration MUST continue to reject provider and payment-method fields outright.
+#### Scenario: New config has no mechanism choice
 
-Where the bound release does not declare the capability, the operation MUST be reported as an unavailable prerequisite naming that capability, before any hosted mutation, rather than attempted and failed.
+- **WHEN** an operator generates or starts from defaults without selecting a settlement mechanism
+- **THEN** no mechanism is enabled or preferred and publication/settlement remains unavailable until configuration is explicit
 
-#### Scenario: A payer submits microdeposit amounts
+### Requirement: Mechanism registrations own typed configuration and readiness
 
-- **WHEN** a payer submits the two deposited minor-unit amounts against a setup the authority reports as awaiting verification
-- **THEN** the authority's readiness for that setup is returned, the instrument becomes usable for saved and off-session modes once it is ready, and no provider material is persisted or reported
+Each installed mechanism MUST register its canonical ID, configuration key and schema, applicable roles, preflight, listing-option builder, buyer compatibility hook, typed public settlement-clause projections, and any mechanism-specific operator commands. A client factory and accepted-obligation or verifier hooks MAY be absent for an Agreement-based stage that does not use the conditional-escrow runtime.
 
-#### Scenario: A submission carries both forms of evidence
+#### Scenario: Arkhai payments readiness is evaluated
 
-- **WHEN** a submission names both deposited amounts and a descriptor code, or names neither
-- **THEN** it is refused before any hosted call, and the pending setup is left untouched
+- **WHEN** common status preflights `arkhai.payments.v1`
+- **THEN** its registration returns a common sanitized result without exposing an API credential or performing a payment mutation
 
-#### Scenario: The bound release lacks the capability
+#### Scenario: Agreement-deposit preference is evaluated
 
-- **WHEN** a verification submission is attempted against a bound release that does not declare direct payer instrument setup
-- **THEN** the capability is reported as the unavailable prerequisite before any hosted mutation, and no alternate path is substituted
+- **WHEN** a buyer clause filters on the public agreement-deposit setting of an advertised `arkhai.payments.v1` option
+- **THEN** the mechanism registration projects that typed option value and shared selection compares it without interpreting opaque parameters
 
-#### Scenario: A setup is started from an instrument the payer holds
+### Requirement: Mechanism clause fields stay in their namespace
 
-- **WHEN** a setup is started with an opaque provider token for the payer's own instrument
-- **THEN** the authority reports the setup as awaiting verification with no hosted action, and the token appears in no marketplace row, projection, or report
+Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
 
-#### Scenario: Verification evidence is not retained
+#### Scenario: A mechanism contributes a clause field
 
-- **WHEN** a submission has been made and its result recorded
-- **THEN** marketplace persistence and any report contain the opaque setup reference and public readiness only, and contain no amounts, descriptor code, or provider payload
+- **WHEN** a mechanism adds a publication clause field
+- **THEN** the field lives under the mechanism's configuration key with its declared roles, operators, and value types, and the shared grammar composes it without interpreting its value
+
+### Requirement: Mechanism-specific commands stay registration-owned
+
+Seller and buyer CLIs MUST expose common settlement status and normal lifecycle commands without mechanism-specific flags. Setup, diagnostics, raw inspection, and raw mutation operations that are genuinely mechanism-specific MUST live under `settlement <mechanism>` and MAY consume only that registration's typed configuration and resources. A mechanism namespace MUST NOT create a separate publication path, settlement lifecycle, priority model, or accepted-agreement interpretation.
+
+#### Scenario: Arkhai payment diagnostics are invoked
+
+- **WHEN** an operator invokes a mechanism-specific Arkhai payment diagnostic
+- **THEN** it runs through the `arkhai.payments.v1` registration and does not alter common publication, priority, or Agreement semantics
+
+#### Scenario: Buyer inspects an Alkahest escrow
+
+- **WHEN** the buyer invokes the raw escrow inspection utility
+- **THEN** it resolves under `market settlement alkahest` and no raw escrow command remains at the top level
+
+### Requirement: Common seller status covers enabled mechanisms
+
+The storefront CLI MUST expose one `settlement status` summary and mechanism-owned subcommands under `settlement <mechanism>`. Alkahest checks MUST use its configured wallet/chains only when invoked or enabled. Normal publication MUST remain mechanism-neutral.
+
+#### Scenario: Seller requests common status
+
+- **WHEN** Alkahest and `arkhai.payments.v1` are both installed
+- **THEN** one machine-readable response contains a common result for each in configured order plus mechanism-owned sanitized blockers
+
+#### Scenario: Seller invokes an Alkahest check
+
+- **WHEN** the seller invokes an Alkahest check
+- **THEN** the command uses Alkahest's configured wallet and chain resources without making those resources prerequisites for Arkhai payments
+
+### Requirement: Recovery follows the accepted settlement option
+
+Run logs MAY record configuration-schema version, the public resolved mechanism set, the selected settlement option, and non-secret mechanism references, but MUST NOT store credentials, provider data, or raw actions. Recovery MUST use the accepted Agreement's exact mechanism, settlement option, opaque parameters, and stable operation identity rather than current priority, current readiness, or another mechanism's state.
+
+#### Scenario: Priority changes during an Arkhai payment
+
+- **WHEN** recovery resumes a transaction after another mechanism becomes first priority
+- **THEN** it continues with the accepted `arkhai.payments.v1` option and the same transaction ID without fallback
+
+#### Scenario: A mechanism is disabled for new agreements
+
+- **WHEN** recovery resumes an accepted operation after its mechanism is disabled for new deals
+- **THEN** it continues under the accepted mechanism and exact operation identity rather than converting the Agreement to another mechanism
+
+### Requirement: Settlement options keep mechanism-owned parameters opaque
+
+A listing MUST advertise settlement choices through `settlement_options` with the shared fields `{option_id, mechanism, asset, rates, params}`. The accepted Agreement MUST select one exact option, and the core MUST NOT interpret mechanism-specific values in `params`.
+
+#### Scenario: Alkahest option is published
+
+- **WHEN** a seller publishes an Alkahest settlement choice
+- **THEN** its escrow policy is interpreted by the Alkahest kit, not by Arkhai payments
+
+### Requirement: Each mechanism's option carries its own parameters
+
+Alkahest options MUST carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, hold window, and agreement-deposit setting needed to derive and disclose its payment policy.
+
+#### Scenario: Arkhai payment option is published
+
+- **WHEN** a seller publishes an `arkhai.payments.v1` option
+- **THEN** the option identifies its payee account, declared hold window, and agreement-deposit setting while core exposes only the shared option envelope
+

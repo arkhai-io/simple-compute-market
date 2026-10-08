@@ -448,7 +448,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     assert job_eval.get("rule_matched") == case.rule_id, job_eval
     assert job_eval.get("would_pause") is True, job_eval
 
-    settle = storefront_client.settle(
+    settle = storefront_client.settle_evm(
         escrow_uid,
         negotiation_id=negotiation_id,
         buyer_evm_address=buyer_config["wallet_address"],

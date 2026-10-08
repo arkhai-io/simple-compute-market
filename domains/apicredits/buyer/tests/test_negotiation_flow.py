@@ -9,10 +9,12 @@ API-credits default guards, ``unit_count`` = requested quantity, and the
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
+from market_core.schemas import Agreement
 from market_policy.negotiation_middleware import load_negotiation_chain
 
 from arkhai_apicredits_buyer.buyer_client import negotiate_with_seller
@@ -89,12 +91,17 @@ def _request_header(req, name: str) -> str:
 
 def _urlopen_fake(responses, captured=None):
     it = iter(responses)
+    state: dict[str, object] = {}
 
     def _fn(req, timeout=None):
         request_body = json.loads(req.data.decode("utf-8")) if req.data else {}
         if captured is not None and req.data:
             captured.append(request_body)
         payload = dict(next(it))
+        is_opening = req.full_url.endswith("/api/v1/negotiate/new")
+        if is_opening:
+            state["listing_id"] = request_body.get("listing_id")
+            state["provision_terms"] = request_body.get("provision_terms")
         payload.setdefault(
             "buyer_principal",
             _BUYER_SIGNER.identity.model_dump(mode="json"),
@@ -103,7 +110,6 @@ def _urlopen_fake(responses, captured=None):
             "seller_principal",
             _SELLER_SIGNER.identity.model_dump(mode="json"),
         )
-        is_opening = req.full_url.endswith("/api/v1/negotiate/new")
         if is_opening:
             payload.setdefault(
                 "accepted_provision_terms",
@@ -113,6 +119,28 @@ def _urlopen_fake(responses, captured=None):
                 "accepted_escrow_proposal",
                 request_body["proposal"],
             )
+        if payload.get("action") == "accept" and payload.get("agreement") is None:
+            proposal = payload.get("proposal")
+            fields = proposal.get("fields") if isinstance(proposal, dict) else None
+            amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+            negotiation_id = payload.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
+            agreement = Agreement(
+                negotiation_id=negotiation_id,
+                listing_id=state.get("listing_id") or request_body.get("listing_id") or "lst-credits-1",
+                listing_hash="0" * 64,
+                buyer=_BUYER_SIGNER.identity.model_dump(mode="json"),
+                seller=_SELLER_SIGNER.identity.model_dump(mode="json"),
+                amount=amount,
+                asset=fields.get("token") if isinstance(fields, dict) else None,
+                duration_seconds=0,
+                start_utc="2025-01-01T00:00:00Z",
+                provision_terms=payload.get("accepted_provision_terms") or state.get("provision_terms"),
+                accepted_at="2025-01-01T00:00:00Z",
+            )
+            payload["agreement"] = agreement.model_dump(mode="json", exclude_none=True)
+            payload["agreement_bytes"] = base64.b64encode(
+                agreement.model_dump_json(exclude_none=True).encode("utf-8")
+            ).decode("ascii")
         operation = "negotiate_new" if is_opening else "negotiate_continue"
         resource = (
             request_body["listing_id"]

@@ -1,0 +1,832 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arkhai-io/arkhai-payments/schema/payments.schema.json",
+  "title": "arkhai-payments wire contract",
+  "$defs": {
+    "AccountId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Arkhai account UUID."
+    },
+    "Amount": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,37}$"
+    },
+    "ApiError": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ApiErrorCode"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "ApiErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "authentication_required",
+        "caller_not_authorized",
+        "account_not_found",
+        "transaction_not_found",
+        "part_not_found",
+        "mandate_expired",
+        "fee_mismatch",
+        "dispute_authority_missing",
+        "deal_mismatch",
+        "attachment_not_found",
+        "invalid_event",
+        "request_id_reused",
+        "hold_matured",
+        "hold_not_reversible",
+        "insufficient_held_funds",
+        "insufficient_funds",
+        "account_directory_unavailable",
+        "ledger_unavailable",
+        "internal_error"
+      ]
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "properties": {
+        "mandate": {
+          "$ref": "#/$defs/Mandate"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DealAttachment"
+          }
+        }
+      },
+      "required": [
+        "mandate"
+      ],
+      "additionalProperties": false
+    },
+    "Asset": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]{0,16}(\\/\\d{1,6})?$"
+    },
+    "Authorities": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "stop": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        },
+        "reverse": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountId"
+          }
+        }
+      },
+      "required": [
+        "start",
+        "stop",
+        "reverse"
+      ],
+      "additionalProperties": false
+    },
+    "Balance": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/Asset"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/BalanceAmount"
+          }
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BalanceHold"
+          }
+        }
+      },
+      "required": [
+        "available",
+        "held"
+      ],
+      "additionalProperties": false
+    },
+    "BalanceAmount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,37})$"
+    },
+    "BalanceHold": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimedBalanceHold"
+        },
+        {
+          "$ref": "#/$defs/UntilStopBalanceHold"
+        }
+      ]
+    },
+    "DealAttachment": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "deal"
+        },
+        "content": {
+          "$ref": "#/$defs/DealContent"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "DealCommitment": {
+      "$ref": "#/$defs/Sha256Hex"
+    },
+    "DealContent": {},
+    "Duration": {
+      "type": "string",
+      "pattern": "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$"
+    },
+    "EventCommand": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/LifecycleKind"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        },
+        "payload": {
+          "description": "Opaque JSON, recorded and never interpreted."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "EventRequest": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "event": {
+          "$ref": "#/$defs/LifecycleEvent"
+        }
+      },
+      "required": [
+        "account",
+        "requestId",
+        "event"
+      ],
+      "additionalProperties": false
+    },
+    "Fee": {
+      "type": "object",
+      "properties": {
+        "bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "bps"
+      ],
+      "additionalProperties": false,
+      "description": "Service fee in basis points, pinned in the mandate; must equal current policy."
+    },
+    "Health": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "ok"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "Hold": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HoldFor"
+        },
+        {
+          "$ref": "#/$defs/HoldUntilStop"
+        }
+      ],
+      "description": "How long a part's money stays reversible and uncollectable by the payee."
+    },
+    "HoldFor": {
+      "type": "object",
+      "properties": {
+        "for": {
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "for"
+      ],
+      "additionalProperties": false,
+      "description": "Collectable once this long has passed since approval."
+    },
+    "HoldUntilStop": {
+      "type": "object",
+      "properties": {
+        "until": {
+          "type": "string",
+          "const": "stop"
+        }
+      },
+      "required": [
+        "until"
+      ],
+      "additionalProperties": false,
+      "description": "Collectable once the transaction is stopped."
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "identifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "identifier"
+      ],
+      "additionalProperties": false,
+      "description": "Canonical unpadded base64url of a 32-byte Ed25519 public key."
+    },
+    "LifecycleEvent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/LifecycleKind"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        },
+        "payload": {
+          "description": "Opaque JSON, recorded and never interpreted."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "LifecycleKind": {
+      "type": "string",
+      "enum": [
+        "start",
+        "stop",
+        "reverse"
+      ]
+    },
+    "Mandate": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "parts": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Part"
+          }
+        },
+        "deal": {
+          "$ref": "#/$defs/DealCommitment"
+        },
+        "fee": {
+          "$ref": "#/$defs/Fee"
+        },
+        "authorities": {
+          "$ref": "#/$defs/Authorities"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "expires": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Unix seconds after which approval is refused."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "parts",
+        "deal",
+        "fee",
+        "authorities",
+        "nonce",
+        "expires"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit terms submitted for approval in an authenticated request."
+    },
+    "MinorUnits": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,37})$"
+    },
+    "OncePart": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "once"
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "amount": {
+          "$ref": "#/$defs/Amount"
+        },
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        }
+      },
+      "required": [
+        "kind",
+        "asset",
+        "amount",
+        "hold"
+      ],
+      "additionalProperties": false,
+      "description": "A fixed amount, debited and credited (held) at approval."
+    },
+    "Part": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/OncePart"
+        }
+      ]
+    },
+    "PartSnapshot": {
+      "type": "object",
+      "properties": {
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "gross": {
+          "$ref": "#/$defs/Amount"
+        },
+        "held": {
+          "$ref": "#/$defs/MinorUnits"
+        },
+        "released": {
+          "$ref": "#/$defs/MinorUnits"
+        },
+        "reversed": {
+          "$ref": "#/$defs/MinorUnits"
+        },
+        "feePaid": {
+          "$ref": "#/$defs/MinorUnits"
+        },
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        },
+        "releaseAt": {
+          "description": "UTC instant when a timed hold becomes releasable.",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/PartState"
+        }
+      },
+      "required": [
+        "part",
+        "asset",
+        "gross",
+        "held",
+        "released",
+        "reversed",
+        "feePaid",
+        "hold",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "PartState": {
+      "type": "string",
+      "enum": [
+        "held",
+        "released",
+        "reversed",
+        "settled"
+      ]
+    },
+    "Receipt": {
+      "type": "object",
+      "properties": {
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "deal": {
+          "$ref": "#/$defs/DealCommitment"
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "ledger": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Ledger transaction id for approval."
+        },
+        "parts": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReceiptPart"
+          }
+        },
+        "approvedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Unix seconds."
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        }
+      },
+      "required": [
+        "transaction",
+        "deal",
+        "from",
+        "to",
+        "ledger",
+        "parts",
+        "approvedAt",
+        "issuer"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiptPart": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "gross": {
+          "$ref": "#/$defs/Amount"
+        },
+        "fee": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        },
+        "net": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,37})$"
+        },
+        "hold": {
+          "$ref": "#/$defs/Hold"
+        }
+      },
+      "required": [
+        "asset",
+        "gross",
+        "fee",
+        "net",
+        "hold"
+      ],
+      "additionalProperties": false
+    },
+    "RequestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "SignatureProof": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+        }
+      },
+      "required": [
+        "scheme",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "SignedReceipt": {
+      "type": "object",
+      "properties": {
+        "receipt": {
+          "$ref": "#/$defs/Receipt"
+        },
+        "proof": {
+          "$ref": "#/$defs/SignatureProof"
+        }
+      },
+      "required": [
+        "receipt",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "SignedTransactionSnapshot": {
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/TransactionSnapshot"
+        },
+        "proof": {
+          "$ref": "#/$defs/SignatureProof"
+        }
+      },
+      "required": [
+        "snapshot",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "StoredDealAttachment": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "deal"
+        },
+        "content": {
+          "$ref": "#/$defs/DealContent"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "name": {
+          "type": "string",
+          "const": "deal.json"
+        },
+        "mediaType": {
+          "type": "string",
+          "const": "application/json"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "UTF-8 byte length of the JCS content."
+        },
+        "uploader": {
+          "$ref": "#/$defs/AccountId"
+        }
+      },
+      "required": [
+        "kind",
+        "content",
+        "sha256",
+        "name",
+        "mediaType",
+        "size",
+        "uploader"
+      ],
+      "additionalProperties": false
+    },
+    "StoredEvent": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "requestId": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "event": {
+          "$ref": "#/$defs/LifecycleEvent"
+        },
+        "receivedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Unix seconds when the service durably received the event."
+        }
+      },
+      "required": [
+        "account",
+        "requestId",
+        "event",
+        "receivedAt"
+      ],
+      "additionalProperties": false
+    },
+    "TimedBalanceHold": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "balance": {
+          "$ref": "#/$defs/BalanceAmount"
+        },
+        "fee": {
+          "$ref": "#/$defs/Fee"
+        },
+        "releaseAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "transaction",
+        "part",
+        "from",
+        "to",
+        "asset",
+        "balance",
+        "fee",
+        "releaseAt"
+      ],
+      "additionalProperties": false
+    },
+    "TransactionSnapshot": {
+      "type": "object",
+      "properties": {
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "receipt": {
+          "$ref": "#/$defs/SignedReceipt"
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Unix seconds at which this state was assembled."
+        },
+        "parts": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PartSnapshot"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StoredEvent"
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StoredDealAttachment"
+          }
+        },
+        "issuer": {
+          "$ref": "#/$defs/Identity"
+        }
+      },
+      "required": [
+        "transaction",
+        "receipt",
+        "observedAt",
+        "parts",
+        "events",
+        "attachments",
+        "issuer"
+      ],
+      "additionalProperties": false
+    },
+    "UntilStopBalanceHold": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transaction": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "from": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "to": {
+          "$ref": "#/$defs/AccountId"
+        },
+        "asset": {
+          "$ref": "#/$defs/Asset"
+        },
+        "balance": {
+          "$ref": "#/$defs/BalanceAmount"
+        },
+        "fee": {
+          "$ref": "#/$defs/Fee"
+        },
+        "until": {
+          "type": "string",
+          "const": "stop"
+        }
+      },
+      "required": [
+        "address",
+        "transaction",
+        "part",
+        "from",
+        "to",
+        "asset",
+        "balance",
+        "fee",
+        "until"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

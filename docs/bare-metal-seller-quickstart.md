@@ -12,15 +12,9 @@ Physical Resource may back VM and bare-metal offers only when both listings
 use the same stable physical-host identity and their Resource Pools explicitly
 declare the relevant `deliverable_modes`.
 
-Whole-host listings may publish Alkahest and hosted Stripe fiat as independent
-settlement alternatives. Hosted options use one exact `card.v1`, US/USD
-`us_bank_transfer.v1`, or US/USD `us_ach_debit.v1` profile; slow or interactive
-payment never reserves, allocates, or provisions the host before authoritative
-funding. See the
+Whole-host listings may publish Alkahest settlement options. See the
 [`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for
-payment behavior and
-[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
-the distinction between shipped support and completed external qualification.
+buyer-side escrow requirements.
 
 ## Prerequisites
 
@@ -32,9 +26,11 @@ the distinction between shipped support and completed external qualification.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration. Hosted-only roles require the signed released hosted manifest/client/API capability pins, public authority trust and environment scope, seller account binding, exact profiles/currency/country/condition policy, and no wallet/RPC secret. Alkahest roles require the ordinary chain configuration and funded public seller address. Never put a wallet private key, Stripe credential, payer binding, or provider object in Compose or this document.
+- One strict shared settlement configuration. Alkahest requires the ordinary chain
+  configuration and funded public seller address. Never put a wallet private key
+  or provider object in Compose or this document.
 
-The installed `arkhai-bare-metal-buyer` contribution supplies the `market bare-metal` discovery, negotiation, hosted start/status/reclaim, and recovery commands. A running seller stack is not end-to-end evidence until that public path also observes authenticated access, teardown, and access revocation against a disposable host.
+The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
 ## Build the images
 
@@ -148,9 +144,6 @@ export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
 export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
 export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
 export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
-export BARE_METAL_FUNDING_DEADLINES_JSON='{"card.v1":900,"us_bank_transfer.v1":86400,"us_ach_debit.v1":432000}'
-export BARE_METAL_OFFER_EXPIRES_AT=<UTC-timestamp>
-export BARE_METAL_FULFILLMENT_DEADLINE=<UTC-timestamp>
 export BARE_METAL_MAX_DURATION_SECONDS=7200
 
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
@@ -275,7 +268,7 @@ reason), hold, refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Payments-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime registers the ready mechanisms and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
 
 ### Resetting the storefront database
 

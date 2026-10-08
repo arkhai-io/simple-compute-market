@@ -15,13 +15,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from arkhai_vms import VmProvisionTerms
 from core_buyer import (  # noqa: F401 — re-exports for existing callers
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
     BuyConstraints,
     BuyResult,
-    NegotiationResult,
     NegotiateFn,
+    NegotiationResult,
     SettleFn,
     fetch_listing_dict,
     fetch_listing_dict_multi,
@@ -42,11 +43,13 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
 from core_buyer.orchestration import AgreedTerms as CoreAgreedTerms
 from core_buyer.orchestration import (
     make_negotiate_hook as _core_make_negotiate_hook,
+)
+from core_buyer.orchestration import (
     make_settle_hook as _core_make_settle_hook,
 )
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
-from arkhai_vms import VmProvisionTerms
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
+
 from .escrow_client import (
     BuildEscrowTermsFn,
     CreateEscrowFn,
@@ -113,6 +116,7 @@ def make_legacy_settle_hook(
     settlement_poll_interval: float,
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
+    agreement_settlement: SettleFn | None = None,
 ) -> SettleFn:
     """Build the compute-instantiated settlement hook over the core stage."""
     adapted_confirm: Optional[Callable[[CoreAgreedTerms, dict[str, Any]], bool]] = None
@@ -147,4 +151,5 @@ def make_legacy_settle_hook(
         settlement_poll_interval=settlement_poll_interval,
         settlement_total_timeout=settlement_total_timeout,
         sleep=sleep,
+        agreement_settlement=agreement_settlement,
     )

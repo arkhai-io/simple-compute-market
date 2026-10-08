@@ -8,9 +8,9 @@ module supplies what is bare metal's:
 - the closed ``bare_metal.v1`` message as the negotiated terms, the requested
   duration as the agreement's, and no requested start, so a lease begins when
   settlement commits it;
-- an exact settlement option, hosted or contact exchange, accepted at round
-  zero at its trusted amount without price policy, once its physical facts are
-  checked against the trusted listing;
+- an exact settlement option, of any composed mechanism, accepted at round
+  zero at its trusted amount without price policy; a deal that provisions the
+  machine is first held to the listing's admission rules;
 - an escrow proposal decided by the seller chain (``negotiation.py``);
 - the settlement plan built from the same seller wallet and chain configuration
   settlement verification uses, and committed at acceptance with the
@@ -24,16 +24,13 @@ lifecycle".
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from arkhai_bare_metal import (
-    BareMetalBuyerDemand,
-    BareMetalMessage,
-    BareMetalTerms,
-    validate_buyer_selection,
-)
+from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -44,6 +41,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
     compute_rate_total,
+    Agreement,
 )
 from market_identity import Identity
 from market_negotiation_runtime import (
@@ -64,8 +62,13 @@ from market_settlement_runtime import AcceptedObligationArtifacts
 from market_storefront_kit import TradingPause
 
 from .listing_source_check import ListingSourceCheck
-from .negotiation import BareMetalSellerRoundHook
+from .negotiation import BareMetalSellerRoundHook, bare_metal_admission_refusal
 from .settlement import BareMetalSettlementPlanError
+from .settlement_composition import (
+    BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY,
+    UndeclaredMechanismFulfillmentError,
+    mechanism_fulfills_through_capacity,
+)
 
 PlanBuilder = Callable[..., dict[str, Any]]
 # One curried registry dispatch per composed mechanism: the selection resolves
@@ -94,6 +97,70 @@ class BareMetalNegotiationRefusal(ValueError):
         self.status_code = status_code
 
 
+AcceptedAgreementBuilder = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+
+
+def _with_agreement(
+    acceptance: Acceptance,
+    artifacts: dict[str, Any],
+    *,
+    settlement: SettlementOption | None,
+    data_dispatch: Mapping[str, AcceptedAgreementBuilder],
+) -> dict[str, Any]:
+    """Add the accepted Agreement and the selected mechanism's settlement data.
+
+    Both parties keep the exact Agreement bytes; a mechanism that settles from
+    the Agreement derives its settlement data from those bytes.
+    """
+
+    if acceptance.accepted_at is None or acceptance.agreement.start_utc is None:
+        raise NegotiationStateError("accepted Agreement lacks fixed acceptance timestamps")
+    plan = artifacts.get("settlement_plan")
+    asset = settlement.asset if settlement is not None else None
+    if asset is None and isinstance(plan, Mapping):
+        obligations = plan.get("obligations")
+        if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
+            raw_asset = obligations[0].get("asset")
+            asset = raw_asset if isinstance(raw_asset, str) else None
+    provision = acceptance.terms.wire
+    if provision is None and hasattr(acceptance.terms.decoded, "model_dump"):
+        provision = acceptance.terms.decoded.model_dump(mode="json", exclude_none=True)
+    listing_bytes = json.dumps(
+        acceptance.listing_record,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+        default=str,
+    ).encode("utf-8")
+    selection = artifacts.get("settlement_selection")
+    agreement = Agreement(
+        negotiation_id=acceptance.negotiation_id,
+        listing_id=acceptance.listing_id,
+        listing_hash=hashlib.sha256(listing_bytes).hexdigest(),
+        buyer=acceptance.buyer_principal.model_dump(mode="json"),
+        seller=acceptance.seller_principal.model_dump(mode="json"),
+        settlement=settlement,
+        settlement_params=(
+            SettlementSelection.model_validate(selection).params if selection is not None else {}
+        ),
+        amount=acceptance.agreed_amount,
+        asset=asset,
+        duration_seconds=acceptance.agreement.duration_seconds,
+        start_utc=acceptance.agreement.start_utc,
+        provision_terms=dict(provision) if isinstance(provision, Mapping) else None,
+        accepted_at=acceptance.accepted_at.isoformat().replace("+00:00", "Z"),
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
+    artifacts["agreement"] = agreement
+    artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
+    if settlement is not None and settlement.mechanism in data_dispatch:
+        artifacts["settlement_data"] = dict(
+            data_dispatch[settlement.mechanism](json.loads(agreement_bytes))
+        )
+    return artifacts
+
+
 def exact_selection(
     proposal: Any, settlement_selection: SettlementSelection | None
 ) -> SettlementSelection | None:
@@ -110,18 +177,18 @@ def exact_selection(
         fields = proposal.get("fields", {})
         if unknown or not isinstance(fields, Mapping):
             raise BareMetalNegotiationRefusal(
-                "hosted settlement proposal has invalid fields", status_code=400
+                "exact settlement proposal has invalid fields", status_code=400
             )
         try:
             nested = SettlementSelection.model_validate(proposal.get("settlement_selection"))
         except (TypeError, ValueError) as exc:
             raise BareMetalNegotiationRefusal(
-                "hosted settlement proposal has an invalid selection", status_code=400
+                "exact settlement proposal has an invalid selection", status_code=400
             ) from exc
     if settlement_selection is not None and isinstance(proposal, Mapping) and nested is None:
         if sorted(set(proposal).difference({"fields"})):
             raise BareMetalNegotiationRefusal(
-                "hosted settlement proposal mixes incompatible carriers", status_code=400
+                "exact settlement proposal mixes incompatible carriers", status_code=400
             )
     if (
         settlement_selection is not None
@@ -129,7 +196,7 @@ def exact_selection(
         and settlement_selection != nested
     ):
         raise BareMetalNegotiationRefusal(
-            "hosted settlement proposal contains ambiguous selections", status_code=400
+            "exact settlement proposal contains ambiguous selections", status_code=400
         )
     return settlement_selection or nested
 
@@ -227,8 +294,12 @@ def _seller_reference_amount(
     return 0
 
 
-def _escrow_terms(listing: Any, message: BareMetalMessage, listing_id: str) -> BareMetalTerms:
-    """What fulfillment provisions for an accepted escrow: the listed host, as asked."""
+def _accepted_terms(listing: Any, message: BareMetalMessage, listing_id: str) -> BareMetalTerms:
+    """What fulfillment provisions for an accepted deal: the listed host, as asked.
+
+    The same for every settlement mechanism; the trusted listing names the
+    machine and the buyer's message says how long and with what access.
+    """
 
     return BareMetalTerms(
         host_id=listing.host_id,
@@ -251,6 +322,8 @@ def build_bare_metal_negotiation_runtime(
     accepted_obligation_dispatch: AcceptedObligationDispatch,
     seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
+    settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
+    mechanism_fulfillment: Mapping[str, bool] = BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
@@ -260,6 +333,7 @@ def build_bare_metal_negotiation_runtime(
     """
 
     chain_paths = dict(chain_config_paths or {})
+    data_dispatch = dict(settlement_data_dispatch or {})
 
     def require_domain(binding: Any) -> None:
         if str(binding.domain_identity) != str(domain.identity):
@@ -418,12 +492,14 @@ def build_bare_metal_negotiation_runtime(
 
         selection = exact_selection(proposal, None)
         assert selection is not None
-        build_obligation = accepted_obligation_dispatch.get(selection.mechanism)
-        if build_obligation is None:
+        # A composed mechanism with no obligation builder settles from the
+        # Agreement alone, so it is admitted without a plan.
+        if selection.mechanism not in accepted_obligation_dispatch:
             raise BareMetalNegotiationRefusal(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
             )
+        build_obligation = accepted_obligation_dispatch[selection.mechanism]
         record = request.listing_record
         if Identity.model_validate(record.get("seller_principal")) != seller_principal:
             raise BareMetalNegotiationRefusal("listing seller identity changed")
@@ -450,78 +526,99 @@ def build_bare_metal_negotiation_runtime(
                 "selection does not exact-match one trusted listing option",
                 status_code=400,
             )
-        terms: BareMetalTerms | None = None
-        service_terms: dict[str, Any] = {}
-        if "bare_metal" in selected_option.params:
-            terms, service_terms = await validate_physical_selection(
-                request.repository,
-                listing_id=listing_id,
-                message=message,
-                selection=selection,
-                options=options,
-                selected_option=selected_option,
-            )
+        # A deal that provisions the listed machine is held to the same
+        # admission rules and records the same terms however it settles.
         try:
-            built = build_obligation(
-                selected_option.model_dump(mode="json"),
-                {
-                    "buyer_principal": request.buyer_principal.model_dump(mode="json"),
-                    "seller_principal": seller_principal.model_dump(mode="json"),
-                    "expiration_unix": selection.expiration_unix,
-                    "duration_seconds": message.duration_seconds,
-                    "domain_param_keys": ("bare_metal",),
-                    "listing_id": listing_id,
-                },
+            provisions = mechanism_fulfills_through_capacity(
+                selection.mechanism, mechanism_fulfillment
             )
-        except (TypeError, ValueError) as exc:
-            raise BareMetalNegotiationRefusal(
-                "selected listing option cannot produce an exact accepted plan"
-            ) from exc
+        except UndeclaredMechanismFulfillmentError as exc:
+            raise BareMetalNegotiationRefusal(str(exc), status_code=400) from exc
+        terms: BareMetalTerms | None = None
+        if provisions:
+            trusted_listing = await request.repository.load_bare_metal_listing_payload(
+                listing_id=listing_id
+            )
+            if trusted_listing is None:
+                raise BareMetalNegotiationRefusal("trusted bare-metal listing is unavailable")
+            refusal = bare_metal_admission_refusal(trusted_listing, message)
+            if refusal is not None:
+                raise BareMetalNegotiationRefusal(refusal, status_code=400)
+            terms = _accepted_terms(trusted_listing, message, listing_id)
+        built = None
+        if build_obligation is not None:
+            try:
+                built = build_obligation(
+                    selected_option.model_dump(mode="json"),
+                    {
+                        "buyer_principal": request.buyer_principal.model_dump(mode="json"),
+                        "seller_principal": seller_principal.model_dump(mode="json"),
+                        "expiration_unix": selection.expiration_unix,
+                        "duration_seconds": message.duration_seconds,
+                        "domain_param_keys": (),
+                        "listing_id": listing_id,
+                    },
+                )
+            except (TypeError, ValueError) as exc:
+                raise BareMetalNegotiationRefusal(
+                    "selected listing option cannot produce an exact accepted plan"
+                ) from exc
         fields = proposal.get("fields") or {}
         unknown = sorted(set(fields).difference({"amount"}))
         if unknown:
             raise BareMetalNegotiationRefusal(
-                "hosted settlement proposal may contain only amount", status_code=400
+                "exact settlement proposal may contain only amount", status_code=400
             )
-        proposed_amount = _amount(fields.get("amount"), what="hosted settlement amount")
-        if built.amount is not None:
+        proposed_amount = _amount(fields.get("amount"), what="exact settlement amount")
+        if built is not None and built.amount is not None:
             if proposed_amount is not None and proposed_amount != built.amount:
                 raise BareMetalNegotiationRefusal(
                     "settlement amount differs from the trusted accepted amount",
                     status_code=400,
                 )
-        elif proposed_amount is not None:
+        elif built is not None and proposed_amount is not None:
             raise BareMetalNegotiationRefusal(
                 "selected mechanism does not negotiate a settlement amount",
                 status_code=400,
             )
-        try:
-            plan = SettlementPlan(
-                buyer_principal=request.buyer_principal.model_dump(mode="json"),
-                seller_principal=seller_principal.model_dump(mode="json"),
-                service_terms={**built.service_terms, **service_terms},
-                obligations=[SettlementObligation.model_validate(built.obligation)],
-            )
-        except (TypeError, ValueError) as exc:
-            raise BareMetalNegotiationRefusal(
-                "selected listing option cannot produce an exact accepted plan"
-            ) from exc
-        agreed_amount = built.amount if built.amount is not None else 0
+        plan: SettlementPlan | None = None
+        if built is not None:
+            try:
+                plan = SettlementPlan(
+                    buyer_principal=request.buyer_principal.model_dump(mode="json"),
+                    seller_principal=seller_principal.model_dump(mode="json"),
+                    service_terms=dict(built.service_terms),
+                    obligations=[SettlementObligation.model_validate(built.obligation)],
+                )
+            except (TypeError, ValueError) as exc:
+                raise BareMetalNegotiationRefusal(
+                    "selected listing option cannot produce an exact accepted plan"
+                ) from exc
+        agreed_amount = (
+            built.amount
+            if built is not None and built.amount is not None
+            else proposed_amount
+            if proposed_amount is not None
+            else compute_rate_total(selected_option.rates[0], message.duration_seconds)
+            if selected_option.rates and selected_option.rates[0].per in {"hour"}
+            else 0
+        )
         accepted_proposal = {
             "settlement_selection": selection.model_dump(mode="json"),
-            "fields": {"amount": str(built.amount)} if built.amount is not None else {},
+            "fields": {"amount": str(agreed_amount)} if agreed_amount else {},
         }
         return RoundEvaluation(
             our_amount=agreed_amount,
             strategy_label=EXACT_SELECTION_STRATEGY,
             decision=NegotiationDecision(action="accept", proposal=accepted_proposal),
             pinned_proposal=accepted_proposal,
-            uses_scalar_amount=built.amount is not None,
+            uses_scalar_amount=bool(agreed_amount),
             buyer_amount=agreed_amount,
             domain_state={
                 "exact_selection": {
-                    "settlement_plan": plan.model_dump(mode="json"),
+                    "settlement_plan": plan.model_dump(mode="json") if plan is not None else None,
                     "settlement_selection": selection.model_dump(mode="json"),
+                    "settlement_option": selected_option.model_dump(mode="json"),
                     "bare_metal_terms": (
                         terms.model_dump(mode="json", exclude_none=True)
                         if terms is not None
@@ -531,76 +628,6 @@ def build_bare_metal_negotiation_runtime(
             },
         )
 
-    async def validate_physical_selection(
-        repository: Any,
-        *,
-        listing_id: str,
-        message: BareMetalMessage,
-        selection: SettlementSelection,
-        options: list[SettlementOption],
-        selected_option: SettlementOption,
-    ) -> tuple[BareMetalTerms, dict[str, Any]]:
-        """Hold a machine-provisioning selection to the trusted physical facts."""
-
-        try:
-            demand = BareMetalBuyerDemand(
-                duration_seconds=message.duration_seconds,
-                access_method=message.access_method,
-                ssh_public_key=message.ssh_public_key or "",
-                settlement=selection,
-                allow_off_session=(
-                    selected_option.params.get("interaction") == "saved_instrument"
-                ),
-            )
-            selected = validate_buyer_selection(demand=demand, advertised_options=options)
-        except (TypeError, ValueError) as exc:
-            raise BareMetalNegotiationRefusal(
-                "hosted selection does not exact-match one trusted listing option",
-                status_code=400,
-            ) from exc
-        trusted_listing = await repository.load_bare_metal_listing_payload(
-            listing_id=listing_id
-        )
-        listing_binding = await repository.load_listing_binding(listing_id=listing_id)
-        if trusted_listing is None or listing_binding is None:
-            raise BareMetalNegotiationRefusal("trusted bare-metal listing is unavailable")
-        facts = selected.facts
-        if (
-            facts.site_id != listing_binding.site_id
-            or facts.physical_resource_id != listing_binding.physical_resource_id
-            or facts.pool_id != listing_binding.pool_id
-            or facts.physical_host_id != trusted_listing.physical_host_id
-            or facts.access_method != message.access_method
-        ):
-            raise BareMetalNegotiationRefusal(
-                "hosted selection changes trusted physical listing terms"
-            )
-        if (
-            trusted_listing.min_duration_seconds is not None
-            and message.duration_seconds < trusted_listing.min_duration_seconds
-        ) or (
-            trusted_listing.max_duration_seconds is not None
-            and message.duration_seconds > trusted_listing.max_duration_seconds
-        ):
-            raise BareMetalNegotiationRefusal(
-                "hosted selection duration is outside listing bounds"
-            )
-        if message.access_method not in trusted_listing.access_methods:
-            raise BareMetalNegotiationRefusal(
-                "hosted selection uses an unadvertised access method"
-            )
-        if message.access_ref is not None:
-            raise BareMetalNegotiationRefusal(
-                "buyer cannot supply hosted bare-metal access authority", status_code=400
-            )
-        terms = _escrow_terms(trusted_listing, message, listing_id)
-        physical_terms = {
-            "listing_id": listing_id,
-            "option_id": selected.option.option_id,
-            "option_facts": selected.facts.model_dump(mode="json", exclude_none=True),
-            "provision_terms": terms.model_dump(mode="json", exclude_none=True),
-        }
-        return terms, {"bare_metal.v2": physical_terms}
 
     def reference_amount(
         _listing: Any,
@@ -623,10 +650,17 @@ def build_bare_metal_negotiation_runtime(
         state = acceptance.policy_state if isinstance(acceptance.policy_state, Mapping) else {}
         exact = state.get("exact_selection")
         if isinstance(exact, Mapping):
-            return {
-                "settlement_plan": exact["settlement_plan"],
+            response: dict[str, Any] = {
                 "settlement_selection": exact["settlement_selection"],
             }
+            if exact.get("settlement_plan") is not None:
+                response["settlement_plan"] = exact["settlement_plan"]
+            return _with_agreement(
+                acceptance,
+                response,
+                settlement=SettlementOption.model_validate(exact["settlement_option"]),
+                data_dispatch=data_dispatch,
+            )
         if acceptance.pinned_proposal is not None and (
             "settlement_selection" in acceptance.pinned_proposal
         ):
@@ -650,7 +684,7 @@ def build_bare_metal_negotiation_runtime(
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts
         }
         response.setdefault("accepted_escrow_proposal", acceptance.pinned_proposal)
-        return response
+        return _with_agreement(acceptance, response, settlement=None, data_dispatch=data_dispatch)
 
     async def persist_opening(repository: Any, opening: OpeningRecord) -> None:
         copied = await repository.copy_listing_binding_to_thread(
@@ -675,10 +709,19 @@ def build_bare_metal_negotiation_runtime(
             )
             if listing is None:
                 raise NegotiationStateError("trusted bare-metal listing is unavailable")
-            terms = _escrow_terms(listing, acceptance.terms.decoded, acceptance.listing_id)
+            terms = _accepted_terms(listing, acceptance.terms.decoded, acceptance.listing_id)
         if terms is not None:
             await repository.save_bare_metal_terms(
                 negotiation_id=acceptance.negotiation_id, terms=terms
+            )
+        data = artifacts.get("settlement_data")
+        if isinstance(data, Mapping):
+            selection = SettlementSelection.model_validate(artifacts["settlement_selection"])
+            agreement_bytes = base64.b64decode(artifacts["agreement_bytes"], validate=True)
+            await repository.record_bare_metal_payment_acceptance(
+                negotiation_id=acceptance.negotiation_id,
+                mechanism=selection.mechanism,
+                agreement_sha256=hashlib.sha256(agreement_bytes).hexdigest(),
             )
         plan = artifacts.get("settlement_plan")
         if isinstance(plan, Mapping):

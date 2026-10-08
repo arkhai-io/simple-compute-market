@@ -12,8 +12,10 @@ import asyncio
 import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 import typer
+from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -76,26 +78,28 @@ def publish_cmd(
         help="Quota resource in the credits service's ledger the listing derives from.",
     ),
     service_name: str = typer.Option(..., "--service-name"),
-    price_per_token: str = typer.Option(
-        ...,
+    price_per_token: str | None = typer.Option(
+        None,
         "--price-per-token",
-        help="Per-token rate in base units of the payment token.",
+        help=(
+            "Optional Alkahest rate in base units per token; omit to publish "
+            "configured settlement clauses only."
+        ),
     ),
-    token: str = typer.Option(
-        ...,
+    token: str | None = typer.Option(
+        None,
         "--token",
-        help="Payment token contract address (0x…).",
+        help="Alkahest payment token contract address (0x…).",
     ),
-    chain: str = typer.Option(
-        ...,
+    chain: str | None = typer.Option(
+        None,
         "--chain",
-        help="Chain name from [chains.<name>] config.",
+        help="Alkahest chain name from [chains.<name>] config.",
     ),
     escrow_address: str | None = typer.Option(
         None,
         "--escrow-address",
-        help="Escrow contract address; resolved from the chain's alkahest "
-        "config (erc20 non-unconditional) when omitted.",
+        help="Alkahest escrow contract; resolved from the chain config when omitted.",
     ),
     description: str | None = typer.Option(None, "--description"),
     openapi_url: str | None = typer.Option(None, "--openapi-url"),
@@ -108,41 +112,53 @@ def publish_cmd(
 ) -> None:
     """Create + publish a listing backed by a quota resource.
 
-    The accepted escrow advertises a unit rate
-    ``{field: "amount", per: "token", value: <price-per-token>}`` — the
-    buyer's quantity scales it to the absolute amount at negotiation.
+    Pass the Alkahest rate, token, and chain together to publish an escrow
+    option. Omit all three to publish configured settlement clauses, such as
+    Arkhai payments, without requiring an EVM chain.
     """
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.utils.config import CHAINS
     from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
-    if not price_per_token.strip().isdigit():
-        typer.echo("--price-per-token must be a base-unit integer", err=True)
+    legacy_requested = any(
+        value is not None for value in (price_per_token, token, chain)
+    )
+    if escrow_address is not None and not legacy_requested:
+        typer.echo(
+            "--escrow-address requires the Alkahest rate, token, and chain.", err=True
+        )
         raise typer.Exit(code=2)
-
-    resolved_escrow = escrow_address
-    if not resolved_escrow:
-        chain_cfg = CHAINS.get(chain)
-        if chain_cfg is None:
-            typer.echo(f"chain {chain!r} is not configured", err=True)
+    accepted_escrows: list[dict[str, Any]] = []
+    if legacy_requested:
+        if price_per_token is None or token is None or chain is None:
+            typer.echo(
+                "Alkahest publication requires --price-per-token, --token, and --chain together.",
+                err=True,
+            )
             raise typer.Exit(code=2)
-        from market_alkahest.alkahest import (
-            get_erc20_escrow_obligation_default,
-        )
+        if not price_per_token.strip().isdigit():
+            typer.echo("--price-per-token must be a base-unit integer", err=True)
+            raise typer.Exit(code=2)
 
-        resolved_escrow = get_erc20_escrow_obligation_default(
-            chain,
-            config_path=chain_cfg.alkahest_address_config_path,
-        )
-
-    accepted_escrows = [
-        {
-            "chain_name": chain,
-            "escrow_address": resolved_escrow.lower(),
-            "literal_fields": {"token": token},
-            "rates": [{"field": "amount", "per": "token", "value": price_per_token}],
-        }
-    ]
+        resolved_escrow = escrow_address
+        if not resolved_escrow:
+            chain_cfg = CHAINS.get(chain)
+            if chain_cfg is None:
+                typer.echo(f"chain {chain!r} is not configured", err=True)
+                raise typer.Exit(code=2)
+            resolved_escrow = get_erc20_escrow_obligation_default(
+                chain, config_path=chain_cfg.alkahest_address_config_path
+            )
+        accepted_escrows = [
+            {
+                "chain_name": chain,
+                "escrow_address": resolved_escrow.lower(),
+                "literal_fields": {"token": token},
+                "rates": [
+                    {"field": "amount", "per": "token", "value": price_per_token}
+                ],
+            }
+        ]
 
     from apicredits_storefront.utils.config import (
         BASE_URL_OVERRIDE,

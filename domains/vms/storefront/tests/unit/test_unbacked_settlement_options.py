@@ -12,7 +12,7 @@ from market_storefront.settlement_composition import (
     mechanism_fulfills_through_capacity,
 )
 
-_DECLARED = {"alkahest.v1": True, "fiat.stripe.v1": True, "contact-exchange.v1": False}
+_DECLARED = {"alkahest.v1": True, "arkhai.payments.v1": True, "contact-exchange.v1": False}
 
 
 def _option(mechanism):
@@ -22,7 +22,7 @@ def _option(mechanism):
 def test_every_mechanism_the_vm_storefront_composes_is_declared():
     assert set(VM_MECHANISM_FULFILLS_THROUGH_CAPACITY) == {
         "alkahest.v1",
-        "fiat.stripe.v1",
+        "arkhai.payments.v1",
         "contact-exchange.v1",
     }
 
@@ -37,7 +37,7 @@ def test_an_undeclared_mechanism_is_refused_not_defaulted():
 
 
 def test_a_backed_candidate_keeps_every_option():
-    options = [_option("alkahest.v1"), _option("fiat.stripe.v1")]
+    options = [_option("alkahest.v1"), _option("arkhai.payments.v1")]
 
     kept, dropped = admissible_settlement_clauses(
         options, capacity_backing="backed", declarations=_DECLARED
@@ -47,14 +47,14 @@ def test_a_backed_candidate_keeps_every_option():
 
 
 def test_an_unbacked_candidate_drops_capacity_fulfilled_options():
-    options = [_option("fiat.stripe.v1"), _option("contact-exchange.v1")]
+    options = [_option("arkhai.payments.v1"), _option("contact-exchange.v1")]
 
     kept, dropped = admissible_settlement_clauses(
         options, capacity_backing="unbacked", declarations=_DECLARED
     )
 
     assert kept == [_option("contact-exchange.v1")]
-    assert dropped == ["fiat.stripe.v1"]
+    assert dropped == ["arkhai.payments.v1"]
 
 
 def test_an_unbacked_listing_left_with_no_option_is_refused():
@@ -63,7 +63,7 @@ def test_an_unbacked_listing_left_with_no_option_is_refused():
     with pytest.raises(ValueError, match="no settlement option"):
         ListingService._unbacked_settlement_terms(
             accepted_escrows=[{"chain_name": "anvil"}],
-            settlement_options=[_option("fiat.stripe.v1")],
+            settlement_options=[_option("arkhai.payments.v1")],
             clauses=(),
             demands=[{"arbiter": "x"}],
             composition=composition,
