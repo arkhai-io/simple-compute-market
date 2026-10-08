@@ -33,6 +33,7 @@ is the one its `pyproject.toml` declares.
 | `arkhai-core-registry` | `core/registry/` | `arkhai-kit-identity` |
 | `arkhai-kit-site` | `kit/site/` | none |
 | `arkhai-kit-identity` | `kit/identity/` | none |
+| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-policy` | `kit/policy/` | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | none |
 | `arkhai-kit-config` | `kit/config/` | `arkhai-kit-alkahest` |
@@ -170,35 +171,6 @@ publish round-trip ([`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md)). The
 publish workflow passes `--no-sources`, so the only sources a published wheel
 could record are index pins, such as the PyTorch CPU index.
 
-## Hosted settlement release pin
-
-`arkhai-kit-hosted-settlement` consumes an exact
-`arkhai-hosted-settlement-client` version. A deployable marketplace release
-must additionally pin the hosted service's signed immutable manifest: exact
-client wheel/version/hash, service image digest, OpenAPI/conformance hash,
-migration schema version, SBOM, provenance, and repository signer identity.
-The storefront readiness preflight verifies the manifest digest, API version,
-and required capabilities; a matching major version or floating image tag is
-not a substitute. The hosted repository publishes those artifacts. This
-repository publishes only the thin adapter and marketplace consumers.
-
-A staged release is therefore no longer how the client is obtained; that is the
-index's job. What staging is still for is the rest of the manifest — the service
-image digest, OpenAPI and conformance hashes, migration schema version, SBOM,
-provenance, and signer identity — which a deployment verifies before activating a
-workload and which no package index carries. Verifying a release describes a
-deployed authority, so it is a publication-time and deployment-time activity and
-gates no build or test.
-
-Hosted financial system E2E consumes that same ordinary production release; it
-does not acquire a second test distribution or alternate service image. The
-verified release identity records its repository, workflow reference, and
-hosted source commit. Protected reports record the producer workflow run
-identity separately as orchestration evidence and keep all producer
-coordinates separate from the
-marketplace consumer commit. Provider-neutral scripted collaborators exist
-only in the hosted producer's focused tests and are absent from client/service
-wheels, image layers, manifests, capabilities, migrations, and entry points.
 
 ## Troubleshooting
 

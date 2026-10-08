@@ -16,30 +16,26 @@ What the tests verify:
 
 from __future__ import annotations
 
-import uuid
 import json
 import time
+import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.request import Request
 
 import pytest
-
-from market_core.schemas import (
-    EscrowProposal,
-    EscrowTerms,
-    SettlementOption,
-    SettlementSelection,
-    derive_settlement_option_id,
-)
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
+)
+from market_core.schemas import (
+    EscrowProposal,
+    EscrowTerms,
 )
 
 from arkhai_vms_buyer.buy_orchestrator import (
@@ -291,6 +287,8 @@ def _urlopen_sequence(responses):
         if not queue:
             raise AssertionError(f"Unexpected urlopen call: {req.full_url}")
         nxt = queue.pop(0)
+        if isinstance(nxt, dict):
+            nxt = with_accepted_agreement(req, nxt)
         body = nxt if isinstance(nxt, str) else json.dumps(nxt)
         headers = (
             signed_response_headers(req, nxt)
@@ -350,72 +348,6 @@ def test_matches_can_be_preseeded_skipping_registry_query():
         )
     assert result.status == "exited"
     assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
-
-
-def test_exact_settlement_revalidation_runs_before_seller_network() -> None:
-    params = {
-        "account_ref": "seller-main",
-        "authority_id": "authority-main",
-        "country": "US",
-        "environment": "production",
-        "claimant_principal": seller_principals().identities[0].model_dump(
-            mode="json"
-        ),
-        "condition": {
-            "condition_id": "vm-fulfillment",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {"encoding": "application/jcs+json", "value": {}},
-        },
-        "funding_profile": "card.v1",
-        "interaction": "interactive",
-        "funds_flow": "separate_charges_transfers",
-        "contract_fingerprint": "sha256:" + "ab" * 32,
-    }
-    option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=[],
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        params=params,
-    )
-    selection = SettlementSelection(
-        mechanism=option.mechanism,
-        option_id=option.option_id,
-        expiration_unix=2_000_000_000,
-    )
-    observed = []
-
-    async def reject(match, advertised_option):
-        observed.append((match["listing_id"], advertised_option.option_id))
-        raise RuntimeError("remote readiness unavailable")
-
-    result = _run_buy_with_legacy_hooks(
-        config=_config(),
-        constraints=_constraints(),
-        provision=_provision(),
-        build_escrow_proposal=lambda _match: selection,
-        build_escrow_terms=_build_escrow_terms_ok,
-        create_escrow=lambda escrows: ["0xnever"],
-        matches=[
-            {
-                "listing_id": "seller-1",
-                "seller": _SELLER_URL,
-                "_selected_settlement": SimpleNamespace(option=option),
-            }
-        ],
-        revalidate_settlement=reject,
-    )
-    assert result.status == "exited"
-    assert observed == [("seller-1", option.option_id)]
-    assert result.attempts[0]["error"] == "settlement_revalidation_failed"
 
 
 def test_run_buy_composes_high_level_negotiate_and_settle_hooks():

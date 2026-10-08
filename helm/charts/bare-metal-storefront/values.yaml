@@ -57,7 +57,6 @@ alkahestAddressBook:
   mountPath: /etc/arkhai/alkahest
 
 # Strict shared Settlement configuration JSON. Hosted credentials remain in the
-# independently deployed hosted authority; this Secret contains only public
 # authority/trust/account references and release pins.
 settlementConfigSecret:
   name: bare-metal-storefront-settlement

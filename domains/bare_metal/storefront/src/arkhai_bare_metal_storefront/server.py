@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable, Iterable
 from functools import partial
@@ -13,6 +14,7 @@ from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_arkhai_payments import run_payment_reconciliation
 from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
@@ -29,12 +31,12 @@ from .domain_runtime import get_market_domain_contract
 from .lifecycle_steps import (
     INTRODUCTION_RETENTION,
     NEGOTIATION_WATCHDOG,
+    PAYMENT_RECONCILIATION,
     SETTLEMENT_SERVICING,
 )
+from .response_auth import authenticate_response
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 from .storefront_registry import build_bare_metal_storefront_registry
-from .response_auth import authenticate_response
-
 
 DESCRIPTION = (
     "Seller-side storefront for the Arkhai bare-metal marketplace.\n\n"
@@ -42,6 +44,8 @@ DESCRIPTION = (
     "request and response signature version 2 contracts."
 )
 
+
+logger = logging.getLogger(__name__)
 
 def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
     return NegotiationWatchdogPolicy(
@@ -84,6 +88,22 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
                 task_factory=partial(
                     runtime.settlement_worker.run,
                     paused=loops.loop_gate(SETTLEMENT_SERVICING),
+                    wait=loops.idle,
+                ),
+            )
+        )
+    if runtime.payments_reconciliation_enabled():
+        loops.start_loop(
+            StorefrontBackgroundTask(
+                name=PAYMENT_RECONCILIATION,
+                task_factory=partial(
+                    run_payment_reconciliation,
+                    lambda: runtime.settlement_service().reconcile_payments_once(),
+                    interval_seconds=float(
+                        os.environ.get("BARE_METAL_PAYMENT_RECONCILIATION_INTERVAL", "30")
+                    ),
+                    logger=logger,
+                    paused=loops.loop_gate(PAYMENT_RECONCILIATION),
                     wait=loops.idle,
                 ),
             )

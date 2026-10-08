@@ -32,14 +32,14 @@
       "dist": "arkhai-kit-negotiation-runtime"
     },
     {
-      "key": "kit-hosted-settlement",
-      "path": "kit/hosted-settlement",
-      "dist": "arkhai-kit-hosted-settlement"
-    },
-    {
       "key": "core",
       "path": "core",
       "dist": "arkhai-core"
+    },
+    {
+      "key": "kit-arkhai-payments",
+      "path": "kit/arkhai-payments",
+      "dist": "arkhai-kit-arkhai-payments"
     },
     {
       "key": "core-buyer",

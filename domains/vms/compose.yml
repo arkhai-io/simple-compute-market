@@ -4,7 +4,7 @@
 # Bob's and Alice's storefronts and their provisioning authorities. The
 # domain stack has no unconditional chain dependency. An explicit Alkahest
 # storefront profile may add Anvil through the root development overlay;
-# a hosted-only profile composes without it.
+# a payments-only profile composes without it.
 #
 # Paths below are relative to THIS file's directory (domains/vms/) — Compose
 # `include:` resolves an included file's relative paths against its own

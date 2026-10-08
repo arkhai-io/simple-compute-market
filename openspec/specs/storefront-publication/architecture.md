@@ -203,7 +203,7 @@ Administrator and service-peer configuration contains public trust pins, but dur
 
 Provisioning and other service-peer connections are therefore pinned by both the active principals of a stable peer subject and the storefront-owned `site_id` binding. Signed requests, responses, and callbacks must match those exact pins before their contents affect routing, capacity, fulfillment, or settlement state. A peer cannot self-assert a different site through a body field, and matching identifier text under another scheme is not equivalent.
 
-A seller may deliberately reuse one public principal for registry publication, storefront ownership, hosted account ownership, negotiation, and settlement. That does not merge authority roles: every receiving service enforces its own binding and receives only a signer operation or signed proof. Storefront rows and projections carry the public principal and opaque provider references, never a private credential or provider identity.
+A seller may deliberately reuse one public principal for registry publication, storefront ownership, negotiation and marketplace settlement requests. That does not merge authority roles: every receiving service enforces its own binding and receives only a signer operation or signed proof. Storefront rows and projections carry the public principal and public mechanism references, never a private credential or provider identity.
 
 Site trust is resolved through a registry interface that returns the site identifier, URL, and complete scheme-tagged principal. Configuration is the current registry source, but callers depend on the interface so durable storage can replace it without changing authentication or routing consumers. Every site has its own trust pin; a principal registered for one site cannot authenticate another.
 
@@ -221,32 +221,10 @@ The storefront owns seller settlement status and administration because it is th
 
 Command defaults, CSV resource rows, projected reconciliation records, and direct listing requests converge on the same typed clause model before builders run. A resource's clause list replaces command defaults as a whole. Rates are human decimal asset quantities at input and are normalized exactly once by the owning mechanism to currency minor units or token base units; non-exact conversion fails rather than rounding. Legacy publication config and CSV input use an explicit preview/write/backup migration and ambiguous multi-mechanism scalar pricing requires manual resolution.
 
-Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths. Normal `publish` accepts only mechanism-neutral clauses.
+Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as an Alkahest check without creating separate publication paths. Normal `publish` accepts only mechanism-neutral clauses.
 
-## Exact hosted alternatives and accepted authorization
 
-Hosted publication treats every complete ready profile clause as an independent option. The option and accepted plan bind the exact profile alongside money, destination account, condition, parties, and expiry policy. Readiness is evaluated per clause and per profile, so adding or losing one rail does not rewrite another option or an already accepted agreement.
 
-The buyer obtains its operation-scoped funding authorization only after accepted terms are durable. Storefront start accepts the accepted negotiation and obligation identities plus that safe reference, then reloads all commercial inputs from seller-owned state. Payer profiles, saved instruments, buyer automation policy, and provider data never enter listings, accepted terms, storefront persistence, or evidence.
-
-Historical card-only plans are classified from persisted state and decoded only for recovery. New config, publication, negotiation, and start accept the explicit `card.v1` profile; there is no public legacy alias that could generate a second identity for the same old plan.
-
-## Bare-metal hosted readiness
-
-Bare-metal publication begins with one complete fresh signed selected-site projection and the trusted domain listing derived from it. It then intersects access capability, authoritative availability, exact hosted profile/currency/country/account/condition readiness, offer and funding deadlines, and maximum fulfillment duration. Every ready profile becomes a deterministic independent option; an unready profile becomes a sanitized blocker without suppressing its ready peers. Stale or conflicting site/resource facts close or omit the option, never trigger site fallback or mutate an accepted binding.
-
-The common publication runner carries `settlement_options` independently from legacy `accepted_escrows`. The dedicated publication command authenticates registry mutation with the storefront signer and records the exact derived source only after success.
-
-## API-credit hosted publication
-
-Quota availability and settlement readiness are separate inputs. Publication
-first requires an authoritative sellable API-credit resource, then compiles
-each complete ready mechanism clause independently. Hosted clauses become
-distinct deterministic `SettlementOption` objects; Alkahest entries remain
-legacy `accepted_escrows`. The listing schema and registry projections allow an
-empty escrow list, so a hosted-only listing does not manufacture a chain
-carrier. Accepted negotiation persists the exact selected option and a
-quantity-scaled integer amount for later server-authoritative preparation.
 
 ## Related contracts
 
@@ -255,3 +233,9 @@ quantity-scaled integer amount for later server-authoritative preparation.
 - [Site capacity](../site-capacity/spec.md)
 - [Fulfillment](../fulfillment/spec.md)
 - [Settlement servicing](../settlement-servicing/spec.md)
+
+## Arkhai payment options
+
+VM, bare-metal, and API-credit publication composes ready `arkhai.payments.v1` clauses beside supported Alkahest choices. The public option discloses payee account, asset/rates, hold window, and Agreement deposit policy; no Stripe profile, instrument, or provider object enters the listing.
+
+Bare-metal readiness intersects fresh selected-site availability and SSH capability with payment consumer policy. API-credit readiness starts from sellable named-service quota. One mechanism's blocker suppresses only its new options, not a ready peer or an accepted Agreement. Acceptance records the seller-derived mandate in shared opaque `settlement_data`; provisioning/issuance uses the signed receipt gate, not a publication readiness hint.

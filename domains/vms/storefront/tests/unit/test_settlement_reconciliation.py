@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER, TEST_SITE_AUTHORITIES
 from tests.listing_service_fixtures import vm_listing_collaborators
@@ -23,7 +26,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         authorities=TEST_SITE_AUTHORITIES,
     )
     accepted_terms = {
-        "mechanism": "fiat.stripe.v1",
+        "mechanism": "example.payment.v1",
         "option_id": "accepted-option",
     }
     stored = {
@@ -45,7 +48,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "settlement_options": [],
         "publication_clauses": [
             {
-                "mechanism": "fiat.stripe.v1",
+                "mechanism": "example.payment.v1",
                 "asset": "usd",
                 "rate": "1.25",
                 "per": "hour",
@@ -70,7 +73,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
     )
     new_option = {
         "option_id": "newly-ready-option",
-        "mechanism": "fiat.stripe.v1",
+        "mechanism": "example.payment.v1",
         "asset": "usd",
         "rates": [{"field": "amount", "per": "hour", "value": "125"}],
         "params": {},

@@ -27,53 +27,32 @@ ESCROW = "0x" + "11" * 20
 LISTING_ID = "L-tok"
 
 
-def hosted_option() -> SettlementOption:
+PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
+PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
+
+
+def payment_option() -> SettlementOption:
+    """An Arkhai payments option priced per credit, as a seller publishes one."""
     rates = [RateValue(field="amount", per="credit", value=100)]
-    params = {
-        "account_ref": "acct-api-credits",
-        "authority_id": "hosted-authority-1",
-        "environment": "test",
-        "country": "US",
-        "claimant_principal": SELLER_PRINCIPAL.model_dump(mode="json"),
-        "funds_flow": "separate_charges_transfers",
-        "funding_profile": "card.v1",
-        "interaction": "interactive",
-        "contract_fingerprint": "sha256:" + "11" * 32,
-        "condition": {
-            "protocol": "arkhai.condition.v1",
-            "condition_id": "api-credits-issued",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "resolver_id": "api-credits",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {
-                "encoding": "application/jcs+json",
-                "value": {"kind": "api_credits.v1"},
-            },
-        },
-    }
+    params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
         ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
         rates=rates,
         params=params,
     )
 
 
-def hosted_selection(*, expiration_unix: int = 1_900_000_000):
-    option = hosted_option()
+def payment_selection(*, expiration_unix: int = 1_900_000_000) -> SettlementSelection:
+    option = payment_option()
     return SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
         expiration_unix=expiration_unix,
+        params={"payer_account": PAYER_ACCOUNT},
     )
 
 
@@ -155,7 +134,7 @@ async def seed_listing(client) -> None:
                 "rates": [{"field": "amount", "per": "token", "value": "100"}],
             }
         ],
-        settlement_options=[hosted_option().model_dump(mode="json")],
+        settlement_options=[],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://test-seller:8002",

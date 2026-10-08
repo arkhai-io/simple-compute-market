@@ -420,16 +420,16 @@ def test_float_floor_is_refused():
         extract_unit_price_from_order(hidden, default_min_price=1.5)
 
 
-def _hosted_option(rate=None):
+def _rated_option(rate=None):
     rates = [RateValue(field="amount", per="credit", value=rate)] if rate else []
     option = {
-        "mechanism": "fiat.stripe.v1",
+        "mechanism": "example.rated.v1",
         "asset": "usd",
         "rates": [r.model_dump(mode="json") for r in rates],
         "params": {},
     }
     option["option_id"] = derive_settlement_option_id(
-        mechanism="fiat.stripe.v1", asset="usd", rates=rates, params={}
+        mechanism="example.rated.v1", asset="usd", rates=rates, params={}
     )
     return option
 
@@ -455,14 +455,14 @@ def test_a_selected_escrow_other_than_the_first_is_the_reference():
 
 
 def test_a_selected_settlement_option_is_the_reference():
-    option = _hosted_option(rate=40)
+    option = _rated_option(rate=40)
     listing = {**_listing(rate="100"), "settlement_options": [option]}
 
     assert _seller_reference_amount(listing, 3, proposal=_selecting(option)) == 120
 
 
 def test_a_selected_rateless_option_uses_the_floor():
-    option = _hosted_option()
+    option = _rated_option()
     listing = {**_listing(rate="100"), "settlement_options": [option]}
 
     assert _seller_reference_amount(
@@ -473,7 +473,7 @@ def test_a_selected_rateless_option_uses_the_floor():
 def test_kit_reference_hook_reads_the_whole_pinned_proposal(monkeypatch):
     monkeypatch.setattr(negotiation_runtime, "provision_quantity", lambda _decoded: 3)
     monkeypatch.setattr(negotiation_runtime, "_default_min_price", lambda: None)
-    option = _hosted_option(rate=40)
+    option = _rated_option(rate=40)
     listing = {**_listing(rate="100"), "settlement_options": [option]}
     terms = NegotiationTerms(decoded={}, wire=None)
 

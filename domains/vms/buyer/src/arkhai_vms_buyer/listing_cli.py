@@ -14,13 +14,13 @@ out with the buyer-as-pure-client refactor.
 
 from __future__ import annotations
 
-
 import typer
+from core_buyer import build_buyer_explanation, explain_registry_query
+from market_settlement_runtime import settlement_clause_descriptors
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from core_buyer import build_buyer_explanation, explain_registry_query
 
 from .buy_orchestrator import query_registry_for_matches_multi
 from .cli_helpers import emit_buyer_explanation
@@ -32,8 +32,10 @@ from arkhai_vms_listings import (
     short_ts,
     shorten,
 )
-from market_settlement_runtime import settlement_clause_descriptors
 
+from .buy_orchestrator import query_registry_for_matches_multi
+from .cli_helpers import emit_buyer_explanation
+from .settlement_composition import resolve_buyer_settlement_policy
 
 listing_app = typer.Typer(no_args_is_help=True)
 
@@ -129,7 +131,7 @@ def listing_list(
         None,
         "--settlement",
         help="Repeatable typed settlement alternative, for example "
-        "'mechanism=stripe asset=usd stripe.method=card'.",
+        "'mechanism=alkahest.v1'.",
     ),
     explain: bool = typer.Option(
         False,

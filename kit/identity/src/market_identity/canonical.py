@@ -60,7 +60,7 @@ def canonical_body_hash(value: Any = EMPTY_BODY) -> str:
 def canonical_request_bytes(envelope: RequestEnvelope) -> bytes:
     """Encode all semantic request fields as one collision-free byte sequence."""
 
-    return _frame(
+    return frame_fields(
         (
             envelope.protocol,
             envelope.role,
@@ -79,7 +79,7 @@ def canonical_request_bytes(envelope: RequestEnvelope) -> bytes:
 def canonical_response_bytes(envelope: ResponseEnvelope) -> bytes:
     """Encode all semantic response fields as one collision-free byte sequence."""
 
-    return _frame(
+    return frame_fields(
         (
             envelope.protocol,
             envelope.role,
@@ -99,7 +99,7 @@ def canonical_response_bytes(envelope: ResponseEnvelope) -> bytes:
 def canonical_rotation_bytes(intent: RotationIntent) -> bytes:
     """Encode the shared old/new possession intent signed during rotation."""
 
-    return _frame(
+    return frame_fields(
         (
             intent.protocol,
             intent.current.scheme.value,
@@ -118,7 +118,7 @@ def canonical_rotation_bytes(intent: RotationIntent) -> bytes:
 def request_hash(envelope: RequestEnvelope) -> str:
     """Fingerprint replay semantics, excluding freshness and the lookup key."""
 
-    semantic_bytes = _frame(
+    semantic_bytes = frame_fields(
         (
             envelope.protocol,
             envelope.principal.scheme.value,
@@ -183,7 +183,13 @@ def sign_rotation(
     )
 
 
-def _frame(fields: Sequence[str]) -> bytes:
+def frame_fields(fields: Sequence[str]) -> bytes:
+    """Frame text fields unambiguously: each is a 4-byte big-endian length then UTF-8.
+
+    Signed messages built from several fields frame them this way so no field
+    boundary can be moved without changing the bytes. Other signature contracts
+    that adopt the same framing, such as payment receipts, use this function.
+    """
     framed = bytearray()
     for field in fields:
         if not isinstance(field, str):

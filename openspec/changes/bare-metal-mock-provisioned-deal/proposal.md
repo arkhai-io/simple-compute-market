@@ -64,12 +64,15 @@ API-credit deal runs inside the VM lane.
   taking the opening request as its body.
 - Start bare-metal fulfillment when settlement verifies the escrow through the kit
   settlement-servicing worker, one mechanism-neutral worker over the configured
-  settlement runtime rather than one composed only for hosted settlement, and retire
+  settlement runtime for obligation-based mechanisms, and retire
   `POST /api/v1/fulfillments/begin`. The storefront requires its explicit settlement
   configuration (`BARE_METAL_STOREFRONT_SETTLEMENT`) and builds every configured
   mechanism's resources from it; the implicit Alkahest fallback is retired. The Helm chart
   and production Compose carry the chain and wallet inputs Alkahest needs, and the chart's
   `alkahestEnabled` flag, which restated the settlement configuration, is removed.
+- Preserve Arkhai payments' receipt-based delivery and reconciliation independently
+  of the obligation worker. Remove hosted Stripe bindings and authority readers
+  while retaining the Alkahest evidence codec and authenticated resolver.
 - Deliver a bare-metal Alkahest deal through the worker: once the lease is active, the
   storefront stores its credential-free lease-ready evidence, publishes only its digest
   on chain through a new `kit/alkahest` fulfillment publisher, and binds the attestation

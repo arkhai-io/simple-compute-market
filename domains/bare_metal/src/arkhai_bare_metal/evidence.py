@@ -2,20 +2,50 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .hosted_contract import (
-    BARE_METAL_ACCEPTED_BINDING_KIND,
-    BareMetalAcceptedHostedBinding,
-    CanonicalPrincipal,
-    ResourceSelection,
-    bare_metal_digest,
-    canonical_bare_metal_json,
-)
+ResourceSelection = Literal["specific", "fungible"]
+_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+def canonical_bare_metal_json(value: Any) -> str:
+    """Serialize a public domain value for stable identity derivation."""
+
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", exclude_none=True)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def bare_metal_digest(value: Any) -> str:
+    """Return a canonical lower-case SHA-256 reference."""
+
+    return (
+        "sha256:"
+        + hashlib.sha256(canonical_bare_metal_json(value).encode()).hexdigest()
+    )
+
+
+class CanonicalPrincipal(BaseModel):
+    """Canonical marketplace principal for the parties bound by the evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    scheme: str = Field(min_length=1)
+    identifier: str = Field(min_length=1)
+
+    @field_validator("scheme", "identifier")
+    @classmethod
+    def _validate_component(cls, value: str) -> str:
+        if value != value.strip() or _TOKEN.fullmatch(value) is None:
+            raise ValueError("principal components must be trimmed public tokens")
+        return value
+
 
 BARE_METAL_LEASE_READY_RESULT_KIND = "bare_metal.lease-ready-result.v1"
 BARE_METAL_LEASE_READY_EVIDENCE_KIND = "bare_metal.lease-ready-evidence.v1"
@@ -83,10 +113,9 @@ class BareMetalLeaseReadyResult(BaseModel):
 class BareMetalAcceptedAlkahestBinding(BaseModel):
     """What an accepted Alkahest deal binds its lease-ready evidence to.
 
-    The hosted binding carries the physical facts inside its advertised option;
-    an Alkahest deal has no such option, so this binding states them directly,
-    from the listing binding the accepted thread copied, beside the digest of
-    the settlement plan committed at acceptance and the escrow it was funded by.
+    Physical facts come from the listing binding copied by the accepted thread,
+    beside the digest of the settlement plan committed at acceptance and the
+    escrow it was funded by.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -145,13 +174,7 @@ class BareMetalAcceptedAlkahestBinding(BaseModel):
         return bare_metal_digest(self)
 
 
-BareMetalAcceptedBinding = BareMetalAcceptedHostedBinding | BareMetalAcceptedAlkahestBinding
-
-
-def _physical_facts(binding: BareMetalAcceptedBinding):
-    if isinstance(binding, BareMetalAcceptedHostedBinding):
-        return binding.option.facts
-    return binding.facts
+BareMetalAcceptedBinding = BareMetalAcceptedAlkahestBinding
 
 
 class BareMetalLeaseReadyEvidence(BaseModel):
@@ -162,12 +185,9 @@ class BareMetalLeaseReadyEvidence(BaseModel):
     kind: Literal["bare_metal.lease-ready-evidence.v1"] = (
         BARE_METAL_LEASE_READY_EVIDENCE_KIND
     )
-    # The hosted kind stays the default, so evidence stored before the Alkahest
-    # binding existed keeps its canonical form and its digest.
-    accepted_binding_kind: Literal[
-        "bare_metal.accepted-hosted-binding.v1",
-        "bare_metal.accepted-alkahest-binding.v1",
-    ] = BARE_METAL_ACCEPTED_BINDING_KIND
+    accepted_binding_kind: Literal["bare_metal.accepted-alkahest-binding.v1"] = (
+        BARE_METAL_ACCEPTED_ALKAHEST_BINDING_KIND
+    )
     agreement_ref: str = Field(min_length=1, max_length=256)
     obligation_ref: str = Field(min_length=1, max_length=256)
     accepted_binding_digest: str
@@ -216,7 +236,7 @@ def derive_bare_metal_fulfillment_identity(
 ) -> str:
     """Derive the stable physical fulfillment identity from accepted authority."""
 
-    facts = _physical_facts(binding)
+    facts = binding.facts
     return bare_metal_digest(
         {
             "kind": "bare_metal.fulfillment-identity.v1",
@@ -242,7 +262,7 @@ def build_bare_metal_lease_ready_evidence(
 ) -> BareMetalLeaseReadyEvidence:
     """Bind an authoritative public result to the exact accepted obligation."""
 
-    facts = _physical_facts(binding)
+    facts = binding.facts
     if result.site_id != facts.site_id or result.offering_mode != facts.offering_mode:
         raise ValueError("lease-ready result conflicts with accepted site/executor")
     if result.resource_selection != facts.resource_selection:

@@ -3,8 +3,7 @@
 A storefront serves a deal's lease-ready evidence by its digest, signed with the
 storefront's own proof, to the deal's parties only, each under its own role: the
 buyer as ``buyer``, the claimant as ``seller``, the seller's administrator as
-``admin``, and, for evidence a hosted settlement bound, the hosted authority it
-trusts as ``authority``. An Alkahest deal publishes the digest on a public chain
+``admin``. An Alkahest deal publishes the digest on a public chain
 and the evidence names the deal's parties, which is why the body is not public.
 
 The route contract here is what the storefront's binding authenticates with and
@@ -23,8 +22,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from .evidence import BareMetalLeaseReadyEvidence
-from .hosted_contract import BARE_METAL_ACCEPTED_BINDING_KIND, CanonicalPrincipal
+from .evidence import BareMetalLeaseReadyEvidence, CanonicalPrincipal
 
 # -- wire model ---------------------------------------------------------------
 
@@ -53,7 +51,7 @@ EVIDENCE_PATH = "/api/v1/evidence/bare-metal/{evidence_digest}"
 EVIDENCE_OPERATION = "resolve_bare_metal_lease_ready_evidence"
 #: The roles a reader may sign as; which principals each admits depends on the
 #: evidence (``BareMetalEvidenceRouteService.readers``).
-EVIDENCE_READER_ROLES = ("buyer", "seller", "admin", "authority")
+EVIDENCE_READER_ROLES = ("buyer", "seller", "admin")
 
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
@@ -101,13 +99,11 @@ class BareMetalEvidenceRouteService:
         seller_principal: CanonicalPrincipal,
         sign: Callable[[bytes], bytes],
         admin_principals: tuple[CanonicalPrincipal, ...],
-        hosted_authority_principals: tuple[CanonicalPrincipal, ...] = (),
     ) -> None:
         self._load = load_evidence
         self._seller = seller_principal
         self._sign = sign
         self._admins = tuple(admin_principals)
-        self._hosted_authorities = tuple(hosted_authority_principals)
 
     async def evidence(self, evidence_digest: str) -> BareMetalLeaseReadyEvidence:
         """The evidence the path's digest names, or a 404 refusal."""
@@ -123,21 +119,12 @@ class BareMetalEvidenceRouteService:
     def readers(
         self, evidence: BareMetalLeaseReadyEvidence
     ) -> Mapping[str, tuple[CanonicalPrincipal, ...]]:
-        """Who may read ``evidence``, by the role each signs as.
-
-        The hosted authority takes part only in a deal a hosted settlement
-        bound; no hosted authority reads an Alkahest deal's evidence.
-        """
+        """Who may read ``evidence``, by the role each signs as."""
         readers: dict[str, tuple[CanonicalPrincipal, ...]] = {
             "buyer": (evidence.buyer_principal,),
             "seller": (evidence.claimant_principal,),
             "admin": self._admins,
         }
-        if (
-            evidence.accepted_binding_kind == BARE_METAL_ACCEPTED_BINDING_KIND
-            and self._hosted_authorities
-        ):
-            readers["authority"] = self._hosted_authorities
         return readers
 
     def respond(

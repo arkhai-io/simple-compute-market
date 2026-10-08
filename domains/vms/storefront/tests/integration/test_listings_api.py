@@ -640,36 +640,36 @@ class TestEvaluateNegotiate:
         assert result.our_reference_amount > 0
         assert result.strategy  # non-empty string
 
-    async def test_a_hosted_selection_negotiates_from_the_hosted_rate(self, admin_client):
-        """On a listing offering Alkahest at 9000 and a hosted option at 1500,
-        a buyer selecting the hosted option is negotiated against 1500: the
+    async def test_a_rated_selection_negotiates_from_its_own_rate(self, admin_client):
+        """On a listing offering Alkahest at 9000 and an option rated at 1500,
+        a buyer selecting that option is negotiated against 1500: the
         rate of the option it selected, in that option's own asset."""
         c, db = admin_client
         rates = [RateValue(field="amount", per="hour", value=1500)]
-        hosted = {
-            "mechanism": "fiat.stripe.v1",
+        rated = {
+            "mechanism": "example.rated.v1",
             "asset": "usd",
             "rates": [rate.model_dump(mode="json") for rate in rates],
             "params": {},
             "option_id": derive_settlement_option_id(
-                mechanism="fiat.stripe.v1", asset="usd", rates=rates, params={}
+                mechanism="example.rated.v1", asset="usd", rates=rates, params={}
             ),
         }
-        await _seed_listing(db, "neg-eval-hosted", settlement_options=[hosted])
+        await _seed_listing(db, "neg-eval-rated", settlement_options=[rated])
         with patch(
             "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-hosted",
+                "neg-eval-rated",
                 proposal={
                     "settlement_selection": {
-                        "mechanism": hosted["mechanism"],
-                        "option_id": hosted["option_id"],
+                        "mechanism": rated["mechanism"],
+                        "option_id": rated["option_id"],
                         "expiration_unix": 2000000000,
                     },
-                    # Below the hosted rate, so the strategy counters from
-                    # it: accepting would build a hosted settlement plan,
+                    # Below that rate, so the strategy counters from
+                    # it: accepting would build a settlement plan,
                     # which this fixture composes no mechanism for.
                     "fields": {"amount": 1000},
                 },

@@ -22,8 +22,19 @@ from tomlkit.items import Table
 ConfigValidator = Callable[[Mapping[str, Any], SettlementRole], None]
 
 ALKAHEST_MECHANISM = "alkahest.v1"
-STRIPE_MECHANISM = "fiat.stripe.v1"
-KNOWN_MECHANISMS = frozenset({ALKAHEST_MECHANISM, STRIPE_MECHANISM})
+
+#: A role's installed mechanisms, mechanism identifier to `[Settlement]` key,
+#: taken from the registrations its runtime composes. The migration has no
+#: mechanism list of its own, so it cannot drift from what a role installs.
+InstalledMechanisms = Mapping[str, str]
+
+#: Removed mechanisms, refused with a removal diagnostic rather than as unknown.
+RETIRED_MECHANISMS: Mapping[str, str] = {"fiat.stripe.v1": "stripe"}
+_RETIRED_ALIASES = {"stripe": "fiat.stripe.v1", "fiat": "fiat.stripe.v1"}
+STRIPE_REMOVAL_MESSAGE = (
+    "Stripe settlement (`fiat.stripe.v1`, `[Settlement.stripe]`) was removed; "
+    "remove these settings. They are not mapped to Arkhai payments."
+)
 
 BUYER_MIGRATION_COMMAND = "market config migrate --scope settlement --write --backup"
 STOREFRONT_MIGRATION_COMMAND = (
@@ -47,21 +58,6 @@ _LEGACY_ALKAHEST_FIELDS: dict[str, tuple[str, Callable[[Any], Any] | None]] = {
         lambda value: _address_list(value),
     ),
 }
-_HOSTED_FIELD_RENAMES = {
-    "contract_version": "expected_api_version",
-    "timeout_seconds": "request_timeout_seconds",
-}
-_REMOVED_EMPTY_HOSTED_PATHS = frozenset(
-    {
-        ("account_ref",),
-        ("authority_id",),
-        ("authority", "principals"),
-        ("base_url",),
-        ("condition_profile",),
-        ("environment",),
-        ("expected_manifest_digest",),
-    }
-)
 _ALKAHEST_FIELDS = frozenset(
     {
         "address_config_path",
@@ -70,45 +66,6 @@ _ALKAHEST_FIELDS = frozenset(
         "interruptible_oracle_addresses",
         "oracle_gated",
         "trusted_oracle_addresses",
-    }
-)
-_STRIPE_FIELDS = frozenset(
-    {
-        "account_ref",
-        "allow_insecure_loopback",
-        "authority",
-        "authority_id",
-        "base_url",
-        "condition_profile",
-        "condition_profiles",
-        "currency",
-        "enabled",
-        "environment",
-        "expected_api_version",
-        "expected_manifest_digest",
-        "expected_schema_version",
-        "preflight_timeout_seconds",
-        "request_timeout_seconds",
-        "required_capabilities",
-        "resolvers",
-    }
-)
-_FORBIDDEN_STRIPE_KEY_PARTS = frozenset(
-    {
-        "access_token",
-        "admin",
-        "administrator",
-        "api_key",
-        "credential",
-        "database",
-        "db_url",
-        "dsn",
-        "migration",
-        "private_key",
-        "provider",
-        "secret",
-        "stripe_key",
-        "webhook",
     }
 )
 
@@ -255,14 +212,11 @@ def _normalized_mechanism(value: Any) -> str:
         )
     aliases = {
         "alkahest": ALKAHEST_MECHANISM,
-        "stripe": STRIPE_MECHANISM,
-        "hosted": STRIPE_MECHANISM,
-        "hosted.stripe": STRIPE_MECHANISM,
     }
     return aliases.get(value, value)
 
 
-def _normalized_priority(value: Any) -> list[str]:
+def _normalized_priority(value: Any, installed: InstalledMechanisms) -> list[str]:
     raw = _plain(value)
     entries = raw.split(",") if isinstance(raw, str) else raw
     if not isinstance(entries, (list, tuple)):
@@ -273,7 +227,12 @@ def _normalized_priority(value: Any) -> list[str]:
         _normalized_mechanism(entry.strip() if isinstance(entry, str) else entry)
         for entry in entries
     ]
-    if any(mechanism not in KNOWN_MECHANISMS for mechanism in priority):
+    if any(
+        mechanism in RETIRED_MECHANISMS or mechanism in _RETIRED_ALIASES
+        for mechanism in priority
+    ):
+        raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
+    if any(mechanism not in installed for mechanism in priority):
         raise SettlementMigrationValidationError(
             "legacy settlement priority contains an unknown mechanism (value redacted)"
         )
@@ -290,13 +249,16 @@ def _same_value(left: Any, right: Any) -> bool:
 
 class _Planner:
     def __init__(
-        self, document: MutableMapping[str, Any], role: SettlementRole
+        self,
+        document: MutableMapping[str, Any],
+        role: SettlementRole,
+        installed: InstalledMechanisms,
     ) -> None:
         self.document = document
         self.role = role
+        self.installed = installed
         self.actions: list[MigrationAction] = []
         self.alkahest_seen = False
-        self.stripe_enabled = False
         self.legacy_priority: list[str] | None = None
         self.legacy_priority_item: Any | None = None
         self.enablement_sources: dict[str, str] = {}
@@ -336,58 +298,6 @@ class _Planner:
             return
         _delete_path(self.document, source)
         self.actions.append(MigrationAction("remove", _path_text(source)))
-
-    def migrate_hosted(self) -> None:
-        present = [
-            path
-            for path in _LEGACY_HOSTED_TABLES
-            if _lookup(self.document, path) is not None
-        ]
-        if len(present) > 1:
-            raise SettlementMigrationConflict(
-                _path_text(present[0]), _path_text(present[1])
-            )
-        if not present:
-            return
-        source_table_path = present[0]
-        source_table = _lookup(self.document, source_table_path)
-        if not isinstance(source_table, Mapping):
-            raise SettlementMigrationValidationError(
-                f"legacy settlement path {_path_text(source_table_path)} must be a table"
-            )
-        self._reject_forbidden_stripe_keys(source_table, source_table_path)
-        enabled = source_table.get("enabled")
-        self.stripe_enabled = _plain(enabled) is True
-        if self.stripe_enabled:
-            self.enablement_sources["stripe"] = (
-                f"{_path_text(source_table_path)}.enabled"
-            )
-        leaves = _iter_table_leaves(source_table)
-        for relative, _item in leaves:
-            source = (*source_table_path, *relative)
-            if relative in _REMOVED_EMPTY_HOSTED_PATHS and _plain(_item) in (
-                "",
-                [],
-            ):
-                self.remove(source)
-                continue
-            renamed = (
-                _HOSTED_FIELD_RENAMES.get(relative[0], relative[0]),
-                *relative[1:],
-            )
-            self.move(source, ("Settlement", "stripe", *renamed))
-        self.remove(source_table_path)
-
-    def _reject_forbidden_stripe_keys(
-        self, table: Mapping[str, Any], prefix: tuple[str, ...]
-    ) -> None:
-        for relative, _value in _iter_table_leaves(table):
-            for part in relative:
-                lowered = part.lower()
-                if any(token in lowered for token in _FORBIDDEN_STRIPE_KEY_PARTS):
-                    raise SettlementMigrationValidationError(
-                        f"forbidden hosted settlement path {_path_text((*prefix, *relative))} (value redacted)"
-                    )
 
     def migrate_alkahest_policy(self) -> None:
         for source_name, (
@@ -468,10 +378,10 @@ class _Planner:
         source = ("settlement", "mechanism_priority")
         legacy_item = _lookup(self.document, source)
         if legacy_item is not None:
-            self.legacy_priority = _normalized_priority(legacy_item)
+            self.legacy_priority = _normalized_priority(legacy_item, self.installed)
             self.legacy_priority_item = copy.deepcopy(legacy_item)
             for mechanism in self.legacy_priority:
-                key = "alkahest" if mechanism == ALKAHEST_MECHANISM else "stripe"
+                key = "alkahest"
                 self.enablement_sources[key] = _path_text(source)
             _delete_path(self.document, source)
             self.actions.append(
@@ -481,13 +391,13 @@ class _Planner:
         destination = ("Settlement", "priority")
         current_item = _lookup(self.document, destination)
         current = (
-            _normalized_priority(current_item) if current_item is not None else None
+            _normalized_priority(current_item, self.installed)
+            if current_item is not None
+            else None
         )
         derived = list(self.legacy_priority or current or [])
         if self.alkahest_seen and ALKAHEST_MECHANISM not in derived:
             derived.append(ALKAHEST_MECHANISM)
-        if self.stripe_enabled and STRIPE_MECHANISM not in derived:
-            derived.append(STRIPE_MECHANISM)
 
         if (
             self.legacy_priority is not None
@@ -517,7 +427,6 @@ class _Planner:
 
         if self.actions and derived:
             self._set_enabled("alkahest", ALKAHEST_MECHANISM in derived)
-            self._set_enabled("stripe", STRIPE_MECHANISM in derived)
 
     def _set_enabled(self, key: str, enabled: bool) -> None:
         section = _lookup(self.document, ("Settlement", key))
@@ -534,7 +443,12 @@ class _Planner:
             parent["enabled"] = enabled
 
     def run(self) -> tuple[MigrationAction, ...]:
-        self.migrate_hosted()
+        if any(
+            _lookup(self.document, path) is not None for path in _LEGACY_HOSTED_TABLES
+        ):
+            raise SettlementMigrationError(
+                "hosted settlement configuration is not supported"
+            )
         self.migrate_alkahest_policy()
         self.migrate_address_books()
         self.migrate_priority()
@@ -580,11 +494,7 @@ def reject_legacy_settlement_path(path: str, *, command: str) -> None:
 def environment_renames(
     environ: Mapping[str, str], *, role: SettlementRole
 ) -> tuple[EnvironmentRename, ...]:
-    """Project legacy marketplace environment names without reading their values.
-
-    Hosted-service-owned ``HOSTED_SETTLEMENT_*`` variables are intentionally not
-    marketplace aliases and are therefore never returned.
-    """
+    """Project supported marketplace environment aliases without reading values."""
 
     renames: list[EnvironmentRename] = []
     if role == "seller":
@@ -602,17 +512,8 @@ def environment_renames(
                 "STOREFRONT_SETTLEMENT__ALKAHEST__INTERRUPTIBLE_ORACLE_ADDRESSES"
             ),
         }
-        hosted_suffixes = {
-            "CONTRACT_VERSION": "EXPECTED_API_VERSION",
-            "TIMEOUT_SECONDS": "REQUEST_TIMEOUT_SECONDS",
-        }
         for name in environ:
             destination = exact.get(name)
-            hosted_prefix = "STOREFRONT_SETTLEMENT__HOSTED__"
-            if name.startswith(hosted_prefix):
-                suffix = name[len(hosted_prefix) :]
-                suffix = hosted_suffixes.get(suffix, suffix)
-                destination = f"STOREFRONT_SETTLEMENT__STRIPE__{suffix}"
             if destination is not None:
                 renames.append(EnvironmentRename(name, destination))
     else:
@@ -627,6 +528,7 @@ def _validate_candidate(
     *,
     role: SettlementRole,
     validator: ConfigValidator | None,
+    installed: InstalledMechanisms,
 ) -> Mapping[str, Any]:
     try:
         parsed = tomllib.loads(text)
@@ -639,11 +541,12 @@ def _validate_candidate(
     if settlement is not None:
         if not isinstance(settlement, dict):
             raise SettlementMigrationValidationError("Settlement must be a table")
+        if any(key in settlement for key in RETIRED_MECHANISMS.values()):
+            raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
         unknown_sections = set(settlement) - {
             "schema_version",
             "priority",
-            "alkahest",
-            "stripe",
+            *installed.values(),
         }
         if unknown_sections:
             raise SettlementMigrationValidationError(
@@ -660,19 +563,21 @@ def _validate_candidate(
                 "Settlement.schema_version must match the installed schema"
             )
         priority = settlement.get("priority", [])
-        normalized = _normalized_priority(priority)
+        normalized = _normalized_priority(priority, installed)
         if normalized != priority:
             raise SettlementMigrationValidationError(
                 "Settlement.priority must use canonical mechanism identifiers"
             )
-        for key in ("alkahest", "stripe"):
+        # The migration maps legacy Alkahest keys, so it owns their field set;
+        # every other installed section is left to the caller's typed validator.
+        for key in ("alkahest",):
             section = settlement.get(key)
             if section is not None and not isinstance(section, dict):
                 raise SettlementMigrationValidationError(
                     f"Settlement.{key} must be a table"
                 )
             if isinstance(section, dict):
-                allowed = _ALKAHEST_FIELDS if key == "alkahest" else _STRIPE_FIELDS
+                allowed = _ALKAHEST_FIELDS
                 if set(section) - allowed:
                     raise SettlementMigrationValidationError(
                         f"Settlement.{key} contains an unknown key (value redacted)"
@@ -685,24 +590,6 @@ def _validate_candidate(
                 raise SettlementMigrationValidationError(
                     f"Settlement.{key}.enabled must be a boolean"
                 )
-        stripe = settlement.get("stripe")
-        if isinstance(stripe, dict) and "authority" in stripe:
-            authority = stripe["authority"]
-            if not isinstance(authority, dict) or set(authority) - {"principals"}:
-                raise SettlementMigrationValidationError(
-                    "Settlement.stripe.authority contains an unknown key "
-                    "(value redacted)"
-                )
-        if isinstance(stripe, dict):
-            for relative, _value in _plain_leaves(stripe):
-                if any(
-                    token in part.lower()
-                    for part in relative
-                    for token in _FORBIDDEN_STRIPE_KEY_PARTS
-                ):
-                    raise SettlementMigrationValidationError(
-                        "Settlement.stripe contains a forbidden provider or secret key (value redacted)"
-                    )
 
     _reject_remaining_legacy(parsed)
     if validator is not None:
@@ -886,12 +773,14 @@ def migrate_settlement_config(
     check: bool = False,
     write: bool = False,
     backup: bool = False,
+    installed: InstalledMechanisms,
     validator: ConfigValidator | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> SettlementMigrationResult:
     """Check or atomically migrate one role TOML document.
 
-    Exactly one of ``check`` and ``write`` is required. Write mode requires an
+    ``installed`` names the role's installed mechanisms, from the same
+    registrations its runtime composes. Exactly one of ``check`` and ``write`` is required. Write mode requires an
     explicit backup opt-in. Candidate validation and all conflict checks happen
     before the first filesystem mutation.
     """
@@ -926,9 +815,11 @@ def migrate_settlement_config(
         ) from exc
 
     planned = copy.deepcopy(document)
-    actions = _Planner(planned, role).run()
+    actions = _Planner(planned, role, installed).run()
     candidate_text = tomlkit.dumps(planned)
-    _validate_candidate(candidate_text, role=role, validator=validator)
+    _validate_candidate(
+        candidate_text, role=role, validator=validator, installed=installed
+    )
     candidate = candidate_text.encode("utf-8")
     changed = bool(actions)
     renames = environment_renames(environ or {}, role=role)

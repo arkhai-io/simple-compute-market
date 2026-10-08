@@ -101,7 +101,7 @@ async def _settled(tmp_path, *, site: _Site, chain: ChainClient, escrow: EscrowO
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with _buyer(app) as buyer:
-            settled = await buyer.settle(
+            settled = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
     return runtime, app, settled.extra["obligation_ref"]
@@ -371,8 +371,6 @@ async def test_alkahest_evidence_is_served_only_to_the_deals_parties(tmp_path) -
         as_admin = await _resolve(app, ADMIN_SIGNER, "admin", digest)
         for name, signer, role in (
             ("stranger", stranger, "buyer"),
-            # No hosted authority takes part in an Alkahest deal.
-            ("authority", stranger, "authority"),
         ):
             with pytest.raises(StorefrontClientError) as raised:
                 await _resolve(app, signer, role, digest)
@@ -391,58 +389,6 @@ async def test_alkahest_evidence_is_served_only_to_the_deals_parties(tmp_path) -
     assert as_buyer.evidence.accepted_binding_kind == (
         "bare_metal.accepted-alkahest-binding.v1"
     )
-    assert refused == {"stranger": 403, "authority": 403}
+    assert refused == {"stranger": 403}
     assert missing.value.status_code == 404
     assert unsigned.status_code == 401
-
-
-async def test_hosted_evidence_is_served_to_its_hosted_authority(tmp_path) -> None:
-    from test_hosted_lifecycle_repository import accepted_binding, lease_ready_result
-
-    from arkhai_bare_metal import build_bare_metal_lease_ready_evidence
-    from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-    from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-    from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
-    from settlement_compositions import hosted_composition
-
-    authority = Eip191Signer(bytes.fromhex("88" * 32))
-    domain = get_market_domain_contract()
-    db = SQLiteClient(str(tmp_path / "storefront.db"), domain=domain)
-    runtime = BareMetalStorefrontRuntime(
-        db=db,
-        domain=domain,
-        seller_principal=SELLER_SIGNER.identity,
-        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
-        storefront_url="http://seller:8000",
-        marketplace_signer=SELLER_SIGNER,
-        settlement_composition=hosted_composition(SELLER_SIGNER, authority=authority),
-    )
-    # A hosted deal's evidence, recorded with the writes its lifecycle makes.
-    binding = accepted_binding()
-    await db.save_bare_metal_hosted_binding(binding)
-    result = lease_ready_result()
-    evidence = build_bare_metal_lease_ready_evidence(
-        binding=binding, condition_anchor="condition-a", result=result
-    )
-    await db.advance_bare_metal_hosted_lifecycle(
-        obligation_ref=binding.obligation_ref,
-        physical_state="access_ready",
-        capacity_reservation_id=result.capacity_reservation_ref,
-        settlement_resource_id=result.settlement_resource_ref,
-        fulfillment_id=result.fulfillment_ref,
-        public_result=result,
-    )
-    await db.advance_bare_metal_hosted_lifecycle(
-        obligation_ref=binding.obligation_ref,
-        physical_state="evidence_published",
-        public_result=result,
-        portable_evidence=evidence,
-        portable_evidence_ref="portable-evidence-a",
-    )
-    app = _app(runtime)
-
-    async with app.router.lifespan_context(app):
-        served = await _resolve(app, authority, "authority", evidence.evidence_digest)
-
-    assert served.evidence == evidence
-    assert served.seller_principal.identifier == SELLER_SIGNER.identity.identifier

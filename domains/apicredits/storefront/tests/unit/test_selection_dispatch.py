@@ -10,24 +10,14 @@ from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.negotiation_runtime import (
     _accepted_selection_artifacts,
     _decode_terms,
-    _hosted_policy_state,
-)
-from apicredits_storefront.settlement_composition import (
-    ApiCreditsSettlementComposition,
-    build_storefront_settlement_registry,
 )
 from market_core.schemas import (
     ProvisionTerms,
-    RateValue,
     SettlementPlan,
     derive_settlement_option_id,
 )
-from market_hosted_settlement import (
-    StripeSettlementConfig,
-    default_hosted_selection_dispatch,
-)
 from market_identity import Ed25519Signer
-from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
+from market_negotiation_runtime import OfferUnfulfillableError
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
     MechanismReadiness,
@@ -140,47 +130,6 @@ def _intro_option() -> dict[str, Any]:
     }
 
 
-def _hosted_option() -> dict[str, Any]:
-    rates = [RateValue(field="amount", per="credit", value=100)]
-    params = {
-        "account_ref": "acct-api-credits",
-        "authority_id": "hosted-authority-1",
-        "environment": "test",
-        "country": "US",
-        "claimant_principal": _SELLER.model_dump(mode="json"),
-        "funds_flow": "separate_charges_transfers",
-        "funding_profile": "card.v1",
-        "interaction": "interactive",
-        "contract_fingerprint": "sha256:" + "11" * 32,
-        "condition": {
-            "protocol": "arkhai.condition.v1",
-            "condition_id": "api-credits-issued",
-            "evaluator": {
-                "kind": "builtin.v1",
-                "version": "trivial.v1",
-                "resolver_id": "api-credits",
-                "params": {"kind": "trivial"},
-            },
-            "demand": {
-                "encoding": "application/jcs+json",
-                "value": {"kind": "api_credits.v1"},
-            },
-        },
-    }
-    return {
-        "option_id": derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
-        ),
-        "mechanism": "fiat.stripe.v1",
-        "asset": "usd",
-        "rates": [rate.model_dump(mode="json") for rate in rates],
-        "params": params,
-    }
-
-
 def _selection(option: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "mechanism": option["mechanism"],
@@ -240,88 +189,3 @@ def test_non_scalar_selection_rejects_a_proposed_amount() -> None:
             listing=_listing(option),
             provision_terms=_terms(),
         )
-
-
-def test_uncomposed_mechanism_selection_is_refused() -> None:
-    option = _intro_option()
-    with pytest.raises(NegotiationStateError, match="unsupported mechanism"):
-        _hosted_policy_state(
-            _listing(option),
-            {"settlement_selection": _selection(option)},
-            default_hosted_selection_dispatch(),
-        )
-    with pytest.raises(OfferUnfulfillableError, match="mechanism_unsupported"):
-        _accepted_selection_artifacts(
-            default_hosted_selection_dispatch(),
-            selection=_selection(option),
-            option=option,
-            agreed_amount=0,
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            listing=_listing(option),
-            provision_terms=_terms(),
-        )
-
-
-def test_scalar_amount_must_match_the_mechanism_build() -> None:
-    option = _hosted_option()
-    dispatch = default_hosted_selection_dispatch()
-    artifacts = _accepted_selection_artifacts(
-        dispatch,
-        selection=_selection(option),
-        option=option,
-        agreed_amount=300,
-        buyer_principal=_BUYER,
-        seller_principal=_SELLER,
-        listing=_listing(option),
-        provision_terms=_terms(quantity=3),
-    )
-    plan = SettlementPlan.model_validate(artifacts["settlement_plan"])
-    assert plan.obligations[0].amount == 300
-    with pytest.raises(OfferUnfulfillableError, match="quantity_scaled"):
-        _accepted_selection_artifacts(
-            dispatch,
-            selection=_selection(option),
-            option=option,
-            agreed_amount=299,
-            buyer_principal=_BUYER,
-            seller_principal=_SELLER,
-            listing=_listing(option),
-            provision_terms=_terms(quantity=3),
-        )
-
-
-def test_composition_dispatch_surfaces_only_obligation_builders() -> None:
-    registry = build_storefront_settlement_registry()
-    config = SettlementConfig(
-        priority=("alkahest.v1", "fiat.stripe.v1"),
-        mechanisms={"stripe": StripeSettlementConfig()},
-    )
-    composition = ApiCreditsSettlementComposition(
-        domain=_DOMAIN,
-        repository=None,
-        runtime=None,
-        worker=None,
-        local_principal=_SELLER,
-        mechanism_clients={},
-        settlement_config=config,
-        configuration_registry=registry,
-        mechanism_resources={},
-        credits_client=None,
-        evidence_service=None,
-        private_results=None,
-        failure_policy=None,
-    )
-    dispatch = composition.accepted_obligation_dispatch()
-    assert set(dispatch) == {"fiat.stripe.v1"}
-    built = dispatch["fiat.stripe.v1"](
-        _hosted_option(),
-        {
-            "buyer_principal": _BUYER.model_dump(mode="json"),
-            "seller_principal": _SELLER.model_dump(mode="json"),
-            "expiration_unix": 1_900_000_000,
-            "unit_quantity": 3,
-            "domain_param_keys": (),
-        },
-    )
-    assert built.amount == 300

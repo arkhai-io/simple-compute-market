@@ -16,6 +16,8 @@ import pytest_asyncio
 from fastapi import FastAPI
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from storefront_client import StorefrontClient, StorefrontClientError
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_capacity_publication import publication_binding
 
 import market_storefront.container as _container
@@ -27,10 +29,12 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from tests._settings_overrides import settings_overrides
-from storefront_client import StorefrontClient, StorefrontClientError
-
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
@@ -57,10 +61,12 @@ def _assert_canonical_owners(result: dict) -> None:
 
 @pytest_asyncio.fixture
 async def db(tmp_path):
-    from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
     from market_storefront.utils.sqlite_client import SQLiteClient
 
-    return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    return SQLiteClient(
+        db_path=str(tmp_path / "negotiate_test.db"),
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
 
 # The site-test projection the storefront reads each listing's own source from.
@@ -227,11 +233,11 @@ async def _seed_listing(
 
 @pytest_asyncio.fixture
 async def client(db, monkeypatch):
-    import market_storefront.negotiation_runtime as _negotiation_runtime
     import market_policy.negotiation_thread as _nt_module
-
     from market_config.config_loader import ChainConfig
     from market_policy.identity import Identity
+
+    import market_storefront.negotiation_runtime as _negotiation_runtime
 
     _nt_module._thread_store = None
     _nt_module.get_thread_store(
@@ -297,9 +303,7 @@ async def client(db, monkeypatch):
 
     async def capacity_binding_for_listing(repository, listing_id):
         assert repository is db
-        listing_binding = await repository.load_listing_binding(
-            listing_id=listing_id
-        )
+        listing_binding = await repository.load_listing_binding(listing_id=listing_id)
         assert listing_binding is not None
         return publication_binding(
             capacity_backing=listing_binding.capacity_backing,
@@ -360,7 +364,7 @@ class TestNegotiateNew:
     async def test_missing_listing_id_raises_422(self, client):
         """listing_id is required — Pydantic rejects the request."""
         c, _ = client
-        with pytest.raises(StorefrontClientError) as exc_info:
+        with pytest.raises(StorefrontClientError):
             await c.negotiate_new(
                 listing_id="",
                 initial_amount=8000,

@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -46,7 +46,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.3.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]
@@ -59,7 +59,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -67,23 +67,23 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -93,7 +93,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

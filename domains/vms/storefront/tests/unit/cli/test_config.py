@@ -232,51 +232,6 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert "# settlements = [" in cfg.read_text()
 
 
-def test_config_migrate_registers_settlement_check(monkeypatch, tmp_path, runner, app):
-    from market_config.settlement_migration import (
-        MigrationAction,
-        SettlementMigrationResult,
-    )
-
-    import market_storefront.groups.config as config_group
-
-    cfg = tmp_path / "storefront.toml"
-    cfg.write_text("[hosted_settlement]\nenabled = true\n")
-    captured = {}
-
-    def migrate(path, **kwargs):
-        captured.update(kwargs)
-        return SettlementMigrationResult(
-            path=path,
-            changed=True,
-            written=False,
-            actions=(
-                MigrationAction(
-                    "move",
-                    "hosted_settlement.enabled",
-                    "Settlement.stripe.enabled",
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
-    monkeypatch.setattr(config_group, "migrate_settlement_config", migrate)
-
-    result = runner.invoke(
-        app,
-        ["config", "migrate", "--scope", "settlement", "--check"],
-    )
-
-    assert result.exit_code == 0
-    assert captured["role"] == "seller"
-    assert captured["check"] is True
-    assert captured["write"] is False
-    assert captured["backup"] is False
-    assert callable(captured["validator"])
-    assert "value redacted" in result.output
-    assert "Settlement.stripe.enabled" in result.output
-
-
 def test_config_set_rejects_legacy_path_with_exact_migration_command(
     monkeypatch, runner, app
 ):
@@ -299,3 +254,67 @@ def test_config_set_rejects_legacy_path_with_exact_migration_command(
 
     assert result.exit_code == 2
     assert STOREFRONT_MIGRATION_COMMAND in result.output
+
+
+_PAYMENTS_SETTLEMENT = """[Settlement]
+schema_version = 1
+priority = ["arkhai.payments.v1"]
+
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments.example.test"
+service_identity = { scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }
+fee_bps = 250
+dispute_authority = "33333333-3333-4333-8333-333333333333"
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+"""
+
+
+def test_settlement_migration_accepts_the_installed_payments_mechanism(
+    monkeypatch, tmp_path, runner, app
+):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text(_PAYMENTS_SETTLEMENT)
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code == 0, result.output
+    assert cfg.read_text() == _PAYMENTS_SETTLEMENT
+
+
+def test_settlement_migration_refuses_stripe_with_its_removal(monkeypatch, tmp_path, runner, app):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text('[Settlement]\nschema_version = 1\npriority = ["fiat.stripe.v1"]\n')
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code != 0
+    assert "was removed" in result.output
+
+
+def test_publication_migration_compiles_a_payment_clause():
+    import tomllib
+
+    from market_storefront.groups.config import _seller_publication_clause_compiler
+
+    compile_clause = _seller_publication_clause_compiler(tomllib.loads(_PAYMENTS_SETTLEMENT))
+    clause = compile_clause(
+        {
+            "mechanism": "arkhai.payments.v1",
+            "asset": "USD/2",
+            "rate": "200",
+            "per": "hour",
+            "mechanism_input": {
+                "payee_account": "22222222-2222-4222-8222-222222222222",
+                "asset": "USD/2",
+            },
+        }
+    )
+
+    assert clause.mechanism == "arkhai.payments.v1"

@@ -149,15 +149,9 @@ def capacity_admin_routes(
             capacity_reservation_id=reservation_id
         )
         if lifecycle is None:
-            hosted = await runtime.db.load_bare_metal_hosted_reservation_state(
-                capacity_reservation_id=reservation_id
+            raise LookupError(
+                f"capacity reservation {reservation_id!r} is not this storefront's"
             )
-            if hosted is None:
-                raise LookupError(
-                    f"capacity reservation {reservation_id!r} is not this storefront's"
-                )
-            # A hosted deal releases its reservation through its own lifecycle.
-            return {"capacity_reservation_id": reservation_id, "state": hosted}
         if str(event.get("site_id") or "") != lifecycle["site_id"]:
             raise LookupError(
                 f"capacity reservation {reservation_id!r} belongs to another site"

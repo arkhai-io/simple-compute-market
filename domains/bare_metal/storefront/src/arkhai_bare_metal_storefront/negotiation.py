@@ -108,6 +108,37 @@ def _rejected_result(
     )
 
 
+def bare_metal_admission_refusal(
+    listing: BareMetalListing, requested: BareMetalMessage
+) -> str | None:
+    """Why a request for this listed machine cannot be accepted, or None.
+
+    Every deal that provisions the machine is held to these, however it is
+    settled: the duration within the listing's bounds, SSH access the listing
+    advertises, a buyer key, and no buyer-supplied access authority.
+    """
+
+    if (
+        listing.min_duration_seconds is not None
+        and requested.duration_seconds < listing.min_duration_seconds
+    ):
+        return "bare_metal_duration_below_listing_min"
+    if (
+        listing.max_duration_seconds is not None
+        and requested.duration_seconds > listing.max_duration_seconds
+    ):
+        return "bare_metal_duration_above_listing_max"
+    if requested.access_method not in listing.access_methods:
+        return "bare_metal_access_method_not_listed"
+    if requested.access_method != SSH_ACCESS_METHOD:
+        return "bare_metal_access_method_unsupported"
+    if requested.access_ref is not None:
+        return "bare_metal_buyer_access_ref_forbidden"
+    if not (requested.ssh_public_key or "").strip():
+        return "bare_metal_ssh_public_key_required"
+    return None
+
+
 class _DefaultBareMetalSellerRoundHook:
     def __init__(self, names: Sequence[str]) -> None:
         self._names = list(names)
@@ -128,50 +159,10 @@ class _DefaultBareMetalSellerRoundHook:
         requested = BareMetalMessage.model_validate(message)
         strategy = strategy_label or "bare_metal_listed_price"
 
-        if (
-            listing_resource.min_duration_seconds is not None
-            and requested.duration_seconds < listing_resource.min_duration_seconds
-        ):
+        refusal = bare_metal_admission_refusal(listing_resource, requested)
+        if refusal is not None:
             return _rejected_result(
-                reason="bare_metal_duration_below_listing_min",
-                seller_reference_amount=seller_reference_amount,
-                strategy_label=strategy,
-                message=requested,
-            )
-        if (
-            listing_resource.max_duration_seconds is not None
-            and requested.duration_seconds > listing_resource.max_duration_seconds
-        ):
-            return _rejected_result(
-                reason="bare_metal_duration_above_listing_max",
-                seller_reference_amount=seller_reference_amount,
-                strategy_label=strategy,
-                message=requested,
-            )
-        if requested.access_method not in listing_resource.access_methods:
-            return _rejected_result(
-                reason="bare_metal_access_method_not_listed",
-                seller_reference_amount=seller_reference_amount,
-                strategy_label=strategy,
-                message=requested,
-            )
-        if requested.access_method != SSH_ACCESS_METHOD:
-            return _rejected_result(
-                reason="bare_metal_access_method_unsupported",
-                seller_reference_amount=seller_reference_amount,
-                strategy_label=strategy,
-                message=requested,
-            )
-        if requested.access_ref is not None:
-            return _rejected_result(
-                reason="bare_metal_buyer_access_ref_forbidden",
-                seller_reference_amount=seller_reference_amount,
-                strategy_label=strategy,
-                message=requested,
-            )
-        if not (requested.ssh_public_key or "").strip():
-            return _rejected_result(
-                reason="bare_metal_ssh_public_key_required",
+                reason=refusal,
                 seller_reference_amount=seller_reference_amount,
                 strategy_label=strategy,
                 message=requested,

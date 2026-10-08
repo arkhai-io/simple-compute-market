@@ -83,7 +83,7 @@ def list_api_keys(db: Session = Depends(get_db)) -> List[ApiKeyListItem]:
     ]
 
 
-@router.delete("/{key_id}", status_code=204)
+@router.delete("/{key_id}", status_code=204, response_model=None)
 def revoke(key_id: int, db: Session = Depends(get_db)) -> None:
     """Mark a key revoked. Idempotent on already-revoked keys; 404
     when the id is unknown."""

@@ -40,7 +40,7 @@ def _registration(
     async def preflight(section, resources, role):
         del role
         calls.append(f"preflight:{mechanism}")
-        if mechanism == "fiat.stripe.v1" and resources.get("publication_clauses"):
+        if mechanism == "example.payment.v1" and resources.get("publication_clauses"):
             profiles = [
                 str(item.get("mechanism_input", {}).get("funding_profile"))
                 for item in resources["publication_clauses"]
@@ -97,23 +97,25 @@ def _registration(
 def _composition(
     *,
     priority: tuple[str, ...],
-    stripe_ready: bool,
+    example_ready: bool,
     alkahest_ready: bool,
-    stripe_enabled: bool = True,
+    example_enabled: bool = True,
     alkahest_enabled: bool = True,
 ):
     calls: list[str] = []
     registry = SettlementConfigurationRegistry(
         (
             _registration("alkahest.v1", "alkahest", ready=alkahest_ready, calls=calls),
-            _registration("fiat.stripe.v1", "stripe", ready=stripe_ready, calls=calls),
+            _registration(
+                "example.payment.v1", "example", ready=example_ready, calls=calls
+            ),
         )
     )
     config = SettlementConfig(
         priority=priority,
         mechanisms={
             "alkahest": _Section(enabled=alkahest_enabled),
-            "stripe": _Section(enabled=stripe_enabled),
+            "example": _Section(enabled=example_enabled),
         },
     )
     registry.validate(config, role="seller")
@@ -129,26 +131,26 @@ def _composition(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("priority", "stripe_enabled", "alkahest_enabled", "expected"),
+    ("priority", "example_enabled", "alkahest_enabled", "expected"),
     [
-        (("fiat.stripe.v1",), True, False, ["stripe"]),
+        (("example.payment.v1",), True, False, ["example"]),
         (("alkahest.v1",), False, True, ["alkahest"]),
-        (("fiat.stripe.v1", "alkahest.v1"), True, True, ["stripe", "alkahest"]),
-        (("alkahest.v1", "fiat.stripe.v1"), True, True, ["alkahest", "stripe"]),
+        (("example.payment.v1", "alkahest.v1"), True, True, ["example", "alkahest"]),
+        (("alkahest.v1", "example.payment.v1"), True, True, ["alkahest", "example"]),
     ],
 )
 async def test_ready_mechanisms_are_built_in_priority_order(
-    priority, stripe_enabled, alkahest_enabled, expected
+    priority, example_enabled, alkahest_enabled, expected
 ):
     composition, calls = _composition(
         priority=priority,
-        stripe_ready=True,
+        example_ready=True,
         alkahest_ready=True,
-        stripe_enabled=stripe_enabled,
+        example_enabled=example_enabled,
         alkahest_enabled=alkahest_enabled,
     )
     resources = {
-        "stripe_options": [{"mechanism": "fiat.stripe.v1"}],
+        "example_options": [{"mechanism": "example.payment.v1"}],
         "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
     }
 
@@ -158,32 +160,35 @@ async def test_ready_mechanisms_are_built_in_priority_order(
 
     assert [
         value.split(":", 1)[1] for value in calls if value.startswith("option:")
-    ] == ["fiat.stripe.v1" if item == "stripe" else "alkahest.v1" for item in expected]
-    assert options == ([{"mechanism": "fiat.stripe.v1"}] if stripe_enabled else [])
+    ] == [
+        "example.payment.v1" if item == "example" else "alkahest.v1"
+        for item in expected
+    ]
+    assert options == ([{"mechanism": "example.payment.v1"}] if example_enabled else [])
     assert accepted == ([{"mechanism": "alkahest.v1"}] if alkahest_enabled else [])
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("stripe_ready", "alkahest_ready", "expected_options", "expected_escrows"),
+    ("example_ready", "alkahest_ready", "expected_options", "expected_escrows"),
     [
         (False, True, [], [{"mechanism": "alkahest.v1"}]),
-        (True, False, [{"mechanism": "fiat.stripe.v1"}], []),
+        (True, False, [{"mechanism": "example.payment.v1"}], []),
     ],
 )
 async def test_one_unready_mechanism_does_not_hide_ready_peer(
-    stripe_ready, alkahest_ready, expected_options, expected_escrows
+    example_ready, alkahest_ready, expected_options, expected_escrows
 ):
     composition, _calls = _composition(
-        priority=("fiat.stripe.v1", "alkahest.v1"),
-        stripe_ready=stripe_ready,
+        priority=("example.payment.v1", "alkahest.v1"),
+        example_ready=example_ready,
         alkahest_ready=alkahest_ready,
     )
 
     accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
         composition,
         {
-            "stripe_options": [{"mechanism": "fiat.stripe.v1"}],
+            "example_options": [{"mechanism": "example.payment.v1"}],
             "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
         },
     )
@@ -195,8 +200,8 @@ async def test_one_unready_mechanism_does_not_hide_ready_peer(
 @pytest.mark.asyncio
 async def test_publication_fails_safely_when_none_are_ready():
     composition, _calls = _composition(
-        priority=("fiat.stripe.v1", "alkahest.v1"),
-        stripe_ready=False,
+        priority=("example.payment.v1", "alkahest.v1"),
+        example_ready=False,
         alkahest_ready=False,
     )
 
@@ -207,13 +212,13 @@ async def test_publication_fails_safely_when_none_are_ready():
 @pytest.mark.asyncio
 async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order():
     composition, calls = _composition(
-        priority=("alkahest.v1", "fiat.stripe.v1"),
-        stripe_ready=True,
+        priority=("alkahest.v1", "example.payment.v1"),
+        example_ready=True,
         alkahest_ready=True,
     )
     clauses = [
         SettlementPublicationClause(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rate="2",
             per="hour",
@@ -229,64 +234,27 @@ async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order(
     accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
         composition,
         {
-            "stripe_options": [{"mechanism": "fiat.stripe.v1"}],
+            "example_options": [{"mechanism": "example.payment.v1"}],
             "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
         },
         clauses=clauses,
     )
 
     assert [value for value in calls if value.startswith("option:")] == [
-        "option:fiat.stripe.v1",
+        "option:example.payment.v1",
         "option:alkahest.v1",
     ]
-    assert options == [{"mechanism": "fiat.stripe.v1"}]
+    assert options == [{"mechanism": "example.payment.v1"}]
     assert accepted == [{"mechanism": "alkahest.v1"}]
 
-
-
-@pytest.mark.asyncio
-async def test_hosted_profile_clauses_publish_independently_in_declared_order():
-    composition, calls = _composition(
-        priority=("fiat.stripe.v1", "alkahest.v1"),
-        stripe_ready=True,
-        alkahest_ready=True,
-    )
-    profiles = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
-    clauses = [
-        SettlementPublicationClause(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rate="2",
-            per="hour",
-            mechanism_input={
-                "funding_profile": profile,
-                "interaction": "interactive",
-            },
-        )
-        for profile in profiles
-    ]
-
-    _accepted, options, _readiness = (
-        await VmSettlementComposition.publication_artifacts(
-            composition,
-            {"stripe_options": [{"mechanism": "fiat.stripe.v1"}]},
-            clauses=clauses,
-        )
-    )
-
-    assert options == [
-        {"mechanism": "fiat.stripe.v1"},
-        {"mechanism": "fiat.stripe.v1"},
-    ]
-    assert "profiles:card.v1,us_bank_transfer.v1,us_ach_debit.v1" in calls
 
 @pytest.mark.asyncio
 async def test_explicit_disabled_clause_is_rejected() -> None:
     composition, _calls = _composition(
         priority=("alkahest.v1",),
-        stripe_ready=True,
+        example_ready=True,
         alkahest_ready=True,
-        stripe_enabled=False,
+        example_enabled=False,
         alkahest_enabled=True,
     )
 
@@ -296,7 +264,7 @@ async def test_explicit_disabled_clause_is_rejected() -> None:
             {},
             clauses=[
                 SettlementPublicationClause(
-                    mechanism="fiat.stripe.v1",
+                    mechanism="example.payment.v1",
                     asset="usd",
                     rate="2",
                     per="hour",
@@ -308,8 +276,8 @@ async def test_explicit_disabled_clause_is_rejected() -> None:
 @pytest.mark.asyncio
 async def test_builder_validation_error_fails_the_listing(monkeypatch) -> None:
     composition, _calls = _composition(
-        priority=("fiat.stripe.v1",),
-        stripe_ready=True,
+        priority=("example.payment.v1",),
+        example_ready=True,
         alkahest_ready=False,
         alkahest_enabled=False,
     )
@@ -327,7 +295,7 @@ async def test_builder_validation_error_fails_the_listing(monkeypatch) -> None:
             {},
             clauses=[
                 SettlementPublicationClause(
-                    mechanism="fiat.stripe.v1",
+                    mechanism="example.payment.v1",
                     asset="usd",
                     rate="2.001",
                     per="hour",

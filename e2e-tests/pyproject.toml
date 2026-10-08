@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-e2e-tests"
-version = "0.1.8"
+version = "0.2.0"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.5.0",
-    "arkhai-compute-provisioning-client>=0.5.0",
+    "arkhai-compute-provisioning-contracts>=0.9.0",
+    "arkhai-compute-provisioning-client>=0.6.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.1.0",
     "pytest>=8.0",
@@ -26,34 +26,32 @@ dependencies = [
     "python-dotenv>=1.0",
     "rich>=13.0",
     "httpx>=0.27",            # used by storefront smoke and canonical service clients
-    # Validates written protected-lane evidence against the published
-    # evidence.schema.json. A base dependency, not a stripe-test extra:
-    # the schema check is a credential-free public check.
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-core-storefront-client>=0.20.0",
+    "arkhai-core-storefront-client>=0.25.0",
     # Stage 06 of the listing-shapes scenario writes storefront pool overrides
     # through the kit's typed client.
-    "arkhai-kit-pool-overrides>=0.1.0",
+    "arkhai-kit-pool-overrides>=0.2.0",
     "arkhai-kit-config",
-    "arkhai-core-registry-client>=0.12.0",
-    "arkhai-kit-alkahest>=0.3.0",
-    "arkhai-kit-site-client>=0.7.0",
-	"arkhai-vms-storefront>=0.9.0",
-    "arkhai-vms-provisioning-operator-client>=0.7.0",
-    "arkhai-bare-metal>=0.6.0",
+    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-kit-alkahest>=0.4.0",
+    "arkhai-kit-site-client>=0.9.0",
+	"arkhai-vms-storefront>=0.16.0",
+    "arkhai-vms-provisioning-operator-client>=0.9.0",
+    "arkhai-bare-metal>=0.10.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "arkhai-vms-buyer>=0.4.0",
+    "arkhai-vms-buyer>=0.7.0",
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.4.0",
-    "arkhai-kit-policy>=0.1.0",
+    "arkhai-apicredits-buyer>=0.5.0",
+    "arkhai-kit-arkhai-payments>=0.2.0",
+    "arkhai-kit-policy>=0.4.0",
 ]
 
 [tool.uv]
@@ -64,9 +62,6 @@ dev = [
     "isort>=5.13",
     "mypy>=1.8",
     "ruff>=0.3",
-]
-stripe-test = [
-    "playwright==1.54.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -103,13 +98,13 @@ markers = [
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
+    "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; blocked without a reachable payments target",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
     "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, and reinstatement against a mock-profile site",
     "e2e_vm_introduction: VM lane — backed and unbacked VM listings found by one rate-bounded query; an unbacked listing's introduction negotiated and revealed through the `market` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit",
     "e2e_bare_metal_introduction: Bare-metal lane — an introduction offered by pool override, revealed with its retention disclosed, then deleted by an operator and by the held, stepped retention sweep",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
-    "e2e_hosted_stripe_test: Protected Stripe test-mode hosted settlement compatibility evidence",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
@@ -131,7 +126,7 @@ markers = [
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
     "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
-    
+
 ]
 log_cli = true
 log_cli_level = "INFO"

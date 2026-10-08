@@ -644,6 +644,88 @@
                 }
               }
             },
+            "^[aA][rR][kK][hH][aA][iI]_[pP][aA][yY][mM][eE][nN][tT][sS]$": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[eE][nN][aA][bB][lL][eE][dD]$": {
+                  "type": "boolean"
+                },
+                "^[sS][eE][rR][vV][iI][cC][eE]_[uU][rR][lL]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[sS][eE][rR][vV][iI][cC][eE]_[iI][dD][eE][nN][tT][iI][tT][yY]$": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][cC][hH][eE][mM][eE]$": {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[fF][eE][eE]_[bB][pP][sS]$": {
+                  "anyOf": [
+                    {
+                      "maximum": 10000,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[dD][iI][sS][pP][uU][tT][eE]_[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[aA][pP][iI]_[kK][eE][yY]_[eE][nN][vV]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[dD][eE][vV][eE][lL][oO][pP][mM][eE][nN][tT]_[aA][uU][tT][hH]$": {
+                  "type": "boolean"
+                },
+                "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
+                  "type": "boolean"
+                }
+              }
+            },
             "^[cC][oO][nN][tT][aA][cC][tT]$": {
               "additionalProperties": false,
               "type": "object",
@@ -707,327 +789,6 @@
                   "exclusiveMinimum": 0,
                   "type": "integer"
                 }
-              }
-            },
-            "^[sS][tT][rR][iI][pP][eE]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[eE][nN][aA][bB][lL][eE][dD]$": {
-                  "type": "boolean"
-                },
-                "^[bB][aA][sS][eE]_[uU][rR][lL]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]_[iI][dD]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[eE][nN][vV][iI][rR][oO][nN][mM][eE][nN][tT]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "type": "object",
-                      "patternProperties": {
-                        "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
-                          "items": {
-                            "additionalProperties": false,
-                            "type": "object",
-                            "patternProperties": {
-                              "^[sS][cC][hH][eE][mM][eE]$": {
-                                "enum": [
-                                  "eip191",
-                                  "ed25519"
-                                ],
-                                "type": "string"
-                              },
-                              "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
-                                "maxLength": 128,
-                                "minLength": 1,
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "maxItems": 2,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      }
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[mM][aA][nN][iI][fF][eE][sS][tT]_[dD][iI][gG][eE][sS][tT]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[aA][pP][iI]_[vV][eE][rR][sS][iI][oO][nN]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
-                  "anyOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[rR][eE][qQ][uU][iI][rR][eE][dD]_[cC][aA][pP][aA][bB][iI][lL][iI][tT][iI][eE][sS]$": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "^[aA][cC][cC][oO][uU][nN][tT]_[rR][eE][fF]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[cC][uU][rR][rR][eE][nN][cC][yY]$": {
-                  "const": "usd",
-                  "type": "string"
-                },
-                "^[cC][oO][uU][nN][tT][rR][yY]$": {
-                  "const": "US",
-                  "type": "string"
-                },
-                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE][sS]$": {
-                  "additionalProperties": {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[pP][rR][oO][tT][oO][cC][oO][lL]$": {
-                        "const": "arkhai.condition.v1",
-                        "type": "string"
-                      },
-                      "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[iI][dD]$": {
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "^[eE][vV][aA][lL][uU][aA][tT][oO][rR]$": {
-                        "additionalProperties": false,
-                        "type": "object",
-                        "patternProperties": {
-                          "^[kK][iI][nN][dD]$": {
-                            "enum": [
-                              "alkahest.evm-arbiter.v1",
-                              "external-http.v1",
-                              "builtin.v1"
-                            ],
-                            "type": "string"
-                          },
-                          "^[vV][eE][rR][sS][iI][oO][nN]$": {
-                            "maxLength": 64,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "^[rR][eE][sS][oO][lL][vV][eE][rR]_[iI][dD]$": {
-                            "anyOf": [
-                              {
-                                "maxLength": 128,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "^[aA][rR][bB][iI][tT][eE][rR]_[iI][dD]$": {
-                            "anyOf": [
-                              {
-                                "maxLength": 128,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "^[pP][aA][rR][aA][mM][sS]$": {
-                            "additionalProperties": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "integer"
-                                },
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "items": {},
-                                  "type": "array"
-                                },
-                                {
-                                  "additionalProperties": {},
-                                  "type": "object"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "type": "object"
-                          }
-                        }
-                      },
-                      "^[dD][eE][mM][aA][nN][dD]$": {
-                        "additionalProperties": false,
-                        "type": "object",
-                        "patternProperties": {
-                          "^[eE][nN][cC][oO][dD][iI][nN][gG]$": {
-                            "enum": [
-                              "evm-abi",
-                              "application/jcs+json"
-                            ],
-                            "type": "string"
-                          },
-                          "^[vV][aA][lL][uU][eE]$": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "anyOf": [
-                                  {
-                                    "type": "boolean"
-                                  },
-                                  {
-                                    "type": "integer"
-                                  },
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "items": {},
-                                    "type": "array"
-                                  },
-                                  {
-                                    "additionalProperties": {},
-                                    "type": "object"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            ]
-                          }
-                        }
-                      },
-                      "^[eE][vV][mM]_[sS][uU][bB][jJ][eE][cC][tT]$": {
-                        "anyOf": [
-                          {
-                            "additionalProperties": false,
-                            "type": "object",
-                            "patternProperties": {
-                              "^[aA][dD][dD][rR][eE][sS][sS]$": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    }
-                  },
-                  "type": "object"
-                },
-                "^[rR][eE][sS][oO][lL][vV][eE][rR][sS]$": {
-                  "additionalProperties": {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[cC][hH][aA][iI][nN]_[nN][aA][mM][eE]$": {
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "^[eE][vV][iI][dD][eE][nN][cC][eE]_[mM][oO][dD][eE]$": {
-                        "enum": [
-                          "eas.v1",
-                          "portable-remote.v1"
-                        ],
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "type": "object"
-                },
-                "^[rR][eE][qQ][uU][eE][sS][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "exclusiveMinimum": 0,
-                  "type": "number"
-                },
-                "^[pP][rR][eE][fF][lL][iI][gG][hH][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "exclusiveMinimum": 0,
-                  "type": "number"
-                },
-                "^[aA][lL][lL][oO][wW]_[iI][nN][sS][eE][cC][uU][rR][eE]_[lL][oO][oO][pP][bB][aA][cC][kK]$": {
-                  "type": "boolean"
-                },
-                "^[oO][fF][fF]_[sS][eE][sS][sS][iI][oO][nN]_[pP][oO][lL][iI][cC][yY]$": false,
-                "^[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]_[jJ][oO][uU][rR][nN][aA][lL]_[pP][aA][tT][hH]$": false
               }
             }
           }

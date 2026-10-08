@@ -90,3 +90,54 @@ class TestEscrowFulfillmentIdentityPersistence:
         assert row["fulfillment_uid"] == "0xonchain..."
         assert row["fulfillment_id"] == "fulfillment-1"
         assert row["fulfillment_uid"] != row["fulfillment_id"]
+
+
+class TestDeliveryAndRefundOrdering:
+    """Delivery start and refund intent are ordered by single serialized writes."""
+
+    async def _provisioning(self, client: SQLiteClient) -> None:
+        await client.insert_escrow(
+            escrow_uid="deal-1",
+            negotiation_id="deal-1",
+            chain_name=None,
+            escrow_address=None,
+            status="provisioning",
+        )
+
+    async def test_refund_first_blocks_delivery(self, client: SQLiteClient):
+        await self._provisioning(client)
+        intent = await client.record_refund_intent(escrow_uid="deal-1", negotiation_id="deal-1")
+        assert intent == {"status": "provisioning", "delivery_started": False}
+        assert await client.claim_delivery_start(escrow_uid="deal-1") is False
+        assert (await client.load_escrow(escrow_uid="deal-1"))["status"] == "refunding"
+
+    async def test_delivery_first_is_recorded_by_the_refund(self, client: SQLiteClient):
+        await self._provisioning(client)
+        assert await client.claim_delivery_start(escrow_uid="deal-1") is True
+        intent = await client.record_refund_intent(escrow_uid="deal-1", negotiation_id="deal-1")
+        assert intent == {"status": "provisioning", "delivery_started": True}
+
+    async def test_claims_and_intents_repeat_safely(self, client: SQLiteClient):
+        await self._provisioning(client)
+        assert await client.claim_delivery_start(escrow_uid="deal-1") is True
+        assert await client.claim_delivery_start(escrow_uid="deal-1") is True
+        row = await client.load_escrow(escrow_uid="deal-1")
+        assert row["fulfillment_phase"] == "delivery_started"
+        await client.update_escrow(escrow_uid="deal-1", status="refunded")
+        again = await client.record_refund_intent(escrow_uid="deal-1", negotiation_id="deal-1")
+        assert again["status"] == "refunded"
+        assert (await client.load_escrow(escrow_uid="deal-1"))["status"] == "refunded"
+
+    async def test_refund_intent_without_a_row_creates_one(self, client: SQLiteClient):
+        intent = await client.record_refund_intent(escrow_uid="deal-2", negotiation_id="deal-2")
+        assert intent == {"status": None, "delivery_started": False}
+        assert await client.claim_delivery_start(escrow_uid="deal-2") is False
+
+    async def test_abandoned_intent_restores_the_prior_state(self, client: SQLiteClient):
+        await self._provisioning(client)
+        await client.record_refund_intent(escrow_uid="deal-1", negotiation_id="deal-1")
+        await client.abandon_refund_intent(escrow_uid="deal-1", prior_status="provisioning")
+        assert await client.claim_delivery_start(escrow_uid="deal-1") is True
+        await client.record_refund_intent(escrow_uid="deal-3", negotiation_id="deal-3")
+        await client.abandon_refund_intent(escrow_uid="deal-3", prior_status=None)
+        assert await client.load_escrow(escrow_uid="deal-3") is None

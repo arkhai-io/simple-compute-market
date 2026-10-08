@@ -688,6 +688,13 @@ def _negotiate_matches(
                 if outcome.accepted_provision_terms is not None
                 else None
             ),
+            agreement=(
+                outcome.agreement.model_dump(mode="json", exclude_none=True)
+                if outcome.agreement is not None
+                else None
+            ),
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
         )
         attempts.append(
             {
@@ -735,11 +742,13 @@ def make_settle_hook(
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
     duration_seconds: int = 0,
+    agreement_settlement: SettleFn | None = None,
 ) -> SettleFn:
     """Build the schema-instantiated settlement hook.
 
     Domain ports materialize escrow terms, recipient identity, and the
-    mechanism-specific settlement request payload.
+    mechanism-specific settlement request payload. When a selected
+    settlement has no escrow proposal, an optional domain stage handles it.
     """
 
     def _hook(
@@ -748,6 +757,12 @@ def make_settle_hook(
     ) -> BuyResult:
         if negotiation.match is None or negotiation.outcome is None:
             raise ValueError("settle hook received no selected negotiation")
+        if (
+            negotiation.outcome.accepted_escrow_proposal is None
+            and negotiation.outcome.settlement_selection is not None
+            and agreement_settlement is not None
+        ):
+            return agreement_settlement(negotiation, on_event)
         return _settle_one(
             match=negotiation.match,
             outcome=negotiation.outcome,

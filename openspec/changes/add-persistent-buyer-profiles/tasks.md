@@ -46,16 +46,16 @@
 ## 7. Generated config, deployment, and E2E fixtures
 
 - [x] 7.1 Update typed buyer configuration metadata and generated reference/template drift checks to use XDG profile-store/provider-reference inputs and reject direct buyer `[Identity]`, raw credential, seed, mnemonic, and implicit wallet-derived marketplace identity fields.
-- [x] 7.2 Update `e2e-tests/config/hosted-buyer.toml`, `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
+- [x] 7.2 Update the hosted buyer config `hosted-buyer.toml` (removed with hosted settlement by `settle-through-arkhai-payments`), `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
 - [x] 7.3 Update API-credit and VM Compose/examples (`compose.apicredits.yml`, `domains/{vms,apicredits}/compose.yml`) and any generated role fixtures to separate mutable XDG metadata from strict file/environment Secret injection; add Podman-compatible `mise` path only if an affected project hardcodes `docker` and lacks the repository convention.
-- [x] 7.4 Extend `e2e-tests/tests/unit/test_hosted_public_boundary.py`, hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
+- [x] 7.4 Extend the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`), hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
 
 ## 8. Focused, integration, and package verification
 
-- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and hosted driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
+- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
 - [ ] 8.2 Build the changed identity, core buyer, VM buyer, and API-credit buyer wheels into `.dist`; explicitly upgrade/reinstall them through each touched project's reinit target, inspect wheel contents/dependencies, and run typing plus forbidden-import checks without editable sibling paths.
 - [ ] 8.3 Run the ordinary wallet-free Ed25519 VM and API-credit smoke paths with fresh and resumed runs under one persistent profile, then inspect JSONL, TOML, output, reprs, logs, Compose renders, wheels, and images with secret canaries; keep Alkahest wallet regression separate and unchanged.
-- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external hosted/cluster checks rather than replacing them with narrower focused evidence.
+- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external cluster checks rather than replacing them with narrower focused evidence.
 
 ## 9. Permanent documentation and cutover
 

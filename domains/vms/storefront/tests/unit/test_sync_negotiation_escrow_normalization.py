@@ -198,3 +198,63 @@ def test_buyer_counter_guard_rejects_missing_scalar_amount():
     assert decision is not None
     assert decision.action == "reject"
     assert decision.reason == "counter_missing_amount"
+
+
+_OPTION_ID = "ab" * 32
+
+
+def _selection_round(selection: dict) -> list[NegotiationRound]:
+    return [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal={"fields": {}, "settlement_selection": selection},
+        )
+    ]
+
+
+def _option_listing() -> dict:
+    return {
+        "listing_id": "L1",
+        "max_duration_seconds": 7200,
+        "settlement_options": [
+            {"option_id": _OPTION_ID, "mechanism": "arkhai.payments.v1", "asset": "USD/2"}
+        ],
+    }
+
+
+def _selection(**extra) -> dict:
+    return {
+        "mechanism": "arkhai.payments.v1",
+        "option_id": _OPTION_ID,
+        "expiration_unix": 1_900_000_000,
+        **extra,
+    }
+
+
+def test_selection_with_mechanism_params_is_accepted_with_them():
+    """A payment selection carries the buyer's payer account as params."""
+    params = {"payer_account": "11111111-1111-4111-8111-111111111111"}
+    decision, context = round_zero_opening_guard(
+        _selection_round(_selection(params=params)), _context(_option_listing())
+    )
+    assert decision is None
+    assert context.intermediate["accepted_settlement_selection"]["params"] == params
+
+
+def test_selection_with_empty_params_is_accepted():
+    """A storefront serializes a parameterless selection with params set to None."""
+    decision, _context_out = round_zero_opening_guard(
+        _selection_round(_selection(params=None)), _context(_option_listing())
+    )
+    assert decision is None
+
+
+def test_selection_with_unknown_fields_or_non_mapping_params_is_rejected():
+    for selection in (_selection(amount="5"), _selection(params=["payer"])):
+        decision, _context_out = round_zero_opening_guard(
+            _selection_round(selection), _context(_option_listing())
+        )
+        assert decision is not None and decision.action == "reject"
+        assert decision.reason == "invalid_settlement_selection:selection has invalid fields"

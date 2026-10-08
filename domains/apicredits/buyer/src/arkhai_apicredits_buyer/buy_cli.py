@@ -1,78 +1,65 @@
 """`market credits buy` — pure-client sequential credit buy.
 
-Drives the deal end-to-end from the CLI process:
+Discovery and negotiation use the shared buyer orchestration. The accepted
+settlement then follows its selected mechanism: Alkahest creates an on-chain
+escrow; Arkhai payments approves a deterministic mandate and verifies its
+signed receipt. The seller issues credits only after its settlement gate and
+returns the credentials once through the signed status response.
 
-    discover (registry, api-credits schema) →
-    negotiate each match (sync HTTP rounds, quantity × per-token rate) →
-    pick agreed match →
-    create escrow on-chain (alkahest-py in-process) →
-    POST /settle/{uid} on seller →
-    poll /settle/{uid}/status until ready/failed →
-    deliver the issued credentials to the run-log.
-
-The orchestration stages are core (``core_buyer.orchestration``); this
-command wires the API-credits instantiation: the quantity unit count,
-the key disposition fixed at round 0, the durationless escrow terms,
-and the once-only credential delivery.
+This command wires the API-credit quantity and key disposition fixed at round
+zero, mechanism-specific settlement adapters, and credential delivery.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import webbrowser
 import time
 from typing import Any, Optional
 
 import typer
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-
-import arkhai_apicredits.negotiation.buyer_policies as buyer_policies  # registers answer_key_challenge
 from core_buyer import (
     BuyConfig,
     BuyConstraints,
     query_registry_for_matches_multi,
     run_buy,
-    make_hosted_settle_hook,
 )
-from core_buyer.action_policy import resolve_buyer_action_policy
 from core_buyer.deal_helpers import is_negotiation_complete
-from .buyer_client import load_buyer_chain
 from core_buyer.orchestration import make_negotiate_hook, make_settle_hook
+from core_buyer.orchestrator import BuyResult
 from core_buyer.run_log import RunLog
+from market_alkahest.proposals import escrow_proposal_from_accepted_entry
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.token import TokenResolutionError, resolve_token
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+import arkhai_apicredits.negotiation.buyer_policies as buyer_policies
 from arkhai_apicredits.negotiation import (
     ApiCreditsProvisionTerms,
     make_api_credits_provision_terms,
 )
-from market_alkahest.proposals import escrow_proposal_from_accepted_entry
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_hosted_settlement import (
-    MECHANISM as HOSTED_MECHANISM,
-    FundingMode,
-    FundingProfile,
-    FundingSelection,
-)
 
+from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
-from .hosted_authorization import prepare_hosted_funding_authorization
-from .settlement_composition import resolve_buyer_settlement_policy
+from .payments import (
+    configured_payer_account,
+    payment_selection_for_listing,
+    settle_api_credit_negotiation,
+)
 from .settle_cli import render_credentials, run_settle_from_log
+from .settlement_composition import resolve_buyer_settlement_policy
 
 
 def _confirm_settlement_interactive(
-    *,
-    terms,
-    listing: dict,
-    quantity: int,
-    console: Console,
+    *, terms, listing: dict, quantity: int, console: Console
 ) -> bool:
-    """Prompt the buyer to approve settlement at the negotiated total.
+    """Prompt before creating the negotiated Alkahest escrow.
 
-    Shown after negotiation agrees but BEFORE create_escrow runs — i.e.,
-    no on-chain transaction has been emitted and the seller's /settle
-    endpoint hasn't been touched yet. Declining here is a clean exit.
+    Declining before the on-chain call is a clean exit; payments has its
+    own prompt after validating the seller's exact mandate.
     """
     per_token = terms.agreed_amount / quantity if quantity else 0
     table = Table.grid(padding=(0, 2))
@@ -87,8 +74,36 @@ def _confirm_settlement_interactive(
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
     try:
         return typer.confirm(
-            "Proceed to settlement (escrow + /settle + poll)?", default=True
+            "Proceed to settlement (create Alkahest escrow + poll)?", default=True
         )
+    except typer.Abort:
+        return False
+
+
+def _confirm_payment_interactive(
+    *, mandate: Any, transaction_id: str, listing: dict, quantity: int, console: Console
+) -> bool:
+    """Show the validated Arkhai mandate before approving its payment."""
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row(
+        "Seller",
+        str(listing.get("storefront_url") or listing.get("seller_url") or ""),
+    )
+    table.add_row("Listing", str(listing.get("listing_id") or ""))
+    table.add_row("Quantity", str(quantity))
+    table.add_row("Transaction", transaction_id)
+    console.print(Panel(table, title="Confirm Arkhai payment", border_style="yellow"))
+    console.print(
+        Panel(
+            json.dumps(mandate.model_dump(mode="json", by_alias=True), indent=2),
+            title="Validated mandate",
+            border_style="dim",
+        )
+    )
+    try:
+        return typer.confirm("Approve this payment mandate?", default=True)
     except typer.Abort:
         return False
 
@@ -102,7 +117,6 @@ def register(credits_app: typer.Typer) -> None:
     policies contribute --initial-price/--max-price/--price-markup
     (per-token rates), plus the --policy-param escape hatch.
     """
-
     from core_buyer.cli import (
         assume_yes_option,
         parse_key_value_options,
@@ -112,114 +126,69 @@ def register(credits_app: typer.Typer) -> None:
 
     _policy = configured_buyer_policy()
 
-    def buy(  # registered below after policy-param injection
+    def buy(
         assume_yes: bool = assume_yes_option(
-            "Skip ALL interactive prompts (price defaults + "
-            "pre-settlement confirmation). Set this for scripts, CI, "
-            "or non-interactive runs.",
+            "Skip ALL interactive prompts (price defaults + pre-settlement confirmation). Set this for scripts, CI, or non-interactive runs."
         ),
         quantity: Optional[int] = typer.Option(
             None,
             "--quantity",
             "-n",
-            help="How many credits to buy. Required for fresh "
-            "runs — fixed at round 0 in the provision terms and the "
-            "unit count that scales per-token prices to absolute "
-            "amounts. Resumed runs read the prior totals from the run-log.",
+            help="How many credits to buy. Required for fresh runs — fixed at round 0 in the provision terms and the unit count that scales per-token prices to absolute amounts. Resumed runs read the prior totals from the run-log.",
         ),
         new_key: bool = typer.Option(
             False,
             "--new-key",
-            help="Issue a fresh API key for this purchase (the default "
-            "disposition; the seller binds it to your marketplace principal).",
+            help="Issue a fresh API key for this purchase (the default disposition; the seller binds it to your marketplace principal).",
         ),
         key_id: Optional[str] = typer.Option(
             None,
             "--key-id",
-            help="Top up an existing key instead of issuing a new one. "
-            "The key must be bound to the authenticated marketplace principal "
-            "or carry no ownership claim.",
+            help="Top up an existing key instead of issuing a new one. The key must be bound to the authenticated marketplace principal or carry no ownership claim.",
         ),
         resource_query: Optional[str] = typer.Option(
             None,
             "--resource",
-            help="Typed resource constraints, for example "
-            "'service_name=weather token in [0xabc,0xdef]'.",
+            help="Typed resource constraints, for example 'service_name=weather token in [0xabc,0xdef]'.",
         ),
         from_run: Optional[str] = typer.Option(
             None,
             "--from",
-            help="Resume a partial buy run-id end-to-end. Continues "
-            "negotiation if it stopped mid-stream, then drives "
-            "escrow.create + /settle + poll. The same run-log is "
-            "appended to, so it captures the full lifecycle.",
+            help=(
+                "Resume a partial buy run-id end-to-end. Continues negotiation if needed, "
+                "then approves or creates the selected settlement and polls for issuance. "
+                "The same run-log captures the lifecycle."
+            ),
         ),
         registry_urls: Optional[str] = typer.Option(
             None,
             "--registry-urls",
-            help="Comma-separated registry base URLs (default: "
-            "registry.urls from config.toml). Discovery is the "
-            "union across all listed registries, deduped by registry authority "
-            "and listing_id.",
+            help="Comma-separated registry base URLs (default: registry.urls from config.toml). Discovery is the union across all listed registries, deduped by listing_id.",
         ),
         discovery_timeout: Optional[float] = typer.Option(
             None,
             "--discovery-timeout",
-            help="Per-registry deadline in seconds (default: "
-            "registry.discovery_timeout from config.toml, fallback 5).",
+            help="Per-registry deadline in seconds (default: registry.discovery_timeout from config.toml, fallback 5).",
         ),
         token_contract: Optional[str] = typer.Option(
             None,
             "--token-contract",
-            help="Optional filter: only consider listings whose accepted "
-            "escrow uses this ERC-20. Required when passing explicit "
-            "--initial-price/--max-price (decimals scaling).",
+            help="Optional filter: only consider listings whose accepted escrow uses this ERC-20. Required when passing explicit --initial-price/--max-price (decimals scaling).",
         ),
         token_decimals: Optional[int] = typer.Option(
             None,
             "--token-decimals",
-            help="ERC-20 token decimals override. When omitted, decimals "
-            "are resolved on chain via the token contract's "
-            "decimals() view.",
+            help="ERC-20 token decimals override. When omitted, decimals are resolved on chain via the token contract's decimals() view.",
         ),
         chain_name: Optional[str] = typer.Option(
             None,
             "--chain",
-            help="Pick which configured [chains.<name>] entry to operate on. "
-            "Required when --yes is set and the buyer has more than one "
-            "chain configured; otherwise the buyer prompts.",
+            help="Pick which configured [chains.<name>] entry to operate on. Required when --yes is set and the buyer has more than one chain configured; otherwise the buyer prompts.",
         ),
         expiration_seconds: int = typer.Option(
             3600,
             "--expiration",
-            help="Escrow deadline (seconds from now) for the "
-            "reclaim_expired escape hatch. Default 1h.",
-        ),
-        funding_profile: Optional[str] = typer.Option(
-            None,
-            "--funding-profile",
-            help="Use an exact hosted profile: card.v1, us_bank_transfer.v1, "
-            "or us_ach_debit.v1. Omit to preserve Alkahest when both are enabled.",
-        ),
-        funding_mode: str = typer.Option(
-            "interactive",
-            "--funding-mode",
-            help="Hosted funding mode: interactive or saved_instrument.",
-        ),
-        instrument_ref: Optional[str] = typer.Option(
-            None,
-            "--instrument-ref",
-            help="Opaque hosted instrument reference for saved_instrument mode.",
-        ),
-        action: Optional[str] = typer.Option(
-            None,
-            "--action",
-            help="Hosted transient-action policy: open, print, or fail.",
-        ),
-        automatic_funding: bool = typer.Option(
-            False,
-            "--automatic-funding",
-            help="Evaluate the bounded local off-session policy for this purchase.",
+            help="Escrow deadline (seconds from now) for the reclaim_expired escape hatch. Default 1h.",
         ),
         max_matches: int = typer.Option(
             5,
@@ -229,19 +198,13 @@ def register(credits_app: typer.Typer) -> None:
         aggregate_by: Optional[str] = typer.Option(
             None,
             "--aggregate-by",
-            help="Across-seller aggregation policy. Default: "
-            "[aggregation].policy from buyer.toml, falling "
-            "back to 'best_price'.",
+            help="Across-seller aggregation policy. Default: [aggregation].policy from buyer.toml, falling back to 'best_price'.",
         ),
         max_rounds: int = typer.Option(
-            10,
-            "--max-rounds",
-            help="Per-negotiation round cap.",
+            10, "--max-rounds", help="Per-negotiation round cap."
         ),
         poll_interval: float = typer.Option(
-            5.0,
-            "--poll-interval",
-            help="Seconds between /settle/status polls.",
+            5.0, "--poll-interval", help="Seconds between /settle/status polls."
         ),
         settlement_timeout: float = typer.Option(
             600.0,
@@ -268,21 +231,17 @@ def register(credits_app: typer.Typer) -> None:
         to the run-log.
 
         When ``--from <run_id>`` is supplied, picks up wherever the
-        prior run left off: finishes the negotiation if it stopped
-        mid-stream, then drives stages 3-5 (escrow → submit → poll).
+        When ``--from <run_id>`` is supplied, resumes the saved deal: it
+        finishes negotiation if needed, then follows the selected
+        mechanism and polls for issued credentials.
         """
         console = Console()
-
-        # The configured policy's parameters arrive through the injected
-        # flags. One policy-owned namespace: declared flag values merged
-        # with parsed --policy-param pairs.
         policy_params_all: dict[str, Any] = {
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
         policy_params_all.update(
             parse_key_value_options(
-                policy_values.get("policy_param") or [],
-                option_name="--policy-param",
+                policy_values.get("policy_param") or [], option_name="--policy-param"
             )
         )
         initial_price: Optional[float] = policy_params_all.get("initial_price")
@@ -299,50 +258,22 @@ def register(credits_app: typer.Typer) -> None:
         )
         signer = identity.signer
         principal = identity.principal
-        try:
-            selected_funding_mode = FundingMode(funding_mode)
-            selected_funding_profile = (
-                FundingProfile(funding_profile) if funding_profile is not None else None
-            )
-            funding_selection = FundingSelection(
-                mode=selected_funding_mode,
-                instrument_ref=instrument_ref,
-            )
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-        buyer_settlement = resolve_buyer_settlement_policy(
-            identity=identity,
-            funding_selection=funding_selection,
-            action_capable=action != "fail",
-        )
+        buyer_settlement = resolve_buyer_settlement_policy(identity=identity)
         alkahest_config = buyer_settlement.config.mechanism_config("alkahest")
-        stripe_config = buyer_settlement.config.mechanism_config("stripe")
         alkahest_enabled = bool(
             alkahest_config is not None and getattr(alkahest_config, "enabled", False)
         )
-        stripe_enabled = bool(
-            stripe_config is not None and getattr(stripe_config, "enabled", False)
+        payments_config = buyer_settlement.config.mechanism_config("arkhai_payments")
+        payments_enabled = bool(
+            payments_config is not None and getattr(payments_config, "enabled", False)
         )
-        hosted_requested = (
-            funding_profile is not None
-            or selected_funding_mode is not FundingMode.INTERACTIVE
-            or instrument_ref is not None
-            or automatic_funding
-            or (stripe_enabled and not alkahest_enabled)
-        )
-        if hosted_requested and not stripe_enabled:
-            raise typer.BadParameter(
-                "--funding-profile requires enabled [Settlement.stripe]"
-            )
-        if not hosted_requested and not alkahest_enabled:
+        payer_account = configured_payer_account() if payments_enabled else None
+        if not alkahest_enabled and not payments_enabled:
             raise typer.BadParameter("no buyer settlement mechanism is enabled")
-
         if from_run:
-            if not is_negotiation_complete(from_run):
+            if not is_negotiation_complete(from_run, signer=signer):
                 typer.secho(
-                    "Run-log has no agreed negotiation. Resume the round "
-                    "loop with `market credits negotiate --from <run-id>` "
-                    "first, then settle.",
+                    "Run-log has no agreed negotiation. Resume the round loop with `market credits negotiate --from <run-id>` first, then settle.",
                     err=True,
                     fg=typer.colors.RED,
                 )
@@ -357,44 +288,33 @@ def register(credits_app: typer.Typer) -> None:
                 poll_interval=poll_interval,
                 settlement_timeout=settlement_timeout,
                 console=console,
-                funding_mode=funding_mode,
-                instrument_ref=instrument_ref,
-                action=action,
-                automatic_funding=automatic_funding,
             )
             return
-
         if quantity is None or quantity < 1:
             typer.secho(
-                "Fresh `market credits buy` runs require --quantity >= 1 "
-                "(how many credits to buy).",
+                "Fresh `market credits buy` runs require --quantity >= 1 (how many credits to buy).",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-
         from .common import resolve_key_disposition
 
         key_mode, resolved_key_id = resolve_key_disposition(
-            new_key=new_key,
-            key_id=key_id,
+            new_key=new_key, key_id=key_id
         )
-
         explicit_prices = initial_price is not None and max_price is not None
         if not explicit_prices and (initial_price is not None) != (
             max_price is not None
         ):
             typer.secho(
-                "Pass both --initial-price and --max-price, or neither "
-                "(in which case prices are derived from the advertised rate).",
+                "Pass both --initial-price and --max-price, or neither (in which case prices are derived from the advertised rate).",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-
-        # Resolution: CLI flag > config.toml > derivation > default.
         from .common import (
             APICREDITS_SCHEMA_ID,
+            buyer_chains,
             resolve_buyer_wallet,
             resolve_discovery_timeout,
             resolve_indexer_urls,
@@ -426,34 +346,33 @@ def register(credits_app: typer.Typer) -> None:
         selected_chain_name = None
         rpc = None
         addr_cfg = None
-        if not hosted_requested:
+        alkahest_available = False
+        if alkahest_enabled:
             evm_addr, evm_key = resolve_buyer_wallet(
-                override_addr=evm_address,
-                override_pk=evm_private_key,
+                override_addr=evm_address, override_pk=evm_private_key
             )
-            chain_cfg = select_chain_for_listing(
-                listing=None,
-                override=chain_name,
-                yes=assume_yes,
-            )
-            selected_chain_name = chain_cfg.name
-            rpc = chain_cfg.rpc_url
-            addr_cfg = chain_cfg.alkahest_address_config_path
-        missing = [name for name, value in (("registry_urls", reg_urls),) if not value]
-        if not hosted_requested:
-            missing.extend(
-                name
-                for name, value in (
-                    ("buyer_evm_address", evm_addr),
-                    ("buyer_evm_private_key", evm_key),
+            if evm_addr and evm_key and buyer_chains():
+                chain_cfg = select_chain_for_listing(
+                    listing=None, override=chain_name, yes=assume_yes
                 )
-                if not value
-            )
+                selected_chain_name = chain_cfg.name
+                rpc = chain_cfg.rpc_url
+                addr_cfg = chain_cfg.alkahest_address_config_path
+                alkahest_available = True
+        missing = [name for name, value in (("registry_urls", reg_urls),) if not value]
+        if alkahest_enabled and not payments_enabled and not alkahest_available:
+            if not evm_addr:
+                missing.append("buyer_evm_address")
+            if not evm_key:
+                missing.append("buyer_evm_private_key")
+            if not buyer_chains():
+                missing.append("chain configuration")
         if missing:
             typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
             key_for = {
                 "buyer_evm_address": "wallet.address",
                 "buyer_evm_private_key": "wallet.private_key",
+                "chain configuration": "chains.<name>",
                 "registry_urls": "registry.urls",
             }
             for name in missing:
@@ -463,35 +382,23 @@ def register(credits_app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
             raise typer.Exit(2)
-
-        # --token-contract acts as a filter on each candidate listing's
-        # accepted_escrows. Explicit prices require it (decimals scaling).
         tc = token_contract
-        if explicit_prices and not tc and not hosted_requested:
+        if explicit_prices and alkahest_available and not tc:
             typer.secho(
-                "--initial-price and --max-price require --token-contract "
-                "so prices can be scaled to the right decimals. Without it, "
-                "drop the explicit price flags and let prices anchor on each "
-                "listing's advertised per-token rate.",
+                "--initial-price and --max-price require --token-contract when settling with Alkahest.",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        if explicit_prices and not hosted_requested:
+        if explicit_prices and alkahest_available:
             if token_decimals is None:
-                from market_alkahest.token import resolve_token, TokenResolutionError
 
                 try:
-                    meta = resolve_token(
-                        tc,
-                        rpc_url=rpc,
-                        chain_id=chain_cfg.chain_id,
-                    )
+                    meta = resolve_token(tc, rpc_url=rpc, chain_id=chain_cfg.chain_id)
                     token_decimals = meta.decimals
                 except (TokenResolutionError, RuntimeError) as exc:
                     typer.secho(
-                        f"Could not resolve token {tc} on chain {chain_cfg.name!r} — pass "
-                        f"--token-decimals or check the chain's rpc_url. ({exc})",
+                        f"Could not resolve token {tc} on chain {chain_cfg.name!r} — pass --token-decimals or check the chain's rpc_url. ({exc})",
                         err=True,
                         fg=typer.colors.RED,
                     )
@@ -507,41 +414,23 @@ def register(credits_app: typer.Typer) -> None:
                 )
             except ValueError as exc:
                 raise typer.BadParameter(str(exc)) from exc
-        if explicit_prices and hosted_requested:
-            if (
-                not float(initial_price).is_integer()
-                or not float(max_price).is_integer()
-            ):
-                raise typer.BadParameter(
-                    "hosted explicit prices use integer currency minor units"
-                )
-            initial_price = int(initial_price)
-            max_price = int(max_price)
-
-        accepted_proposal_recipient = None
-
-        def encode_escrow_proposal(value):
-            return value
-
-        def looks_like_propagation_lag(_exc):
-            return False
+        from .escrow_client import (
+            accepted_proposal_recipient,
+            encode_escrow_proposal,
+            looks_like_propagation_lag,
+        )
 
         build_escrow_terms = None
         create_escrow = None
-        make_alkahest_settlement_payload_fn = None
-        if not hosted_requested:
+        if alkahest_available:
             from .escrow_client import (
-                accepted_proposal_recipient,
-                encode_escrow_proposal,
-                looks_like_propagation_lag,
                 make_alkahest_settlement_payload_fn,
                 make_buyer_payment_escrow_terms_fn,
                 make_create_escrow_fn,
             )
 
             build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-                chain_name=selected_chain_name,
-                addr_config_path=addr_cfg or None,
+                chain_name=selected_chain_name, addr_config_path=addr_cfg or None
             )
             create_escrow = make_create_escrow_fn(
                 private_key=evm_key,
@@ -549,7 +438,6 @@ def register(credits_app: typer.Typer) -> None:
                 chain_name=selected_chain_name,
                 addr_config_path=addr_cfg or None,
             )
-
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls,
@@ -562,7 +450,6 @@ def register(credits_app: typer.Typer) -> None:
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
-
         if not matches:
             typer.secho(
                 "No listings matched the resource constraints.",
@@ -571,36 +458,6 @@ def register(credits_app: typer.Typer) -> None:
             )
             raise typer.Exit(0)
         expiration_unix = int(time.time()) + int(expiration_seconds)
-        if hosted_requested:
-            clauses = ["mechanism=fiat.stripe.v1"]
-            if selected_funding_profile is not None:
-                clauses[0] += (
-                    f" stripe.funding_profile={selected_funding_profile.value}"
-                )
-            clauses[0] += f" stripe.interaction={selected_funding_mode.value}"
-            selected_matches = buyer_settlement.select_listings(
-                matches,
-                clauses=tuple(clauses),
-                expiration_unix=expiration_unix,
-            )
-            matches = []
-            for match, selected in selected_matches:
-                normalized = dict(match)
-                normalized["_selected_settlement"] = selected
-                normalized["settlement_options"] = [
-                    selected.option.model_dump(mode="json")
-                ]
-                matches.append(normalized)
-            if not matches:
-                typer.secho(
-                    "No listings matched the exact hosted settlement constraints.",
-                    err=True,
-                    fg=typer.colors.YELLOW,
-                )
-                raise typer.Exit(0)
-
-        # Listed-price default: when the buyer hasn't pinned both prices
-        # explicitly, both anchor on the cheapest advertised per-token rate.
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
@@ -612,15 +469,9 @@ def register(credits_app: typer.Typer) -> None:
             )
             if initial_price is None or max_price is None:
                 raise typer.Exit(2)
-
         aggregation_policy = (
-            aggregate_by
-            or resolve_config_value(
-                toml_path="aggregation.policy",
-            )
-            or None
+            aggregate_by or resolve_config_value(toml_path="aggregation.policy") or None
         )
-
         config = BuyConfig.from_resolved_identity(
             identity=identity,
             registry_urls=reg_urls,
@@ -635,21 +486,22 @@ def register(credits_app: typer.Typer) -> None:
             policy_params=policy_params_all,
         )
         provision = make_api_credits_provision_terms(
-            quantity=int(quantity),
-            key_mode=key_mode,
-            key_id=resolved_key_id,
+            quantity=int(quantity), key_mode=key_mode, key_id=resolved_key_id
         )
-
         from .escrow_selection import select_escrow_entry
 
-        def build_escrow_proposal_for_match(
-            match: dict,
-        ) -> EscrowProposal | Any | None:
-            if hosted_requested:
-                selected = match.get("_selected_settlement")
-                if selected is None:
-                    return None
-                return selected.selection
+        def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | Any | None:
+            payment_selection = payment_selection_for_listing(
+                buyer_settlement,
+                match,
+                expiration_unix=expiration_unix,
+                payer_account=payer_account,
+                prefer_payment=not alkahest_available,
+            )
+            if payment_selection is not None:
+                return payment_selection
+            if not alkahest_available:
+                return None
             entry = select_escrow_entry(
                 match,
                 chain_name=selected_chain_name,
@@ -664,9 +516,7 @@ def register(credits_app: typer.Typer) -> None:
             if entry is None:
                 return None
             return escrow_proposal_from_accepted_entry(
-                listing=match,
-                entry=entry,
-                expiration_unix=expiration_unix,
+                listing=match, entry=entry, expiration_unix=expiration_unix
             )
 
         run_log = RunLog.start(
@@ -685,17 +535,7 @@ def register(credits_app: typer.Typer) -> None:
             max_matches=max_matches,
             max_rounds=max_rounds,
             chain_name=selected_chain_name,
-            settlement_mechanism=(
-                "fiat.stripe.v1" if hosted_requested else "alkahest.v1"
-            ),
-            funding_profile=(
-                selected_funding_profile.value
-                if selected_funding_profile is not None
-                else None
-            ),
-            funding_mode=selected_funding_mode.value if hosted_requested else None,
         )
-
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
         header.add_column()
@@ -706,8 +546,6 @@ def register(credits_app: typer.Typer) -> None:
         )
         if evm_addr:
             header.add_row("EVM chain wallet", evm_addr)
-        else:
-            header.add_row("Settlement", "hosted (wallet-free)")
         header.add_row("Quantity", str(quantity))
         header.add_row(
             "Key", key_mode + (f" ({resolved_key_id})" if resolved_key_id else "")
@@ -721,10 +559,7 @@ def register(credits_app: typer.Typer) -> None:
         console.print(Panel(header, title="market credits buy", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:
-            # Append a structured event to the run log so post-mortem
-            # inspection and `--from` resume have something to read.
             run_log.event(stage, **body)
-
             if stage == "discover":
                 console.print(
                     f"[dim]discover[/dim]  {body.get('match_count', 0)} match(es)"
@@ -744,9 +579,7 @@ def register(credits_app: typer.Typer) -> None:
             elif stage == "negotiation_completed":
                 color = "green" if body.get("status") == "agreed" else "yellow"
                 console.print(
-                    f"[{color}]negotiate ←[/{color}] {body.get('status')} "
-                    f"@ {body.get('agreed_amount', '-')}  "
-                    f"({body.get('rounds', '-')} rounds)"
+                    f"[{color}]negotiate ←[/{color}] {body.get('status')} @ {body.get('agreed_amount', '-')}  ({body.get('rounds', '-')} rounds)"
                 )
             elif stage == "negotiation_failed":
                 console.print(f"[red]negotiate ✗[/red]  {body.get('error')}")
@@ -757,16 +590,11 @@ def register(credits_app: typer.Typer) -> None:
             elif stage == "settlement_poll":
                 st = (body.get("body") or {}).get("status")
                 console.print(f"[dim]poll #{body.get('attempt')}[/dim]  status={st}")
-            elif stage == "hosted_settlement_poll":
-                console.print(
-                    f"[dim]hosted poll #{body.get('attempt')}[/dim]  "
-                    f"status={body.get('status')}"
-                )
 
         confirm_settlement_cb = None
         if not assume_yes and os.isatty(0):
 
-            def confirm_settlement_cb(terms, listing):  # noqa: E306
+            def confirm_settlement_cb(terms, listing):
                 return _confirm_settlement_interactive(
                     terms=terms,
                     listing=listing,
@@ -774,9 +602,6 @@ def register(credits_app: typer.Typer) -> None:
                     console=console,
                 )
 
-        # The chain is always built locally so the API-credits default
-        # guards (answer_key_challenge) ride even with no [negotiation]
-        # config — core's own default would use only the shape guard.
         from .common import resolve_negotiation_config
 
         policies, policy_mode = resolve_negotiation_config()
@@ -785,7 +610,6 @@ def register(credits_app: typer.Typer) -> None:
             policy_mode=policy_mode,
             default_guards=buyer_policies.APICREDITS_BUYER_GUARDS,
         )
-
         negotiate_hook = make_negotiate_hook(
             config=config,
             constraints=constraints,
@@ -800,46 +624,11 @@ def register(credits_app: typer.Typer) -> None:
             decode_escrow_proposal=EscrowProposal.model_validate,
             decode_escrow_terms=EscrowTerms.model_validate,
         )
-        if hosted_requested:
-            action_policy = resolve_buyer_action_policy(
-                action,
-                interactive=os.isatty(0) and os.isatty(1),
-            )
-            hosted_confirm = None
-            if not assume_yes and os.isatty(0):
-
-                def _confirm_hosted(amount, _listing):
-                    return typer.confirm(
-                        f"Proceed with hosted settlement for {amount} minor units?",
-                        default=True,
-                    )
-
-                hosted_confirm = _confirm_hosted
-            settle_hook = make_hosted_settle_hook(
-                config=config,
-                mechanism=HOSTED_MECHANISM,
-                prepare_authorization=lambda obligation_ref, obligation: (
-                    prepare_hosted_funding_authorization(
-                        buyer_profile_id=str(identity.profile_id),
-                        principal=principal,
-                        signer=signer,
-                        stripe_config=stripe_config,
-                        obligation_ref=obligation_ref,
-                        obligation=obligation,
-                        selection=funding_selection,
-                        automatic=automatic_funding,
-                    )
-                ),
-                poll_interval=poll_interval,
-                total_timeout=settlement_timeout,
-                sleep=time.sleep,
-                action_policy=action_policy,
-                open_url=webbrowser.open,
-                print_url=typer.echo,
-                confirm=hosted_confirm,
-            )
-        else:
-            settle_hook = make_settle_hook(
+        alkahest_settle_hook = None
+        if alkahest_available:
+            if build_escrow_terms is None or create_escrow is None:
+                raise RuntimeError("Alkahest settlement adapters were not initialized")
+            alkahest_settle_hook = make_settle_hook(
                 config=config,
                 unit_count=float(quantity),
                 duration_seconds=0,
@@ -847,7 +636,7 @@ def register(credits_app: typer.Typer) -> None:
                 create_escrow=create_escrow,
                 settlement_recipient=accepted_proposal_recipient,
                 build_settlement_payload=make_alkahest_settlement_payload_fn(
-                    buyer_evm_address=evm_addr,
+                    buyer_evm_address=evm_addr
                 ),
                 settlement_submit_max_attempts=6,
                 settlement_submit_retryable=looks_like_propagation_lag,
@@ -856,6 +645,41 @@ def register(credits_app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 sleep=time.sleep,
             )
+
+        def settle_hook(negotiation, on_event):
+            outcome = getattr(negotiation, "outcome", None)
+            selection = getattr(outcome, "settlement_selection", None)
+            if selection is not None and selection.mechanism == "arkhai.payments.v1":
+                payment_confirmation = None
+                if not assume_yes and os.isatty(0):
+
+                    def confirm_payment(mandate, transaction_id):
+                        return _confirm_payment_interactive(
+                            mandate=mandate,
+                            transaction_id=transaction_id,
+                            listing=negotiation.match or {},
+                            quantity=int(quantity),
+                            console=console,
+                        )
+
+                    payment_confirmation = confirm_payment
+                return settle_api_credit_negotiation(
+                    negotiation=negotiation,
+                    buyer=identity,
+                    buy_config=config,
+                    settlement_config=buyer_settlement.config,
+                    payer_account=payer_account,
+                    poll_interval=poll_interval,
+                    total_timeout=settlement_timeout,
+                    on_event=on_event,
+                    confirm_payment=payment_confirmation,
+                )
+            if alkahest_settle_hook is None:
+
+                return BuyResult(
+                    status="exited", reason="no compatible settlement mechanism"
+                )
+            return alkahest_settle_hook(negotiation, on_event)
 
         try:
             result = run_buy(
@@ -872,27 +696,23 @@ def register(credits_app: typer.Typer) -> None:
             run_log.end("error", error=str(exc))
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
-
         credentials = (
             result.tenant_credentials
             if isinstance(result.tenant_credentials, dict)
             else None
         )
         if credentials:
-            # The durable copy — the seller returns the secret exactly once.
             run_log.event("credentials_delivered", credentials=credentials)
-
         run_log.end(
             result.status,
             seller_url=result.seller_url,
             negotiation_id=result.negotiation_id,
             agreed_amount=result.agreed_amount,
             escrow_uid=result.escrow_uid,
+            settlement_ref=result.settlement_ref,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
-
-        # Render the final outcome.
         tbl = Table.grid(padding=(0, 2))
         tbl.add_column(style="bold")
         tbl.add_column()
@@ -902,12 +722,12 @@ def register(credits_app: typer.Typer) -> None:
             ("Negotiation", result.negotiation_id),
             ("Agreed amount (total)", result.agreed_amount),
             ("Escrow UID", result.escrow_uid),
+            ("Settlement ref", result.settlement_ref),
             ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),
         ):
             if val:
                 tbl.add_row(label, str(val))
-
         border = {
             "ready": "green",
             "failed": "red",
@@ -916,10 +736,8 @@ def register(credits_app: typer.Typer) -> None:
             "no_matches": "yellow",
         }.get(result.status, "white")
         console.print(Panel(tbl, title="Buy complete", border_style=border))
-
         if credentials:
             render_credentials(console, credentials)
-
         if result.status != "ready":
             raise typer.Exit(4)
 

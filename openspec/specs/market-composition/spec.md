@@ -6,35 +6,14 @@ Define the dependency direction and role/domain/plugin boundaries that keep mark
 
 ## Requirements
 
-### Requirement: Hosted payer calls bypass storefront without bypassing authority
-
-Composition roots MAY expose exact released-client payer profile/setup/instrument operations and one accepted-obligation funding authorization directly from buyer to hosted authority. Those calls MUST use the selected persistent marketplace signer and authority/environment-scoped opaque binding. Storefronts MUST NOT proxy, choose, or persist payer/instrument state, and buyers MUST NOT call hosted escrow status, reclaim, condition, collection, provider, recovery, or operator surfaces directly.
-
-#### Scenario: Buyer sets a default instrument
-
-- **WHEN** the selected buyer profile performs a released payer instrument operation
-- **THEN** the call goes directly to the hosted authority and marketplace state retains only the opaque binding and safe lifecycle projection
-
-#### Scenario: Buyer polls a funded escrow
-
-- **WHEN** a marketplace purchase needs hosted settlement status after start
-- **THEN** the buyer uses the authenticated seller storefront rather than the hosted authority
-
-### Requirement: Hosted consumer remains provider-neutral
-
-Marketplace packages, schemas, config, persistence, logs, tests, and deployment MUST use released hosted payer/profile/authorization and conditional-escrow models only. They MUST NOT import Stripe SDK/types, model Customer, PaymentMethod, mandate, charge, debit, bank instruction, transfer, return, refund, dispute, webhook, provider credential/ID, hosted database/migration, reconciliation, or operator recovery behavior.
-
-#### Scenario: Provider behavior changes behind the hosted contract
-
-- **WHEN** the hosted authority changes Stripe adapter implementation without changing its released public contract
-- **THEN** marketplace code and configuration require no provider-specific change
-
 ### Requirement: Schema-opaque core orchestration
-Core role packages MUST own discovery, negotiation, settlement, and servicing control flow without importing a concrete market domain or settlement mechanism.
+
+Core role packages MUST own discovery and negotiation control flow without importing a concrete market domain or settlement mechanism. Core MUST expose the accepted Agreement and settlement-option carriers but MUST NOT impose a shared settlement-stage API or escrow lifecycle on mechanism and domain compositions.
 
 #### Scenario: Installing core without a domain plugin
+
 - **WHEN** the core buyer CLI runs without a domain entry-point plugin
-- **THEN** it exposes generic discovery behavior and no concrete market verbs
+- **THEN** it exposes generic discovery and negotiation behavior and no concrete market verbs or settlement implementation
 
 ### Requirement: Domain-owned deterministic semantics
 A domain package MUST own the listing, message, terms, materialization, receipt, result vocabulary, and pure interpretation required for independent implementations of that market to agree.
@@ -120,109 +99,6 @@ domain by inspecting terms, proposals, listings, or persisted payloads.
 - **WHEN** the domain supplies the negotiation resolver and complete domain hook set
 - **THEN** it obtains the same protocol guards without copying a VM or API-credit runtime
 
-### Requirement: Kit-owned single settlement runtime
-The mechanism-neutral commercial-settlement lifecycle MUST live in a foundation kit and
-MUST be composed by role/domain roots. It MUST use one stable per-obligation identity and
-one operation journal for materialization, authoritative status reconciliation, condition
-checking, collection, expired reclaim, retries, and uncertain acknowledgements. A domain
-MUST supply accepted-plan semantics, fulfillment, configuration, status projection, and
-real failure actions; a mechanism kit MUST supply the conditional-escrow adapter. Neither
-core carrier packages nor the runtime kit may import a concrete domain or deployed
-service.
-
-#### Scenario: A domain settles a deal
-
-- **WHEN** a composing domain accepts and fulfills a settlement obligation
-- **THEN** lifecycle transitions and idempotency come from the shared runtime, while the
-  domain supplies only its plan, fulfillment, projection, configuration, and actions
-
-#### Scenario: A second settlement mechanism is installed
-
-- **WHEN** a composition registers another conditional-escrow adapter
-- **THEN** it uses the same obligation records, operation leases, worker, and aggregate
-  status rather than introducing a mechanism-specific lifecycle
-
-#### Scenario: Settlement is interrupted and resumed
-
-- **WHEN** a process stops after an operation is reserved or its acknowledgement is
-  uncertain
-- **THEN** recovery reloads the exact obligation and stable operation identity and
-  reconciles or retries without guessing an obligation or duplicating a financial effect
-
-#### Scenario: A domain has no fulfillment authority
-
-- **WHEN** a domain can verify settlement but cannot produce a real immutable fulfillment
-  reference
-- **THEN** composition exposes that verified-only boundary and does not install a no-op
-  executor, synthetic fulfillment, or collectable claim
-
-### Requirement: No parallel settlement lifecycle
-
-A production composition MUST NOT retain an escrow-UID claim engine, dual-write claim
-projection, domain-local settlement orchestration copy, or compatibility alias that can
-advance the same obligation outside the shared runtime.
-
-#### Scenario: Legacy claim state is migrated
-
-- **WHEN** existing claim rows are converted into stable obligation records
-- **THEN** every immutable snapshot is validated before one atomic conversion, conflicts
-  roll back the conversion, and subsequent writes use only the shared runtime
-
-#### Scenario: Domain compensation differs
-
-- **WHEN** VM provisioning, API-credit issuance, or another domain effect fails
-- **THEN** the shared ordered dispatcher invokes that domain's registered real actions at
-  the existing side-effect boundary and does not interpret domain payloads or invent a
-  generic money-movement action
-
-### Requirement: Thin hosted consumer boundary
-
-The hosted-settlement kit MUST contain only the exact manifest-pinned released client dependency, marketplace-to-client configuration conversion, signature injection, safe payer/profile/authorization helpers, and the conditional-escrow adapter. It MUST NOT contain provider logic, copy client wire models or canonicalization, import a service-local module, or own authority persistence/recovery. Core and domain packages MUST depend on the kit/provider-neutral contracts rather than the hosted client or Stripe. Buyer composition MAY use kit-owned direct payer/authorization helpers; storefront composition MUST mediate escrow operations.
-
-#### Scenario: Hosted settlement is installed
-
-- **WHEN** a buyer or storefront enables `fiat.stripe.v1`
-- **THEN** it registers the thin kit/client integration in the same settlement runtime or payer namespace and imports no hosted service implementation, marketplace-internal wire copy, or provider code
-
-#### Scenario: Buyer manages payer state
-
-- **WHEN** the Stripe payer command is registered
-- **THEN** its implementation is supplied by the hosted kit and persistent identity layer rather than by a domain or core provider model
-
-### Requirement: Thin hosted settlement composition
-
-The marketplace MUST integrate hosted fiat through a foundation-kit adapter registered with the existing settlement runtime. The adapter MAY depend on the released hosted client, core carriers, and settlement runtime, but MUST NOT contain or import the Stripe SDK, EVM/RPC gateway, webhook handling, financial database models, provider credentials/IDs, or duplicate hosted wire/signature implementations.
-
-#### Scenario: VM composition enables hosted settlement
-- **WHEN** the pinned hosted client and adapter are configured
-- **THEN** VM settlement uses the same obligation records, operation journal, worker, and failure dispatcher as Alkahest with mechanism effects supplied by the adapter
-
-#### Scenario: Other domains are installed
-- **WHEN** API-credit or bare-metal packages run without hosted settlement enabled
-- **THEN** they acquire no hosted-client or Stripe dependency and their composition remains unchanged
-
-### Requirement: Cross-repository authority boundary
-
-Marketplace code MUST call hosted settlement only through the exact released client; it MUST NOT import, mount, install, or copy the hosted service source, provider adapters, settings, migrations, or financial state. The hosted service MUST remain provider/domain neutral and MUST NOT import marketplace domains. The client package MUST remain the only shared contract and MAY include provider-neutral payer profile, instrument readiness, funding authorization, action metadata, and conditional-escrow wire models.
-
-#### Scenario: Marketplace composes hosted settlement
-
-- **WHEN** a buyer or storefront enables `fiat.stripe.v1`
-- **THEN** it supplies typed public config, selected marketplace identity, persistent opaque payer binding where applicable, and domain condition input through the released client without receiving provider credentials or storage access
-
-#### Scenario: Hosted contract changes
-
-- **WHEN** the service publishes a new incompatible contract
-- **THEN** marketplace CI and readiness reject it until the exact client/manifest pin and conformance fixtures are updated together
-
-### Requirement: Independent request authentication
-
-The hosted client and service MUST use their released body-bound request-signing contract. Existing marketplace registry, storefront, and signed-operation authentication modules and development behavior MUST remain unchanged and MUST NOT become a cross-repository source dependency.
-
-#### Scenario: Hosted request is signed
-- **WHEN** the adapter invokes the external authority
-- **THEN** signing binds operation, resource, canonical body hash, and timestamp under the released client contract without importing an internal marketplace auth module
-
 ### Requirement: From-below identity capability
 
 Canonical principal, signer/verifier dispatch, authenticated-envelope, replay, and rotation contracts MUST live in a foundation kit. Core roles MAY consume that kit, and domain and settlement implementations MAY receive its opaque interfaces, but identity code MUST NOT depend on role composition, a concrete domain, a settlement mechanism, a hosted provider, or chain runtime. Core orchestration MUST carry complete scheme-tagged principals opaquely and MUST NOT interpret identifiers as wallet addresses, provider accounts, or mechanism configuration.
@@ -239,55 +115,56 @@ Canonical principal, signer/verifier dispatch, authenticated-envelope, replay, a
 
 ### Requirement: Composition roots inject signers
 
-Buyer, registry, storefront, provisioning, and domain composition roots MUST load one selected signer from secret-bound identity configuration and construct only the counterparty verifier registry needed for the role. Hosted buyer composition MUST bind payer/profile and authorization calls to the selected or recorded persistent signer; hosted storefront composition MUST verify accepted buyer identity and use its own signer for mediated escrow calls. Public config, process arguments, logs, and durable public carriers MUST remain credential-free.
+Buyer, registry, storefront, provisioning, and domain composition roots MUST load one selected signer from secret-bound identity configuration and construct only the counterparty verifier registry needed for the role. Arkhai payment calls MUST use the appropriate owner's WorkOS user-scoped API credential separately from the marketplace signer. Public config, process arguments, logs, and durable public carriers MUST remain credential-free.
 
 #### Scenario: Buyer starts with an Ed25519 profile
 
 - **WHEN** buyer config names an Ed25519 principal and its Secret supplies the matching seed
-- **THEN** the buyer composition constructs an Ed25519 signer, selects the matching opaque hosted payer binding, and uses it for payer/authorization calls without loading an EVM private key
+- **THEN** buyer composition constructs an Ed25519 signer for marketplace requests without loading an EVM private key
 
 #### Scenario: Storefront rotates its signer
 
 - **WHEN** storefront configuration resolves a replacement principal with an old overlapping verifier
-- **THEN** the composition signs new hosted escrow requests with the replacement and accepts authenticated peer requests under the declared overlap without changing accepted buyer profile ownership
+- **THEN** the composition signs new marketplace requests with the replacement and accepts authenticated peer requests under the declared overlap without changing accepted buyer ownership
 
 #### Scenario: Registry serves mixed consumer schemes
 
 - **WHEN** buyer and storefront principals use different supported schemes
-- **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret, wallet, or hosted payer model
+- **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret or wallet
 
-#### Scenario: VM composition selects hosted fiat
+#### Scenario: VM composition selects Arkhai payments
 
-- **WHEN** the VM root receives an Ed25519 signer and a manifest-compatible hosted adapter
-- **THEN** the same scheme-neutral core lifecycle runs without an Alkahest client, wallet derivation, or chain preflight
+- **WHEN** the VM buyer and storefront select `arkhai.payments.v1` with their marketplace signers and owner-scoped payment credentials
+- **THEN** the payment calls use the Arkhai account credentials without loading an Alkahest wallet or chain configuration
 
 #### Scenario: A chain mechanism is selected
 
 - **WHEN** a composition selects an Alkahest or other EVM effect
-- **THEN** its concrete mechanism adapter resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
+- **THEN** its concrete mechanism resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
 
-#### Scenario: Hosted fiat is published
+#### Scenario: Arkhai payments is published
 
-- **WHEN** a composition installs the hosted adapter with a manifest-pinned hosted client
-- **THEN** the adapter verifies the required identity capability and delegates the hosted wire contract to that client rather than copying canonicalization, headers, signatures, or response verification
+- **WHEN** a composition installs the Arkhai payments kit
+- **THEN** it uses the published HTTP and receipt contracts without duplicating their wire encoding, canonicalization, or signature verification
 
 ### Requirement: Explicit settlement configuration registration
 
-Composition roots MUST register installed settlement mechanisms with canonical ID, typed config schema, preflight, client factory, option builder, buyer compatibility, and optional operator commands. Core role packages MUST consume only the shared registration/status contract and MUST NOT branch on mechanism IDs or import concrete mechanism configuration.
+Composition roots MUST register installed settlement mechanisms with canonical ID, typed config schema, preflight, option builder, buyer compatibility, and optional operator commands; obligation-runtime client factories are optional for Agreement-based stages. Core role packages MUST consume only the shared registration/status contract and MUST NOT branch on mechanism IDs or import concrete mechanism configuration.
 
-#### Scenario: Composition omits hosted client
+#### Scenario: Composition omits payments client
 
-- **WHEN** a domain composition installs only Alkahest
-- **THEN** common settlement status, publication, and buyer selection expose only that registration without hosted placeholders or no-op hooks
+- **WHEN** a domain installs only the Alkahest registration and omits the Arkhai payments kit
+- **THEN** common status, publication, and buyer selection expose only the installed Alkahest registration without payment placeholders or no-op hooks
 
 ### Requirement: Shared resources are injected on demand
 
 Identity, wallet, and chain resources MUST be composed independently of settlement mechanism configuration and injected only into registrations that declare them. Installing a non-EVM mechanism MUST NOT require placeholder wallet or chain resources.
 
-#### Scenario: Fiat-only VM storefront starts
 
-- **WHEN** VM composition installs hosted non-EVM settlement with Ed25519 identity and no Alkahest registration
-- **THEN** startup, readiness, publication, and servicing succeed without constructing a wallet or chain client
+#### Scenario: Payment-only VM storefront starts
+
+- **WHEN** VM composition installs only `arkhai.payments.v1` with its required payment-service credential
+- **THEN** startup, readiness, publication, and payment settlement succeed without constructing an Alkahest wallet or chain client
 
 ### Requirement: Storefront roots inject a frozen domain registry
 
@@ -523,49 +400,16 @@ binding is recorded.
   offering mode or its listing codec projects another mode
 - **THEN** publication is rejected before registry or capacity effects
 
-### Requirement: Bare-metal adopts the shared hosted lifecycle
-
-The bare-metal buyer MUST be an installed `market.buyer_domains` contribution and the storefront MUST register Alkahest and hosted Stripe through `SettlementConfigurationRegistry`. Bare-metal composition MAY interpret trusted listings and physical lifecycle records, but MUST consume the core `HostedSettlementTransport` and shared `HostedSettlementRouteService`; it MUST NOT import `hosted_settlement_client` outside the hosted kit or copy VM transport/routes.
-
-#### Scenario: Domain callback injection
-
-- **WHEN** the shared route service prepares, reserves, fulfills, projects, or cleans a hosted obligation
-- **THEN** injected bare-metal callbacks derive accepted physical authority, perform selected-site fulfillment, and project lease evidence
-- **AND** the shared service retains signing, replay, mechanism runtime, collect, and reclaim mechanics
-
-### Requirement: API-credit hosted composition uses shared seams
-
-API-credit buyer and storefront roots MUST install Alkahest and
-`fiat.stripe.v1` through the shared settlement configuration registry and
-mechanism-neutral runtime. Buyer lifecycle calls MUST use
-`core_buyer.HostedSettlementTransport`; storefront lifecycle routes MUST use
-`HostedSettlementRouteService` with API-credit callbacks. Core and API-credit
-domain packages MUST remain provider opaque and MUST NOT import VM, bare-metal,
-or the released hosted client directly.
-
-#### Scenario: Hosted-only API-credit storefront starts
-- **WHEN** only a ready hosted clause and Ed25519 seller signer are configured
-- **THEN** publication, negotiation, start, issuance, evidence, status, and reclaim routes initialize without a wallet or Alkahest client
-
-#### Scenario: Both mechanisms are enabled
-- **WHEN** one API-credit listing has complete Alkahest and hosted configuration
-- **THEN** both alternatives share domain pricing/fulfillment semantics while retaining independent mechanism state and failure outcomes
-
 ### Requirement: Pre-terms mechanism dispatch is registration-owned
 
 The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's
-settlement selection or the legacy flat-proposal coercion, and every subsequent
-mechanism-shaped decision — proposal interpretation, verification, accepted-artifact
-construction, settle-route and status projection — MUST reach the resolved mechanism's
-registration hooks. Domain code MUST NOT branch on a concrete mechanism identifier at
-these decision points.
+settlement selection or the legacy flat-proposal coercion, and pre-terms option interpretation MUST use that registration. Domain composition MUST dispatch the accepted Agreement to its supported settlement stage; mechanism-specific mandate and provisioning translations belong to that composition, not schema-opaque core.
 
 #### Scenario: A third mechanism is composed
 
 - **WHEN** a new mechanism registration is added to a domain's composition root and
   enabled in `[Settlement]`
-- **THEN** its deals negotiate, verify, settle, and report through the registration
-  hooks with no new conditional arms in any domain
+- **THEN** its options use the registration, and a supporting domain explicitly composes its settlement and provisioning stages
 
 #### Scenario: A mechanism conditional is sought in domain code
 
@@ -575,10 +419,7 @@ these decision points.
 
 ### Requirement: Deal identity is mechanism-neutral for every mechanism
 
-Every deal, regardless of mechanism, MUST have a durable `settlement_obligations`
-record keyed by its `obligation_ref`, with any mechanism-issued identifier (such as an
-escrow uid) recorded as that mechanism's `mechanism_ref`. Cross-mechanism tooling MUST
-correlate deals by `obligation_ref`.
+Every accepted deal MUST retain its negotiation ID and exact Agreement. Mechanisms using the obligation runtime MUST have a durable `settlement_obligations` record keyed by `obligation_ref`, with the mechanism's identifier as `mechanism_ref`. Arkhai payments MUST instead correlate its accepted mandate and transaction evidence by negotiation ID; its transaction ID MUST NOT be represented as an escrow obligation.
 
 #### Scenario: An Alkahest deal is recorded neutrally
 
@@ -608,6 +449,78 @@ command assembly.
 - **THEN** market orchestration on that side proceeds unchanged and the sink is
   reported as a local delivery fault
 
+### Requirement: Arkhai payment request and receipt authentication
+
+Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
+
+#### Scenario: Arkhai payment request is authenticated
+
+- **WHEN** a buyer or seller kit calls the Arkhai payments service
+- **THEN** the request uses the owner's WorkOS user-scoped API credential, and the caller verifies a returned receipt with the published signature contract rather than copying marketplace request-signing code
+
+### Requirement: Arkhai payments registers as a peer settlement mechanism
+
+A domain composition that supports Arkhai payments MUST register `arkhai.payments.v1` beside `alkahest.v1` through the shared typed settlement registration surface. Selection MUST pin one exact mechanism and option, and core MUST dispatch without a mechanism-specific branch. A domain MUST NOT require or install the Arkhai payments client when that registration is absent.
+
+#### Scenario: A domain registers both peer mechanisms
+
+- **WHEN** a domain installs `alkahest.v1` and `arkhai.payments.v1`
+- **THEN** both options appear through their registrations and each accepted Agreement dispatches to its selected settlement stage
+
+#### Scenario: A domain omits Arkhai payments
+
+- **WHEN** a domain installs Alkahest without the Arkhai payments kit
+- **THEN** it publishes no Arkhai payment option and acquires no Arkhai payment-service dependency
+
+### Requirement: Deals compose negotiate, settle, and provision stages
+
+A deal MUST flow from negotiation to a selected settlement stage and then to domain provisioning. Negotiation MUST pass its exact accepted Agreement to the selected settlement stage. That stage MUST return its own settlement evidence; the domain's provisioning stage MUST consume that evidence and translate it into the domain's internal paid or ready form.
+
+#### Scenario: Arkhai payment gates domain provisioning
+
+- **WHEN** the seller settles an accepted Agreement through `arkhai.payments.v1`
+- **THEN** VM, bare-metal, or API-credit provisioning remains blocked until the seller verifies a signed receipt matching the transaction ID and Agreement deal hash
+
+### Requirement: Domains compose only the stages they support
+
+A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
+
+#### Scenario: A domain composes two settlement mechanisms
+
+- **WHEN** a domain advertises both Alkahest and Arkhai payment options
+- **THEN** its composition routes each accepted Agreement to the selected mechanism stage and passes that stage's evidence to compatible provisioning without a new core mechanism conditional
+
+#### Scenario: A settlement mechanism also provides the service
+
+- **WHEN** a deal selects `contact-exchange.v1`
+- **THEN** the composed mechanism may fuse settlement and provisioning into one stage that consumes the negotiation output
+
+### Requirement: Arkhai payments authority remains external
+
+`kit/arkhai-payments` MUST consume the published HTTP and JSON Schema contract from `arkhai-io/arkhai-payments` and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release, dispute attachment, and payment-provider operations.
+
+#### Scenario: Payments service owns the ledger
+
+- **WHEN** a marketplace domain composes `arkhai.payments.v1`
+- **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
+
+### Requirement: Marketplace roles hold no payment ledger
+
+Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. The kit MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit.
+
+#### Scenario: A headless caller checks a payment
+
+- **WHEN** a buyer or seller process checks a payment
+- **THEN** it supplies its owner-scoped credential for that request and verifies the service-signed receipt through the identity kit, keeping no servicing state between calls
+
+### Requirement: Buyer dispatch preserves Agreement-only settlement
+
+`make_settle_hook` MUST route a selected negotiation outcome with no escrow proposal to the composing domain's `agreement_settlement` stage. Core MUST pass the outcome unchanged and MUST NOT infer escrow terms, synthesize an obligation, or select a replacement mechanism.
+
+#### Scenario: Payments outcome has no escrow proposal
+
+- **WHEN** an accepted outcome has a settlement selection and no escrow proposal
+- **THEN** the injected Agreement settlement stage receives the exact outcome
 ### Requirement: Family-grouped capability shapes share one flattening contract
 
 A capability shape MUST be expressed in the family-grouped form: a mapping of family name to

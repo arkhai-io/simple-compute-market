@@ -26,19 +26,12 @@ from arkhai_bare_metal.evidence_routes import (
     evidence_resource,
 )
 
-from test_evidence import accepted_binding, alkahest_binding, lease_ready_result
+from test_evidence import alkahest_binding, lease_ready_result
 from arkhai_bare_metal import build_bare_metal_lease_ready_evidence
 
 SELLER = CanonicalPrincipal(scheme="ed25519", identifier="seller")
 ADMIN = CanonicalPrincipal(scheme="ed25519", identifier="admin")
-AUTHORITY = CanonicalPrincipal(scheme="ed25519", identifier="authority")
 DIGEST = "sha256:" + "ab" * 32
-
-
-def _hosted():
-    return build_bare_metal_lease_ready_evidence(
-        binding=accepted_binding(), condition_anchor="condition-a", result=lease_ready_result()
-    )
 
 
 def _alkahest():
@@ -59,7 +52,6 @@ def _service(*stored):
         seller_principal=SELLER,
         sign=lambda material: b"signed:" + material,
         admin_principals=(ADMIN,),
-        hosted_authority_principals=(AUTHORITY,),
     )
 
 
@@ -81,21 +73,16 @@ def test_unknown_or_malformed_evidence_is_not_found():
 
 
 def test_readers_follow_the_evidence_binding():
-    hosted, alkahest = _hosted(), _alkahest()
-    service = _service(hosted, alkahest)
+    evidence = _alkahest()
+    service = _service(evidence)
 
-    hosted_readers = service.readers(asyncio.run(service.evidence(hosted.evidence_digest)))
-    alkahest_readers = service.readers(
-        asyncio.run(service.evidence(alkahest.evidence_digest))
-    )
+    readers = service.readers(asyncio.run(service.evidence(evidence.evidence_digest)))
 
-    assert hosted_readers["buyer"] == (hosted.buyer_principal,)
-    assert hosted_readers["seller"] == (hosted.claimant_principal,)
-    assert hosted_readers["admin"] == (ADMIN,)
-    assert hosted_readers["authority"] == (AUTHORITY,)
-    # No hosted authority takes part in an Alkahest deal.
-    assert "authority" not in alkahest_readers
-    assert alkahest_readers["seller"] == (alkahest.claimant_principal,)
+    assert readers == {
+        "buyer": (evidence.buyer_principal,),
+        "seller": (evidence.claimant_principal,),
+        "admin": (ADMIN,),
+    }
 
 
 def test_the_response_carries_the_sellers_proof_over_the_canonical_body():

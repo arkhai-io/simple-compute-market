@@ -18,7 +18,7 @@ import pytest
 import arkhai_apicredits_buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
-from market_identity import Eip191Signer, REQUEST_PROTOCOL, TrustedIdentitySet
+from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
 
 _PROPOSAL = {
@@ -143,10 +143,8 @@ def fake_chain_config(monkeypatch):
     )
     monkeypatch.setattr(common, "resolve_registry_api_keys", lambda: {})
     monkeypatch.setattr(common, "resolve_discovery_timeout", lambda: 5.0)
-    import core_buyer.orchestration as buyer_orchestration
-
     monkeypatch.setattr(
-        buyer_orchestration,
+        settle_cli,
         "make_publisher_trust_resolver",
         lambda **_kwargs: lambda: trust,
     )

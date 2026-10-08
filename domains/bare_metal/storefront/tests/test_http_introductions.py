@@ -255,7 +255,6 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
 
 
 async def test_contact_options_publish_through_the_composition() -> None:
-    from datetime import datetime, timedelta, timezone
 
     from market_settlement_runtime import SettlementPublicationClause
 
@@ -277,7 +276,6 @@ async def test_contact_options_publish_through_the_composition() -> None:
             "claimant_principal": SELLER_SIGNER.identity,
         },
     )
-    now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
         candidate={"host_id": "machine-1", "site_id": "default"},
         clauses=[
@@ -287,9 +285,6 @@ async def test_contact_options_publish_through_the_composition() -> None:
                 mechanism_input={"profile": "default"},
             )
         ],
-        option_expires_at=now + timedelta(hours=2),
-        funding_deadlines={},
-        fulfillment_deadline=now + timedelta(hours=3),
     )
     assert payload.accepted_escrows == ()
     (option,) = payload.settlement_options

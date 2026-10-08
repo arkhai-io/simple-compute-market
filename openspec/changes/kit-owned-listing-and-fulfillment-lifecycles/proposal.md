@@ -49,6 +49,13 @@ The VM storefront also keeps `site_projection_cache` (270 lines) as its own view
 per-site projection state, while bare metal reaches the same state through the
 capacity/publication kit's declaration reader and per-site hold.
 
+The Arkhai payments cutover removes the hosted lifecycle and evidence publisher
+from the current tree. Their descriptions above retain the audit's historical
+context. Current convergence also includes receipt-based payment records, which
+have no conditional-escrow obligation. The proposed unification must preserve
+that distinction and consume each domain's payment reconciliation pass rather
+than register payments on the obligation worker.
+
 ## What Changes
 
 - Move the seller listing lifecycle into `kit/capacity-publication`, over the common

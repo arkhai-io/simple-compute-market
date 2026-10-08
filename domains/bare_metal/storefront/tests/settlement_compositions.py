@@ -1,7 +1,7 @@
 """Settlement compositions for tests, built the way the server builds them.
 
 The storefront has no settlement without a composition, so a test that
-negotiates a hosted selection or settles an escrow composes the real
+settles an escrow composes the real
 ``BareMetalStorefrontSettlementComposition`` from a strict settlement root. Only
 what lies beyond the storefront is a double: the Alkahest chain clients the
 evidence is published through, and, where a test drives the worker, the
@@ -16,10 +16,6 @@ from typing import Any
 
 from market_alkahest import create_alkahest_registration
 from market_contact_exchange import create_contact_exchange_registration
-from market_hosted_settlement import (
-    REQUIRED_STRIPE_CAPABILITIES,
-    create_stripe_registration,
-)
 from market_identity import Signer
 from market_settlement_runtime import (
     ConditionOutcome,
@@ -40,57 +36,6 @@ ALKAHEST_SECTION = {
     "interruptible": False,
     "interruptible_oracle_addresses": [],
 }
-
-
-def stripe_section(signer: Signer) -> dict[str, Any]:
-    """An enabled hosted section trusting ``signer`` as the authority."""
-    return {
-        "enabled": True,
-        "base_url": "https://settlement.example",
-        "authority_id": "authority-main",
-        "environment": "test",
-        "authority": {"principals": [signer.identity.model_dump(mode="json")]},
-        "expected_manifest_digest": "sha256:" + "ab" * 32,
-        "expected_api_version": "0.2.1",
-        "expected_schema_version": 5,
-        "required_capabilities": list(REQUIRED_STRIPE_CAPABILITIES),
-        "account_ref": "seller-main",
-        "currency": "usd",
-        "country": "US",
-        "condition_profile": "bare-metal-lease-ready",
-        "condition_profiles": {
-            "bare-metal-lease-ready": {
-                "condition_id": "bare-metal-lease-ready",
-                "evaluator": {
-                    "kind": "builtin.v1",
-                    "version": "trivial.v1",
-                    "params": {"kind": "trivial"},
-                },
-                "demand": {"encoding": "application/jcs+json", "value": {}},
-            }
-        },
-    }
-
-
-def hosted_composition(
-    signer: Signer, *, authority: Signer | None = None
-) -> BareMetalStorefrontSettlementComposition:
-    """Hosted settlement only, signed by ``signer`` as the storefront.
-
-    ``authority`` is the hosted authority the storefront trusts; the storefront's
-    own signer when none is given.
-    """
-    return BareMetalStorefrontSettlementComposition.from_raw_config(
-        {
-            "schema_version": 1,
-            "priority": ["fiat.stripe.v1"],
-            "stripe": stripe_section(authority or signer),
-        },
-        resources={
-            "marketplace_signer": signer,
-            "claimant_principal": signer.identity,
-        },
-    )
 
 
 class EscrowOnChain:
@@ -185,7 +130,6 @@ def alkahest_composition(
     registry = SettlementConfigurationRegistry(
         (
             alkahest,
-            create_stripe_registration(),
             create_contact_exchange_registration(),
         )
     )

@@ -8,50 +8,44 @@ from core_buyer.action_policy import (
     BuyerActionRequired,
     resolve_buyer_action_policy,
 )
-
 from core_buyer.buyer_config import (
     BuyerProfileResolver,
     ResolvedBuyerIdentity,
     resolve_fresh_buyer_identity,
     resolve_recovery_buyer_identity,
 )
-from core_buyer.hosted_settlement import (
-    HostedProjection,
-    HostedSettlementTransport,
-    make_hosted_settle_hook,
-)
 from core_buyer.delivery import (
     deliver_introduction,
     load_buyer_delivery_sinks,
     report_delivery,
-)
-from core_buyer.introductions import (
-    IntroductionProjection,
-    IntroductionTransport,
 )
 from core_buyer.explanation import (
     EXPLANATION_SCHEMA_VERSION,
     build_buyer_explanation,
     format_buyer_explanation,
 )
+from core_buyer.introductions import (
+    IntroductionProjection,
+    IntroductionTransport,
+)
+from core_buyer.orchestration import signed_storefront_json
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
     BuyConstraints,
     BuyResult,
     NegotiateFn,
+    NegotiationResult,
     RegistryDiscovery,
     RegistryQueryPlan,
-    explain_registry_query,
-    NegotiationResult,
     SettleFn,
+    explain_registry_query,
     fetch_listing_dict,
     fetch_listing_dict_multi,
     query_registry_for_matches,
     query_registry_for_matches_multi,
     run_buy,
 )
-from core_buyer.orchestration import signed_storefront_json
 from core_buyer.plugins import DOMAIN_GROUP, discover_domains
 from core_buyer.registry_config import (
     RegistryAuthority,
@@ -88,14 +82,11 @@ __all__ = [
     "RegistryDiscovery",
     "RegistryQueryPlan",
     "RegistryAuthority",
-    "HostedProjection",
-    "HostedSettlementTransport",
     "IntroductionProjection",
     "IntroductionTransport",
     "deliver_introduction",
     "load_buyer_delivery_sinks",
     "report_delivery",
-    "make_hosted_settle_hook",
     "SelectedSettlementOption",
     "SettleFn",
     "SettlementClauseStage",

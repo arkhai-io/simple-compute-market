@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
 from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
@@ -36,17 +35,6 @@ def _json_env(environ: Mapping[str, str], name: str) -> Any:
         raise RuntimeError(f"{name} must contain valid JSON") from exc
 
 
-def _instant(environ: Mapping[str, str], name: str) -> datetime:
-    value = environ.get(name, "")
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be an ISO-8601 timestamp") from exc
-    if parsed.tzinfo is None:
-        raise RuntimeError(f"{name} must include a timezone")
-    return parsed.astimezone(timezone.utc)
-
-
 def publication_payload_builder(
     runtime: BareMetalStorefrontRuntime,
     environ: Mapping[str, str],
@@ -58,23 +46,14 @@ def publication_payload_builder(
             "shared settlement configuration is required for publication"
         )
     clauses_raw = _json_env(environ, "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES")
-    deadlines_raw = _json_env(environ, "BARE_METAL_STOREFRONT_FUNDING_DEADLINES")
-    if not isinstance(clauses_raw, list) or not isinstance(deadlines_raw, dict):
-        raise RuntimeError("publication clauses/deadlines have invalid JSON shapes")
+    if not isinstance(clauses_raw, list):
+        raise RuntimeError("publication clauses have an invalid JSON shape")
     clauses = tuple(
         SettlementPublicationClause.model_validate(item) for item in clauses_raw
     )
-    funding_deadlines = {
-        str(profile): datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        for profile, value in deadlines_raw.items()
-    }
     demands = _json_env(environ, "BARE_METAL_STOREFRONT_DEMANDS")
     if not isinstance(demands, list):
         raise RuntimeError("BARE_METAL_STOREFRONT_DEMANDS must be a JSON list")
-    option_expiry = _instant(environ, "BARE_METAL_STOREFRONT_OPTION_EXPIRES_AT")
-    fulfillment_deadline = _instant(
-        environ, "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE"
-    )
     max_duration = configured_max_duration_seconds(environ)
     if max_duration is None:
         raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
@@ -90,9 +69,6 @@ def publication_payload_builder(
                 if override_clauses is not None
                 else clauses
             ),
-            option_expires_at=option_expiry,
-            funding_deadlines=funding_deadlines,
-            fulfillment_deadline=fulfillment_deadline,
             demands=demands,
             max_duration_seconds=candidate.get(
                 "override_max_duration_seconds", max_duration

@@ -12,23 +12,23 @@ the only exception, and they leave with the client-wheel wire bump) and
 no dependencies beyond pydantic — the wheel must stay importable by
 every role without dragging in role or kit code.
 
-Settlement mechanisms: the negotiated outcome is carried as a
-``SettlementPlan`` — per obligation, lifecycle universals
-(payer/claimant, amount/asset, expiration, conditions) as typed fields
-and everything mechanism-specific behind a ``{mechanism, params}``
-envelope whose deterministic interpretation lives in kit codecs
-(``kit/alkahest`` first; fiat providers later). The flat alkahest
-shapes (``EscrowTerms``; proposals keyed on chain + contract address)
-predate the envelope: ``EscrowTerms`` survives as the typed params
-shape of the ``alkahest.v1`` mechanism and as a marked legacy wire
-coercion into the envelope (work item I.1 of
-``docs/development/ARCHITECTURE.md, "Settlement Lifecycle"``).
+Settlement mechanisms: acceptance produces an ``Agreement``, the exact
+accepted terms both parties keep, which a settle stage consumes. Mechanisms
+that settle from the Agreement alone need nothing else from core.
+Mechanisms serviced through the obligation runtime additionally carry a
+``SettlementPlan`` of obligations, whose fields describe escrow-style
+obligations (payer and claimant, amount and asset, expiration, conditions),
+with mechanism-specific materialization behind a ``{mechanism, params}``
+envelope that kit codecs interpret. ``EscrowTerms`` is the typed params
+shape of the ``alkahest.v1`` mechanism and the legacy flat proposal shape
+coerced into that envelope.
 """
 
 from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 
 from typing import Annotated, Any, Literal
 
@@ -340,15 +340,16 @@ dispatches on it. The matching codec lives in ``kit/alkahest``.
 class SettlementObligation(BaseModel):
     """One obligation in a settlement plan.
 
-    The lifecycle universals every settlement mechanism shares are typed
-    fields: who funds it, who collects it, how much of what, when the
-    collect-vs-reclaim boundary falls, and what conditions gate
-    collection. Everything needed to *materialize and verify* the
-    obligation under a particular mechanism — chain + contract address
-    and the ``ObligationData`` struct for alkahest; provider + payment
-    refs for a fiat escrow — rides in ``params``, interpreted by the kit
-    codec registered for ``mechanism``. Core code drives obligations
-    through injected per-mechanism hooks and never reads ``params``.
+    Plans and obligations belong to mechanisms serviced through the
+    obligation runtime; a mechanism that settles from the Agreement alone
+    creates none. The typed fields describe an escrow-style obligation: who
+    funds it, who collects it, how much of what, when collection gives way to
+    reclaim, and which conditions gate collection. Everything needed to
+    *materialize and verify* the obligation under its mechanism (for alkahest,
+    the chain, contract address and ``ObligationData`` struct) rides in
+    ``params``, interpreted by the kit codec registered for ``mechanism``.
+    Core code drives obligations through injected per-mechanism hooks and
+    never reads ``params``.
 
     ``amount``/``asset`` are the *display/lifecycle* view of the
     obligation's value (None when the mechanism's value isn't a scalar,
@@ -356,11 +357,10 @@ class SettlementObligation(BaseModel):
     authoritative materialization input, and the codec's verification is
     responsible for their consistency.
 
-    ``conditions`` carries declared condition descriptors for the deal
-    servicing engine (lifecycle doc work item I.3). Opaque to core;
-    empty means "whatever the mechanism params already encode" — for
-    alkahest the arbiter demand tree inside ``params`` is authoritative
-    and is decoded by the kit codec on demand.
+    ``conditions`` carries declared condition descriptors for the servicing
+    engine. Opaque to core; empty means "whatever the mechanism params
+    already encode": for alkahest the arbiter demand tree inside ``params``
+    is authoritative and is decoded by the kit codec on demand.
     """
 
     payer: Literal["buyer", "seller"] = Field(
@@ -496,16 +496,18 @@ class SettlementPlan(BaseModel):
     Generalizes the single accepted-escrow handoff: a plan is N
     obligations (payment escrows, interval escrows, penalty bonds —
     possibly under different mechanisms) plus the off-chain duties each
-    party takes on while servicing the deal. The determinism contract
-    extends unchanged in kind: both sides must derive the same plan from
-    the shared message history; for mechanisms whose materialization is
-    not independently derivable (fiat), determinism covers the agreed
-    terms and the codec verifies the materialized object against them.
+    party takes on while servicing the deal. Plans belong to mechanisms
+    serviced through the obligation runtime; a mechanism that settles from
+    the Agreement alone creates none. The determinism contract extends
+    unchanged in kind: both sides must derive the same plan from the shared
+    message history; for mechanisms whose materialization is not
+    independently derivable, determinism covers the agreed terms and the
+    codec verifies the materialized object against them.
 
     ``service_terms`` is the attachment point for heartbeat cadence and
-    schema, oracle identity, evidence format, and interval boundaries
-    (lifecycle doc work items I.4/I.5). Opaque to core; empty for plans
-    with no off-chain duties beyond the mechanism defaults.
+    schema, oracle identity, evidence format, and interval boundaries.
+    Opaque to core; empty for plans with no off-chain duties beyond the
+    mechanism defaults.
     """
 
     obligations: list[SettlementObligation] = Field(
@@ -642,13 +644,74 @@ class SettlementOption(BaseModel):
 
 
 class SettlementSelection(BaseModel):
-    """Buyer selection of one exact listing settlement option."""
+    """Buyer selection of one exact listing settlement option.
+
+    ``expiration_unix`` is required by mechanisms that materialize expiring
+    obligations, such as Alkahest. Agreement-only mechanisms omit it.
+    """
 
     model_config = {"extra": "forbid"}
 
     mechanism: str = Field(min_length=1)
     option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expiration_unix: int = Field(gt=0)
+    expiration_unix: int | None = Field(default=None, gt=0)
+    # Buyer-side mechanism parameters, opaque to core. The seller's option
+    # params cannot name the buyer's own mechanism identity (for example the
+    # account a charge-first mechanism debits), so the buyer supplies it here
+    # and the Agreement carries it as settlement_params.
+    params: dict[str, Any] | None = None
+
+
+class Agreement(BaseModel):
+    """Accepted deal terms passed unchanged from negotiation to settlement."""
+
+    model_config = {"extra": "forbid"}
+
+    negotiation_id: str = Field(min_length=1)
+    listing_id: str = Field(min_length=1)
+    listing_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    buyer: dict[str, str]
+    seller: dict[str, str]
+    settlement: SettlementOption | None = None
+    settlement_params: dict[str, Any] | None = None
+    amount: int = Field(ge=0)
+    asset: str | None = None
+    duration_seconds: int = Field(ge=0)
+    start_utc: str
+    provision_terms: dict[str, Any] | None = None
+    accepted_at: str
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_agreement_amount(cls, v: Any) -> int:
+        parsed = _parse_uint256_str(v, "amount")
+        if parsed is None:
+            raise ValueError("Agreement.amount must not be null")
+        return parsed
+
+    @field_serializer("amount")
+    def _serialize_agreement_amount(self, v: int) -> str:
+        return _serialize_uint256_str(v) or "0"
+
+    @field_validator("start_utc", "accepted_at")
+    @classmethod
+    def _require_utc_timestamp(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Agreement timestamps must be non-empty UTC strings")
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Agreement timestamps must be ISO-8601") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+            raise ValueError("Agreement timestamps must include a UTC offset")
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @model_validator(mode="after")
+    def _settlement_asset_matches(self) -> "Agreement":
+        if self.settlement is not None and self.asset != self.settlement.asset:
+            raise ValueError("Agreement asset must match its selected settlement option")
+        return self
 
 
 def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:

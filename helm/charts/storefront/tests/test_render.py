@@ -327,11 +327,11 @@ def test_typed_fields_are_accepted_in_any_spelling() -> None:
         }
     }
     del identity["service_peers"]
-    agent["config"]["Settlement"] = {"Priority": [], "Stripe": {"Enabled": False}}
+    agent["config"]["Settlement"] = {"Priority": [], "Arkhai_Payments": {"Enabled": False}}
     config = _config(_ok(_render(agent=agent)))
 
     assert config["Identity"]["Principal"] == BASE_AGENT["config"]["Identity"]["principal"]
-    assert config["Settlement"] == {"Priority": [], "Stripe": {"Enabled": False}}
+    assert config["Settlement"] == {"Priority": [], "Arkhai_Payments": {"Enabled": False}}
 
     wrong = copy.deepcopy(agent)
     wrong["config"]["Identity"]["Service_Peers"]["provisioning_default"]["Principals"] = [
@@ -372,24 +372,11 @@ def test_retired_values_are_refused_naming_the_key() -> None:
     _refused(_render(extra={"image": {"settlementConfigSchemaVersion": 1}}), "settlementConfigSchemaVersion")
 
 
-def test_generated_schema_refuses_secret_buyer_and_unknown_typed_fields() -> None:
-    stripe = {"enabled": False}
+def test_generated_schema_refuses_secret_and_unknown_typed_fields() -> None:
     cases = {
         "secret wallet key": (_with_config(Wallet={"private_key": "0xabc"}), "private_key"),
         "any spelling": (_with_config(wallet={"PRIVATE_KEY": "0xabc"}), "PRIVATE_KEY"),
         "registry token": (_with_config(registry={"auth": {"http://x": "t"}}), "auth"),
-        "buyer-only field": (
-            _with_config(Settlement={"priority": [], "stripe": {**stripe, "off_session_policy": {}}}),
-            "off_session_policy",
-        ),
-        "provider secret": (
-            _with_config(Settlement={"priority": [], "stripe": {**stripe, "webhook_secret": "x"}}),
-            "webhook_secret",
-        ),
-        "payer data": (
-            _with_config(Settlement={"priority": [], "stripe": {**stripe, "payment_method_id": "pm_1"}}),
-            "payment_method_id",
-        ),
         "unregistered mechanism": (_with_config(Settlement={"priority": [], "teleport": {}}), "teleport"),
         "typed field type": (_with_config(Settlement={"priority": [], "schema_version": "one"}), "schema_version"),
     }
@@ -428,21 +415,6 @@ def test_identity_admits_only_its_public_keys() -> None:
 
 
 # --- committed fixtures ----------------------------------------------------
-
-
-def test_fiat_fixture_passes_its_settlement_through() -> None:
-    manifest = _ok(_render(files=("fiat-ed25519-values.yaml",)))
-    config = _config(manifest)
-
-    assert config["Settlement"]["priority"] == ["fiat.stripe.v1"]
-    assert config["Settlement"]["stripe"]["expected_schema_version"] == 5
-    assert [c["mechanism_input"]["funding_profile"] for c in config["pricing"]["settlements"]] == [
-        "card.v1",
-        "us_bank_transfer.v1",
-        "us_ach_debit.v1",
-    ]
-    assert "Wallet" not in config and "Chains" not in config
-    assert "wait-for-rpc" not in _source(manifest, "deployment.yaml")
 
 
 def test_contact_exchange_fixture_passes_contact_and_delivery_through() -> None:

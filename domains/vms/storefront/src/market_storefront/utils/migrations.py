@@ -22,6 +22,8 @@ from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
     apply_schema_migrations,
 )
 
+from market_storefront.payment_repository import add_vm_payment_records
+
 logger = logging.getLogger(__name__)
 
 
@@ -648,4 +650,5 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
         "20261006_012_fulfillment_context_names_no_guest",
         _migrate_fulfillment_context_names_no_guest,
     ),
+    Migration("20261001_011_vm_payment_records", add_vm_payment_records),
 )

@@ -1,21 +1,19 @@
+## Re-scope (2026-10-08)
+
+Hosted Stripe settlement was removed, so this design covers Alkahest and `contact-exchange.v1`; the hosted capability gate and the hosted adapter it described were removed with it. Open for the owners: whether the early-reclaim relaxation still has a user now that fiat obligations are gone (see the proposal).
+
 ## Context
 
 See proposal.md — Why. The constraints that shape the approach:
 
 - `SettlementObligation` (`core/src/market_core/schemas.py:274`) documents `amount`/`asset`
   as the *display/lifecycle* view of value, explicitly `None` when the mechanism's value is
-  not scalar. Fiat is never that case: `_validate_obligation`
-  (`kit/hosted-settlement/.../adapter.py:560-581`) refuses any hosted obligation whose amount
-  is not a positive integer minor unit and whose asset is not a lowercase ISO 4217 currency.
-  Non-scalar value is an Alkahest-only shape, and both registered splitter arbiters —
+  not scalar. Non-scalar value is an Alkahest-only shape, and both registered splitter arbiters —
   `erc20_splitter` and `native_token_splitter` — divide scalar value as well.
 - The exclusion the change reshapes is enforced in SQL inside `BEGIN IMMEDIATE`
   (`kit/settlement-runtime/src/market_settlement_runtime/sqlite_repository.py:1052-1105`),
   not in Python. Whatever replaces it has to stay a single-statement-visible predicate over
   one row plus the operation journal.
-- The hosted wire cannot carry an amount: `OperationRequest` is `protocol` + `request_id`
-  (`hosted_settlement_client/client.py:704`). This is a pinned dependency; the marketplace
-  may not construct requests outside the client's interface.
 - Alkahest's splitter arbiters are registered (`kit/alkahest/.../claims.py:143-199`) and take
   the split from an oracle's decision, not from the escrow. Any design that computes a split
   in the runtime contradicts the mechanism that already implements one.
@@ -34,7 +32,6 @@ See proposal.md — Why. The constraints that shape the approach:
   evaluation returned and executes it.
 - Splitting value the runtime cannot conserve. A non-scalar obligation gets the two
   degenerate dispositions and nothing else.
-- Any producer-side hosted contract work.
 
 ## Decisions
 
@@ -64,8 +61,8 @@ conversion happens between the decision and the disbursement.
 Carrying a second, mechanism-shaped disposition for non-scalar value — rejected, and worth
 recording why, because it was the first shape of this design. It would have let the runtime
 store a split it cannot conserve, on the reasoning that core does not interpret mechanism
-value. But nothing needs it: fiat obligations are scalar by the hosted adapter's own
-validation, and the two splitter arbiters that exist divide scalar value too. There is no
+value. But nothing needs it: the two splitter arbiters that exist divide scalar
+value. There is no
 mechanism today that splits a bundle, so the branch would have been an unenforceable
 invariant written for a caller that does not exist. Refusing the split instead keeps
 conservation total and fails closed; if a bundle-splitting arbiter ever appears, it arrives
@@ -118,17 +115,6 @@ That vocabulary matters here: the refusal must carry the retry deadline so the s
 off to expiry instead of re-asking on every due-work tick. Without that, removing the local gate
 converts one skipped obligation into a polling loop against a chain.
 
-### Partial on hosted is capability-gated and closed by default
-
-The consumer refuses a non-degenerate disposition unless the bound release declares the
-capability, exactly as `payer-direct-instrument-setup.v1` gates payer verification.
-
-The capability string is producer-owned and no release declares one today. This change reads a
-name the producer defines and treats absence as "cannot split", so an unconfirmed or misspelled
-name fails closed — the gate simply never opens, which is the safe direction. The string must be
-agreed with the producer before hosted partials can work; nothing else in this change depends on
-that agreement.
-
 ## Risks / Trade-offs
 
 - **A mechanism refusal becomes a retry storm** → the refusal carries a normalized deadline and
@@ -155,13 +141,11 @@ that agreement.
 1. Additive schema migration: disposition columns on the obligation row. No column is dropped or
    retyped; `collection_state` and `reclaim_state` keep their names and meanings.
 2. Backfill from terminal state as described above. Deterministic, and re-runnable.
-3. Convert the three mechanisms and flip the port in one commit, since there is no shim.
-4. Ship with no release declaring the partial capability, so every disposition in production is
-   degenerate and behavior is unchanged on the hosted rail.
+3. Convert the two mechanisms and flip the port in one commit, since there is no shim.
+4. Ship with behavior unchanged for every existing obligation: a partial disposition arises only
+   from an arbiter that returns one.
 
 **Rollback.** Additive columns mean an older binary ignores them and reads the same lifecycle
-states it always did — but only while every disposition is degenerate. The capability gate is
-therefore also the rollback window: rollback stays safe exactly as long as no release declares
-partial disposition. Once one does and a split has been disbursed, rollback is no longer safe,
-and that boundary should be stated when the capability is first declared rather than discovered
-later.
+states it always did — but only while every disposition is degenerate. Rollback
+therefore stays safe exactly until the first split is disbursed, and that boundary should be
+stated before an arbiter that returns a split is enabled rather than discovered later.

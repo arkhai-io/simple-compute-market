@@ -44,7 +44,7 @@ async def test_a_restart_after_verification_delivers_once(tmp_path) -> None:
     async with app.router.lifespan_context(app):
         # The buyer's retried settlement finds the same obligation.
         async with _buyer(app) as buyer:
-            retried = await buyer.settle(
+            retried = await buyer.settle_evm(
                 ESCROW_UID, negotiation_id="neg-accepted", buyer_evm_address=BUYER
             )
         for _ in range(3):

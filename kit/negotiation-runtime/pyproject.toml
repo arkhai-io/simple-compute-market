@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.4.1"
+version = "0.5.0"
 license = "MIT"
 description = "Schema-opaque signed negotiation lifecycle, persistence, and recovery orchestration."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-kit-identity==0.3.0",
-    "arkhai-kit-policy==0.3.0",
+    "arkhai-kit-identity==0.4.0",
+    "arkhai-kit-policy==0.4.0",
 ]
 
 [build-system]

@@ -1206,7 +1206,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         """
         require_state(deal_state, "negotiation_id", "real_escrow_uid", "_provision_job_evaluated")
 
-        settle_resp = storefront_client.settle(
+        settle_resp = storefront_client.settle_evm(
             deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,
             buyer_evm_address=buyer_config["wallet_address"],

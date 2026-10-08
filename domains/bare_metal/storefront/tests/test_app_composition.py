@@ -212,9 +212,8 @@ async def test_a_runtime_without_a_settlement_composition_has_no_settlement(
     )
 
     assert runtime.settlement_worker is None
-    assert runtime.hosted_domain_callbacks is None
     assert "settlement-servicing" not in runtime.loops.step_routes()
-    with pytest.raises(RuntimeError, match="not configured"):
+    with pytest.raises(RuntimeError, match="no bare-metal settlement mechanism is configured"):
         runtime.settlement_service()
     health = await runtime.health()
     assert health["checks"]["commercial_settlement"] == "unavailable"
@@ -235,7 +234,6 @@ async def test_an_alkahest_only_runtime_composes_the_worker_and_its_step(
     )
 
     assert runtime.settlement_worker is not None
-    assert runtime.hosted_domain_callbacks is None
     assert "settlement-servicing" in runtime.loops.step_routes()
     service = runtime.settlement_service()
     assert service.chain_clients == chain_clients

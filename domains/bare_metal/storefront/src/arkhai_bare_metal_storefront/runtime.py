@@ -14,9 +14,8 @@ from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.models.system_models import ProjectionFamilyStatus
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
-from market_core import MarketDomainContract, validate_domain_contract
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
@@ -26,14 +25,15 @@ from market_contact_exchange import (
     IntroductionRetentionService,
     SQLiteIntroductionStore,
 )
-from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
+from market_core import MarketDomainContract, validate_domain_contract
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_negotiation_runtime import NegotiationRuntime
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
-from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
-from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -42,70 +42,32 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
-from .domain_runtime import get_market_domain_contract
-from .negotiation import default_seller_round_hook
-from .listing_source_check import build_listing_source_check
-from .negotiation_runtime import build_bare_metal_negotiation_runtime
-from .settlement import build_bare_metal_settlement_plan
-from .settlement_service import BareMetalSettlementService
-from .fulfillment_service import BareMetalFulfillmentService
 from .alkahest_lifecycle import BareMetalAlkahestLifecycle
-from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
-from .hosted_routes import (
-    BareMetalHostedDomainCallbacks,
-    lifecycle_domain_callbacks,
-)
-from .lifecycle_steps import register_bare_metal_lifecycle_steps
 from .delivery import storefront_introduction_delivery
+from .domain_runtime import get_market_domain_contract
+from .fulfillment_service import BareMetalFulfillmentService
+from .lifecycle_steps import register_bare_metal_lifecycle_steps
+from .listing_source_check import build_listing_source_check
+from .negotiation import default_seller_round_hook
+from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
     compile_publication_clauses,
     configured_max_duration_seconds,
 )
-from .sqlite_client import SQLiteClient
+from .settlement import build_bare_metal_settlement_plan
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    BareMetalStorefrontSettlementComposition,
+)
+from .settlement_service import BareMetalSettlementService
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
     parse_site_bindings,
 )
-from .settlement_composition import (
-    ALKAHEST_MECHANISM,
-    HOSTED_MECHANISM,
-    BareMetalStorefrontSettlementComposition,
-)
-
-
-
-def _portable_evidence_reference(
-    lifecycle: Any,
-    attestation_uid: str,
-) -> str:
-    condition = lifecycle.accepted_binding.option.option.params.get("condition")
-    evaluator = condition.get("evaluator") if isinstance(condition, Mapping) else None
-    resolver_id = (
-        evaluator.get("resolver_id") if isinstance(evaluator, Mapping) else None
-    )
-    if not isinstance(resolver_id, str) or not resolver_id:
-        raise RuntimeError("hosted evidence resolver is unavailable")
-    fulfillment = PortableRemoteFulfillmentRef(
-        resolver_id=resolver_id,
-        uid=attestation_uid,
-    )
-    return canonical_json(fulfillment.model_dump(mode="json")).decode()
-
-
-async def _publish_portable_evidence_reference(
-    lifecycle: Any,
-    evidence: Any,
-    publisher: Any,
-) -> str:
-    attestation_uid = await publisher.publish_fulfillment(
-        condition_anchor=evidence.condition_anchor,
-        evidence=evidence.canonical_json(),
-    )
-    return _portable_evidence_reference(lifecycle, attestation_uid)
-
+from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +89,6 @@ class BareMetalStorefrontRuntime:
     settlement_composition: BareMetalStorefrontSettlementComposition | None = field(
         default=None,
         repr=False,
-    )
-    # Composed from the settlement composition in ``__post_init__``, never
-    # passed in, so a runtime copied with other clients composes its own.
-    hosted_domain_callbacks: BareMetalHostedDomainCallbacks | None = field(
-        default=None, init=False, repr=False
     )
     settlement_worker: SettlementServicingWorker | None = field(
         default=None, init=False, repr=False
@@ -223,8 +180,6 @@ class BareMetalStorefrontRuntime:
                 ),
                 trading_pause=self.trading_pause,
                 plan_builder=self.plan_builder,
-                # No settlement composition means no settlement: nothing an
-                # accepted selection could be built into.
                 accepted_obligation_dispatch=(
                     self.settlement_composition.accepted_obligation_dispatch()
                     if self.settlement_composition is not None
@@ -232,13 +187,18 @@ class BareMetalStorefrontRuntime:
                 ),
                 seller_wallet_address=self.seller_evm_address,
                 chain_config_paths=self.chain_config_paths,
+                settlement_data_dispatch=(
+                    self.settlement_composition.settlement_data_dispatch()
+                    if self.settlement_composition is not None
+                    else {}
+                ),
             ),
         )
         self._compose_settlement_servicing()
         register_bare_metal_lifecycle_steps(self)
 
     def _compose_settlement_servicing(self) -> None:
-        """Compose the hosted lifecycle, the Alkahest step, and the one worker.
+        """Compose the Alkahest step and the obligation-servicing worker.
 
         They are built here, before the lifecycle steps are registered, so the
         settlement-servicing step exists whenever settlement does. With no
@@ -248,10 +208,6 @@ class BareMetalStorefrontRuntime:
         composition = self.settlement_composition
         if composition is None:
             return
-        if composition.configures(HOSTED_MECHANISM):
-            object.__setattr__(
-                self, "hosted_domain_callbacks", self._hosted_lifecycle_callbacks()
-            )
         if composition.configures(ALKAHEST_MECHANISM):
             object.__setattr__(
                 self,
@@ -264,7 +220,6 @@ class BareMetalStorefrontRuntime:
                     chain_clients=composition.resources.get("clients") or {},
                 ),
             )
-        callbacks = self.hosted_domain_callbacks
         alkahest = self.alkahest_lifecycle
 
         # Each mechanism's fulfillment is started by whatever owns it. Contact
@@ -273,9 +228,7 @@ class BareMetalStorefrontRuntime:
         # here that could deliver it.
         async def on_ready(record: Any, worker_id: str) -> None:
             mechanism = str(record.obligation.get("mechanism") or "")
-            if mechanism == HOSTED_MECHANISM and callbacks is not None:
-                await callbacks.fulfill(record, worker_id)
-            elif mechanism == ALKAHEST_MECHANISM and alkahest is not None:
+            if mechanism == ALKAHEST_MECHANISM and alkahest is not None:
                 await alkahest.fulfill(record, worker_id)
             elif mechanism != CONTACT_MECHANISM:
                 raise RuntimeError(
@@ -284,10 +237,7 @@ class BareMetalStorefrontRuntime:
 
         async def on_terminal(record: Any, state: str, reason: str | None) -> None:
             mechanism = str(record.obligation.get("mechanism") or "")
-            if mechanism == HOSTED_MECHANISM and callbacks is not None:
-                if state != "collected":
-                    await callbacks.cleanup(record.agreement_ref, reason or state)
-            elif mechanism == ALKAHEST_MECHANISM and alkahest is not None:
+            if mechanism == ALKAHEST_MECHANISM and alkahest is not None:
                 await alkahest.end_service(record, state, reason)
             elif mechanism != CONTACT_MECHANISM:
                 raise RuntimeError(
@@ -307,32 +257,6 @@ class BareMetalStorefrontRuntime:
             ),
         )
 
-    def _hosted_lifecycle_callbacks(self) -> BareMetalHostedDomainCallbacks:
-        db = self.db
-
-        async def publish_evidence(evidence: Any) -> str:
-            lifecycle = await db.load_bare_metal_hosted_lifecycle(
-                obligation_ref=evidence.obligation_ref
-            )
-            if lifecycle is None:
-                raise RuntimeError("hosted evidence lifecycle is unavailable")
-            publisher = self.settlement_clients[HOSTED_MECHANISM]
-            return await _publish_portable_evidence_reference(
-                lifecycle,
-                evidence,
-                publisher,
-            )
-
-        lifecycle = BareMetalHostedLifecycleCallbacks(
-            db=db,
-            runtime=self.settlement_runtime,
-            local_principal=self.seller_principal,
-            capacity_client=self.capacity_client,
-            fulfillment_client=self.fulfillment_client,
-            publish_evidence=publish_evidence,
-        )
-        return lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
-
     def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
         """Hand a fresh reveal to the configured seller-side dispatch, if any."""
         if self.introduction_delivery is not None:
@@ -346,23 +270,27 @@ class BareMetalStorefrontRuntime:
             return None
         return binding.site_id
 
-    def settlement_service(self) -> BareMetalSettlementService:
-        """Build commercial verification from the configured Alkahest section.
+    def payments_reconciliation_enabled(self) -> bool:
+        """Whether accepted payment deals need a seller-side reconciliation loop."""
+        return (
+            self.settlement_composition is not None
+            and self.settlement_composition.arkhai_payments_stage() is not None
+        )
 
-        The chain clients are the composition's own resources, the ones its
-        Alkahest servicing client was built with, so verification and
-        servicing agree about which chains exist.
-        """
+    def settlement_service(self) -> BareMetalSettlementService:
+        """Build settlement from the configured mechanisms and their resources."""
         composition = self.settlement_composition
-        if (
-            composition is None
-            or not composition.configures(ALKAHEST_MECHANISM)
-            or not self.seller_evm_address
-        ):
+        if composition is None:
+            raise RuntimeError("no bare-metal settlement mechanism is configured")
+        alkahest_configured = composition.configures(ALKAHEST_MECHANISM)
+        if alkahest_configured and not self.seller_evm_address:
             raise RuntimeError("Alkahest settlement is not configured")
+        payments = composition.arkhai_payments_stage()
+        if not alkahest_configured and payments is None:
+            raise RuntimeError("no bare-metal settlement mechanism is configured")
         return BareMetalSettlementService(
             db=self.db,
-            seller_wallet=self.seller_evm_address,
+            seller_wallet=self.seller_evm_address or None,
             chain_clients=composition.resources.get("clients") or {},
             chain_config_paths=self.chain_config_paths,
             verify_escrow=self.escrow_verifier,
@@ -370,6 +298,12 @@ class BareMetalStorefrontRuntime:
             service_obligation=(
                 self.settlement_worker.service_obligation
                 if self.settlement_worker is not None
+                else None
+            ),
+            arkhai_payments_stage=payments,
+            begin_fulfillment=(
+                self.fulfillment_service().begin
+                if self.capacity_client is not None and self.fulfillment_client is not None
                 else None
             ),
         )
@@ -437,7 +371,7 @@ class BareMetalStorefrontRuntime:
         composition = self.settlement_composition
         if composition is None:
             return "unavailable"
-        paying = {ALKAHEST_MECHANISM, HOSTED_MECHANISM}
+        paying = {ALKAHEST_MECHANISM, ARKHAI_PAYMENTS_MECHANISM}
         if paying & set(composition.enabled_mechanisms):
             return "ok"
         return "unconfigured"

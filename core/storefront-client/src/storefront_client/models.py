@@ -804,6 +804,82 @@ class SettleResponse:
         )
 
 
+def _require(d: Any, model: str, **fields: type) -> None:
+    """Raise ``ValueError`` naming the first absent or mistyped required field."""
+    if not isinstance(d, dict):
+        raise ValueError(f"{model} response is not an object")
+    for name, kind in fields.items():
+        value = d.get(name)
+        if not isinstance(value, kind) or (kind is str and not value):
+            raise ValueError(f"{model} response lacks a valid {name!r}")
+
+
+@dataclass
+class AgreementSettleResponse:
+    """Response from agreement settlement, POST /api/v1/settle/{negotiation_id}.
+
+    ``pending`` with ``retryable`` set means no payment evidence exists yet;
+    other statuses and ``extra`` fields are the domain's delivery state.
+    """
+
+    negotiation_id: str = ""
+    escrow_uid: str = ""
+    settlement_ref: str = ""
+    status: str = ""
+    retryable: bool = False
+    buyer_principal: Identity | None = None
+    seller_principal: Identity | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def pending(self) -> bool:
+        return self.status == "pending"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AgreementSettleResponse":
+        """Parse strictly: a missing or mistyped required field is a contract break."""
+        _require(d, cls.__name__, negotiation_id=str, escrow_uid=str, settlement_ref=str,
+                 status=str, retryable=bool, buyer_principal=dict, seller_principal=dict)
+        known = {
+            "negotiation_id",
+            "escrow_uid",
+            "settlement_ref",
+            "status",
+            "retryable",
+            "buyer_principal",
+            "seller_principal",
+        }
+        return cls(
+            negotiation_id=d["negotiation_id"],
+            escrow_uid=d["escrow_uid"],
+            settlement_ref=d["settlement_ref"],
+            status=d["status"],
+            retryable=d["retryable"],
+            buyer_principal=_identity(d["buyer_principal"]),
+            seller_principal=_identity(d["seller_principal"]),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class RefundSettlementResponse:
+    """Response from POST /api/v1/settlements/{negotiation_id}/refund."""
+
+    negotiation_id: str = ""
+    settlement_ref: str = ""
+    status: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RefundSettlementResponse":
+        """Parse strictly: a missing or mistyped required field is a contract break."""
+        _require(d, cls.__name__, negotiation_id=str, settlement_ref=str, status=str)
+        return cls(
+            negotiation_id=d["negotiation_id"],
+            settlement_ref=d["settlement_ref"],
+            status=d["status"],
+        )
+
+
 @dataclass
 class SettleStatusResponse:
     """Response from GET /api/v1/settle/{escrow_uid}/status."""

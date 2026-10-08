@@ -27,7 +27,7 @@ from tests.publication_app import SITE, SITE_B, pool, publication_app, settlemen
 
 pytestmark = pytest.mark.asyncio
 
-_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "fiat.stripe.v1": True}
+_UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
 _BIG = {"gpu_count": 2, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
 HINT_SHAPE = {"gpu": {"count": 1, "model": "H100"}, "cpu": {"count": 8},
               "memory": {"gib": 32}, "storage": {"gib": 100}}

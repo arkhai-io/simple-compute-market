@@ -6,36 +6,6 @@ Define test-level ownership, shared contract fixtures, deterministic e2e staging
 
 ## Requirements
 
-### Requirement: Expanded hosted consumer behavior is tested at owned boundaries
-
-Credential-free tests MUST cover exact funding-profile config/option identity, independent readiness/publication, local persistent payer binding, direct payer and exact authorization calls, bounded automation policy, storefront mediation, transient actions, delayed funding, immutable runtime journals, legacy card recovery, fulfillment gates, reclaim races, and sanitized evidence. They MUST use the exact released client models with deterministic hosted-port outcomes and MUST NOT claim external Stripe behavior.
-
-Protected integration MUST attribute only the external assertions actually exercised for `card.v1`, `us_bank_transfer.v1`, `us_ach_debit.v1`, and off-session `requires_action`. Each scenario MUST identify marketplace and hosted releases independently and MUST mark unavailable provider prerequisites rather than simulate or substitute them.
-
-#### Scenario: Contributor runs default marketplace checks
-
-- **WHEN** no hosted service, Stripe credential, browser, or provider prerequisite is configured
-- **THEN** config, adapter, buyer, storefront, runtime, packaging, typing, redaction, and deterministic recovery tests complete without external calls or silent omissions
-
-#### Scenario: Protected ACH prerequisite is absent
-
-- **WHEN** the selected connected account cannot exercise an ACH availability/return boundary
-- **THEN** the protected report marks only those ACH assertions unavailable and does not attribute card, simulated provider, or credential-free outcomes to them
-
-### Requirement: Consumer fault cases preserve exact identity
-
-Deterministic integration tests MUST inject acknowledgement loss, timeout, restart, duplicate request, changed request conflict, delayed visibility, readiness loss, expiry race, and operator-required outcome around direct authorization and mediated escrow boundaries. Assertions MUST prove one buyer profile owner, one funding authorization, one marketplace operation, one hosted escrow/financial operation, and no cross-profile or cross-mechanism fallback. Test clocks and event controls MUST be injected directly rather than selected through runtime configuration.
-
-#### Scenario: Authorization succeeds before timeout
-
-- **WHEN** the deterministic authority applies an exact authorization but the buyer loses acknowledgement and restarts
-- **THEN** retry returns the same authorization reference and storefront start creates at most one hosted obligation
-
-#### Scenario: Profile readiness changes during recovery
-
-- **WHEN** a pending bank obligation resumes after that profile is disabled for new purchases
-- **THEN** recovery uses the accepted profile and identities rather than switching to card or Alkahest
-
 ### Requirement: Layered behavioral verification
 Unit, integration, smoke, and end-to-end tests MUST each defend the narrowest observable contract appropriate to their level and MUST NOT rely on e2e alone for component behavior.
 
@@ -63,190 +33,6 @@ Every staged e2e state field MUST use one exact producer/consumer name, and ever
 #### Scenario: Test author adds staged state
 - **WHEN** a test adds a field to `DealState`
 - **THEN** a downstream stage consumes that exact attribute name and coverage verifies the transition
-
-### Requirement: Stripe-backed hosted settlement system evidence
-
-The marketplace-owner wallet-free VM lifecycle against Stripe test mode MUST verify one exact signed hosted release at the producer boundary and one exact marketplace consumer release, then exercise ordinary marketplace publication, discovery, negotiation, accepted funding authorization, hosted materialization, buyer action, authoritative funding, VM fulfillment evidence, condition evaluation, collection or eligible reclaim, status, restart, and recovery for each selected exact profile. The report MUST record marketplace source/commit separately from hosted manifest, client wheel, service image, contract/schema, migrations, provenance, release repository/workflow/ref/source, capability set, and protected workflow run. Every provider assertion MUST derive from the selected profile's supported Stripe test-mode behavior; unavailable external prerequisites MUST remain explicit and MUST NOT be replaced by local simulation.
-
-How a saved instrument becomes ready MUST follow the bound release rather than the harness. Where the bound release declares direct payer instrument setup, a bank-funded saved-instrument lane MUST complete its setup by submitting the payer's own verification evidence and MUST NOT require a browser. Where it does not, the existing interactive setup path MUST stand unchanged. A profile for which the bound release offers no saved-instrument path at all MUST be reported as an unavailable prerequisite, not as a failure of the lane.
-
-A refusal the authority states it will not reconsider MUST end a lane's wait at
-once and MUST be reported as that refusal. A lane MAY retry only a refusal whose
-condition can still change, such as losing a compare-and-set reservation. A
-refusal that can never succeed MUST NOT be retried until a deadline and MUST NOT
-be reported as a convergence timeout in a later stage, because that names a
-stage instead of a cause and discards what the authority said. A wait that does
-exhaust MUST record the last refusal it received, so an exhausted retry is
-distinguishable from an answer that never arrived.
-
-An obligation the runtime parks for operator evidence MUST also end a lane's
-wait at once. A parked obligation is waiting for a person rather than for time,
-and its projection already carries the mechanism's own name for what it could
-not get past, so a wait that outlasts it replaces a stated cause with an expired
-bound.
-
-#### Scenario: Successful `card.v1` purchase
-
-- **WHEN** Chromium completes required card interaction and hosted retrieval proves accepted funding and transfer outcomes
-- **THEN** the report records one signed marketplace-to-storefront-to-hosted lifecycle with exact artifact identities and sanitized payment/transfer evidence
-
-#### Scenario: Successful `us_bank_transfer.v1` purchase
-
-- **WHEN** the test uses issued instructions and attributable test funds through the configured supported Stripe test path
-- **THEN** the report records awaiting-payment, authoritative funding, fulfillment, and collection boundaries without storing bank instructions or provider IDs
-
-#### Scenario: Successful `us_ach_debit.v1` purchase
-
-- **WHEN** the exact test debit crosses mandate/confirmation and availability gates
-- **THEN** the report records delayed state, authoritative funding, fulfillment, and collection or declared return/reclaim boundary without claiming card behavior
-
-#### Scenario: A bank-funded saved instrument is set up without a browser
-
-- **WHEN** the bound release declares direct payer instrument setup and a saved-instrument lane selects a bank-funded profile
-- **THEN** the lane submits the payer's own verification evidence, the instrument becomes ready without a browser session, and the report records the setup boundary without the submitted evidence or any provider identifier
-
-#### Scenario: The bound release predates direct setup
-
-- **WHEN** a saved-instrument lane runs against a bound release that does not declare direct payer instrument setup
-- **THEN** the interactive setup path runs exactly as it does today, and the lane's recorded evidence is unchanged
-
-#### Scenario: Off-session action fallback
-
-- **WHEN** a bounded automated card purchase returns `requires_action`
-- **THEN** the same accepted obligation/authorization/operation continues interactively and the report proves no profile, instrument, amount, destination, or identity substitution
-
-#### Scenario: Real Stripe collection succeeds
-
-- **WHEN** an authorized protected run completes the selected profile's real Stripe test-mode funding path, delivers or reconciles authoritative provider state, and satisfies the accepted fulfillment condition
-- **THEN** the ordinary authority worker converges to collected and authoritative retrieval identifies exactly one related funding operation and destination transfer with the expected amount, currency, destination, transfer group or normalized relation, stable idempotency identity, and marketplace operation identity
-
-#### Scenario: Real Stripe reclaim succeeds
-
-- **WHEN** a distinct funded test-mode obligation remains unfulfilled until its profile-specific pre-transfer reclaim is eligible
-- **THEN** buyer-authorized reclaim converges to exactly one related return, cancellation, or refund, recovery under the original operation identity creates no second reversal, and no transfer exists for that obligation
-
-#### Scenario: Missed webhook is reconciled
-
-- **WHEN** real profile funding completes while webhook forwarding or the reconciliation worker is stopped and ordinary processes later restart against preserved authority state
-- **THEN** authoritative Stripe retrieval converges the accepted obligation without recreating funding and any transfer or reversal uses the original operation identity exactly once
-
-#### Scenario: A bank-transfer reclaim supplies a payer return address
-
-- **WHEN** a `us_bank_transfer.v1` obligation funded in test mode reaches eligible pre-transfer reclaim and the bound release declares payer return instructions
-- **THEN** the buyer's reclaim supplies a return address the run is entitled to use, the authority accepts the return as in flight, and the report records the reclaim boundary without the address or any provider identifier
-
-#### Scenario: A bank-transfer reclaim without an address is reported as refused
-
-- **WHEN** a `us_bank_transfer.v1` reclaim lane supplies no return address
-- **THEN** the run reports the authority's own refusal naming the missing input, and does not consume a retry deadline or report a convergence timeout
-
-#### Scenario: The authority refuses a reversal the profile forbids
-
-- **WHEN** an eligible-reclaim wait receives a refusal naming the accepted profile's reversal policy as the reason
-- **THEN** the wait ends immediately, the run reports that refusal and its code, and no retry deadline is consumed
-
-#### Scenario: A reclaim wait exhausts its deadline
-
-- **WHEN** an eligible-reclaim wait retries a refusal whose condition may still change and reaches its deadline
-- **THEN** the run reports a timeout that also names the last refusal received, rather than a bare statement that a stage did not converge
-
-#### Scenario: A parked obligation ends the wait
-
-- **WHEN** a lane observes the obligation projected as requiring operator evidence
-- **THEN** the wait ends at once and the run reports the mechanism's own reason for parking it, or names it as parked when the projection carries no reason
-
-### Requirement: Deterministic hosted recovery is tested at the provider port
-Deterministic tests for timeout placement, unknown acknowledgement, delayed authoritative visibility, provider unavailability, exact-attempt failures, and duplicate or out-of-order normalized events MUST inject declared outcomes at the hosted service's internal financial-provider or webhook-inbox boundary. They MUST exercise the production operation journal, immutable request fingerprints, leases, retry policy, idempotency, reconciliation, webhook inbox, and lifecycle logic without exposing a provider-compatible API, reproducing Stripe objects, requiring provider credentials, or packaging the collaborator with production artifacts. Assertions MUST describe Arkhai state, calls, and effects under a scripted provider outcome; every assertion presented as Stripe behavior MUST be covered separately by Stripe test-mode evidence.
-
-#### Scenario: Submission acknowledgement is unknown
-- **WHEN** a test-only scripted provider records one immutable effect and returns an unknown acknowledgement before bounded retrieval exposes it
-- **THEN** the production journal records uncertainty, reconciliation retrieves the original effect through the provider interface, and retry retains one operation identity and one effect
-
-#### Scenario: Provider failure is prescribed
-- **WHEN** a test prescribes a timeout, retryable failure, terminal failure, delayed visibility, or unavailability at a named provider-interface operation
-- **THEN** it asserts only Arkhai's resulting state transition, retry, reconciliation, and idempotency behavior and makes no claim that Stripe produces the failure in that way
-
-### Requirement: Public and protected hosted checks remain distinct
-
-Public/default checks MUST cover deterministic provider-neutral hosted client/adapter/payer/authorization behavior, state-machine integration, configuration, package contents, typing, release verification, browser action dispatch, consumer redaction, and evidence-schema validation without credentials. The marketplace MUST verify signed producer conformance evidence for producer-owned webhook-inbox recovery rather than importing, simulating, or claiming that internal behavior. Protected Stripe checks MUST require explicit role-scoped test credentials, exact signed release inputs, selected profile prerequisites, and fail-closed enablement.
-
-A public check MUST NOT require a signed producer release in order to obtain a producer artifact it compiles against. Where the artifact it needs belongs to a version that has one, it MUST use it and verify it. Where the version has none, the check MAY obtain the artifact from an access-controlled internal channel instead, and MUST treat what it obtained as unattested: it MUST NOT verify, claim, or record provenance for it, and it MUST NOT thereby satisfy anything reserved to a check with signed release inputs.
-
-Which of the two applies MUST follow from the version the consumer pins and the version the trusted release names, and MUST NOT be selected by a separate switch. A check that cannot reach the channel it needs MUST report the version and the channel as the unavailable prerequisite, rather than failing as though the artifact did not exist.
-
-#### Scenario: Contributor runs public checks
-
-- **WHEN** no Stripe credential or protected hosted release access is present
-- **THEN** default collection and execution succeed without probing provider controls or attempting hosted financial E2E, while all required credential-free consumer tests still run
-
-#### Scenario: Protected profile selection is incomplete
-
-- **WHEN** the protected lane requests a funding profile but lacks its exact account capability, test instrument/funding path, browser action, or release contract
-- **THEN** preflight stops before publication/funding mutation and records the exact unavailable prerequisite
-
-#### Scenario: Explicit protected run lacks a prerequisite
-
-- **WHEN** an operator selects hosted Stripe system E2E without one required release, credential, network, webhook, browser, account, or selected-profile prerequisite
-- **THEN** preflight reports the exact unmet prerequisite before payment creation and does not cite focused or simulated output as Stripe evidence
-
-#### Scenario: A public check compiles against an unreleased producer version
-
-- **WHEN** the consumer pins a producer version that the trusted release does not name
-- **THEN** the public check obtains that version's artifact from the internal channel, runs its suites against it, and neither verifies nor records provenance for it
-
-#### Scenario: A public check compiles against a released producer version
-
-- **WHEN** the pinned version and the version the trusted release names are the same
-- **THEN** the public check obtains the signed release assets and verifies them exactly as it does today
-
-#### Scenario: The internal channel is unreachable
-
-- **WHEN** a public check needs an unreleased producer artifact and cannot authenticate to the internal channel
-- **THEN** it reports the version and the channel as the unavailable prerequisite, and does not report the artifact as missing or the suite as broken
-
-### Requirement: Protected hosted evidence is attributable and sanitized
-
-Every protected marketplace-hosted run MUST produce a schema-validated report signed by the marketplace repository's designated evidence signer. It MUST record exact independent consumer and producer release identities, selected profile/currency, public lifecycle stages, normalized outcomes, attempts, timestamps, workflow/run identity, and permitted hashed opaque correlations. It MUST exclude credentials, provider/customer/payment-method/mandate/bank/card identifiers or data, raw actions/URLs, provider payloads/events/requests, source-bearing local paths, and unrestricted logs.
-
-#### Scenario: Sensitive provider data reaches a report field
-
-- **WHEN** schema validation or recursive canary scanning finds credential, provider/customer/payment-method/mandate/bank/card data, raw action, payload, URL, or source-bearing path
-- **THEN** the report is rejected before signing or publication
-
-#### Scenario: Consumer and producer releases differ
-
-- **WHEN** the protected run uses marketplace and hosted artifacts from distinct repositories or commits
-- **THEN** the report records both exact identity sets without collapsing them into one source claim
-
-#### Scenario: Protected assertion is unavailable
-
-- **WHEN** a rail, return, confirmation, account capability, browser, or external system is unavailable
-- **THEN** the report records the assertion and missing prerequisite as unavailable and does not replace it with simulated or local evidence
-
-#### Scenario: Report is altered after signing
-
-- **WHEN** a reviewer verifies a modified report
-- **THEN** signature verification fails
-
-#### Scenario: Stripe is unavailable during setup
-
-- **WHEN** a protected run cannot reach Stripe before any marketplace or financial mutation
-- **THEN** it reports an `environment` failure with separately identified consumer and hosted release coordinates and records no secret or provider payload
-
-#### Scenario: Connected account is not ready
-
-- **WHEN** the allowlisted test connected account fails its ownership, capability, or readiness checks
-- **THEN** preflight reports an `account` failure before publishing the hosted option or creating payment state
-
-#### Scenario: Terminal state violates the contract
-
-- **WHEN** prerequisites are valid and the observed signature, state, amount, relation, cardinality, or marketplace transition contradicts the accepted scenario
-- **THEN** the run reports a `product` failure with bounded sanitized evidence and does not hide it behind an environment or timeout classification
-
-#### Scenario: A valid observation does not converge
-
-- **WHEN** prerequisites remain valid but a named observable state does not arrive within its declared bound
-- **THEN** the run reports a `timeout` failure under the original operation identity without issuing a replacement mutation
 
 ### Requirement: Buyer profile compatibility is deterministic across domains
 
@@ -309,45 +95,37 @@ fulfillment result, private authority state, or teardown carrier.
 
 #### Scenario: An external authority is unavailable
 
-- **WHEN** a live seller, site/provisioning authority, chain, hosted authority, credential, or real access target required by the selected scenario is absent
+- **WHEN** a live seller, site/provisioning authority, chain, payments authority, credential, or real access target required by the selected scenario is absent
 - **THEN** that exact live assertion remains blocked or unavailable and static composition is not reported as end-to-end success
 
-### Requirement: Bare-metal hosted evidence is attributed by layer
+### Requirement: Payment evidence is attributed at its owning boundary
 
-Focused local suites MUST cover exact option/party/resource derivation, hosted-only composition, profile publication filtering, no provisioning before funding, selected-site exactly-once fulfillment, portable evidence, restart/collect/reclaim races, return/loss projection, teardown independence, and Alkahest non-regression. Protected Stripe qualification MUST use the ordinary signed hosted release. Whole-host release acceptance MUST observe real access and later revocation/teardown on a disposable host; mocks and local success flags do not satisfy that protected lane.
+Credential-free SCM tests MUST prove generated wire contracts, JCS hashes, mandate policy, signed-receipt rejection, exact Agreement and settlement-data persistence, selected-mechanism dispatch, retryable pending, and idempotent domain delivery through deterministic ports. They MUST NOT claim live ledger or provider behavior, which remains producer-owned evidence.
 
-#### Scenario: External lanes are unavailable
+#### Scenario: Local payment smoke uses controlled collaborators
 
-- **WHEN** signed producer artifacts, protected Stripe inputs, or a disposable live host are unavailable
-- **THEN** local deterministic evidence may pass but the corresponding protected task remains explicitly blocked
-- **AND** no synthetic evidence is recorded as release acceptance
+- **WHEN** a local VM smoke drives pending to provisioning to ready with controlled HTTP and delivery
+- **THEN** its evidence establishes SCM receipt gating and one delivery, not live payment-service or hardware acceptance
 
-### Requirement: Hosted API-credit evidence is attributed at its owning boundary
+#### Scenario: API-credit payment is retried
 
-Credential-free focused tests MUST cover mechanism-neutral listing/selection,
-hosted-only composition, accepted-state mismatch rejection, shared buyer and
-storefront transport, delayed funding gates, deterministic fulfillment/grant
-identity, canonical principal ownership, unknown-outcome retrieval, exact-once
-issuance, secret-safe credential delivery, signed portable evidence,
-collect/reclaim exclusion, restart, and Alkahest independence at the lowest
-owning package. They MUST use deterministic ports and MUST NOT claim Stripe,
-signed producer release, protected browser, or live external-resolver evidence.
+- **WHEN** seller progress is nonterminal after an issuance acknowledgement is lost
+- **THEN** focused domain tests use the same transaction and grant identity and assert no duplicate balance or quota mutation
 
-#### Scenario: Default API-credit checks run
-- **WHEN** no wallet, chain, hosted authority, Stripe credential, browser, or external resolver is configured
-- **THEN** domain, buyer, storefront, credits authority, migration, package, runtime, and redaction checks can exercise their local contracts without external calls
+### Requirement: External payment qualification names its target
 
-#### Scenario: Protected API-credit lane is unavailable
-- **WHEN** the exact signed hosted release, protected Stripe account, or deployed portable resolver is unavailable
-- **THEN** only that external evidence remains blocked and deterministic local results are not substituted for it
+External qualification MUST identify the actual payments target and consumer revision, check readiness before mutations, and report unavailable prerequisites rather than substitute another mechanism. Payment-service ledger, hold release, fees, disputes, top-ups, payouts, and provider recovery remain the payments service's evidence.
 
-## Evidence
+#### Scenario: Bare-metal qualification lacks hardware
 
-- Layer ownership: package unit/integration suites, role-level E2E scenarios, and the independently released hosted producer's financial-provider and webhook-inbox integration suites.
-- Cross-language API-credit protocol behavior: `middleware/conformance/session.json` and the Python, TypeScript, and Rust conformance runners.
-- Explicit staged dependencies: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`, scenario `require_state` calls, and `e2e-tests/tests/e2e/roles/README.md`.
-- Protected hosted system evidence: the canonical `hosted-stripe-test` target and workflow, their schema-validated sanitized report, and the exact ordinary hosted production release recorded by that report.
-- Frozen registry and lifecycle boundary matrix: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_domain_lifecycle.py`, `test_publication_plugins.py`, and `test_publication_runner.py`.
-- VM contribution, immutable bindings, migration, publication, settlement, and selected-site recovery adapters: `domains/vms/storefront/tests/unit/test_domain_registry.py`, `test_domain_thread_bindings.py`, `test_domain_migration.py`, `test_publication_wiring.py`, `test_settlement_composition.py`, and `test_fulfillment_resume_runtime.py`.
+- **WHEN** a disposable selected-site host is unavailable
+- **THEN** local deterministic tests do not claim authenticated access, revocation, or physical teardown
 
-Additive/optional client coexistence during a staged rollout is not established as a general baseline contract; registry rollout work remains proposed in `migrate-registry-to-postgres`.
+### Requirement: Signed receipts in tests come from the kit fixture
+
+A test that needs a signed receipt over its own Agreement MUST sign it through the payments kit's receipt fixture with an injected signer. The fixture ships no key material, and a kit unit test reproduces the published receipt vector byte for byte.
+
+#### Scenario: A storefront test needs a verified receipt
+
+- **WHEN** an integration test settles a payments deal
+- **THEN** it builds the receipt with the kit's fixture and a test signer, and the vector test proves the fixture signs what the service signs

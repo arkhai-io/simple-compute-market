@@ -24,7 +24,7 @@ from tests.publication_app import BUYER_SIGNER, contact_clause
 CONTACT_MECHANISM = "contact-exchange.v1"
 BUYER_CONTACT = {"email": "buyer@example.invalid"}
 # Contact exchange settles by revealing contacts, so unbacked supply may offer it.
-CONTACT_PUBLISHABLE = {"alkahest.v1": True, "fiat.stripe.v1": True, CONTACT_MECHANISM: False}
+CONTACT_PUBLISHABLE = {"alkahest.v1": True, "arkhai.payments.v1": True, CONTACT_MECHANISM: False}
 
 
 def vm_provision(duration_seconds: int = 3600) -> dict:

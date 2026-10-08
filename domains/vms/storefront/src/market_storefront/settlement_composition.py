@@ -22,24 +22,16 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
-from market_alkahest import create_alkahest_registration
+from market_arkhai_payments import (
+    PaymentSellerStage,
+    servicing_stage,
+)
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
-from market_contact_exchange import create_contact_exchange_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
-    SettlementOption,
-    SettlementPlan,
-    SettlementSelection,
-)
-from market_hosted_settlement import (
-    ConditionDescriptor,
-    FundingMode,
-    FundingProfile,
-    create_stripe_registration,
-    hosted_projected_reason,
 )
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -57,7 +49,8 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
-from market_storefront.hosted_evidence import encode_hosted_fulfillment_ref
+from market_storefront.payment_settlement import VmPaymentsCoordinator
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
     capacity_binding_for_listing,
@@ -66,8 +59,6 @@ from market_storefront.utils import config as storefront_config
 from market_storefront.utils import escrow_verification
 
 logger = logging.getLogger(__name__)
-
-
 
 
 @dataclass(frozen=True)
@@ -90,7 +81,8 @@ class VmProjectionContext:
 VM_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
     {
         "alkahest.v1": True,
-        "fiat.stripe.v1": True,
+        # A payment deal provisions its VM through capacity, like Alkahest.
+        "arkhai.payments.v1": True,
         # An introduction settles by revealing contacts; nothing is admitted
         # against capacity, so an unbacked listing may offer it.
         CONTACT_MECHANISM: False,
@@ -159,6 +151,8 @@ class VmSettlementComposition:
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
     mechanism_resources: Mapping[str, Any]
+    arkhai_payments_stage: PaymentSellerStage | None = None
+    payments_coordinator: VmPaymentsCoordinator | None = None
     # Injected rather than read from the module constant so a composition that
     # adds a mechanism states how that mechanism is fulfilled where it adds it.
     mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY
@@ -172,13 +166,18 @@ class VmSettlementComposition:
 
     def accepted_obligation_dispatch(
         self,
-    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
+    ) -> dict[
+        str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
+    ]:
         """Curried registry dispatch for every enabled obligation-building mechanism."""
 
-        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        dispatch: dict[
+            str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
+        ] = {}
         for mechanism_id in self.settlement_config.priority:
             registration = self.configuration_registry.registration(mechanism_id)
             if registration.accepted_obligation_builder is None:
+                dispatch[mechanism_id] = None
                 continue
 
             def build(
@@ -237,16 +236,6 @@ class VmSettlementComposition:
                         {"chain_name": chain_name} for chain_name in alkahest_chains
                     ],
                 }
-            hosted_clauses = [
-                clause.model_dump(mode="json")
-                for clause in compiled
-                if clause.mechanism == "fiat.stripe.v1"
-            ]
-            if hosted_clauses:
-                readiness_resources = {
-                    **readiness_resources,
-                    "publication_clauses": hosted_clauses,
-                }
 
         readiness = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
@@ -295,34 +284,6 @@ class VmSettlementComposition:
                 raise RuntimeError(
                     f"settlement option builder {status.mechanism} returned no envelope"
                 )
-            if (
-                not envelope.get("accepted_escrows")
-                and not envelope.get("settlement_options")
-                and status.mechanism == "fiat.stripe.v1"
-            ):
-                clause = option_resources.get("publication_clause")
-                mechanism_input = getattr(clause, "mechanism_input", {})
-                profile = (
-                    mechanism_input.get("funding_profile")
-                    if isinstance(mechanism_input, Mapping)
-                    else None
-                )
-                profile_details = (
-                    status.public_details.get("profiles", {}).get(str(profile), {})
-                    if isinstance(status.public_details, Mapping)
-                    else {}
-                )
-                blocker_codes = ",".join(
-                    str(blocker.get("code"))
-                    for blocker in profile_details.get("blockers", ())
-                    if isinstance(blocker, Mapping) and blocker.get("code")
-                )
-                logger.warning(
-                    "[SETTLEMENT] option suppressed mechanism=%s profile=%s blockers=%s",
-                    status.mechanism,
-                    profile,
-                    blocker_codes,
-                )
             accepted_escrows.extend(
                 dict(item) for item in envelope.get("accepted_escrows", ())
             )
@@ -332,16 +293,6 @@ class VmSettlementComposition:
         if not accepted_escrows and not settlement_options:
             raise RuntimeError("no enabled settlement mechanism is ready")
         return accepted_escrows, settlement_options, readiness
-
-
-def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    return SettlementConfigurationRegistry(
-        (
-            create_alkahest_registration(),
-            create_stripe_registration(),
-            create_contact_exchange_registration(),
-        )
-    )
 
 
 def build_storefront_publication_clause_compiler() -> Callable[
@@ -368,8 +319,6 @@ def _settlement_plan_obligations(
     artifacts = build_domain_settlement_artifacts(domain, context)
     obligations = artifacts.settlement_plan["obligations"]
     return tuple(dict(item) for item in obligations)
-
-
 
 
 async def prepare_vm_settlement(
@@ -420,14 +369,6 @@ async def prepare_vm_settlement(
     provision = normalize_vm_provision_terms(thread.get("provision_terms"))
     proposal_raw = thread.get("buyer_escrow_proposal")
 
-    if (
-        isinstance(proposal_raw, dict)
-        and isinstance(proposal_raw.get("settlement_selection"), dict)
-        and proposal_raw["settlement_selection"].get("mechanism") == "fiat.stripe.v1"
-    ):
-        raise ValueError(
-            "hosted settlement must start through the accepted settlement endpoint"
-        )
     if not isinstance(proposal_raw, dict):
         raise ValueError(
             f"Negotiation {negotiation_id} has no persisted accepted escrow proposal"
@@ -556,9 +497,7 @@ async def fulfill_vm_settlement(
     mechanism_client: Any,
 ) -> FulfillmentOutcome:
     fulfillment_input = prepared.fulfillment_input
-    if not isinstance(
-        fulfillment_input, StorefrontSettlementFulfillmentInput
-    ):
+    if not isinstance(fulfillment_input, StorefrontSettlementFulfillmentInput):
         raise TypeError("storefront settlement fulfillment input is missing")
     domain_input = fulfillment_input.domain_input
     provision = domain_input.get("provision")
@@ -569,21 +508,14 @@ async def fulfill_vm_settlement(
     if not isinstance(listing_id, str) or not isinstance(order, dict):
         raise TypeError("VM settlement listing input is missing")
     selected_obligation = prepared.obligations[prepared.selected_obligation_index]
-    hosted = selected_obligation.get("mechanism") == "fiat.stripe.v1"
     # Peer settlement publishes its fulfillment evidence as a string
     # obligation through the alkahest client's own codecs, so it takes the
     # chain client the mechanism adapter resolves rather than the adapter --
     # the same distinction escrow verification needs. Handing over the
     # adapter failed with "no attribute 'string_obligation'" after the VM
     # was already provisioned, which is the most expensive place to find out.
-    delivery_client = (
-        fulfillment_input.evidence_client
-        if hosted
-        else mechanism_client.chain_client(prepared.projection_context.chain_name)
-    )
-    delivery_anchor = (
-        fulfillment_input.fulfillment_anchor if hosted else prepared.mechanism_ref
-    )
+    delivery_client = mechanism_client.chain_client(prepared.projection_context.chain_name)
+    delivery_anchor = prepared.mechanism_ref
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
     lifecycle = await fulfill_domain(
@@ -603,9 +535,7 @@ async def fulfill_vm_settlement(
                 "duration_seconds": provision.duration_seconds,
                 "start_utc": provision.start_utc,
                 "listing_id": listing_id,
-                "settlement_mechanism": str(
-                    selected_obligation.get("mechanism") or ""
-                ),
+                "settlement_mechanism": str(selected_obligation.get("mechanism") or ""),
             },
         ),
     )
@@ -640,30 +570,16 @@ async def fulfill_vm_settlement(
             reason="fulfilled VM did not produce an immutable fulfillment UID",
         )
     fulfillment_ref = fulfillment_uid
-    if hosted:
-        raw_condition = selected_obligation.get("params", {}).get("condition")
-        condition = ConditionDescriptor.model_validate(raw_condition)
-        evidence_mode = domain_input.get("evidence_mode")
-        resolver_id = domain_input.get("evidence_resolver_id")
-        if evidence_mode not in {"eas.v1", "portable-remote.v1"} or not resolver_id:
-            raise ValueError("hosted evidence resolver configuration is unavailable")
-        fulfillment_ref = encode_hosted_fulfillment_ref(
-            condition=condition,
-            fulfillment_uid=fulfillment_uid,
-            evidence_mode=evidence_mode,
-            resolver_id=resolver_id,
-        )
     public_result: dict[str, Any] = {
         "status": "fulfilled",
         "fulfillment_uid": fulfillment_uid,
     }
-    if not hosted:
-        public_result.update(
-            {
-                "message": result.get("message"),
-                "escrow_uid": prepared.mechanism_ref,
-            }
-        )
+    public_result.update(
+        {
+            "message": result.get("message"),
+            "escrow_uid": prepared.mechanism_ref,
+        }
+    )
     return FulfillmentOutcome(
         status="fulfilled",
         fulfillment_ref=fulfillment_ref,
@@ -680,9 +596,7 @@ async def persist_vm_settlement_outcome(
     if not isinstance(context, VmProjectionContext):
         raise TypeError("VM settlement projection context is missing")
     fulfillment_input = prepared.fulfillment_input
-    if not isinstance(
-        fulfillment_input, StorefrontSettlementFulfillmentInput
-    ):
+    if not isinstance(fulfillment_input, StorefrontSettlementFulfillmentInput):
         raise TypeError("storefront settlement fulfillment input is missing")
     listing_id = fulfillment_input.domain_input.get("listing_id")
     if not isinstance(listing_id, str):
@@ -860,20 +774,6 @@ async def truncate_lease_for_terminal_settlement(
         raise
 
 
-@dataclass(frozen=True)
-class HostedAgreement:
-    negotiation_id: str
-    listing_id: str
-    buyer_principal: Identity
-    seller_principal: Identity
-    obligation: dict[str, Any]
-    obligation_ref: str
-    funding_profile: FundingProfile
-    legacy_recovery: bool
-    provision: VmProvisionTerms
-    order: dict[str, Any]
-
-
 def _plain_mapping(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
@@ -882,501 +782,9 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-
 _CURRENCY_CODE = re.compile(r"^[a-z]{3}$")
 _COUNTRY_CODE = re.compile(r"^[A-Z]{2}$")
 _CONTRACT_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
-_FORBIDDEN_HOSTED_PARAMS = frozenset(
-    {
-        "payer_profile_ref",
-        "instrument_ref",
-        "customer_id",
-        "payment_method_id",
-        "mandate",
-        "client_secret",
-        "action",
-        "url",
-        "bank_instructions",
-    }
-)
-
-
-def _accepted_hosted_profile(
-    obligation: Mapping[str, Any],
-    *,
-    buyer_principal: Identity,
-    seller_principal: Identity,
-    allow_legacy_recovery: bool,
-) -> tuple[FundingProfile, bool]:
-    if obligation.get("payer") != "buyer" or obligation.get("claimant") != "seller":
-        raise ValueError("hosted settlement parties do not match the accepted roles")
-    if Identity.model_validate(obligation.get("payer_principal")) != buyer_principal:
-        raise ValueError("hosted payer principal does not match accepted state")
-    if Identity.model_validate(obligation.get("claimant_principal")) != seller_principal:
-        raise ValueError("hosted claimant principal does not match accepted state")
-    params = _plain_mapping(obligation.get("params"))
-    if Identity.model_validate(params.get("payer_principal")) != buyer_principal:
-        raise ValueError("hosted payer parameter does not match accepted state")
-    if Identity.model_validate(params.get("claimant_principal")) != seller_principal:
-        raise ValueError("hosted claimant parameter does not match accepted state")
-    if params.get("funds_flow") != "separate_charges_transfers":
-        raise ValueError("hosted settlement funds flow does not match the contract")
-    condition = ConditionDescriptor.model_validate(params.get("condition"))
-    conditions = obligation.get("conditions")
-    forbidden = sorted(_FORBIDDEN_HOSTED_PARAMS.intersection(params))
-    if forbidden:
-        raise ValueError(
-            "accepted hosted obligation contains forbidden payer/provider fields: "
-            + ", ".join(forbidden)
-        )
-    account_ref = params.get("account_ref")
-    if (
-        not isinstance(account_ref, str)
-        or not account_ref
-        or account_ref != account_ref.strip()
-    ):
-        raise ValueError("accepted hosted obligation has no exact account reference")
-    if "funding_authorization_ref" in params:
-        raise ValueError("accepted hosted plan must not contain a funding authorization")
-    if not isinstance(conditions, list) or len(conditions) != 1:
-        raise ValueError("hosted settlement requires one accepted condition")
-    if ConditionDescriptor.model_validate(conditions[0]) != condition:
-        raise ValueError("hosted condition does not match the accepted obligation")
-    has_legacy_method = "payment_method_types" in params
-    has_profile = "funding_profile" in params
-    if has_legacy_method:
-        if (
-            has_profile
-            or params.get("payment_method_types") != ["card"]
-            or not allow_legacy_recovery
-        ):
-            raise ValueError("legacy hosted card obligations are recovery-only")
-        return FundingProfile.CARD, True
-    if not has_profile:
-        raise ValueError("accepted hosted obligation has no funding profile")
-    for name in ("authority_id", "environment"):
-        value = params.get(name)
-        if not isinstance(value, str) or not value or value != value.strip():
-            raise ValueError(f"accepted hosted obligation has no exact {name}")
-    country = params.get("country")
-    if not isinstance(country, str) or not _COUNTRY_CODE.fullmatch(country):
-        raise ValueError("accepted hosted obligation has no exact country")
-    interaction = params.get("interaction")
-    fingerprint = params.get("contract_fingerprint")
-    if interaction not in {mode.value for mode in FundingMode}:
-        raise ValueError("accepted hosted obligation has no exact interaction mode")
-    if not isinstance(fingerprint, str) or not _CONTRACT_FINGERPRINT.fullmatch(
-        fingerprint
-    ):
-        raise ValueError("accepted hosted obligation has no contract fingerprint")
-    try:
-        return FundingProfile(params["funding_profile"]), False
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "accepted hosted obligation has an unsupported funding profile"
-        ) from exc
-
-
-def _validate_accepted_hosted_option(
-    *,
-    order: Mapping[str, Any],
-    selection: SettlementSelection,
-    obligation: Mapping[str, Any],
-    buyer_principal: Identity,
-    seller_principal: Identity,
-) -> None:
-    """Bind the accepted selection to its canonical, immutable listing option."""
-
-    raw_options = order.get("settlement_options")
-    if isinstance(raw_options, str):
-        try:
-            raw_options = json.loads(raw_options)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "accepted VM input has no exact immutable hosted option"
-            ) from exc
-    if not isinstance(raw_options, list):
-        raise ValueError("accepted VM input has no exact immutable hosted option")
-
-    selected_option: dict[str, Any] | None = None
-    for item in raw_options:
-        candidate = _plain_mapping(item)
-        if (
-            candidate.get("option_id") == selection.option_id
-            and candidate.get("mechanism") == selection.mechanism
-        ):
-            selected_option = candidate
-            break
-    if selected_option is None:
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        )
-    try:
-        option = SettlementOption.model_validate(selected_option)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        ) from exc
-
-    expected_params = dict(option.params)
-    if "payer_principal" in expected_params:
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        )
-    try:
-        advertised_claimant = Identity.model_validate(
-            expected_params.get("claimant_principal")
-        )
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        ) from exc
-    if advertised_claimant != seller_principal:
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        )
-    expected_params["payer_principal"] = buyer_principal.model_dump(mode="json")
-    expected_params["claimant_principal"] = seller_principal.model_dump(mode="json")
-    if (
-        option.mechanism != obligation.get("mechanism")
-        or option.asset != obligation.get("asset")
-        or expected_params != _plain_mapping(obligation.get("params"))
-    ):
-        raise ValueError(
-            "accepted settlement selection does not match the immutable hosted option"
-        )
-
-
-
-
-async def load_hosted_agreement(
-    *,
-    sqlite_client: Any,
-    negotiation_id: str,
-    expected_claimant: Identity,
-    obligation_ref: str | None = None,
-    allow_legacy_recovery: bool = False,
-) -> HostedAgreement:
-    """Reload one exact accepted hosted obligation from marketplace state."""
-
-    thread = await sqlite_client.load_negotiation_thread_row(
-        negotiation_id=negotiation_id
-    )
-    if not thread or thread.get("terminal_state") != "success":
-        raise ValueError("hosted settlement negotiation is not accepted")
-    buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
-    listing_id = str(thread.get("our_listing_id") or "")
-    raw_plan = thread.get("settlement_plan")
-    if not isinstance(raw_plan, dict):
-        raise ValueError("accepted negotiation has no pinned settlement plan")
-    plan = SettlementPlan.model_validate(raw_plan)
-    if len(plan.obligations) != 1:
-        raise ValueError("hosted settlement plan must contain exactly one obligation")
-    obligation = plan.obligations[0].model_dump()
-    if obligation.get("mechanism") != "fiat.stripe.v1":
-        raise ValueError("accepted negotiation did not select hosted settlement")
-    derived_ref = derive_obligation_ref(negotiation_id, 0, obligation)
-    if plan.buyer_principal is None or (
-        Identity.model_validate(plan.buyer_principal) != buyer_principal
-    ):
-        raise ValueError("accepted plan buyer does not match the marketplace thread")
-    if plan.seller_principal is None or (
-        Identity.model_validate(plan.seller_principal) != expected_claimant
-    ):
-        raise ValueError("accepted plan seller does not match the storefront")
-    raw_selection = _plain_mapping(
-        _plain_mapping(thread.get("buyer_escrow_proposal")).get(
-            "settlement_selection"
-        )
-    )
-    selection = SettlementSelection.model_validate(raw_selection)
-    if selection.mechanism != "fiat.stripe.v1":
-        raise ValueError("accepted settlement selection is not hosted")
-    if obligation.get("expiration_unix") != selection.expiration_unix:
-        raise ValueError("hosted expiry does not match the accepted selection")
-    if obligation_ref is not None and obligation_ref != derived_ref:
-        raise ValueError("hosted obligation identifier does not match accepted plan")
-    profile, legacy_recovery = _accepted_hosted_profile(
-        obligation,
-        buyer_principal=buyer_principal,
-        seller_principal=expected_claimant,
-        allow_legacy_recovery=allow_legacy_recovery,
-    )
-    agreed_amount = thread.get("agreed_price")
-    raw_amount = obligation.get("amount")
-    accepted_amount = (
-        int(raw_amount)
-        if isinstance(raw_amount, str) and raw_amount.isdigit()
-        else raw_amount
-    )
-    if (
-        isinstance(agreed_amount, bool)
-        or not isinstance(agreed_amount, int)
-        or isinstance(accepted_amount, bool)
-        or accepted_amount != agreed_amount
-    ):
-        raise ValueError("hosted amount does not match accepted seller state")
-    thread_provision = normalize_vm_provision_terms(thread.get("provision_terms"))
-    vm_state = _plain_mapping(plan.service_terms.get("vm.v1"))
-    if vm_state:
-        accepted_listing_id = vm_state.get("listing_id")
-        order = _plain_mapping(vm_state.get("order"))
-        provision = normalize_vm_provision_terms(vm_state.get("provision"))
-        if accepted_listing_id != listing_id or order.get("listing_id") != listing_id:
-            raise ValueError("accepted VM listing identity is inconsistent")
-        if provision != thread_provision:
-            raise ValueError("accepted VM input does not match the marketplace thread")
-        if not legacy_recovery:
-            _validate_accepted_hosted_option(
-                order=order,
-                selection=selection,
-                obligation=obligation,
-                buyer_principal=buyer_principal,
-                seller_principal=expected_claimant,
-            )
-    elif legacy_recovery:
-        order = await sqlite_client.load_listing(listing_id=listing_id)
-        if not order:
-            raise ValueError("legacy accepted hosted listing is unavailable")
-        provision = thread_provision
-    else:
-        raise ValueError("accepted hosted plan has no immutable VM input")
-    return HostedAgreement(
-        negotiation_id=negotiation_id,
-        listing_id=listing_id,
-        buyer_principal=buyer_principal,
-        seller_principal=expected_claimant,
-        obligation=obligation,
-        obligation_ref=derived_ref,
-        funding_profile=profile,
-        legacy_recovery=legacy_recovery,
-        provision=provision,
-        order=dict(order),
-    )
-
-
-def _hosted_evidence_input(
-    *,
-    composition: VmSettlementComposition,
-    condition: ConditionDescriptor,
-) -> tuple[str, str, Any]:
-
-    resolver_id = condition.evaluator.resolver_id
-    if not resolver_id:
-        raise ValueError("hosted condition has no configured evidence resolver")
-    stripe_config = composition.settlement_config.mechanism_config("stripe")
-    resolvers = _plain_mapping(getattr(stripe_config, "resolvers", {}))
-    resolver = _plain_mapping(resolvers.get(resolver_id))
-    chain_name = str(resolver.get("chain_name") or "")
-    evidence_mode = str(resolver.get("evidence_mode") or "")
-    if evidence_mode not in {"eas.v1", "portable-remote.v1"}:
-        raise ValueError("hosted evidence mode is not configured")
-    client = composition.evidence_clients.get(chain_name)
-    if client is None:
-        raise ValueError("hosted evidence chain is not configured")
-    return resolver_id, evidence_mode, client
-
-
-async def ensure_hosted_fulfillment(
-    *,
-    composition: VmSettlementComposition,
-    sqlite_client: Any,
-    record: Any,
-    worker_id: str,
-) -> Any:
-    """Provision once after authoritative funding, then bind safe evidence."""
-    if record.fulfillment_ref:
-        await composition.worker.wake(record.obligation_ref)
-        return record
-    if record.mechanism_status != "ready":
-        return record
-    reserved = await composition.runtime.reserve_fulfillment(
-        record.obligation_ref,
-        local_principal=composition.local_principal,
-        worker_id=worker_id,
-    )
-    if reserved.status in {"busy", "succeeded"}:
-        row = await composition.repository.load_settlement_obligation(
-            record.obligation_ref
-        )
-        return type(record).model_validate(row)
-    agreement = await load_hosted_agreement(
-        sqlite_client=sqlite_client,
-        negotiation_id=record.agreement_ref,
-        obligation_ref=record.obligation_ref,
-        expected_claimant=composition.local_principal,
-        allow_legacy_recovery=(
-            record.mechanism_params.get("legacy_recovery") == "hosted-card.v1"
-        ),
-    )
-    condition = ConditionDescriptor.model_validate(
-        agreement.obligation.get("params", {}).get("condition")
-    )
-    resolver_id, evidence_mode, evidence_client = _hosted_evidence_input(
-        composition=composition,
-        condition=condition,
-    )
-    if not record.condition_anchor:
-        error = ValueError("hosted authority returned no immutable condition anchor")
-        await composition.runtime.retry_fulfillment(
-            record.obligation_ref,
-            error,
-            local_principal=composition.local_principal,
-            worker_id=worker_id,
-        )
-        raise error
-    # Fulfillment identity for a hosted deal is the authority's immutable
-    # condition anchor, and every VM surface downstream of here reads the deal
-    # through the storefront's own escrow row: provisioning resolves the
-    # negotiation binding from it, lease registration writes the capacity
-    # reservation onto it, and terminal lease truncation finds the reservation
-    # by asking for the negotiation's primary escrow. The EVM lane writes that
-    # row when it reserves settlement; the hosted lane's equivalent moment is
-    # here -- once the anchor exists, before capacity is committed. Insertion
-    # is idempotent by escrow_uid, so a retried fulfillment rebinds rather
-    # than duplicating.
-    await sqlite_client.insert_escrow(
-        escrow_uid=record.condition_anchor,
-        negotiation_id=agreement.negotiation_id,
-        chain_name=None,
-        escrow_address=None,
-        is_primary=True,
-        status="provisioning",
-    )
-    await sqlite_client.bind_escrow_obligation(
-        escrow_uid=record.condition_anchor,
-        obligation_ref=record.obligation_ref,
-        obligation_index=record.obligation_index,
-    )
-    thread_binding = await sqlite_client.load_thread_binding(
-        negotiation_id=agreement.negotiation_id
-    )
-    prepared = PreparedSettlement(
-        agreement_ref=agreement.negotiation_id,
-        obligations=(agreement.obligation,),
-        selected_obligation_index=0,
-        local_principal=composition.local_principal,
-        mechanism_ref=str(record.mechanism_ref),
-        mechanism_receipt=record.status_receipt,
-        fulfillment_input=StorefrontSettlementFulfillmentInput(
-            buyer_principal=agreement.buyer_principal,
-            thread_binding=thread_binding,
-            fulfillment_anchor=record.condition_anchor,
-            evidence_client=evidence_client,
-            domain_input={
-                "provision": agreement.provision,
-                "listing_id": agreement.listing_id,
-                "order": agreement.order,
-                "evidence_mode": evidence_mode,
-                "evidence_resolver_id": resolver_id,
-            },
-        ),
-    )
-    try:
-        outcome = await fulfill_vm_settlement(
-            composition.domain,
-            prepared,
-            mechanism_client=composition.mechanism_clients["fiat.stripe.v1"],
-            sqlite_client=sqlite_client,
-        )
-        if outcome.status != "fulfilled" or not outcome.fulfillment_ref:
-            raise RuntimeError("hosted VM fulfillment did not succeed")
-        completed = await composition.runtime.complete_fulfillment(
-            record.obligation_ref,
-            outcome.fulfillment_ref,
-            local_principal=composition.local_principal,
-            worker_id=worker_id,
-        )
-    except Exception as exc:
-        await composition.runtime.retry_fulfillment(
-            record.obligation_ref,
-            exc,
-            local_principal=composition.local_principal,
-            worker_id=worker_id,
-        )
-        raise
-    stage_event(
-        "claims",
-        "hosted_fulfillment_bound",
-        obligation_ref=record.obligation_ref,
-        settlement_ref=record.mechanism_ref,
-    )
-    await composition.worker.wake(record.obligation_ref)
-    return completed
-
-
-def hosted_public_status(record: Any) -> str:
-    if record.reclaim_state == "succeeded":
-        return "reclaimed"
-    if (
-        record.materialization_state == "manual_required"
-        or record.condition_state == "manual_required"
-        or record.collection_state == "manual_required"
-        or record.reclaim_state == "manual_required"
-        or record.mechanism_status == "manual_required"
-    ):
-        return "manual_required"
-    if record.collection_state == "succeeded":
-        return "collected"
-    if record.condition_state == "failed" or record.mechanism_status == "failed":
-        return "failed"
-    if record.mechanism_status == "ready":
-        return "ready" if record.fulfillment_ref else "funded"
-    return record.mechanism_status or "pending"
-
-
-async def hosted_settlement_projection(
-    *,
-    composition: VmSettlementComposition,
-    record: Any,
-    transient_action: Mapping[str, Any] | None = None,
-    transient_receipt: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Project provider-free lifecycle data; transient actions are never reloaded."""
-
-    del composition
-    params = {
-        **_plain_mapping(record.obligation.get("params")),
-        **_plain_mapping(record.mechanism_params),
-    }
-    legacy = params.get("legacy_recovery") == "hosted-card.v1"
-    profile = (
-        FundingProfile.CARD
-        if legacy
-        else FundingProfile(params.get("funding_profile"))
-    )
-    authorization_ref = params.get("funding_authorization_ref")
-    if not legacy and not isinstance(authorization_ref, str):
-        raise ValueError("hosted settlement has no immutable funding authorization")
-    receipt = dict(
-        transient_receipt
-        or record.reclaim_receipt
-        or record.collection_receipt
-        or record.status_receipt
-        or record.materialization_receipt
-        or {}
-    )
-    state = _plain_mapping(record.mechanism_state)
-    action = dict(transient_action) if transient_action else None
-    action_metadata = action or _plain_mapping(record.buyer_action)
-    return {
-        "settlement_ref": record.mechanism_ref,
-        "obligation_ref": record.obligation_ref,
-        "funding_authorization_ref": authorization_ref,
-        "funding_profile": profile,
-        "payer_principal": record.payer_principal,
-        "claimant_principal": record.claimant_principal,
-        "status": hosted_public_status(record),
-        "funding_reason": hosted_projected_reason(receipt, state),
-        "funding_deadline_unix": receipt.get("funding_deadline_unix")
-        or state.get("funding_deadline_unix"),
-        "action": action,
-        "action_kind": action_metadata.get("kind"),
-        "action_expires_at_unix": action_metadata.get("expires_at_unix"),
-        "condition_anchor": record.condition_anchor,
-        "fulfillment_ref": record.fulfillment_ref,
-        "receipt": receipt or None,
-    }
 
 
 async def preflight_settlement_mechanisms(
@@ -1444,6 +852,8 @@ def build_vm_settlement_composition(
         role="seller",
     ):
         section = settlement_config.mechanism_config(registration.config_key)
+        if registration.client_factory is None:
+            continue
         if section is None:
             continue
         try:
@@ -1460,27 +870,7 @@ def build_vm_settlement_composition(
                 "[SETTLEMENT] disabled mechanism has no recoverable client: %s",
                 registration.mechanism_id,
             )
-    hosted_client = mechanism_clients.get("fiat.stripe.v1")
-    if hosted_client is not None:
-        mechanism_resources["hosted_client"] = hosted_client
     evidence_clients = dict(alkahest_clients)
-    if hosted_client is not None:
-        stripe_section = settlement_config.mechanism_config("stripe")
-        for resolver in _plain_mapping(
-            getattr(stripe_section, "resolvers", {})
-        ).values():
-            resolver_config = _plain_mapping(resolver)
-            if resolver_config.get("evidence_mode") != "portable-remote.v1":
-                continue
-            client_name = str(resolver_config.get("chain_name") or "")
-            if (
-                client_name in evidence_clients
-                and evidence_clients[client_name] is not hosted_client
-            ):
-                raise ValueError(
-                    "hosted evidence client name conflicts with a chain client"
-                )
-            evidence_clients[client_name] = hosted_client
     # A fulfillment attempt provisions a VM, and the storefront gives that its
     # own bound. The operation lease has to outlive it, or the deal is handed to
     # a second worker while the first is still provisioning.
@@ -1508,18 +898,6 @@ def build_vm_settlement_composition(
     def on_event(event: str, fields: dict[str, Any]) -> None:
         stage_event("claims", event, **fields)
 
-    composition_holder: dict[str, VmSettlementComposition] = {}
-
-    async def on_ready(record: Any, worker_id: str) -> None:
-        if record.obligation.get("mechanism") != "fiat.stripe.v1":
-            return
-        await ensure_hosted_fulfillment(
-            composition=composition_holder["value"],
-            sqlite_client=sqlite_client,
-            record=record,
-            worker_id=worker_id,
-        )
-
     worker = SettlementServicingWorker(
         runtime,
         repository,
@@ -1529,7 +907,6 @@ def build_vm_settlement_composition(
         ),
         on_event=on_event,
         on_terminal=on_terminal,
-        on_ready=on_ready,
     )
 
     async def wake_servicing(obligation_ref: str) -> None:
@@ -1577,6 +954,10 @@ def build_vm_settlement_composition(
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,
     )
+    payments_config = settlement_config.mechanism_config("arkhai_payments")
+    # Accepted payment deals are serviced whether or not new payment options
+    # are published, so the stage follows the servicing fields, not `enabled`.
+    payments_stage = servicing_stage(payments_config)
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,
@@ -1589,7 +970,9 @@ def build_vm_settlement_composition(
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
+        arkhai_payments_stage=payments_stage,
+        payments_coordinator=VmPaymentsCoordinator(domain=domain, db=sqlite_client, stage=payments_stage)
+        if payments_stage is not None else None,
         mechanism_fulfillment=mechanism_fulfillment,
     )
-    composition_holder["value"] = composition
     return composition

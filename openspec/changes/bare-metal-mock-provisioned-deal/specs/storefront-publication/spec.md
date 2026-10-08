@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
 
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
@@ -40,7 +40,7 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 
 #### Scenario: Evidence is resolved
 - **WHEN** a caller requests lease-ready evidence by its digest
-- **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator, or, for evidence with the hosted accepted binding only, the hosted authority
+- **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
 
 #### Scenario: A settlement ends uncollected after delivery started
 - **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started

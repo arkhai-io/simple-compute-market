@@ -567,7 +567,7 @@ async def publication_app(
         composition = SettlementCompositionDouble(
             mechanism_fulfillment
             if mechanism_fulfillment is not None
-            else {"alkahest.v1": True, "fiat.stripe.v1": True}
+            else {"alkahest.v1": True, "arkhai.payments.v1": True}
         )
         site = FakeSite(deliverable_modes={"vm"})
         # The site's live answer is the same list the storefront's cache holds,

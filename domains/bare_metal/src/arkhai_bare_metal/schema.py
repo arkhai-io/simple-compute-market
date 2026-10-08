@@ -267,7 +267,7 @@ class BareMetalMaterialization(BaseModel):
     )
     settlement_obligation_ref: str | None = Field(
         default=None,
-        description="Hosted settlement obligation identity from accepted state.",
+        description="Settlement obligation identity from accepted state.",
     )
     host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
@@ -383,7 +383,7 @@ class BareMetalAccessGrant(BaseModel):
     )
     settlement_obligation_ref: str | None = Field(
         default=None,
-        description="Hosted settlement obligation identity from accepted state.",
+        description="Settlement obligation identity from accepted state.",
     )
     host_id: str = Field(
         description=(
@@ -438,7 +438,7 @@ class BareMetalAccessGrant(BaseModel):
     @property
     def settlement_identity_kind(self) -> str:
         return (
-            "hosted_obligation"
+            "settlement_obligation"
             if self.settlement_obligation_ref is not None
             else "alkahest_escrow"
         )

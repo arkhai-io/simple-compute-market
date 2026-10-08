@@ -73,4 +73,4 @@ def test_stated_fields_still_filter_exactly(spec) -> None:
 def test_option_projections_reject_stated_mismatches(spec) -> None:
     listing = _listing()
     assert not _match(spec, listing, channel="carrier-pigeon")
-    assert not _match(spec, listing, mechanism="fiat.stripe.v1")
+    assert not _match(spec, listing, mechanism="example.payment.v1")

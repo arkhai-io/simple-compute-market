@@ -6,6 +6,15 @@ Define the buyer-driven signed round protocol, deterministic terms derivation, p
 
 ## Requirements
 
+### Requirement: Acceptance persists opaque settlement data
+
+Seller acceptance MUST return exact `agreement_bytes` and any mechanism-owned `settlement_data` in the negotiation response and `NegotiationOutcome`. The runtime MUST persist them together in `negotiation_threads` at the acceptance chokepoint. Core MUST carry settlement data opaquely; domain settlement MUST load the accepted mandate by negotiation ID rather than rebuild it from history or current configuration.
+
+#### Scenario: Payment acceptance is resumed
+
+- **WHEN** a buyer or seller resumes an accepted `arkhai.payments.v1` negotiation
+- **THEN** it uses the same Agreement bytes and seller-derived mandate stored in `settlement_data`
+
 ### Requirement: Buyer-driven synchronous rounds
 Negotiation MUST use signed HTTP request/response rounds initiated by the buyer; the seller MUST return its next message inline and MUST NOT require a symmetric push channel.
 
@@ -14,11 +23,18 @@ Negotiation MUST use signed HTTP request/response rounds initiated by the buyer;
 - **THEN** the seller verifies it, persists the round, and returns the next decision synchronously
 
 ### Requirement: Deterministic agreed terms
-Both participants MUST derive the same agreed Terms from the same canonical message history before settlement.
+
+On acceptance, negotiation MUST produce exactly one Agreement object containing only the accepted deal terms and the identifiers needed to bind them: `negotiation_id`, `listing_id`, `listing_hash`, canonical `buyer` and `seller` principals, the selected settlement `{option_id, mechanism, asset, rates, params}`, opaque buyer `settlement_params`, `amount`, `asset`, `duration_seconds`, explicit `start_utc`, domain-owned `provision_terms`, and `accepted_at`. The seller MUST resolve any requested relative start, including “now”, to `start_utc` at acceptance. The acceptance response MUST preserve the Agreement as exact bytes; both participants MUST retain those bytes and MUST NOT rebuild the Agreement from transcript or accepted terms. Core MUST NOT define a universal Agreement hash; a settlement mechanism defines any hash it requires.
 
 #### Scenario: Seller accepts a proposal
+
 - **WHEN** a round terminates in acceptance
-- **THEN** the seller echoes the canonical confirmed message so buyer and seller histories reduce to identical Terms
+- **THEN** the seller returns one Agreement containing only accepted terms, an exact selected settlement option, and an explicit start time rather than requiring buyer and seller to reduce the message history independently
+
+#### Scenario: Both participants retain the accepted Agreement
+
+- **WHEN** the buyer receives the accept response
+- **THEN** buyer and seller retain the exact Agreement bytes from that response and neither reconstructs or reserializes a replacement before settlement
 
 ### Requirement: Injectable policy decision
 The protocol engine MUST delegate schema-specific per-turn decisions to an injected round policy while retaining transport, authentication, history persistence, stage events, and terminal-state handling in the role shell.
@@ -56,49 +72,28 @@ The shared client and storefront MUST reject the obsolete flat compute-shaped pr
 - **WHEN** a client submits flat provision fields without a supported domain envelope
 - **THEN** the storefront returns a version/shape error and does not begin or continue negotiation
 
-### Requirement: Additive hosted settlement choice
-Listings MAY advertise deterministic `SettlementOption` envelopes beside
-legacy Alkahest escrows. Accepted terms MUST pin one exact `SettlementSelection`
-and immutable settlement plan without replacing or reinterpreting legacy
-escrow fields or signed wire bodies when the additive fields are absent.
-
-#### Scenario: Seller accepts hosted settlement
-- **WHEN** the buyer selects an advertised `fiat.stripe.v1` option
-- **THEN** the seller exact-matches its canonical option ID, persists the
-  accepted plan, and derives one buyer-funded, seller-claimed obligation from
-  seller-owned listing and agreement state
-
 ### Requirement: Additive settlement option carriers
 
-Listings and proposals MAY carry ordered `SettlementOption` envelopes containing stable option ID, mechanism, asset, rates, and opaque mechanism parameters. Accepted terms MAY carry one `SettlementSelection` containing mechanism, exact option ID, and expiration. These fields MUST be optional, MUST omit absent or empty values, and MUST NOT reinterpret or replace existing Alkahest escrow fields.
+Listings and proposals MAY carry ordered `SettlementOption` envelopes containing stable option ID, mechanism, asset, rates, and opaque mechanism parameters. Accepted terms MUST pin the exact advertised option through `SettlementSelection`. Buyer-supplied mechanism inputs such as `payer_account` remain in the selection's opaque `params` and the Agreement's `settlement_params`; they MUST NOT replace seller-owned option parameters. Legacy Alkahest-only acceptance MAY omit a selection. These fields MUST be optional, MUST omit absent or empty values, and MUST NOT reinterpret or replace mechanism-owned values in `params` with universal escrow fields.
 
 #### Scenario: Legacy Alkahest negotiation is serialized
-- **WHEN** no settlement options or selection are supplied
-- **THEN** model dumps and signed negotiation bodies are byte-for-byte equal to the canonical Alkahest-only representation
 
-#### Scenario: Hosted option is advertised
-- **WHEN** a listing supports hosted fiat settlement
-- **THEN** the option is carried beside legacy accepted escrows without mutating their values or order
+- **WHEN** a listing has no settlement options or selection and represents an Alkahest-only negotiation
+- **THEN** model dumps and signed negotiation bodies remain byte-for-byte equal to the canonical Alkahest-only representation without copying escrow fields into a shared option carrier
+
+#### Scenario: Arkhai payment option is advertised
+
+- **WHEN** a listing supports charge-first settlement through `arkhai.payments.v1`
+- **THEN** its option is carried in `settlement_options` without rewriting legacy Alkahest escrow fields
 
 ### Requirement: Deterministic option identity
 
-A hosted option ID MUST be lowercase SHA-256 over sorted compact canonical JSON of its immutable mechanism, asset, rates, and parameters. Seller acceptance MUST exact-match the selected option against the stored listing option and MUST derive account, currency, amount, expiry, and condition from that stored option rather than buyer-supplied duplicates.
+A settlement option ID MUST be lowercase SHA-256 over sorted compact canonical JSON of its immutable mechanism, asset, rates, and parameters. Seller acceptance MUST exact-match the selected option against the stored listing option and MUST derive all mechanism-owned values from that stored option rather than buyer-supplied duplicates.
 
 #### Scenario: Buyer changes condition after discovery
-- **WHEN** the selected option ID or body does not exactly match a currently stored listing option
-- **THEN** seller acceptance fails without creating an accepted settlement plan
 
-### Requirement: Exact fiat minor-unit settlement
-
-A fiat selection MUST produce one buyer-funded, seller-claimed `SettlementObligation(mechanism="fiat.stripe.v1")` whose integer amount is the accepted price in minor units and whose asset is a lowercase ISO 4217 currency. Zero, negative, fractional, rounded, or inconsistent amounts MUST be rejected before acceptance.
-
-#### Scenario: Accepted price is below one minor unit
-- **WHEN** the negotiated rate conversion yields zero minor units
-- **THEN** seller acceptance rejects the settlement rather than rounding it up or creating Checkout
-
-#### Scenario: Fiat option is accepted
-- **WHEN** exact option matching and current duration/expiry pricing succeed
-- **THEN** the accepted plan contains one buyer-funded, seller-claimed hosted obligation with the exact integer amount and typed condition
+- **WHEN** the buyer changes an Alkahest condition in option parameters so the option ID or body no longer matches the stored listing option
+- **THEN** seller acceptance fails without creating an accepted Agreement
 
 ### Requirement: Uint256-safe negotiation values
 
@@ -128,12 +123,12 @@ Negotiated scalar payment amounts in proposals, rates, accepted obligations, and
 
 ### Requirement: Principal-bound negotiation history
 
-Every negotiation MUST persist durable ownership by the exact canonical scheme-tagged buyer and seller principals established at opening. Every protocol-visible message MUST preserve its authenticated author's complete principal and role. Each state-changing buyer or administrator request MUST use the shared version 2 body-bound request contract, and seller responses MUST authenticate the seller principal. Accepted Terms and settlement plans MUST preserve the exact buyer and seller parties from the canonical thread. Address claims in bodies, identifier-only comparisons, provider identifiers, and unsigned query values MUST NOT establish identity, authorship, or ownership.
+Every negotiation MUST persist durable ownership by the exact canonical scheme-tagged buyer and seller principals established at opening. Every protocol-visible message MUST preserve its authenticated author's complete principal and role. Each state-changing buyer or administrator request MUST use the shared version 2 body-bound request contract, and seller responses MUST authenticate the seller principal. Accepted Agreements MUST preserve the exact buyer and seller parties from the canonical thread. Address claims in bodies, identifier-only comparisons, provider identifiers, and unsigned query values MUST NOT establish identity, authorship, or ownership.
 
 #### Scenario: Buyer changes its principal mid-thread
 
 - **WHEN** a continuation request is validly signed by a principal other than the thread's authorized buyer and no completed rotation binds it
-- **THEN** the seller rejects the round without changing message history, terminal state, or Terms
+- **THEN** the seller rejects the round without changing message history, terminal state, or Agreement
 
 #### Scenario: Signed negotiation body is changed
 
@@ -143,12 +138,12 @@ Every negotiation MUST persist durable ownership by the exact canonical scheme-t
 #### Scenario: Administrator advances a negotiation
 
 - **WHEN** an authenticated administrator advances or force-accepts an existing thread
-- **THEN** the resulting message records that administrator's exact principal with the administrator role while the thread and any accepted Terms retain their original buyer and seller principals
+- **THEN** the resulting message records that administrator's exact principal with the administrator role while the thread and any accepted Agreement retain their original buyer and seller principals
 
-#### Scenario: Ed25519 parties agree hosted terms
+#### Scenario: Ed25519 parties agree payment terms
 
-- **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `fiat.stripe.v1`
-- **THEN** both derive the same Terms, settlement plan, and exact party principals without requiring EVM addresses
+- **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `arkhai.payments.v1`
+- **THEN** the Agreement preserves both exact party principals and the settlement selection without requiring EVM addresses
 
 ### Requirement: Negotiation identity migration and recovery are deterministic
 
@@ -236,16 +231,16 @@ MUST apply only when the selected option advertises no rate. A reference amount 
 from an option the buyer did not select or from a rate in another asset. The negotiation runtime
 MUST give the domain the buyer's pinned proposal when it asks for the reference amount.
 
-#### Scenario: A hosted option is selected on a two-mechanism listing
+#### Scenario: A second mechanism's option is selected on a two-mechanism listing
 
-- **WHEN** a listing offers an Alkahest option and a hosted option, and the buyer selects the hosted
-  option
-- **THEN** the seller's reference amount is derived from the hosted option's rate in its own minor
+- **WHEN** a listing offers an Alkahest option and an Arkhai payments option, and the buyer selects
+  the payments option
+- **THEN** the seller's reference amount is derived from the payments option's rate in its own minor
   units, not from the Alkahest rate
 
-#### Scenario: A hosted-only listing is negotiated
+#### Scenario: A listing offering only non-escrow options is negotiated
 
-- **WHEN** a listing offers only hosted options with rates and the storefront configures a
+- **WHEN** a listing offers only Arkhai payments options with rates and the storefront configures a
   negotiation floor
 - **THEN** the seller's reference amount is derived from the selected option's rate, and the floor
   is not used

@@ -200,21 +200,18 @@ def test_alkahest_inputs_without_a_section_are_refused(
 
 
 def test_a_disabled_section_is_still_configured():
-    # The runtime builds a mechanism's servicing (the hosted lifecycle, the
-    # Alkahest resources) for every configured section, enabled or not.
+    # Disabled sections still own recovery for their accepted obligations.
     root = json.loads(_settlement(alkahest=False))
-    root["stripe"] = {"enabled": False}
 
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(root)
 
     assert composition.enabled_mechanisms == ("contact-exchange.v1",)
     assert composition.configures("alkahest.v1")
-    assert composition.configures("fiat.stripe.v1")
     assert composition.configures("contact-exchange.v1")
 
 
-def test_a_root_without_a_stripe_section_composes_no_hosted_lifecycle(environment):
+def test_a_contact_only_root_composes_its_obligation_worker(environment):
     runtime = build_runtime_from_environment()
 
-    assert runtime.hosted_domain_callbacks is None
+    assert runtime.alkahest_lifecycle is None
     assert runtime.settlement_worker is not None

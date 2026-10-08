@@ -2609,6 +2609,52 @@ Second design review of this section (2026-10-07), with the maintainer's disposi
 | The attestation-query change's tasks remain VM-only | Accepted: its tasks now cover the shared publisher and bare metal |
 | Composition decision 7 said "enabled set" for "configured sections"; stale Alkahest resources without a section | Accepted: corrected, and such resources are refused at startup (decision 2) |
 
+### Merge reconciliation with Arkhai payments (2026-10-08)
+
+The payments cutover removes `fiat.stripe.v1` and its hosted stack. Section 7's
+references to the hosted ready/terminal hooks, accepted binding, authority reader,
+and hosted-only test composition are superseded by that removal. Alkahest's
+interim lifecycle, committed-plan verification, submission journal, rejection
+bound, and authenticated evidence resolver remain in scope.
+
+- The obligation worker services Alkahest and contact exchange. Arkhai payments
+  continues through the receipt-based settle path and its reconciliation loop;
+  it creates no conditional-escrow obligation and is not added to the worker's
+  ready or terminal dispatch table. The retired buyer `begin` route stays retired.
+- The accepted Agreement fixes its timestamps before every accepted-artifact
+  build, including administrative acceptance. Exact Agreement bytes and opaque
+  settlement data are persisted alongside the branch's accepted artifacts.
+- Alkahest evidence keeps its accepted binding and canonical digest derivation.
+  Its principal and digest primitives live with the evidence codec rather than
+  depending on the deleted hosted contract. Only the buyer, claimant, and seller
+  administrator can read it. Hosted evidence and authority access are removed;
+  payment delivery remains gated by its signed receipt.
+- Explicit settlement configuration and configured-but-disabled Alkahest recovery
+  retain Section 7's rules. Payments-only configuration needs no EVM resources.
+- Wheel versions reuse the newest existing pin from the two branches, with no
+  additional increment; all locks are regenerated from the merged wheelhouse.
+  The umbrella chart references its existing bare-metal subchart version, and
+  the API-credit wheel-install fixture includes the storefront client it requires.
+
+The alternative of retaining hosted compatibility would restore a mechanism the
+payments cutover explicitly removes and is rejected. Reusing the obligation
+worker for payment settlement would impose the conditional-escrow lifecycle on
+an Agreement-based stage and is also rejected. No new financial-authority or
+fulfillment-ownership model is introduced by this reconciliation.
+
+Permanent destinations remain `openspec/specs/storefront-publication/spec.md`
+for Alkahest delivery and evidence authorization,
+`openspec/specs/settlement-servicing/spec.md` for submission safety,
+`openspec/specs/negotiation-protocol/spec.md` for accepted Agreement artifacts,
+and `openspec/specs/settlement-configuration/spec.md` for explicit peer mechanisms
+and accepted-deal recovery. The deployment inputs are current in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` and
+`docs/bare-metal-seller-quickstart.md`. The remaining Section 7 promotion and
+end-to-end gates stay open; this merge does not complete the feature campaign.
+`openspec/changes/README.md` records the reconciled implementation status; the
+campaign graph is unchanged. `docs/development/ROADMAP.md` retains the outstanding
+full-deal pipeline evidence gap until the remaining scenario work is qualified.
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,

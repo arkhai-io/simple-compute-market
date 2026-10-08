@@ -231,7 +231,7 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
     the VM mock's temporary mutation of its default output. The integration test
     reaches the mock through lease registration rather than fulfillment convergence;
     the scenario covers convergence (Section 9).
-  - Found: `e2e-tests/tests/unit/test_hosted_public_boundary.py::test_buyer_deployment_mounts_separate_profile_state_and_credential`
+  - Found: the hosted public-boundary unit test's `test_buyer_deployment_mounts_separate_profile_state_and_credential` (removed with hosted settlement by `settle-through-arkhai-payments`)
     fails at the baseline too; it reads `compose.vms.yml`, which 10.1 rewrites, and is
     fixed there.
 
@@ -4278,6 +4278,47 @@ The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispos
       under the mock profile. `make check-packaging`, comment hygiene, documentation
       citations, OpenSpec strict validation, and pyflakes pass.
 
+### 7F. Reconcile the Arkhai payments merge
+
+- [x] 7F.1 Preserve explicit configuration, committed-plan verification, and the
+      Alkahest servicing step in bare-metal `runtime.py` and
+      `settlement_service.py`; retain payment receipt settlement and reconciliation.
+      Keep Agreement timestamps and opaque settlement data in the negotiation
+      runtimes. Resolve the client and test callers to `settle_evm`.
+- [x] 7F.2 Retain Alkahest `evidence.py`, `evidence_routes.py`, the storefront
+      resolver and evidence persistence, removing their hosted dependencies and
+      authority reader. Reconcile `migrations.py`, `models.py`, and
+      `deal_controls.py`; remove the retired hosted lifecycle and tests.
+- [x] 7F.3 Reuse existing wheel versions in the affected `pyproject.toml` files
+      and regenerate locks through `make lock`. Reconcile the aggregate Make
+      targets, deployment reference, seller quickstart, and this change's deltas.
+      Align `helm/Chart.yaml` with the existing bare-metal chart version, and add
+      the storefront-client wheel to the API-credit distribution-test fixture.
+- [ ] 7F.4 Validate the merged tree: focused negotiation, settlement, bare-metal
+      domain and storefront suites; the root unit/integration aggregate; typing
+      where supported; `make check-packaging`; comment hygiene; documentation
+      citations; and strict OpenSpec validation. Record failures and unrun checks.
+      Confirm end-to-end pipeline evidence separately; retain the existing Section
+      7 gates and post-review promotion tasks when that evidence is unavailable.
+      Recheck import placement, documentation compliance, narrative compression,
+      roadmap/index currency, and the promotion destinations in the merge design.
+      Local evidence (2026-10-08): every root unit/integration target passed across
+      the aggregate run and focused reruns after fixing the API-credit wheel
+      fixture and umbrella-chart reference. This includes the Python, TypeScript,
+      and Rust middleware suites, E2E unit tests, deployment scripts, and Helm
+      render checks. `make check-packaging`, comment hygiene, scoped documentation
+      citations, and strict OpenSpec 1.14.0 validation passed. Registry-client
+      typing passed; core typing reports its existing `query_dsl.py:487`
+      `ValidatedComparison`/`QueryComparison` assignment error (the file is
+      unchanged on both merge parents).
+      Docker E2E and remote pipeline validation remain unrun: local test stacks
+      are already running, the standard E2E targets replace their volumes, and
+      the uncommitted merge has no corresponding pipeline revision. Section 7's
+      gates and post-review promotion remain open. The merge adds no function-local
+      imports, completed-task notes retain only decisions and validation, and the
+      campaign dependency graph and roadmap's outstanding full-deal evidence gap
+      remain applicable. The campaign index records the current merge status.
+
 ## 8. Shared compute deal stages and the VM scenario
 
 Decision: "Compute deal stages are shared". Behaviour-neutral for VM. Reviewable alone:
@@ -4355,7 +4396,7 @@ service code.
       reference: `compose.vms.yml`, `domains/apicredits/compose.yml`,
       `e2e-tests/Makefile`, `.github/workflows/e2e.yml`,
       `scripts/tests/test_multi_storefront_compose.py`,
-      `e2e-tests/tests/unit/test_hosted_public_boundary.py`,
+      the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`),
       `e2e-tests/tests/e2e/roles/README.md`, `dev-env/identities/README.md`,
       `openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.
 - [ ] 10.2 Lane targets in `e2e-tests/Makefile`: `e2e-vm-run`, `e2e-bare-metal-run`,
@@ -4586,7 +4627,7 @@ service code.
 | A fulfillment submission whose outcome is unknown is never repeated; it parks the obligation, which status counts | `openspec/specs/settlement-servicing/spec.md` — "A fulfillment submission with an unknown outcome is never repeated" |
 | Bare-metal Alkahest delivery publishes only its evidence's digest on chain, and evidence resolution authenticates its caller | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
 | The unified fulfillment path, VM's plan rebuild, and the unconfigured-mechanism startup refusal are another change's | `openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/design.md`; nothing permanent from this change |
-| The bare-metal storefront requires its settlement configuration, requires a configured mechanism's recovery resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal hosted role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
+| The bare-metal storefront requires its settlement configuration, requires a configured mechanism's recovery resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
 | A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
 | The job authority persists result and credential envelopes and an opaque execution handle, owns retry timing while executors classify retryability and redact, and never lets a late outcome undo cancellation | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities", "A cancelled job stays cancelled"; `docs/development/ARCHITECTURE.md` |

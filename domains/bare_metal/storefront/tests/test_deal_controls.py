@@ -129,7 +129,7 @@ async def test_wait_returns_once_the_settled_lease_is_active(tmp_path) -> None:
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
             before = await admin.wait_for_settlement(ESCROW_UID, timeout=0.1)
             async with _buyer(app) as buyer:
-                await buyer.settle(
+                await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
             # Settlement stepped the worker, which began the fulfillment; the
