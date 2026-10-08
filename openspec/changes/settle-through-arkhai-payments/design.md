@@ -480,6 +480,7 @@ Resolved against development head `4c55a328`, merged into this branch's head `ce
 - **Release gate: no hosted production state (closed).** M1's data premise is that no deployed VM storefront has an accepted or in-progress `fiat.stripe.v1` deal and that bare metal never carried production hosted state. The repository cannot prove this. The change owner attested to it on 2026-10-08, and the gate is closed on that attestation.
 
 Other findings:
+- **Gate findings.** Running the full gate on the merged tree exposed problems that only composition shows. Development tests still called `StorefrontClient.settle` and the acceptance validator without an Agreement; the API-credit filter spec kept a hosted filter; identity release fixtures pinned the old version; and the VM and API-credit opening guards refused a selection's `params`, which would have refused every payment negotiation through the default chain. `make test` also skipped five suites (registry client, VM provisioning adapter, e2e unit tests, release tooling, and the Helm render contracts); adding them exposed two stale development release-tooling tests, a Helm render script that never rendered the payments fixture, stale gitignored subchart archives (`test-render` now refreshes dependencies), and a development identity-overlap scenario whose overrides duplicated the chart's EIP-191 defaults. The `test-provisioning-adapter` target also rewrote its committed lock with absolute paths. Each is fixed, and the full gate passes.
 
 - **Capacity declarations.** Development's unbacked publication refuses a mechanism whose capacity fulfillment is undeclared; VM declares `arkhai.payments.v1: True`, and bare metal now has the same declaration.
 - **Renames.** This change's tests and examples use development's names: `listing_resource`, `offering_mode`, `host_id`, and the `bare_metal.v2` listing kind.
@@ -510,6 +511,7 @@ Promoted at closeout on 2026-10-08. Each decision is stated at its permanent loc
 | R16 advertised option bound at acceptance | `openspec/specs/buyer-orchestration/spec.md` (acceptance validation binds the Agreement to the advertised option for every mechanism) |
 | R10 core carrier description | `core/src/market_core/schemas.py` docstrings, consistent with `openspec/specs/settlement-servicing/spec.md#requirement-mechanism-neutral-plan-carrier` |
 | Goal 6 current state | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice`: agreement settlement, owned attachment policies, seller-initiated refunds, and seller-side reconciliation; the live-qualification row names the payments service's tests as its owner |
+| Campaign index | `openspec/changes/README.md`: this change's status and acceptance boundary; the dependency edge to `buyers-use-the-storefront-client` stands |
 
 These rows move into the design promotion record as each promotion lands.
 
