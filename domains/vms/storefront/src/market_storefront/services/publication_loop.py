@@ -248,6 +248,7 @@ class VmPublicationCycle:
             site_capacity_buckets=self._buckets,
             backed_only=False,
             shape_feasible=self._shape_feasible,
+            admissibility_default=None,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")

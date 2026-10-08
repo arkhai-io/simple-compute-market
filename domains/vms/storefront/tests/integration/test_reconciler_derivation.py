@@ -16,14 +16,19 @@ from core_storefront.sqlite_migrations import migrate_storefront_domain_bindings
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
     PoolHintResolutionSettings,
+    declared_shape_feasibility,
     listing_pool_key,
     open_listing_resource_keys,
     pool_id_for_listing,
     site_id_for_listing,
 )
-from arkhai_vms_listings.listing_shapes import resolve_shape
+from arkhai_vms_listings.listing_shapes import CONFIGURED_DEFAULT_TIER, resolve_shape
+from market_capability_admissibility import parse_declaration
+
+from arkhai_vms import VM_CAPABILITY_SCHEMA
 from tests._reconciler_cases import (
     _BACKED,
+    _FEASIBILITY,
     _BIG,
     _SMALL_SHAPE,
     _UNBACKED,
@@ -34,6 +39,7 @@ from tests._reconciler_cases import (
     _declared_pool,
     _gpu_key,
     _member,
+    _override_rows,
     _rate,
     _seed_fungible_pool,
     _seed_listing,
@@ -42,6 +48,7 @@ from tests._reconciler_cases import (
     _shaped_pool,
     _site_report,
     _slices,
+    available_compute_slices,
     closed_available_listing_ids,
     db_path,
     stale_open_listing_ids,
@@ -947,3 +954,248 @@ class TestFamilyRateDerivationThroughTheDatabase:
         assert slices
         assert all(not row.get("family_rates") for row in slices)
         assert all("min_price" not in row and "token" not in row for row in slices)
+
+
+def _admissibility_default(raw):
+    parsed = parse_declaration(raw, tier=CONFIGURED_DEFAULT_TIER, schema=VM_CAPABILITY_SCHEMA)
+    assert parsed.declaration is not None, parsed.problems
+    return parsed.declaration
+
+
+def _admitted_slices(db_path, pools, *, default=None, holds=None):
+    return available_compute_slices(
+        db_path,
+        home_site="site-a",
+        site_pool_projection={"site-a": pools},
+        hint_resolution=PoolHintResolutionSettings(admissibility_default=default),
+        holds=holds,
+    )
+
+
+def _published(slices):
+    return sorted((row["gpu_model"], row["gpu_count"]) for row in slices)
+
+
+_A100_MEMBER = _member("a", capacity=_BIG, attributes={"gpu_model": "A100"})
+_H100_MEMBER = _member("h", capacity=_BIG)
+_A100_PLAIN = {"gpu": {"model": "A100", "count": 1}}
+
+
+class TestShapeAdmissibility:
+    """Per-listing admissibility at publication: a listing whose policy cannot
+    be computed, or whose offer its policy excludes, is not derived while the
+    pool's other listings publish."""
+
+    def _pool(self, *shapes):
+        return _shaped_pool("gpu", [_A100_MEMBER, _H100_MEMBER], shapes=list(shapes))
+
+    def test_a_constrained_stated_shape_publishes_its_offer_and_no_constraint(self, db_path):
+        pool = self._pool(
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}},
+             "memory": {"gib": {"max": 512}}},
+        )
+
+        (row,) = _admitted_slices(db_path, [pool])
+
+        assert (row["gpu_count"], row["gpu_model"]) == (1, "H100")
+        assert "ram_gb" not in row
+        assert row["listing_shape"] == {"gpu": {"count": 1, "model": "H100"}}
+        report = _site_report()
+        assert report["inadmissible_listing_shapes"] == {}
+        assert report["unusable_shape_constraints"] == {}
+
+    def test_a_listing_narrowing_the_default_publishes(self, db_path):
+        pool = self._pool({"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}})
+        default = _admissibility_default({"gpu": {"count": {"min": 1, "max": 16}}})
+
+        assert _published(_admitted_slices(db_path, [pool], default=default)) == [("H100", 1)]
+
+    def test_a_configured_default_excludes_a_stated_offer(self, db_path):
+        pool = self._pool(_A100_PLAIN, {"gpu": {"model": "H100", "count": 8}})
+        default = _admissibility_default({"gpu": {"count": {"max": 4}}})
+
+        assert _published(_admitted_slices(db_path, [pool], default=default)) == [("A100", 1)]
+        (finding,) = _site_report()["inadmissible_listing_shapes"]["gpu"]
+        assert finding["tier"] == "pool_hint"
+        assert finding["shape"] == {"gpu": {"count": 8, "model": "H100"}}
+        (problem,) = finding["problems"]
+        assert (problem["code"], problem["tier"], problem["paths"]) == (
+            "above_maximum", CONFIGURED_DEFAULT_TIER, ["gpu.count"],
+        )
+
+    def test_the_default_generator_meets_a_configured_default_and_nothing_is_reported(
+        self, db_path
+    ):
+        pool = _shaped_pool("gpu", [_H100_MEMBER])
+        default = _admissibility_default({"gpu": {"count": {"max": 4}}})
+
+        slices = _admitted_slices(db_path, [pool], default=default)
+
+        assert sorted(row["gpu_count"] for row in slices) == [1, 2, 3, 4]
+        report = _site_report()
+        assert report["inadmissible_listing_shapes"] == {}
+        assert report["unusable_shape_constraints"] == {}
+
+    def test_an_empty_merged_range_closes_that_listing_and_names_both_tiers(self, db_path):
+        pool = self._pool(_A100_PLAIN, {"gpu": {"model": "H100", "count": {"offer": 1, "max": 2}}})
+        default = _admissibility_default({"gpu": {"count": {"min": 4}}})
+
+        assert _published(_admitted_slices(db_path, [pool], default=default)) == []
+        findings = _site_report()["unusable_shape_constraints"]["gpu"]
+        # The default's minimum also excludes the A100 offer of one, which is
+        # reported as inadmissible, not unusable.
+        (finding,) = findings
+        assert {(bound["tier"], bound["bound"], bound["value"]) for bound in finding["bounds"]} == {
+            ("pool_hint", "max", 2), (CONFIGURED_DEFAULT_TIER, "min", 4),
+        }
+        assert _site_report()["inadmissible_listing_shapes"]["gpu"][0]["shape"] == _A100_PLAIN
+
+    def test_an_unknown_constraint_key_closes_that_listing_alone(self, db_path):
+        pool = self._pool(_A100_PLAIN, {"gpu": {"model": "H100", "count": {"offer": 1, "step": 2}}})
+
+        assert _published(_admitted_slices(db_path, [pool])) == [("A100", 1)]
+        (finding,) = _site_report()["unusable_shape_constraints"]["gpu"]
+        assert (finding["tier"], finding["paths"]) == ("pool_hint", ["gpu.count"])
+        assert "'step'" in finding["problem"]
+
+    def test_a_constraint_on_an_undefined_field_closes_that_listing_alone(self, db_path):
+        pool = self._pool(
+            _A100_PLAIN, {"gpu": {"model": "H100", "count": 1}, "memory": {"foo": {"max": 4}}},
+        )
+
+        assert _published(_admitted_slices(db_path, [pool])) == [("A100", 1)]
+        assert _site_report()["unusable_shape_constraints"]["gpu"]
+
+    def test_one_base_shape_stated_with_different_constraints_closes_naming_both(self, db_path):
+        pool = self._pool(
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
+            _A100_PLAIN,
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
+        )
+
+        assert _published(_admitted_slices(db_path, [pool])) == [("A100", 1)]
+        (finding,) = _site_report()["unusable_shape_constraints"]["gpu"]
+        assert finding["entries"] == [0, 2]
+
+    def test_identical_entries_collapse_and_are_not_reported(self, db_path):
+        constrained = {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}}
+        pool = self._pool(constrained, constrained)
+
+        assert _published(_admitted_slices(db_path, [pool])) == [("H100", 1)]
+        assert _site_report()["unusable_shape_constraints"] == {}
+
+    @pytest.mark.parametrize(
+        ("shape", "path"),
+        [
+            ({"gpu": {"model": {"max": 4}, "count": 1}}, "gpu.model"),
+            ({"gpu": {"model": "H100", "count": {"min": 2, "max": 8}}}, "gpu.count"),
+        ],
+    )
+    def test_a_constraint_removing_a_required_field_holds_the_pool(self, db_path, shape, path):
+        holds: set = set()
+
+        assert _admitted_slices(db_path, [self._pool(_A100_PLAIN, shape)], holds=holds) == []
+        assert ("pool", "site-a", "gpu") in holds
+        (problem,) = _site_report()["unreadable_shapes"]["gpu"]
+        assert path in problem
+
+    def test_an_override_shape_does_not_inherit_the_hints_constraints(self, db_path):
+        pool = _shaped_pool(
+            "gpu", [_H100_MEMBER],
+            shapes=[{"gpu": {"model": "H100", "count": {"offer": 1, "max": 2}}}],
+        )
+        rows, report, _ = _override_rows(
+            pool, override={"listing_shapes": [{"gpu": {"model": "H100", "count": 4}}]},
+        )
+
+        (row,) = rows
+        assert [shape.gpu_count for shape in row["feasible_shapes"]] == [4]
+        assert report.inadmissible_listing_shapes == {}
+
+    def test_identity_is_kept_across_a_constraint_only_change(self, db_path):
+        def key(count):
+            pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": count}}])
+            (row,) = _admitted_slices(db_path, [pool])
+            return row["resource_key"]
+
+        assert key(2) == key({"offer": 2, "max": 4}) == key({"offer": 2, "min": 1, "max": 8})
+
+    def test_an_open_listing_stays_open_while_its_offer_stays_admissible(self, db_path):
+        _seed_listing(db_path, listing_id="shaped", pool_id="gpu", gpu_count=2, site_id="site-a")
+        pool = _shaped_pool(
+            "gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": {"offer": 2, "max": 8}}}],
+        )
+
+        assert stale_open_listing_ids(
+            db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            site_pool_projection={"site-a": [pool]},
+        ) == []
+
+    def test_the_next_reconciliation_closes_a_listing_whose_offer_became_inadmissible(
+        self, db_path
+    ):
+        _seed_listing(db_path, listing_id="shaped", pool_id="gpu", gpu_count=2, site_id="site-a")
+        pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": 2}}])
+        reconcile = dict(
+            home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            site_pool_projection={"site-a": [pool]},
+        )
+
+        assert stale_open_listing_ids(db_path, **reconcile) == []
+        tightened = _admissibility_default({"gpu": {"count": {"max": 1}}})
+        assert stale_open_listing_ids(db_path, admissibility_default=tightened, **reconcile) == [
+            "shaped"
+        ]
+
+    def test_a_listing_the_default_excludes_is_not_reopened(self, db_path):
+        _seed_listing(
+            db_path, listing_id="shaped", status="closed", pool_id="gpu", gpu_count=2, site_id="site-a",
+        )
+        pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": 2}}])
+        reopen = dict(home_site="site-a", site_pool_projection={"site-a": [pool]})
+
+        assert closed_available_listing_ids(db_path, **reopen) == ["shaped"]
+        excluding = _admissibility_default({"gpu": {"count": {"max": 1}}})
+        assert closed_available_listing_ids(db_path, admissibility_default=excluding, **reopen) == []
+
+    def test_local_table_derivation_meets_a_configured_default(self, db_path):
+        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=8)
+        default = _admissibility_default({"gpu": {"count": {"max": 4}}})
+
+        slices = _available_vm_slices(
+            db_path,
+            home_site="site-a",
+            hint_resolution=PoolHintResolutionSettings(admissibility_default=default),
+        )
+
+        assert sorted(row["gpu_count"] for row in slices) == [1, 2, 3, 4]
+
+    def test_local_table_derivation_without_a_default_is_unchanged(self, db_path):
+        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=3)
+
+        slices = _available_vm_slices(db_path, home_site="site-a")
+
+        assert sorted(row["gpu_count"] for row in slices) == [1, 2, 3]
+
+
+def test_override_feasibility_is_judged_on_each_shapes_base_shape(db_path):
+    pool = _shaped_pool("gpu", [_H100_MEMBER])
+    shapes = [
+        {"gpu": {"model": "H100", "count": {"offer": 2, "max": 4}}, "memory": {"gib": {"max": 64}}},
+        {"gpu": {"model": "H100", "count": {"offer": 16}}},
+    ]
+
+    feasible = declared_shape_feasibility(
+        db_path,
+        [pool],
+        site_id="site-a",
+        pool_id="gpu",
+        home_site="site-a",
+        override={"listing_shapes": shapes},
+        shape_feasible=_FEASIBILITY,
+    )
+
+    assert feasible == {
+        resolve_shape({"gpu": {"model": "H100", "count": 2}}).digest: True,
+        resolve_shape({"gpu": {"model": "H100", "count": 16}}).digest: False,
+    }

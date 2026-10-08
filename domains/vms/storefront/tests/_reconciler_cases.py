@@ -68,13 +68,25 @@ def _judged(function):
 available_compute_slices = _judged(_available_compute_slices)
 
 
-closed_available_listing_ids = _judged(_closed_available_listing_ids)
+def _keyed(function):
+    """A key reader as these cases call it: judged, and under no configured
+    admissibility default unless a test states one."""
+    judged = _judged(function)
+
+    def call(*args, **kwargs):
+        kwargs.setdefault("admissibility_default", None)
+        return judged(*args, **kwargs)
+
+    return call
 
 
-current_available_resource_keys = _judged(_current_available_resource_keys)
+closed_available_listing_ids = _keyed(_closed_available_listing_ids)
 
 
-stale_open_listing_ids = _judged(_stale_open_listing_ids)
+current_available_resource_keys = _keyed(_current_available_resource_keys)
+
+
+stale_open_listing_ids = _keyed(_stale_open_listing_ids)
 
 
 def _gpu_key(site_id: str, *, gpu_count: int, model: str, pool_id=None, resource_id=None) -> str:

@@ -21,6 +21,7 @@ from typing import Any
 
 from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
 from arkhai_vms_listings.reconciler import (
+    PoolHintResolutionSettings,
     ShapeFeasibility,
     available_compute_slices,
     slice_identity,
@@ -146,6 +147,9 @@ async def _check_listing_source(
             "available": None,
         }
     buckets = _site_only(site_capacity_buckets(), site_id) if projection else None
+    # Only the admissibility default affects which listings derive; the
+    # terms these settings also carry are discarded by the comparison below.
+    admissibility = PoolHintResolutionSettings(admissibility_default=None)
     declared = _slices_by_key(
         available_compute_slices(
             repository.db_path,
@@ -154,6 +158,7 @@ async def _check_listing_source(
             site_pool_projection=projection,
             site_capacity_buckets=buckets,
             declared_range=True,
+            hint_resolution=admissibility,
             shape_feasible=shape_feasible,
         )
     )
@@ -182,6 +187,7 @@ async def _check_listing_source(
         member_availability=await _pinned_site_availability(capacity_runtime, site_id),
         site_pool_projection=projection,
         site_capacity_buckets=buckets,
+        hint_resolution=admissibility,
         shape_feasible=shape_feasible,
     )
     return {

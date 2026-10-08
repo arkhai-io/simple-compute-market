@@ -256,30 +256,82 @@ admissibility cannot be computed closes", "VM publication never advertises an in
 offer", and the modified "Every VM listing is a listing shape". Touches
 `domains/vms/listings/src/arkhai_vms_listings/reconciler.py` only. No Helm checks owed.
 
-- [ ] 4.1 `PoolHintResolutionSettings` gains the parsed configured default (a
+Amended in implementation, with the owner: the key readers that reconciliation closes and
+reopens by (`current_available_resource_keys`, `stale_open_listing_ids`,
+`closed_available_listing_ids`) derived without `hint_resolution`, so a listing the
+configured default excludes would never close. They take `admissibility_default` as a
+required keyword, and section 4 also touches their storefront callers
+(`publication_loop.py`, `publication_service.py`, `controllers/admin_controller.py`,
+`failure_actions.py`) and the inventory guard (`services/listing_source_check.py`), each
+passing `None` until 5.1 supplies the parsed default.
+
+- [x] 4.1 `PoolHintResolutionSettings` gains the parsed configured default (a
       `Declaration`, or none); derivation passes it to listing-shape resolution and the
       generator. (D9)
-- [ ] 4.2 `_projected_pool_rows`: a listing whose policy cannot be computed is not
+      Done. `PoolHintResolutionSettings.admissibility_default` (`None` when unconfigured);
+      derivation passes it to listing-shape resolution, and through it to the generator.
+- [x] 4.2 `_projected_pool_rows`: a listing whose policy cannot be computed is not
       derived, so reconciliation closes an open listing for it, while the pool's other
       listings publish; a stated listing whose base shape is inadmissible under its policy
       is withheld the same way; an unreadable base shape keeps the existing pool hold.
       Generated shapes are never reported. (D8, D10)
-- [ ] 4.3 `_SiteDerivationReport` gains `inadmissible_listing_shapes` (tier, shape,
+      Done in `_admissible_shapes`, which runs right after the unreadable-list hold; every
+      later step (rates, terms, feasibility, `listing_shapes`, infeasibility reports) reads
+      the admitted shapes only. See the amendment above for the key readers.
+- [x] 4.3 `_SiteDerivationReport` gains `inadmissible_listing_shapes` (tier, shape,
       problems) and `unusable_shape_constraints` (tier, path, problem, each tier's
       conflicting value, or each conflicting entry), logged once per change through
       `_record_site_report` like the existing keys; system status serves them unchanged.
       (D10)
-- [ ] 4.4 `_local_table_shapes` chooses counts from `admissible_values` under the
+      Done. `unusable_shape_constraints` entries carry `tier`, `shape_digest`, `shape`,
+      `paths`, `code`, `problem`, `bounds` (tier, bound, value), and `entries`;
+      `inadmissible_listing_shapes` entries carry the source `tier`, the shape, and each
+      problem's `tier`, `paths`, `code`, and `message`. System status serves the report
+      generically, so nothing else changed.
+- [x] 4.4 `_local_table_shapes` chooses counts from `admissible_values` under the
       default-only policy, as the generator does. (D10, local-table bullet)
-- [ ] 4.5 `declared_shape_feasibility` judges the override's base shapes. (D10)
-- [ ] 4.6 Integration tests in `domains/vms/storefront/tests/integration/test_reconciler_derivation.py`
+      Done by calling `gpu_count_shapes` with one synthetic member carrying the row's model
+      and range, under `default_only_policy`.
+- [x] 4.5 `declared_shape_feasibility` judges the override's base shapes. (D10)
+      Done with no code change beyond section 3: resolution yields base shapes. A test
+      keys a constrained override's feasibility by its base shape. The judgement still
+      uses no configured default; the override write check (5.2) refuses an inadmissible
+      shape first.
+- [x] 4.6 Integration tests in `domains/vms/storefront/tests/integration/test_reconciler_derivation.py`
       (cases in `tests/_reconciler_cases.py`): every scenario of the three added
       requirements and the modified one, including identity kept across a
       constraint-only change, the next reconciliation closing a listing whose offer
       became inadmissible, and local-table derivation under a configured default. Extend
       `test_reconciler_projection.py` so a stored listing's key and the inventory guard's
       re-derivation agree for a constrained shape.
-- [ ] 4.7 Verify: the VM storefront unit and integration suites.
+      Done: `TestShapeAdmissibility` (18 cases), one feasibility case, and one
+      projection case binding a constrained candidate through
+      `prepare_vm_listing_binding`. The test helpers' `_keyed` wrapper supplies
+      `admissibility_default=None` unless a case states one.
+- [x] 4.7 Verify: the VM storefront unit and integration suites.
+      Done. VM storefront `tests/unit` + `tests/integration`: 1491 passed, 1 skipped.
+      `make check-packaging`, `make check-comment-hygiene`, and
+      `make check-doc-citations CHANGE=capacity-shape-envelope`: OK. mypy over
+      `reconciler.py` and `listing_source_check.py`: six errors, all present at HEAD
+      before the section; none added.
+
+Handoff from section 4:
+
+- No configured default reaches a running storefront yet: every caller passes
+  `admissibility_default=None` and `pool_hint_resolution_settings()` sets none. 5.1's
+  amendment lists each site; `grep -rn "admissibility_default=None" domains/vms/storefront/src`
+  finds them, and closeout should find none left.
+- `reconciler.py` cites
+  `storefront-publication/spec.md#requirement-a-vm-listing-whose-admissibility-cannot-be-computed-closes`,
+  which resolves only once 7.10 promotes that requirement.
+- An asking rate stated for an excluded or uncomputable shape is also reported under
+  `unpublished_asking_rates`, beside the admissibility report keys. Kept: the rate does
+  reach no buyer.
+- mypy reports six errors in `reconciler.py` and `listing_source_check.py`, all present
+  before section 4; untouched.
+- The fresh-context check found a bare spec pointer (now a heading anchor) and
+  integration cases re-asserting unit-level problem codes (trimmed to one representative
+  detail per report field).
 
 ## 5. VM storefront composition: the configured default and the override write check
 
@@ -297,6 +349,13 @@ changes the storefront's configuration surface.
       as `_require_readable_family_rates` does. Hand the same `Declaration` to publication,
       the generator's composition, and the contribution. Add a commented example to the
       configuration template; `settings.toml` states none. (D9)
+      Amended in section 4: the same `Declaration` also replaces every explicit
+      `admissibility_default=None` section 4 left: `PoolHintResolutionSettings` built by
+      `pool_hint_resolution_settings()`, the key-reader calls in `publication_loop.py`,
+      `publication_service.py`, `controllers/admin_controller.py`, and
+      `failure_actions.py`, and the inventory guard's settings in
+      `services/listing_source_check.py`. Integration evidence that a configured default
+      closes a listing through the publication loop belongs to 5.3.
 - [ ] 5.2 `VmPoolOverrideContribution.vocabulary_problems` splits the record's shapes
       through the kit with the VM schema and resolves each against the configured default,
       refusing unreadable base shapes or constraints, conflicting duplicates, an empty

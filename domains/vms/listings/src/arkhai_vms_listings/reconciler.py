@@ -7,8 +7,11 @@ from dataclasses import dataclass, field
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
+from market_capability_admissibility import AdmissibilityProblem, Declaration, ResolvedPolicy
+
 from arkhai_vms import (
     DIMENSION_KEYS,
+    gpu_count_shapes,
     listing_pool_key,
     listing_resource_key,
     listing_shape_key,
@@ -20,6 +23,8 @@ from arkhai_vms_listings.listing_shapes import (
     SHAPE_SOURCE_DEFAULT,
     SHAPE_SOURCE_OVERRIDE,
     ResolvedShape,
+    ShapeResolution,
+    default_only_policy,
     resolve_shape,
     resolve_vm_listing_shapes,
 )
@@ -651,6 +656,8 @@ class _SiteDerivationReport:
     members_without_gpu_count: dict[str, str] = field(default_factory=dict)
     members_without_resource_type: dict[str, str] = field(default_factory=dict)
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
+    inadmissible_listing_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    unusable_shape_constraints: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unreadable_asking_rates: dict[str, list[str]] = field(default_factory=dict)
     unpublished_asking_rates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     infeasible_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -675,6 +682,12 @@ class _SiteDerivationReport:
                 sorted(self.members_without_resource_type.items())
             ),
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
+            "inadmissible_listing_shapes": dict(
+                sorted(self.inadmissible_listing_shapes.items())
+            ),
+            "unusable_shape_constraints": dict(
+                sorted(self.unusable_shape_constraints.items())
+            ),
             "unreadable_asking_rates": dict(sorted(self.unreadable_asking_rates.items())),
             "unpublished_asking_rates": dict(sorted(self.unpublished_asking_rates.items())),
             "infeasible_shapes": dict(sorted(self.infeasible_shapes.items())),
@@ -757,6 +770,29 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             site_id,
             pool_id,
             "; ".join(problems),
+        )
+    for pool_id, findings in current["inadmissible_listing_shapes"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states %d shape(s) whose offer its "
+            "admissibility policy excludes; they are not published (%s)",
+            site_id,
+            pool_id,
+            len(findings),
+            "; ".join(
+                problem["message"] for finding in findings for problem in finding["problems"]
+            ),
+        )
+    for pool_id, findings in current["unusable_shape_constraints"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states %d listing(s) whose "
+            "admissibility cannot be computed; they are not published (%s)",
+            site_id,
+            pool_id,
+            len({finding["shape_digest"] for finding in findings}),
+            "; ".join(
+                f"{finding['tier']} {', '.join(finding['paths'])}: {finding['problem']}"
+                for finding in findings
+            ),
         )
     for pool_id, problems in current["unreadable_asking_rates"].items():
         logger.warning(
@@ -883,6 +919,11 @@ class PoolHintResolutionSettings:
     own values, not a site's; defaulted here only so every caller doesn't
     need to construct empty ones. `family_rate_defaults` uses the pricing
     hint's family-grouped nesting.
+
+    `admissibility_default` is the storefront's parsed
+    ``[admissibility.defaults.vm]``, the lower tier of every listing's
+    admissibility policy and the whole policy of a generated or local-table
+    listing; ``None`` when the storefront configures none.
     """
 
     accept_pool_declared_sla: bool = False
@@ -890,6 +931,7 @@ class PoolHintResolutionSettings:
     gpu_pricing_defaults_by_model: Mapping[str, Any] = None  # type: ignore[assignment]
     gpu_pricing_flat_default: Any = None
     family_rate_defaults: Mapping[str, Any] = None  # type: ignore[assignment]
+    admissibility_default: Declaration | None = None
 
     def __post_init__(self) -> None:
         # dataclass(frozen=True) needs object.__setattr__ to fill in
@@ -1025,7 +1067,7 @@ def _projected_pool_rows(
     resolution = resolve_vm_listing_shapes(
         policy_tags,
         [members_by_id[usage.resource_id] for usage in usages],
-        configured_default=None,
+        configured_default=hint_resolution.admissibility_default,
         override_shapes=override.get("listing_shapes") if override else None,
     )
     if resolution.unreadable:
@@ -1037,6 +1079,13 @@ def _projected_pool_rows(
         ]
         holds.add(("pool", site_id, pool_id))
         return []
+
+    # Every declaration was read, so a listing whose policy cannot be computed,
+    # or whose offer its own policy excludes, is not derived and an open
+    # listing for it closes, while the pool's other listings publish. Holding
+    # it instead would keep advertising what the storefront's policy may
+    # exclude. See openspec/specs/storefront-publication/spec.md#requirement-a-vm-listing-whose-admissibility-cannot-be-computed-closes.
+    shapes = _admissible_shapes(resolution, pool_id=pool_id, report=report)
 
     # Asking rates hold the pool on the same terms as shapes: a rate the seller
     # believes they published is not silently dropped to a lower tier.
@@ -1050,7 +1099,7 @@ def _projected_pool_rows(
         ]
         holds.add(("pool", site_id, pool_id))
         return []
-    unpublished_rates = rates.unpublished(shape.digest for shape in resolution.shapes)
+    unpublished_rates = rates.unpublished(shape.digest for shape in shapes)
     if unpublished_rates:
         report.unpublished_asking_rates[pool_id] = [
             {"shape_digest": digest, "shape": shape}
@@ -1178,14 +1227,14 @@ def _projected_pool_rows(
             config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
             flat_default=hint_resolution.gpu_pricing_flat_default,
         )
-        for model in sorted({shape.gpu_model for shape in resolution.shapes})
+        for model in sorted({shape.gpu_model for shape in shapes})
     }
     # Family rates resolve per model for the same reason: the GPU family is
     # keyed by model. They resolve on this projection path only; the local-table
     # path is flat-priced, as overrides are inactive there.
     family_rates_by_model: dict[str, Mapping[str, Any]] = {}
     unreadable_rates: list[str] = []
-    for model in sorted({shape.gpu_model for shape in resolution.shapes}):
+    for model in sorted({shape.gpu_model for shape in shapes}):
         family = resolve_family_rates(
             policy_tags,
             gpu_model=model,
@@ -1205,7 +1254,7 @@ def _projected_pool_rows(
         report.unreadable_family_rates[pool_id] = sorted(set(unreadable_rates))
         holds.add(("pool", site_id, pool_id))
         return []
-    for shape in resolution.shapes:
+    for shape in shapes:
         unrated = _families_without_rates(
             shape,
             family_rates_by_model.get(shape.gpu_model) or {},
@@ -1218,7 +1267,7 @@ def _projected_pool_rows(
 
     def _feasible_shapes(members: list[Mapping[str, Any]]) -> tuple[ResolvedShape, ...]:
         feasible: list[ResolvedShape] = []
-        for shape in resolution.shapes:
+        for shape in shapes:
             finding = _judge_members(shape, members)
             if finding is None:
                 feasible.append(shape)
@@ -1230,7 +1279,7 @@ def _projected_pool_rows(
         return tuple(feasible)
 
     shape_fields = {
-        "listing_shapes": resolution.shapes,
+        "listing_shapes": shapes,
         "shape_source": resolution.source,
         "pricing_by_model": pricing_by_model,
         "family_rates_by_model": family_rates_by_model,
@@ -1285,7 +1334,7 @@ def _projected_pool_rows(
             }
         ]
 
-    unserved = [shape for shape in resolution.shapes if shape.digest not in served]
+    unserved = [shape for shape in shapes if shape.digest not in served]
     if resolution.stated:
         for shape in unserved:
             report.infeasible_shapes.setdefault(pool_id, []).append(
@@ -1308,6 +1357,67 @@ def _projected_pool_rows(
                 members=[members_by_id[usage.resource_id] for usage in usages],
             )
     return rows
+
+
+def _admissible_shapes(
+    resolution: ShapeResolution, *, pool_id: str, report: _SiteDerivationReport
+) -> tuple[ResolvedShape, ...]:
+    """The base shapes of the listings a pool may publish, reporting the rest.
+
+    A listing whose policy cannot be computed is reported with each problem's
+    tier, paths, and any conflicting tiers' values or entries. A stated
+    listing whose base shape its policy excludes is reported with its source
+    tier and problems. A generated shape is nobody's statement and is never
+    reported; the generator yields only what the default-only policy admits.
+    """
+    admitted: list[ResolvedShape] = []
+    for listing in resolution.listings:
+        shape = listing.shape
+        if listing.policy is None:
+            report.unusable_shape_constraints.setdefault(pool_id, []).extend(
+                {
+                    "tier": problem.tier,
+                    "shape_digest": shape.digest,
+                    "shape": _shape_dict(shape),
+                    "paths": list(problem.paths),
+                    "code": problem.code.value,
+                    "problem": problem.message,
+                    "bounds": [
+                        {"tier": bound.tier, "bound": bound.bound, "value": bound.value}
+                        for bound in problem.bounds
+                    ],
+                    "entries": list(problem.entries),
+                }
+                for problem in listing.policy_problems
+            )
+            continue
+        problems = listing.policy.admissibility_problems(shape.shape)
+        if problems:
+            if resolution.stated:
+                report.inadmissible_listing_shapes.setdefault(pool_id, []).append(
+                    {
+                        "tier": resolution.source,
+                        "shape_digest": shape.digest,
+                        "shape": _shape_dict(shape),
+                        "problems": [_problem_dict(problem) for problem in problems],
+                    }
+                )
+            continue
+        admitted.append(shape)
+    return tuple(admitted)
+
+
+def _shape_dict(shape: ResolvedShape) -> dict[str, dict[str, Any]]:
+    return {family: dict(fields) for family, fields in shape.shape.items()}
+
+
+def _problem_dict(problem: AdmissibilityProblem) -> dict[str, Any]:
+    return {
+        "tier": problem.tier,
+        "paths": list(problem.paths),
+        "code": problem.code.value,
+        "message": problem.message,
+    }
 
 
 def _shape_listing_resource(
@@ -1522,13 +1632,15 @@ def _parsed_settlements(raw: Any) -> list[dict[str, Any]] | None:
 
 
 def _local_table_shapes(
-    row: Mapping[str, Any], *, declared_range: bool
+    row: Mapping[str, Any], *, declared_range: bool, policy: ResolvedPolicy
 ) -> tuple[ResolvedShape, ...]:
     """GPU-only shapes for a pool read from local tables.
 
     Local tables hold no projected members or hints, so a pool's shapes are the
     default GPU-only shapes for its one model, ranged over what its members make
-    available. A pool with no model has no shape.
+    available. No hint or override applies here, so ``policy`` is the
+    storefront's configured default alone, and the counts are chosen exactly as
+    the default generator chooses them. A pool with no model has no shape.
     """
     model = row.get("gpu_model")
     if not isinstance(model, str) or not model.strip():
@@ -1538,10 +1650,13 @@ def _local_table_shapes(
         if row.get("capacity_backing") == "unbacked" or declared_range
         else "max_member_available_gpu_count"
     )
-    return tuple(
-        resolve_shape({"gpu": {"count": count, "model": model}})
-        for count in range(1, int(row.get(range_field) or 0) + 1)
-    )
+    # One synthetic member carrying the row's model and range, so the default
+    # generator's own choice of counts applies unchanged.
+    member = {
+        "capacity": {"gpu_count": int(row.get(range_field) or 0)},
+        "attributes": {"gpu_model": model},
+    }
+    return tuple(resolve_shape(shape) for shape in gpu_count_shapes([member], policy))
 
 
 def available_compute_slices(
@@ -1668,6 +1783,7 @@ def available_compute_slices(
     finally:
         conn.close()
 
+    local_policy = default_only_policy(hint_resolution.admissibility_default)
     out: list[dict[str, Any]] = []
     for row in pool_rows:
         if row.get("offering_mode") != "vm":
@@ -1680,7 +1796,9 @@ def available_compute_slices(
         single_resource_id = row.get("single_resource_id")
         shapes = row.get("feasible_shapes")
         if shapes is None:
-            shapes = _local_table_shapes(row, declared_range=declared_range)
+            shapes = _local_table_shapes(
+                row, declared_range=declared_range, policy=local_policy
+            )
         pricing_by_model = row.get("pricing_by_model") or {}
         family_rates_by_model = row.get("family_rates_by_model") or {}
         for shape in shapes:
@@ -1751,6 +1869,7 @@ def current_available_resource_keys(
     holds: set[tuple[str, str, str]] | None = None,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    admissibility_default: Declaration | None,
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1762,7 +1881,10 @@ def current_available_resource_keys(
     # shape, so it is bounded by pool count rather than capacity. Terms never
     # affect a key, which is why none of the key readers take a
     # `hint_resolution` (see
-    # `test_resource_keys_are_identical_regardless_of_hint_resolution`).
+    # `test_resource_keys_are_identical_regardless_of_hint_resolution`). The
+    # configured admissibility default is required instead: it decides which
+    # listings exist, so a reader without it would keep open a listing whose
+    # offer publication no longer advertises.
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path,
@@ -1770,6 +1892,7 @@ def current_available_resource_keys(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        hint_resolution=PoolHintResolutionSettings(admissibility_default=admissibility_default),
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
@@ -1961,6 +2084,7 @@ def stale_open_listing_ids(
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     backed_only: bool,
     shape_feasible: ShapeFeasibility,
+    admissibility_default: Declaration | None,
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
@@ -1970,7 +2094,9 @@ def stale_open_listing_ids(
     source reconciliation (the publication loop) closes any listing whose
     source is gone, while availability reconciliation (capacity events, a
     release, a failed deal) acts only on capacity-backed listings, since no
-    availability figure describes an unbacked one.
+    availability figure describes an unbacked one. ``admissibility_default``
+    is the storefront's configured default, which publication applies, so a
+    listing whose offer it excludes is stale here too.
     """
 
     holds: set[tuple[str, str, str]] = set()
@@ -1983,6 +2109,7 @@ def stale_open_listing_ids(
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
+        admissibility_default=admissibility_default,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(
@@ -2005,6 +2132,7 @@ def closed_available_listing_ids(
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    admissibility_default: Declaration | None,
 ) -> list[str]:
     """Return closed capacity-backed VM listings that may reopen now.
 
@@ -2017,7 +2145,8 @@ def closed_available_listing_ids(
     not close it, its source is not held, and its published identity and its
     binding's backing still match what its source derives. Every availability
     reopen shares this predicate, so a listing closed because its source changed
-    is not reopened by a capacity event that happens to free its slice.
+    is not reopened by a capacity event that happens to free its slice, nor
+    one whose offer ``admissibility_default`` excludes.
     """
     holds: set[tuple[str, str, str]] = set()
     slices: dict[str, dict[str, Any]] = {}
@@ -2027,6 +2156,7 @@ def closed_available_listing_ids(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        hint_resolution=PoolHintResolutionSettings(admissibility_default=admissibility_default),
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,

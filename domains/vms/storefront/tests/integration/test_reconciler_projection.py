@@ -23,7 +23,12 @@ from arkhai_vms_listings.listing_comparison import (
     refreshed_listing_resource,
 )
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
-from arkhai_vms_listings.reconciler import PoolHintResolutionSettings, derivation_reports
+from arkhai_vms_listings.reconciler import (
+    PoolHintResolutionSettings,
+    derivation_reports,
+    stored_listing_key,
+)
+from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_pool_overrides import (
     PoolOverrideRecord,
     SQLitePoolOverrideStore,
@@ -339,3 +344,24 @@ def test_a_rate_change_or_removal_refreshes_in_place(db_path):
             stored_resource=stored, fresh_resource=fresh, binding_backing="backed"
         )
         assert refreshed.get("asking_rate") == fresh.get("asking_rate")
+
+
+def test_a_constrained_shapes_stored_key_is_the_one_the_inventory_guard_derives(db_path):
+    """Publication binds a constrained shape by its base shape, so the key its
+    binding records is the key the guard's declared re-derivation produces."""
+    pool = _shaped_pool(
+        "gpu", [_member("m1", capacity=_BIG)],
+        shapes=[{"gpu": {"model": "H100", "count": {"offer": 2, "max": 4}},
+                 "memory": {"gib": {"max": 512}}}],
+    )
+    projection = {"site-a": [pool]}
+    (published,) = available_compute_slices(
+        db_path, home_site="site-a", site_pool_projection=projection,
+    )
+    binding = prepare_vm_listing_binding(listing_id="constrained", candidate=published)
+
+    (rederived,) = available_compute_slices(
+        db_path, home_site="site-a", site_pool_projection=projection, declared_range=True,
+    )
+    stored = stored_listing_key(binding.source_envelope_json, {}, "site-a")
+    assert stored == published["resource_key"] == rederived["resource_key"]

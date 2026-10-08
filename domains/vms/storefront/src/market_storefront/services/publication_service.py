@@ -163,6 +163,7 @@ async def close_stale_compute_listings_after_capacity_change(
         site_capacity_buckets=site_capacity_buckets,
         backed_only=True,
         shape_feasible=vm_shape_feasibility(),
+        admissibility_default=None,
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:
@@ -201,6 +202,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         site_capacity_buckets=site_capacity_buckets,
         shape_feasible=vm_shape_feasibility(),
         configured_sites=configured_sites,
+        admissibility_default=None,
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:

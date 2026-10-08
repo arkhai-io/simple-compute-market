@@ -320,6 +320,7 @@ async def _release_capacity(
                 ),
                 shape_feasible=vm_shape_feasibility(),
                 configured_sites=runtime.site_ids,
+                admissibility_default=None,
             )
         for listing_id in reopened:
             await db.update_listing(
