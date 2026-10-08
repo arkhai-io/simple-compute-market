@@ -1,0 +1,19 @@
+# Overlay for a local development deployment (`make deploy-local`), layered on
+# values.yaml. Persistent volumes are not retained when the release is
+# uninstalled, so uninstalling and deploying again starts every service from no
+# state rather than from whatever an earlier deployment of other code wrote.
+storefront:
+  persistence:
+    retainOnUninstall: false
+provisioning:
+  persistence:
+    retainOnUninstall: false
+registry:
+  persistence:
+    retainOnUninstall: false
+api-credits-registry:
+  persistence:
+    retainOnUninstall: false
+bare-metal-storefront:
+  persistence:
+    retainOnUninstall: false

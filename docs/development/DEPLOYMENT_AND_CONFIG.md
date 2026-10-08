@@ -293,6 +293,17 @@ their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
 so SQLite can create its database without a root startup process. Bind mounts
 and existing volumes must already provide write access to the runtime user.
 
+The Helm charts annotate each service's PVC `helm.sh/resource-policy: keep`, so
+`helm uninstall` leaves the volume and a reinstall rebinds it and recovers its
+state. A chart's `persistence.retainOnUninstall`, `true` by default, controls the
+annotation. `helm/local-values.yaml` sets it `false` for every persistent chart,
+and `make -C helm deploy-local` layers that overlay on `values.yaml`: a local
+deployment's volumes are deleted with the release, so uninstalling and deploying
+again starts every service from no state rather than from a database an earlier
+deployment of other code migrated. A PVC whose release was last installed or
+upgraded without the overlay still carries the annotation, and survives an
+uninstall until it is deleted by hand.
+
 ### Combined compute-family storefront
 
 The storefront image installs the shared `arkhai-core-storefront` shell plus

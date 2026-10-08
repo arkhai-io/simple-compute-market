@@ -16,12 +16,20 @@ commit; it is untracked, so the checkout is unchanged.
 
 - `local` runs `make check-packaging`, then `make test`.
 - `helm` builds the images, runs the chart render checks with the chart-to-loader
-  check able to run against this commit's code, deploys and forwards the charts, runs the end-to-end pipeline's
-  scenarios against the forwarded services, and always unforwards.
+  check able to run against this commit's code, replaces any installed release
+  with a local deployment that starts from no persistent state, forwards it, runs
+  the end-to-end pipeline's scenarios against the forwarded services, and always
+  unforwards.
 
-Each part stops at its first failure, keeps every step's output under
-`.snapshot/validation/<short commit>/<part>/`, prints a summary, and writes it as
-`summary.json` beside the logs for the validation report.
+Validation has full control of the environment it runs in: it stops port-forwards
+and uninstalls the release it finds without asking. What it never changes is the
+commit.
+
+Each part stops at its first failure and keeps each attempt's output apart, under
+`.snapshot/validation/<short commit>/<part>/<attempt>/`, so a rerun never overwrites
+the evidence of the run before it. It prints a summary and writes it as
+`summary.json` beside the logs for the validation report. A step's result is
+`passed`, `failed`, or `warning`; a warning does not fail the part.
 
 Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
 slice".
@@ -64,6 +72,11 @@ HELM_EXCLUSIONS = {
 # background, so the scenarios wait for every port to accept a connection.
 FORWARDED_PORTS = (8545, 8080, 8001, 8081)
 FORWARD_WAIT_SECONDS = 60.0
+# How long an uninstalled release's volumes may take to be deleted.
+VOLUME_WAIT_SECONDS = 120.0
+CREDENTIAL_HELPER_TIMEOUT = 5.0
+# How long stopped port-forwards may take to release their ports.
+PORT_RELEASE_SECONDS = 10.0
 TAIL_LINES = 40
 DIST_CLEAN = ("dist-clean", ["make", "dist-clean"])
 _SKIP_LINE = re.compile(r"^skip:.*$", re.M)
@@ -75,6 +88,8 @@ Runner = Callable[[Sequence[str], Path], int]
 # Reads a command's standard output; raises ValidationError when the command fails.
 Reader = Callable[[Sequence[str]], str]
 PortProbe = Callable[[int], bool]
+# Returns a warning when the Docker credential helper does not answer, else None.
+CredentialProbe = Callable[[], "str | None"]
 
 
 class ValidationError(RuntimeError):
@@ -95,6 +110,7 @@ class Step:
 class Summary:
     part: str
     commit: str
+    attempt: int = 1
     passed: bool = True
     steps: list[Step] = field(default_factory=list)
     not_run: dict[str, str] = field(default_factory=dict)
@@ -119,6 +135,33 @@ def _read(command: Sequence[str]) -> str:
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or "").strip()
         raise ValidationError(f"{' '.join(command)} failed: {detail}") from exc
+
+
+def _docker_config() -> Path:
+    return Path(os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker") / "config.json"
+
+
+def _credential_helper_warning(config: Path | None = None,
+                               timeout: float = CREDENTIAL_HELPER_TIMEOUT) -> str | None:
+    config = config or _docker_config()
+    try:
+        store = json.loads(config.read_text("utf-8")).get("credsStore")
+    except (OSError, ValueError):
+        return None
+    if not store:
+        return None
+    helper = f"docker-credential-{store}"
+    try:
+        status = subprocess.run([helper, "list"], capture_output=True, timeout=timeout).returncode
+        problem = None if status == 0 else f"{helper} exited {status}"
+    except subprocess.TimeoutExpired:
+        problem = f"{helper} did not answer within {timeout:g}s"
+    except OSError as exc:
+        problem = f"{helper} could not run: {exc}"
+    if problem is None:
+        return None
+    return (f"{problem}; image builds look up registry credentials through it and may fail. "
+            f"The credsStore setting in {config} routes even public pulls through it")
 
 
 def _port_open(port: int) -> bool:
@@ -159,8 +202,12 @@ class Validation:
         self.read = read
         self.clock = clock
         commit = read(["git", "rev-parse", "HEAD"]).strip()
-        self.summary = Summary(part=part, commit=commit)
-        self.log_dir = root / LOG_ROOT / commit[:12] / part
+        part_dir = root / LOG_ROOT / commit[:12] / part
+        earlier = [int(entry.name) for entry in part_dir.glob("*")
+                   if entry.is_dir() and entry.name.isdigit()]
+        attempt = max(earlier, default=0) + 1
+        self.summary = Summary(part=part, commit=commit, attempt=attempt)
+        self.log_dir = part_dir / str(attempt)
 
     @property
     def failed(self) -> bool:
@@ -172,6 +219,9 @@ class Validation:
 
     def note(self, name: str, detail: str) -> None:
         self.summary.steps.append(Step(name, "passed", detail=detail))
+
+    def warn(self, name: str, detail: str) -> None:
+        self.summary.steps.append(Step(name, "warning", detail=detail))
 
     def clean(self, name: str) -> bool:
         try:
@@ -228,8 +278,12 @@ def validate_local(validation: Validation) -> Summary:
 def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT,
                   exclusions: dict[str, str] = HELM_EXCLUSIONS,
                   probe: PortProbe = _port_open, sleep: Callable[[float], None] = time.sleep,
-                  forward_wait: float = FORWARD_WAIT_SECONDS) -> Summary:
-    if not validation.clean("clean before") or not _helm_preflight(validation, context):
+                  forward_wait: float = FORWARD_WAIT_SECONDS,
+                  volume_wait: float = VOLUME_WAIT_SECONDS,
+                  credentials: CredentialProbe = _credential_helper_warning) -> Summary:
+    if (not validation.clean("clean before")
+            or not _helm_preflight(validation, context, credentials)
+            or not _free_ports_and_volumes(validation, probe, sleep)):
         return validation.finish()
     try:
         markers = pipeline_markers(validation.read)
@@ -262,7 +316,7 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
     if validation.failed:
         return _after_helm(validation)
 
-    if validation.step("deploy", ["make", "-C", "helm", "deploy"]).result != "passed":
+    if not _replace_release(validation, sleep, volume_wait):
         return _after_helm(validation)
     try:
         if (validation.step("forward", ["make", "-C", "helm", "forward"]).result == "passed"
@@ -282,7 +336,100 @@ def _after_helm(validation: Validation) -> Summary:
     return validation.finish()
 
 
-def _helm_preflight(validation: Validation, context: str) -> bool:
+def _free_ports_and_volumes(validation: Validation, probe: PortProbe,
+                            sleep: Callable[[float], None]) -> bool:
+    """Before anything slow: stop the forwards, and refuse a volume no uninstall removes."""
+    if validation.step("stop forwards", ["make", "-C", "helm", "unforward"]).result != "passed":
+        return False
+    # `unforward` signals the port-forwards and returns; they release their ports
+    # as they exit.
+    deadline = validation.clock() + PORT_RELEASE_SECONDS
+    while held := [port for port in FORWARDED_PORTS if probe(port)]:
+        if validation.clock() >= deadline:
+            validation.fail("ports free",
+                            f"ports {', '.join(map(str, held))} are bound by something other "
+                            "than this release's port-forwards; `ss -ltnp` names the process")
+            return False
+        sleep(0.5)
+    validation.note("ports free", ", ".join(map(str, FORWARDED_PORTS)))
+    try:
+        release, namespace = _release(validation)
+        listed = validation.read(_volume_query(release, namespace, RETENTION_COLUMN)).split()
+    except ValidationError as exc:
+        validation.fail("retained volumes", str(exc))
+        return False
+    retained = [entry.split("=", 1)[0] for entry in listed if entry.endswith("=keep")]
+    if retained:
+        validation.fail("retained volumes",
+                        f"{', '.join(retained)} carry helm.sh/resource-policy: keep, so "
+                        f"uninstalling {release} would leave their state for the next deploy; "
+                        "they were last applied without the local overlay, and are settled "
+                        "with the owner before anything is built")
+        return False
+    validation.note("retained volumes", f"none for {release} in {namespace}")
+    return True
+
+
+# A volume's name and its retention annotation, one per line, as name=policy.
+RETENTION_COLUMN = ("jsonpath={range .items[*]}{.metadata.name}="
+                    "{.metadata.annotations.helm\\.sh/resource-policy}{\"\\n\"}{end}")
+
+
+def _volume_query(release: str, namespace: str, output: str = "name") -> list[str]:
+    return ["kubectl", "get", "pvc", "--namespace", namespace, "--selector",
+            f"app.kubernetes.io/instance={release}", "--output", output]
+
+
+def _release(validation: Validation) -> tuple[str, str]:
+    return _helm_setting(validation, "RELEASE"), _helm_setting(validation, "NAMESPACE")
+
+
+def _replace_release(validation: Validation, sleep: Callable[[float], None],
+                     volume_wait: float) -> bool:
+    """Uninstall the release, wait for its volumes to go, and deploy it afresh."""
+    if validation.step("undeploy", ["make", "-C", "helm", "undeploy"]).result != "passed":
+        return False
+    if not _wait_for_no_volumes(validation, sleep, volume_wait):
+        return False
+    return validation.step("deploy-local", ["make", "-C", "helm", "deploy-local"]).result == "passed"
+
+
+def _helm_setting(validation: Validation, name: str) -> str:
+    return validation.read(["make", "-s", "--no-print-directory", "-C", "helm",
+                            "--eval", "print-%: ; @echo $($*)", f"print-{name}"]).strip()
+
+
+def _wait_for_no_volumes(validation: Validation, sleep: Callable[[float], None],
+                         wait: float) -> bool:
+    # A volume that outlives the uninstall would hand the next deploy state another
+    # commit wrote. Retained volumes were refused before the build, so what remains
+    # here is deletion still in progress.
+    try:
+        release, namespace = _release(validation)
+    except ValidationError as exc:
+        validation.fail("release volumes", str(exc))
+        return False
+    command = _volume_query(release, namespace)
+    deadline = validation.clock() + wait
+    while True:
+        try:
+            remaining = validation.read(command).split()
+        except ValidationError as exc:
+            validation.fail("release volumes", str(exc))
+            return False
+        if not remaining:
+            validation.note("release volumes", f"none remain for {release} in {namespace}")
+            return True
+        if validation.clock() >= deadline:
+            validation.fail("release volumes",
+                            f"{', '.join(remaining)} still exist {wait:g}s after uninstalling "
+                            f"{release}; deploying now would hand them to the new release")
+            return False
+        sleep(2.0)
+
+
+def _helm_preflight(validation: Validation, context: str,
+                    credentials: CredentialProbe) -> bool:
     try:
         current = validation.read(["kubectl", "config", "current-context"]).strip()
     except ValidationError as exc:
@@ -300,6 +447,32 @@ def _helm_preflight(validation: Validation, context: str) -> bool:
                         "run; create it with `make init-storefront` and validate again")
         return False
     validation.note("storefront environment", str(STOREFRONT_PYTHON))
+    try:
+        validation.read(["docker", "info", "--format", "{{.ServerVersion}}"])
+    except ValidationError as exc:
+        validation.fail("docker", f"the Docker daemon is not reachable: {exc}")
+        return False
+    validation.note("docker", "the daemon answers")
+    try:
+        nodes = validation.read(["kubectl", "get", "nodes", "--output",
+                                 "jsonpath={range .items[*]}{.metadata.name}="
+                                 "{.status.conditions[?(@.type==\"Ready\")].status}"
+                                 "{\"\\n\"}{end}"]).split()
+    except ValidationError as exc:
+        validation.fail("kube node", str(exc))
+        return False
+    not_ready = [node for node in nodes if not node.endswith("=True")]
+    if not nodes or not_ready:
+        validation.fail("kube node", "no node is Ready" if not nodes
+                        else f"not Ready: {', '.join(not_ready)}")
+        return False
+    validation.note("kube node", ", ".join(nodes))
+    if validation.step("local secrets",
+                       ["make", "-C", "helm", "check-local-secrets"]).result != "passed":
+        return False
+    warning = credentials()
+    if warning:
+        validation.warn("credential helper", warning)
     return True
 
 
@@ -319,8 +492,8 @@ def _wait_for_ports(validation: Validation, probe: PortProbe,
 
 
 def render(summary: Summary) -> str:
-    lines = [f"{summary.part} validation of {summary.commit[:12]}: "
-             f"{'PASSED' if summary.passed else 'FAILED'}"]
+    lines = [f"{summary.part} validation of {summary.commit[:12]}, attempt "
+             f"{summary.attempt}: {'PASSED' if summary.passed else 'FAILED'}"]
     for step in summary.steps:
         timing = f" ({step.seconds:g}s)" if step.log else ""
         lines.append(f"  {step.result:<7} {step.name}{timing}")
@@ -354,7 +527,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(render(summary))
-    print(f"Summary written to {validation.log_dir.relative_to(ROOT) / 'summary.json'}")
+    print(f"Attempt {summary.attempt} logs and summary.json: "
+          f"{validation.log_dir.relative_to(ROOT)}")
     return 0 if summary.passed else 1
 
 

@@ -13,7 +13,9 @@ EVM_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
+RETAINED_RENDERED="$(mktemp)"
+LOCAL_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED" "$RETAINED_RENDERED" "$LOCAL_RENDERED"' EXIT
 
 # Render one release into a file. A render that fails stops the script with
 # Helm's own message rather than exiting silently under `set -e`.
@@ -53,6 +55,16 @@ render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
 render "$BARE_METAL_RENDERED" "$RELEASE-bare-metal" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --set 'bare-metal-storefront.enabled=true'
+# Every persistent chart enabled, with and without the local overlay.
+render "$RETAINED_RENDERED" "$RELEASE-retained" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set 'bare-metal-storefront.enabled=true' \
+    --set 'api-credits-registry.enabled=true'
+render "$LOCAL_RENDERED" "$RELEASE-local" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/local-values.yaml" \
+    --set 'bare-metal-storefront.enabled=true' \
+    --set 'api-credits-registry.enabled=true'
 
 errors=0
 fail() {
@@ -147,6 +159,28 @@ expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "d
 expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
 expect_absent "$DEFAULT_RENDERED" 'charts/bare-metal-storefront/' "default render omits the dedicated bare-metal storefront"
 expect_present "$BARE_METAL_RENDERED" 'charts/bare-metal-storefront/templates/deployment\.yaml' "dedicated bare-metal storefront can be enabled explicitly"
+# PVCs are retained on uninstall unless a chart sets persistence.retainOnUninstall
+# false, as the local overlay does for every persistent chart. Each PVC document is
+# checked on its own, by name, so one chart's missing annotation cannot hide behind
+# another resource's.
+pvc_retention() {
+    awk '
+        /^---/ { if (pvc) print name "=" keep; pvc = 0; keep = "absent"; name = "" }
+        /^kind: PersistentVolumeClaim/ { pvc = 1 }
+        /^  name: / && name == "" { name = $2 }
+        /helm\.sh\/resource-policy: keep/ { keep = "keep" }
+        END { if (pvc) print name "=" keep }
+    ' "$1"
+}
+expected_pvcs="api-credits-registry-data bare-metal-storefront-data provisioning-data registry-data storefront-bob-data"
+for suffix in $expected_pvcs; do
+    grep -qx "$RELEASE-retained-$suffix=keep" <(pvc_retention "$RETAINED_RENDERED") \
+        && pass "$suffix is retained on uninstall by default" \
+        || fail "$suffix is retained on uninstall by default"
+    grep -qx "$RELEASE-local-$suffix=absent" <(pvc_retention "$LOCAL_RENDERED") \
+        && pass "$suffix is deleted on uninstall under the local overlay" \
+        || fail "$suffix is deleted on uninstall under the local overlay"
+done
 expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"

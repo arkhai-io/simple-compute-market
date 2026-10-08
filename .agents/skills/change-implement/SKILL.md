@@ -72,6 +72,11 @@ Work through the section's tasks in order. For each:
   that differed from the plan. Name a suite by what it actually exercises: a test
   that calls the reconciler directly is not application integration, and a test that
   shows a listing becomes a candidate to close does not show it closes.
+- Before the section's last task is checked, confirm or correct the end-to-end
+  scenarios its plan says cover it, in the section's notes: the pytest markers in
+  `e2e-tests/` that exercise its behaviour once deployed, including any the section
+  added, or that none does. Validation reads this to say whether the pipeline's
+  result is evidence for the section.
 
 Never delete or rewrite a completed task; amend it with a correction note when
 something it established changes.
@@ -153,6 +158,8 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — the pre-review validation of the commits since the last
-  review, then one implementation review covering every section they contain, and
-  the next section.
+- what comes next — validation (`make validate CHANGE=<change>`) and one
+  implementation review (`make review CHANGE=<change> KIND=implementation`) of the
+  commits since the last review, run side by side; the owner's own notes on the
+  diff meanwhile; then triage of the round together with `change-triage`; then the
+  next section.

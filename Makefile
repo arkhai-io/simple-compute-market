@@ -838,7 +838,7 @@ HELM_CONTEXT ?= docker-desktop
 validate-local: ## Validate HEAD without changing the checkout: check-packaging, then make test
 	@python3 scripts/validate_slice.py local
 
-validate-helm: ## Validate HEAD on the Helm charts: render checks, images, deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+validate-helm: ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
 	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
 
 check-push-ready: ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
@@ -847,10 +847,10 @@ check-push-ready: ## Fail unless HEAD is a clean, attached change branch that ma
 push-branch: ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
 	@python3 scripts/check_push_ready.py push
 
-validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change>)
+validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
-	@claude "/change-validate $(CHANGE)"
+	@claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)"
 
 run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \

@@ -105,7 +105,9 @@ directly in the repository is told to write tombstones instead of deleting files
 - [x] Existing subsystem specification — `openspec/specs/planning-governance/spec.md`.
 - [x] New subsystem specification — `openspec/specs/change-workflow/spec.md`.
 - [x] Contributor guidance — `AGENTS.md`, `openspec/README.md`, `docs/agents/`, and
-      `docs/development/TESTING.md` (end-to-end run selection).
+      `docs/development/TESTING.md` (end-to-end run selection), and
+      `docs/development/DEPLOYMENT_AND_CONFIG.md` (PVC retention and the local
+      deploy overlay).
 
 ### Knowledge to promote
 

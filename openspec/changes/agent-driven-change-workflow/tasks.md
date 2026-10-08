@@ -252,7 +252,8 @@ a committed slice and never alters it"). Every script below is tested in
 `scripts/tests/` with an injected command runner, at unit level, except where a
 real repository is the lowest level that proves the behaviour, and except
 `fetch-e2e-logs.py`, whose existing tests patch `subprocess.run` and were extended
-in that form rather than converted.
+in that form rather than converted. No end-to-end scenario covers this section: it
+is the tooling that runs them, proven by its own suites and by 8.6.
 
 - [x] 8.1 Add `make validate-local` (`scripts/validate_slice.py`, tests in
       `scripts/tests/test_validate_slice.py`): `make check-packaging`, then
@@ -261,7 +262,8 @@ in that form rather than converted.
       `.snapshot/validation/<commit>/`; and a summary of each step's result,
       duration, and a failing step's output tail.
       Done; the part starts with `make dist-clean` (`design.md`), and logs go
-      under `.snapshot/validation/<short commit>/local/`. Unit
+      under `.snapshot/validation/<short commit>/local/` (corrected by 8.8: one
+      numbered directory per attempt beneath it). Unit
       (`test_validate_slice.py`, fake runner and reader injected): the step order
       against fakes, the first-failure stop with its output tail, a dirty tree
       (the fake answers only `git status --porcelain --untracked-files=all`)
@@ -277,6 +279,9 @@ in that form rather than converted.
       run with `make test-module` and reported as not run; `make unforward`
       whatever failed; a clean worktree afterwards. The list starts from the
       services the default chart values do not deploy and is confirmed by 8.6.
+      Corrected by 8.10 and 8.11: preflights now include Docker, the node, the
+      Secrets, freed ports, and retained volumes, and `make deploy` became the
+      uninstall-then-`deploy-local` sequence.
       Done, in `validate_slice.py`, also starting with `make dist-clean`, then
       `make build-dev` and a reinstall of the VM storefront environment before the
       render checks, so the loader check runs this commit's code. Unit: the step order, the exclusions reported as
@@ -371,44 +376,99 @@ in that form rather than converted.
       end-to-end stack campaign, with `skip_specs` set as `add-full-stack-ci-job`
       has; like it, `openspec validate --strict` reports the missing delta until
       design either adds one or confirms none is owed.
-- [ ] 8.8 Validation outcomes and attempts: the record's result, overall and per
+- [x] 8.8 Validation outcomes and attempts: the record's result, overall and per
       part, is `passed`, `failed`, or `inconclusive` (`design.md`, "Validation
       controls the environment and settles environmental failures");
       `validate_slice.py` writes each attempt to
       `.snapshot/validation/<short commit>/<part>/<n>/` and prints its path; tests
       for attempt numbering. Amend `change-validate`'s record template and
       `run_change_review.py`'s pre-closeout check (9.3) to accept only `passed`.
-- [ ] 8.9 Environmental failures in the session: amend `change-validate` to stop on
+      Done. Unit: two attempts of one part write `1/` and `2/`, each with its own
+      `summary.json` carrying its `attempt`; the printed path is not asserted. The
+      outcome is the skill's, in the record template, since only the diagnosis
+      tells an environmental fault from a broken build; 9.3 now names the
+      `passed` result.
+- [x] 8.9 Environmental failures in the session: amend `change-validate` to stop on
       a failure diagnosed as environmental with good confidence, put the evidence
       and remedy to the owner, rerun the part as a new attempt on the owner's word,
       record `inconclusive` when the owner declines, never treat an unknown cause
       as environmental, and report validation-tooling defects in a section of the
       record about the validation. State the full-control premise in the skill.
-- [ ] 8.10 Fresh Helm state: add `persistence.retainOnUninstall` (default `true`)
+      Done in the skill: settle-with-the-owner step, an `## Environment` section
+      for environmental failures, `## Failures` only for commit or unknown causes,
+      `## About the validation` for tooling defects, and the full-control premise.
+      Skill text; proven only by 8.6's re-run.
+- [x] 8.10 Fresh Helm state: add `persistence.retainOnUninstall` (default `true`)
       to the storefront, provisioning, registry, and bare-metal storefront charts,
       rendering `helm.sh/resource-policy: keep` only when it is true, with render
       tests for both settings; add `helm/local-values.yaml` setting it `false` and
       `make -C helm deploy-local`; the Helm part uninstalls an existing release,
       waits for its PVCs to go, stops on a surviving one, and deploys with
       `deploy-local`. Tests for the sequence and the surviving-PVC stop.
-- [ ] 8.11 Preflights: `gh auth status` before the push (skill); in the Helm part,
+      Done. Chart render tests (`helm/scripts/test-render.sh`, needs Helm, no
+      cluster): every persistent chart enabled renders five PVCs, all retained by
+      default and none under `local-values.yaml`; breaking the registry template's
+      condition made the overlay check fail, then restored. `deploy` takes
+      `EXTRA_VALUES`, `deploy-local` passes the overlay, `undeploy` uninstalls with
+      `--wait --ignore-not-found`, and `stop` is now its alias. The condition reads
+      the value as a string, so `--set-string …=false` turns retention off too.
+      Each PVC is checked by name in both renders; breaking the storefront
+      template's condition failed exactly its check. Unit (fakes that record the
+      cluster queries and port probes with the commands, and model the forwards
+      and volumes as state): before the build, the forwards stopped, their ports
+      polled until free, and a PVC carrying `keep` refused; after it, `undeploy`,
+      the volumes polled until gone (one removed on the second poll), then
+      `deploy-local`; a volume still present at the deadline stops the deploy. The PVC query
+      selects `app.kubernetes.io/instance=<release>`, which every release PVC
+      carries; release and namespace are read from `helm/Makefile`. The bare-metal
+      storefront schema gains the property; the other charts' schemas do not
+      constrain `persistence`. `DEPLOYMENT_AND_CONFIG.md` describes the
+      convention. Not yet run against a cluster.
+- [x] 8.11 Preflights: `gh auth status` before the push (skill); in the Helm part,
       `docker info`, a `Ready` node, `make -C helm check-local-secrets` (a new
       target over the chart's eight out-of-band Secret names, with a test that each
       name appears in `helm/values.yaml`), and the forwarded ports free after
       `unforward`; a credential-helper response check that warns only. Tests for
       each refusal and the warning.
-- [ ] 8.12 Coverage: amend `change-validate` to write the record's coverage section
+      Done. With the default values a deploy reads six out-of-band Secrets, not
+      eight (`arkhai-api-credits-registry-identity` joins them when
+      `api-credits-registry` is enabled):
+      `arkhai-e2e-credentials` and `arkhai-buyer-profile-credential` (and the
+      `arkhai-buyer-profiles` PVC) are read only by the e2e-tests chart's
+      `helm test` hook, which validation does not run. `check-local-secrets`
+      passes on `docker-desktop`. Unit (fakes): Docker unreachable, a node not
+      Ready, no node, and a missing Secret each stop before `make dist-clean`; a
+      silent credential helper warns and the part still passes; a helper that times
+      out, exits non-zero, or cannot run is each named, and `$DOCKER_CONFIG` is
+      honoured; each listed Secret appears in
+      `helm/values.yaml`. The node query and the helper check were also run
+      against the live machine; the retention query found three `keep` PVCs on the
+      owner's current `docker-desktop` release, so a validation started now stops
+      there and asks. `gh auth status` is a skill step. The ports and retained-volume
+      checks run before the build, after `unforward`, since validation owns the
+      forwards.
+- [x] 8.12 Coverage: amend `change-validate` to write the record's coverage section
       (scenario, basis, lane, result; or that none covers the change), reading the
       scenarios from the change's task notes and adding what the diff shows; amend
       `change-plan` to name the end-to-end scenarios each section's verification
       point relies on, and `change-implement` to confirm or correct them in the
       section's notes before committing.
-- [ ] 8.13 `make validate CHANGE=<change> HELM_ALL_SCENARIOS=1` passes the
+      Done in the three skills. `change-plan`'s verification point now names the
+      covering scenarios, replacing its rule on when a section owes the Helm
+      checks, which predated validation running them on every commit;
+      `change-implement` confirms them before the last task is checked, and its
+      closing report now describes the round (part of 9.4). Skill text; proven by
+      the next plan and section that use them.
+- [x] 8.13 `make validate CHANGE=<change> HELM_ALL_SCENARIOS=1` passes the
       instruction into the session's prompt, and `change-validate` runs the Helm
       part with it and records which scenarios fail only for a missing service.
-- [ ] 8.14 Record for `capacity-shape-envelope`'s closeout (10.3), to place there:
+      Done. `make validate … HELM_ALL_SCENARIOS=1` opens the session as
+      `/change-validate <change> with HELM_ALL_SCENARIOS=1`; the skill's first step
+      reads it. The Makefile text is asserted; the session behaviour is 8.6's.
+- [x] 8.14 Record for `capacity-shape-envelope`'s closeout (10.3), to place there:
       a namespace per validation, and chart Secrets made optional with the ordinary
       values overlays as fallback.
+      Done: added to 10.3.
 
 ## 8A. Reconcile the development-branch merge
 
@@ -473,10 +533,11 @@ session").
 - [ ] 9.3 In `scripts/run_change_review.py`: allocate a record's number when it is
       written rather than when the run starts, so parallel records never share one;
       and make `KIND=pre-closeout` refuse unless the latest validation record names
-      `HEAD` and passed, overridden by `UNVALIDATED=1`. Tests in
+      `HEAD` and its result is `passed`, overridden by `UNVALIDATED=1`. Tests in
       `scripts/tests/test_run_change_review.py`.
 - [ ] 9.4 Amend `change-implement`'s closing report (review and validation in
-      parallel, the owner's notes, then `make triage`) and `change-review`'s inputs
+      parallel, the owner's notes, then `make triage`; the first three were done
+      in 8.12, `make triage` remains) and `change-review`'s inputs
       (read the validation record of the reviewed commit when one exists; never
       wait for one).
 - [ ] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
@@ -499,6 +560,9 @@ session").
       session each, then
       pre-closeout review and triage, closeout, closeout review and triage, and
       archival.
+      At that closeout, decide where two questions from validating this pilot
+      belong: a kube namespace per validation, and the chart's out-of-band
+      Secrets made optional with the ordinary values overlays as fallback.
 
 ## 11. Shared guidance
 
@@ -535,5 +599,8 @@ session").
       knowledge-to-promote list — `change-workflow` spec and architecture
       companion, the three `planning-governance` requirements, closeout part 6,
       `AGENTS.md`, `docs/agents/change-workflow.md`, the run-selection paragraph of
-      `docs/development/TESTING.md`, and a `change-workflow` row
+      `docs/development/TESTING.md`, the PVC-retention paragraph of
+      `docs/development/DEPLOYMENT_AND_CONFIG.md` (and whether
+      `openspec/specs/deployment-state/architecture.md`'s paragraph on explicit
+      volume choices should cite it), and a `change-workflow` row
       linking the spec and architecture companion in `openspec/specs/README.md`.

@@ -65,6 +65,10 @@ databasePath: /var/lib/arkhai/bare-metal-storefront.db
 
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   existingClaim: ""
   storageClass: ""
   size: 1Gi

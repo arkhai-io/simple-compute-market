@@ -398,7 +398,8 @@ environment. Validation does not build that
 environment: when it is absent, validation fails before running anything and names
 `make init-storefront`. A skip reported by the loader check also fails validation,
 since a skip is how that check stops running without anyone noticing. The part then
-runs `make deploy` and `make forward` in `helm/`, the end-to-end
+replaces the release with a fresh local deployment (below), runs `make forward` in
+`helm/`, the end-to-end
 scenarios against the forwarded services, and `make unforward` afterwards whatever
 failed. It deploys unattended and replaces the release running in the cluster, so
 it refuses a kube context other than `HELM_CONTEXT`, `docker-desktop` by default. A
@@ -414,8 +415,8 @@ explicit list naming the missing service, and the validation report lists it as
 not run against Helm, never as passed. The list is established by running the whole
 set against the charts once, not by inspection, and shrinks as the charts gain what
 the compose stacks have. Bringing the charts to parity, using the compose
-configuration the pipeline already runs, is its own change: this one makes no
-deployment change.
+configuration the pipeline already runs, is its own change: this one changes no
+deployment beyond the local overlay below.
 
 The validation skill reads failing scenarios from the logs rather than reporting
 only an exit status, diagnoses each, and writes `reviews/NN-validation.md`. It
@@ -464,10 +465,11 @@ finding.
 deployment's data; reused, they let a run start from state a different commit
 wrote. Each persistent chart therefore takes `persistence.retainOnUninstall`,
 `true` by default, and `helm/local-values.yaml` sets it `false` for local
-deployments. The Helm part uninstalls any existing release, waits until its PVCs
-are gone, and deploys with `make -C helm deploy-local`; a release PVC that survives
-the uninstall — one created before the overlay — stops validation and is settled
-with the owner as above. Validation keeps the `default` namespace and the Secrets
+deployments. Before anything slow runs, the Helm part refuses a release PVC that
+still carries the annotation — one whose release was last installed or upgraded
+without the overlay, which no uninstall would remove — and settles it with the
+owner as above. After the build it uninstalls the release, waits until its PVCs
+are gone, and deploys with `make -C helm deploy-local`. Validation keeps the `default` namespace and the Secrets
 already in it. A namespace per validation, and chart Secrets that are optional
 with the ordinary values overlays as fallback, are larger questions about
 bootstrapping a local deployment; where they belong is decided at the close of the
@@ -475,8 +477,8 @@ first pilot change.
 
 **Preflights.** Each fails before anything slow runs and names what to fix: `gh`
 authentication before the push; the Docker daemon, a `Ready` kube node, the chart's
-out-of-band Secrets (`make -C helm check-local-secrets`), no release PVC left after
-the uninstall, and the forwarded ports free once `unforward` has run. The Docker
+out-of-band Secrets (`make -C helm check-local-secrets`), no release PVC carrying
+the retention annotation, and the forwarded ports free once `unforward` has run. The Docker
 credential helper answering within a few seconds is a warning only: its failure
 was intermittent, so passing proves little.
 

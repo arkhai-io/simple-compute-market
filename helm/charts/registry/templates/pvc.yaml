@@ -14,8 +14,10 @@ metadata:
   name: {{ include "registry.pvcName" . }}
   labels:
     {{- include "registry.labels" . | nindent 4 }}
+  {{- if ne (toString .Values.persistence.retainOnUninstall) "false" }}
   annotations:
     helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
     - {{ .Values.persistence.accessMode | quote }}

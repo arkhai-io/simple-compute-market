@@ -99,8 +99,10 @@ design.
   when it changes a dependency or lock. A section whose title promises a behavior
   of the running application — publication, a write refused — includes at least one
   application-integration case for it, not only lower-level evidence of its parts;
-- states when it owes the Helm checks: when it touches `helm/`, an image build
-  input, or a service's configuration surface.
+- names the end-to-end scenarios (pytest markers in `e2e-tests/`) that exercise
+  the section's behaviour once deployed, or says that none does and whether one is
+  owed. Validation runs the Helm checks and the pipeline on every commit; it reads
+  this list to report whether the pipeline's result is evidence for the section.
 
 **Order by real dependencies.** Lower layers before the layers composing them —
 foundation kit before kit before domain before composition root — and focused
@@ -135,7 +137,8 @@ Before presenting it:
   repository obligation;
 - no open question has its answer prescribed by a task
   (`openspec/README.md#open-questions-and-prescribed-tasks`);
-- every section has a verification point and a size one session can hold;
+- every section has a verification point, its covering end-to-end scenarios or a
+  statement that none covers it, and a size one session can hold;
 - `openspec validate <change> --strict` passes, and
   `make check-doc-citations CHANGE=<change>` reports only files the change will
   create.
