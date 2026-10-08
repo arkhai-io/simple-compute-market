@@ -553,3 +553,9 @@ Each is checked at closeout against `openspec/changes/` for a change that owns i
   already call the site.
 - The compute schema requires `gpu.count` and `gpu.model`, so a VM or bare-metal listing
   without GPUs cannot be stated.
+- `domains/apicredits/tests/conftest_wheels.py` lists by hand the internal projects whose
+  wheels its install tests build, so every new internal edge beneath the API-credits
+  service breaks it until someone adds the project, as the admissibility kit did. The
+  closure is already in each role's lock, and `scripts/uv_project.py` can map
+  distribution names to project directories, so the list could be derived;
+  `check-uv-setup` covers reinit targets and image installs but not test fixtures.
