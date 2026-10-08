@@ -193,7 +193,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
-| Live Arkhai payment qualification across VM delivery, API-credit issuance, and bare-metal selected-site access/teardown | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Live Arkhai payment qualification across VM delivery, API-credit issuance, and bare-metal selected-site access/teardown | [`settle-through-arkhai-payments`](../../openspec/changes/archive/2026-10-08-settle-through-arkhai-payments/) |
 | Production buyers build storefront requests by hand instead of using the storefront's typed client, so the route contract has two independent implementations | [`buyers-use-the-storefront-client`](../../openspec/changes/buyers-use-the-storefront-client/) |
 | The bare-metal storefront negotiates through a domain-local service and routes rather than the negotiation kit every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 | API credits has no end-to-end lane of its own — its scenario rides the VM lane — and its storefront has no test that runs the production application | [`apicredits-end-to-end-lane`](../../openspec/changes/apicredits-end-to-end-lane/) |
@@ -262,7 +262,7 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 |---|---|
 | Live Arkhai payment and domain delivery qualification | The payments service's end-to-end tests, which import this repository's published packages; this repository's payment scenario runs only against a configured target |
 | Spot / interruptible deals on payment rate parts, with teardown on stop | [`spot-deals-through-arkhai-payments`](../../openspec/changes/spot-deals-through-arkhai-payments/) |
-| Isolate escrow carriers and the conditional-escrow port fully within Alkahest | Unowned follow-up; deferred scope in [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Isolate escrow carriers and the conditional-escrow port fully within Alkahest | Unowned follow-up; deferred scope in [`settle-through-arkhai-payments`](../../openspec/changes/archive/2026-10-08-settle-through-arkhai-payments/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
 
