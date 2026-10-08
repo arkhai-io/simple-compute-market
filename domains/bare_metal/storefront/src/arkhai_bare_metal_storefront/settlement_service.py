@@ -9,10 +9,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
-from market_identity import Identity
-from market_settlement_runtime import SettlementRuntime
-
 from core_storefront.models.settle_models import (
     AgreementSettleResponse,
     RefundSettlementResponse,
@@ -20,20 +16,25 @@ from core_storefront.models.settle_models import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
     MandatePolicyError,
-    NotPaid,
     NothingToReverse,
+    NotPaid,
+    PaymentsBlocked,
     PaymentSellerStage,
     PaymentSettlementData,
-    PaymentsBlocked,
     PaymentsUnavailable,
     ReceiptBlocked,
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    ReconciliationPass,
     RefundBlocked,
     Refunded,
     SignedReceipt,
+    reconcile_accepted_payments,
 )
+from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
+from market_identity import Identity
+from market_settlement_runtime import SettlementRuntime
 
 from .fulfillment_service import BareMetalFulfillmentError
 from .models import (
@@ -42,7 +43,6 @@ from .models import (
     BareMetalSettleStatusResponse,
 )
 from .sqlite_client import SQLiteClient
-
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +263,37 @@ class BareMetalSettlementService:
         # payload that would not parse as one.
         AgreementSettleResponse.model_validate(settled.payload)
         return settled
+
+    async def reconcile_payments_once(self, *, limit: int = 100) -> ReconciliationPass:
+        """Advance accepted payment deals a buyer has not settled, without the buyer.
+
+        Takes deals with no verified receipt, refunds left `refunding`, and
+        verified deals whose delivery never started; the same settle path a
+        buyer's call takes advances each.
+        """
+        candidates = []
+        for negotiation_id in await self.db.list_accepted_negotiations_settling_through(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
+        ):
+            record = await self.db.load_bare_metal_settlement_record(negotiation_id=negotiation_id)
+            status = (record or {}).get("status")
+            if status in ("accepted", "refunding"):
+                candidates.append(negotiation_id)
+            elif status == "settlement_verified" and (
+                await self.db.load_bare_metal_fulfillment_lifecycle(negotiation_id=negotiation_id)
+                is None
+            ):
+                candidates.append(negotiation_id)
+
+        async def settle(negotiation_id: str) -> None:
+            thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            await self._verify_arkhai_payment(
+                negotiation_id=negotiation_id,
+                thread=thread,
+                buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+            )
+
+        return await reconcile_accepted_payments(candidates, settle, logger=logger)
 
     async def refund_payment(self, *, negotiation_id: str) -> PaymentSettleResult:
         """Reverse an accepted payment deal's held funds at the seller operator's request."""

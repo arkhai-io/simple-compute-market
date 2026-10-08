@@ -29,11 +29,18 @@ config_app = typer.Typer(no_args_is_help=True)
 def _validate_settlement_candidate(
     document: Mapping[str, Any], role: SettlementRole
 ) -> None:
-    from market_alkahest import create_alkahest_registration
-    from market_settlement_runtime import SettlementConfigurationRegistry
+    from .settlement_composition import buyer_settlement_registry
 
-    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
-    registry.resolve(document.get("Settlement", {}), role=role)
+    buyer_settlement_registry().resolve(document.get("Settlement", {}), role=role)
+
+
+def _installed_settlement_mechanisms() -> dict[str, str]:
+    from .settlement_composition import buyer_settlement_registry
+
+    return {
+        registration.mechanism_id: registration.config_key
+        for registration in buyer_settlement_registry().registrations
+    }
 
 
 _REMOVED_IDENTITY_ROOTS = {
@@ -205,6 +212,7 @@ def config_migrate(
             backup=backup,
             environ=os.environ,
             validator=_validate_settlement_candidate,
+            installed=_installed_settlement_mechanisms(),
         )
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -272,6 +280,15 @@ enabled = false
 # trusted_oracle_addresses = []
 # interruptible = false
 # interruptible_oracle_addresses = []
+
+[Settlement.arkhai_payments]
+enabled = false
+# service_url = "https://<PAYMENTS_SERVICE>"
+# service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+# fee_bps = 250
+# dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
+# api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
+# attach_agreement = false                  # deposit the exact Agreement with the approval
 
 [negotiation]
 # policies = ["buyer_escrow_shape_guard", "bisection"]

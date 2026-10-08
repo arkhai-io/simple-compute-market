@@ -17,12 +17,16 @@ from apicredits_storefront.negotiation_runtime import (
     build_api_credit_negotiation_runtime,
 )
 from core_storefront.models.negotiation_models import NegotiateNewResponse
-from market_negotiation_runtime import OfferUnfulfillableError
+from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
 from market_identity import Ed25519Signer
+from market_policy.negotiation_middleware import NegotiationDecision
+from market_policy.seller_round import SellerRoundResult
 
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
     SELLER_PRINCIPAL,
+    payment_option,
+    payment_selection,
     proposal,
     terms,
 )
@@ -282,3 +286,102 @@ async def test_payment_selection_places_quota_hold(db, monkeypatch):
     hold = await db.load_capacity_hold(negotiation_id="neg-payment")
     assert hold["capacity_reservation_id"] == "alloc-payment"
     assert hold["payload"]["allocated_units"] == 3
+
+
+def _payment_runtime(*, round_hook=None):
+    """The runtime as a payments-composed storefront builds it."""
+    return build_api_credit_negotiation_runtime(
+        _DOMAIN,
+        seller_round_hook=round_hook,
+        accepted_obligation_dispatch={"arkhai.payments.v1": None},
+        settlement_artifacts_builder=lambda agreement: {"mandate": {"amount": agreement["amount"]}},
+    )
+
+
+async def _start_payment(db, *, amount=250, quantity=3):
+    """Open on a listing offering a payment option; the seller counters at the listed price."""
+    await db.update_listing(
+        listing_id="L-tok",
+        settlement_options=[payment_option().model_dump(mode="json")],
+    )
+    selection = payment_selection()
+
+    async def counter_at_listed_price(**_kwargs):
+        return SellerRoundResult(
+            our_amount=300,
+            strategy_label="listed_price",
+            direction="maximize",
+            chain_label="payment-review",
+            decision=NegotiationDecision(
+                action="counter",
+                proposal={
+                    "fields": {"amount": 300},
+                    "settlement_selection": selection.model_dump(mode="json"),
+                },
+            ),
+            intermediate={"buyer_amount": amount, "uses_scalar_amount": True},
+        )
+
+    return await _payment_runtime(round_hook=counter_at_listed_price).start(
+        repository=db,
+        listing_id="L-tok",
+        buyer_principal=BUYER_PRINCIPAL,
+        seller_principal=SELLER_PRINCIPAL,
+        proposal={
+            "fields": {"amount": amount},
+            "settlement_selection": selection.model_dump(mode="json"),
+        },
+        terms=terms(quantity),
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=BUYER_PRINCIPAL,
+    )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"mechanism": "alkahest.v1"},
+        {"option_id": "f" * 64},
+        {"expiration_unix": 1_900_000_001},
+        {"params": {"payer_account": "33333333-3333-4333-8333-333333333333"}},
+    ],
+)
+async def test_counter_rejects_opening_selection_switch(db, fake_capacity, key_records, changed):
+    """A countered negotiation keeps the option and the mechanism inputs it opened with."""
+    opening = await _start_payment(db)
+    assert opening["action"] == "counter"
+    changed_selection = {**payment_selection().model_dump(mode="json"), **changed}
+
+    with pytest.raises(NegotiationStateError, match="opening settlement selection cannot change"):
+        await _payment_runtime().continue_negotiation(
+            repository=db,
+            negotiation_id=opening["negotiation_id"],
+            buyer_action="counter",
+            buyer_proposal={"fields": {"amount": 300}, "settlement_selection": changed_selection},
+            buyer_reason=None,
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+            actor_principal=BUYER_PRINCIPAL,
+            actor_role="buyer",
+        )
+
+
+async def test_accept_revalidates_the_current_trusted_listing_option(db, fake_capacity, key_records):
+    """An option the seller withdrew after the opening cannot be accepted."""
+    opening = await _start_payment(db)
+    await db.update_listing(listing_id="L-tok", settlement_options=[])
+
+    with pytest.raises(NegotiationStateError, match="no longer exact-matches the trusted listing"):
+        await _payment_runtime().continue_negotiation(
+            repository=db,
+            negotiation_id=opening["negotiation_id"],
+            buyer_action="accept",
+            buyer_proposal=None,
+            buyer_reason=None,
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+            actor_principal=BUYER_PRINCIPAL,
+            actor_role="buyer",
+        )
+

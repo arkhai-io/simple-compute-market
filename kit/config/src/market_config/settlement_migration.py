@@ -22,7 +22,19 @@ from tomlkit.items import Table
 ConfigValidator = Callable[[Mapping[str, Any], SettlementRole], None]
 
 ALKAHEST_MECHANISM = "alkahest.v1"
-KNOWN_MECHANISMS = frozenset({ALKAHEST_MECHANISM})
+
+#: A role's installed mechanisms, mechanism identifier to `[Settlement]` key,
+#: taken from the registrations its runtime composes. The migration has no
+#: mechanism list of its own, so it cannot drift from what a role installs.
+InstalledMechanisms = Mapping[str, str]
+
+#: Removed mechanisms, refused with a removal diagnostic rather than as unknown.
+RETIRED_MECHANISMS: Mapping[str, str] = {"fiat.stripe.v1": "stripe"}
+_RETIRED_ALIASES = {"stripe": "fiat.stripe.v1", "fiat": "fiat.stripe.v1"}
+STRIPE_REMOVAL_MESSAGE = (
+    "Stripe settlement (`fiat.stripe.v1`, `[Settlement.stripe]`) was removed; "
+    "remove these settings. They are not mapped to Arkhai payments."
+)
 
 BUYER_MIGRATION_COMMAND = "market config migrate --scope settlement --write --backup"
 STOREFRONT_MIGRATION_COMMAND = (
@@ -204,7 +216,7 @@ def _normalized_mechanism(value: Any) -> str:
     return aliases.get(value, value)
 
 
-def _normalized_priority(value: Any) -> list[str]:
+def _normalized_priority(value: Any, installed: InstalledMechanisms) -> list[str]:
     raw = _plain(value)
     entries = raw.split(",") if isinstance(raw, str) else raw
     if not isinstance(entries, (list, tuple)):
@@ -215,7 +227,12 @@ def _normalized_priority(value: Any) -> list[str]:
         _normalized_mechanism(entry.strip() if isinstance(entry, str) else entry)
         for entry in entries
     ]
-    if any(mechanism not in KNOWN_MECHANISMS for mechanism in priority):
+    if any(
+        mechanism in RETIRED_MECHANISMS or mechanism in _RETIRED_ALIASES
+        for mechanism in priority
+    ):
+        raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
+    if any(mechanism not in installed for mechanism in priority):
         raise SettlementMigrationValidationError(
             "legacy settlement priority contains an unknown mechanism (value redacted)"
         )
@@ -232,10 +249,14 @@ def _same_value(left: Any, right: Any) -> bool:
 
 class _Planner:
     def __init__(
-        self, document: MutableMapping[str, Any], role: SettlementRole
+        self,
+        document: MutableMapping[str, Any],
+        role: SettlementRole,
+        installed: InstalledMechanisms,
     ) -> None:
         self.document = document
         self.role = role
+        self.installed = installed
         self.actions: list[MigrationAction] = []
         self.alkahest_seen = False
         self.legacy_priority: list[str] | None = None
@@ -357,7 +378,7 @@ class _Planner:
         source = ("settlement", "mechanism_priority")
         legacy_item = _lookup(self.document, source)
         if legacy_item is not None:
-            self.legacy_priority = _normalized_priority(legacy_item)
+            self.legacy_priority = _normalized_priority(legacy_item, self.installed)
             self.legacy_priority_item = copy.deepcopy(legacy_item)
             for mechanism in self.legacy_priority:
                 key = "alkahest"
@@ -370,7 +391,9 @@ class _Planner:
         destination = ("Settlement", "priority")
         current_item = _lookup(self.document, destination)
         current = (
-            _normalized_priority(current_item) if current_item is not None else None
+            _normalized_priority(current_item, self.installed)
+            if current_item is not None
+            else None
         )
         derived = list(self.legacy_priority or current or [])
         if self.alkahest_seen and ALKAHEST_MECHANISM not in derived:
@@ -505,6 +528,7 @@ def _validate_candidate(
     *,
     role: SettlementRole,
     validator: ConfigValidator | None,
+    installed: InstalledMechanisms,
 ) -> Mapping[str, Any]:
     try:
         parsed = tomllib.loads(text)
@@ -517,10 +541,12 @@ def _validate_candidate(
     if settlement is not None:
         if not isinstance(settlement, dict):
             raise SettlementMigrationValidationError("Settlement must be a table")
+        if any(key in settlement for key in RETIRED_MECHANISMS.values()):
+            raise SettlementMigrationValidationError(STRIPE_REMOVAL_MESSAGE)
         unknown_sections = set(settlement) - {
             "schema_version",
             "priority",
-            "alkahest",
+            *installed.values(),
         }
         if unknown_sections:
             raise SettlementMigrationValidationError(
@@ -537,11 +563,13 @@ def _validate_candidate(
                 "Settlement.schema_version must match the installed schema"
             )
         priority = settlement.get("priority", [])
-        normalized = _normalized_priority(priority)
+        normalized = _normalized_priority(priority, installed)
         if normalized != priority:
             raise SettlementMigrationValidationError(
                 "Settlement.priority must use canonical mechanism identifiers"
             )
+        # The migration maps legacy Alkahest keys, so it owns their field set;
+        # every other installed section is left to the caller's typed validator.
         for key in ("alkahest",):
             section = settlement.get(key)
             if section is not None and not isinstance(section, dict):
@@ -745,12 +773,14 @@ def migrate_settlement_config(
     check: bool = False,
     write: bool = False,
     backup: bool = False,
+    installed: InstalledMechanisms,
     validator: ConfigValidator | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> SettlementMigrationResult:
     """Check or atomically migrate one role TOML document.
 
-    Exactly one of ``check`` and ``write`` is required. Write mode requires an
+    ``installed`` names the role's installed mechanisms, from the same
+    registrations its runtime composes. Exactly one of ``check`` and ``write`` is required. Write mode requires an
     explicit backup opt-in. Candidate validation and all conflict checks happen
     before the first filesystem mutation.
     """
@@ -785,9 +815,11 @@ def migrate_settlement_config(
         ) from exc
 
     planned = copy.deepcopy(document)
-    actions = _Planner(planned, role).run()
+    actions = _Planner(planned, role, installed).run()
     candidate_text = tomlkit.dumps(planned)
-    _validate_candidate(candidate_text, role=role, validator=validator)
+    _validate_candidate(
+        candidate_text, role=role, validator=validator, installed=installed
+    )
     candidate = candidate_text.encode("utf-8")
     changed = bool(actions)
     renames = environment_renames(environ or {}, role=role)

@@ -8,6 +8,7 @@ from core_storefront.auth import AuthenticatedPrincipal, AuthError, authenticate
 from core_storefront.models.settle_models import SettleRequest
 from fastapi import HTTPException, Request
 from market_identity import EMPTY_BODY, Identity
+from storefront_client.settlement_routes import SETTLE
 
 import market_storefront.container as _container
 
@@ -123,7 +124,7 @@ async def settle_escrow_auth(
         )
     return await _verify(
         request,
-        "settle_escrow",
+        SETTLE.operation,
         escrow_uid,
         persisted_buyer,
         body.model_dump(mode="json"),

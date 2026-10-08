@@ -16,6 +16,7 @@ from core_storefront.auth import (
 from fastapi import Request
 from market_identity import EMPTY_BODY, Identity
 from starlette.responses import JSONResponse, Response
+from storefront_client.settlement_routes import REFUND, bind_settlement_route
 
 import market_storefront.container as _container
 
@@ -65,26 +66,18 @@ async def _durable_buyer(*, listing_id: str, escrow_uid: str | None = None) -> I
         ) from exc
 
 
-def _settlement_refund(method: str, path: str) -> str | None:
-    prefix, suffix = "/api/v1/settlements/", "/refund"
-    if method != "POST" or not path.startswith(prefix) or not path.endswith(suffix):
-        return None
-    negotiation_id = path[len(prefix) : -len(suffix)]
-    return negotiation_id if negotiation_id and "/" not in negotiation_id else None
-
-
 async def resolve_listing_mutation(
     request: Request, body: Any
 ) -> ListingMutation | None:
     """Map one protected listing mutation to its exact v2 authorization binding."""
 
     path = request.url.path.rstrip("/")
-    settlement = _settlement_refund(request.method, path)
+    settlement = REFUND.resource(request.method, path)
     if settlement is not None:
         # A refund reverses the buyer's payment, so only the storefront's own
         # seller principal may request it; the resource is the deal, not a listing.
         return ListingMutation(
-            "refund_settlement", settlement, "seller", _seller_signer().identity, body
+            REFUND.operation, settlement, REFUND.role, _seller_signer().identity, body
         )
     prefix = "/api/v1/listings/"
     if request.method != "POST" or not path.startswith(prefix):
@@ -295,29 +288,15 @@ def _buyer_response_contract(request: Request, body: Any) -> tuple[str, str] | N
         return "negotiate_new", resource
     if method == "POST" and path.startswith("/api/v1/negotiate/"):
         return "negotiate_continue", path.rsplit("/", 1)[-1]
-    if path.startswith("/api/v1/settle/"):
-        suffix = path[len("/api/v1/settle/") :]
-        if method == "GET" and suffix.endswith("/status"):
-            return "settle_status", suffix[: -len("/status")]
-        if method == "POST" and "/" not in suffix:
-            return "settle_escrow", suffix
+    settlement = bind_settlement_route(method, path)
+    if settlement is not None and settlement.route.role == "buyer":
+        return settlement.route.operation, settlement.resource
     if (
         method == "POST"
         and path.startswith("/api/v1/deals/")
         and path.endswith("/heartbeat")
     ):
         return "deal_heartbeat", path.split("/")[-2]
-    if path == "/api/v1/settlements" and method == "POST":
-        resource = (
-            str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""
-        )
-        return "settlement_start", resource
-    if path.startswith("/api/v1/settlements/"):
-        suffix = path[len("/api/v1/settlements/") :]
-        if method == "GET" and "/" not in suffix:
-            return "settlement_status", suffix
-        if method == "POST" and suffix.endswith("/reclaim"):
-            return "settlement_reclaim", suffix[: -len("/reclaim")]
     if path == "/api/v1/introductions" and method == "POST":
         resource = (
             str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""

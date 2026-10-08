@@ -196,9 +196,9 @@ publication running for longer than necessary.
 **Blocked on sections 3 and 4, and on the settlement client being publicly
 resolvable.**
 
-- [ ] 5.1 Bump `arkhai-kit-hosted-settlement`. Its 0.1.4 on PyPI declares a
-  dependency PyPI does not carry, so it is uninstallable for every external
-  consumer and cannot be corrected in place.
+- [x] 5.1 Withdrawn: `settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, including
+  `arkhai-kit-hosted-settlement`, so there is no package to bump. (It was to
+  replace 0.1.4 on PyPI, which declares a dependency PyPI does not carry.)
 - [ ] 5.2 Promote the new version and verify installation into a clean
   environment from the public index alone, with no `.dist` and no checkout.
 - [ ] 5.3 Reconcile with `configure-pypi-trusted-publishing`, which claims

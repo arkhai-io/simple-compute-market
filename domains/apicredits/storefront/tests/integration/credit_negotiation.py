@@ -11,6 +11,10 @@ from datetime import datetime
 from market_core.schemas import (
     EscrowProposal,
     ProvisionTerms,
+    RateValue,
+    SettlementOption,
+    SettlementSelection,
+    derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
 
@@ -21,6 +25,35 @@ SELLER_PRINCIPAL = SELLER_SIGNER.identity
 TOKEN = "0x" + "01" * 20
 ESCROW = "0x" + "11" * 20
 LISTING_ID = "L-tok"
+
+
+PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
+PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
+
+
+def payment_option() -> SettlementOption:
+    """An Arkhai payments option priced per credit, as a seller publishes one."""
+    rates = [RateValue(field="amount", per="credit", value=100)]
+    params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
+
+
+def payment_selection(*, expiration_unix: int = 1_900_000_000) -> SettlementSelection:
+    option = payment_option()
+    return SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=expiration_unix,
+        params={"payer_account": PAYER_ACCOUNT},
+    )
 
 
 def proposal(amount: int) -> EscrowProposal:

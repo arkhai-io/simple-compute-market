@@ -1,3 +1,12 @@
+## Re-scope (2026-10-08)
+
+`settle-through-arkhai-payments` removed hosted Stripe settlement (`fiat.stripe.v1`, `kit/hosted-settlement`, the hosted client, and the real-Stripe lanes). This change now covers Alkahest and `contact-exchange.v1` only:
+
+- Removed: converting the hosted adapter (3.2), the hosted capability gating section, the real-Stripe development lanes, the hosted-rail TESTING note, the `settlement-configuration` delta (the hosted release pin), and the two `settlement-servicing` requirements whose permanent targets were removed with hosted settlement (`Fulfillment and reclaim exclusion`, `Profile-specific reclaim and loss remain authority-owned`).
+- Arkhai payments does not use the settlement runtime, so it is not a mechanism this change converts.
+- Open for the owners: the early-reclaim relaxation (section 4) was motivated by fiat obligations whose funds are held; decide whether it still has a user. Its requirement text lived in the removed `Fulfillment and reclaim exclusion` delta and needs a new home if section 4 stays.
+- References to hosted or fiat below describe the motivation as it stood and no longer apply.
+
 ## Context
 
 See proposal.md — Why. The constraints that shape the approach:

@@ -254,3 +254,67 @@ def test_config_set_rejects_legacy_path_with_exact_migration_command(
 
     assert result.exit_code == 2
     assert STOREFRONT_MIGRATION_COMMAND in result.output
+
+
+_PAYMENTS_SETTLEMENT = """[Settlement]
+schema_version = 1
+priority = ["arkhai.payments.v1"]
+
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://payments.example.test"
+service_identity = { scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }
+fee_bps = 250
+dispute_authority = "33333333-3333-4333-8333-333333333333"
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+"""
+
+
+def test_settlement_migration_accepts_the_installed_payments_mechanism(
+    monkeypatch, tmp_path, runner, app
+):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text(_PAYMENTS_SETTLEMENT)
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code == 0, result.output
+    assert cfg.read_text() == _PAYMENTS_SETTLEMENT
+
+
+def test_settlement_migration_refuses_stripe_with_its_removal(monkeypatch, tmp_path, runner, app):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    cfg.write_text('[Settlement]\nschema_version = 1\npriority = ["fiat.stripe.v1"]\n')
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+
+    result = runner.invoke(app, ["config", "migrate", "--scope", "settlement", "--check"])
+
+    assert result.exit_code != 0
+    assert "was removed" in result.output
+
+
+def test_publication_migration_compiles_a_payment_clause():
+    import tomllib
+
+    from market_storefront.groups.config import _seller_publication_clause_compiler
+
+    compile_clause = _seller_publication_clause_compiler(tomllib.loads(_PAYMENTS_SETTLEMENT))
+    clause = compile_clause(
+        {
+            "mechanism": "arkhai.payments.v1",
+            "asset": "USD/2",
+            "rate": "200",
+            "per": "hour",
+            "mechanism_input": {
+                "payee_account": "22222222-2222-4222-8222-222222222222",
+                "asset": "USD/2",
+            },
+        }
+    )
+
+    assert clause.mechanism == "arkhai.payments.v1"

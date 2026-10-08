@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-
 import logging
 from typing import Any
 
@@ -22,20 +21,24 @@ from core_storefront.models.settle_models import (
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_identity import Identity
 from market_settlement_runtime import (
     SettlementAdminRouteError,
     SettlementAdminRouteService,
 )
-from market_identity import Identity
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
-from market_storefront.payment_settlement import PaymentSettlementError
-from market_storefront.settlement_composition import serialize_settlement_job
+from storefront_client.settlement_routes import SETTLE_STATUS
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.models.settle_models import VmPaymentsSettleRequest, VmSettleRequest
+from market_storefront.models.settle_models import (
+    VmPaymentsSettleRequest,
+    VmSettleRequest,
+)
+from market_storefront.payment_settlement import PaymentSettlementError
 from market_storefront.services.admin_settle_service import AdminSettleService
+from market_storefront.settlement_composition import serialize_settlement_job
 from market_storefront.utils.escrow_verification import EscrowVerificationError
 
 logger = logging.getLogger(__name__)
@@ -239,7 +242,7 @@ class SettleController:
         buyer_principal = Identity.model_validate((thread or {}).get("buyer_principal"))
         auth = await buyer_auth._verify(
             request,
-            "settle_status",
+            SETTLE_STATUS.operation,
             escrow_uid,
             buyer_principal,
         )

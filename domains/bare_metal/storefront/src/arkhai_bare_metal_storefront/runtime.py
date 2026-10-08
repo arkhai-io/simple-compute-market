@@ -14,9 +14,7 @@ from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.models.system_models import ProjectionFamilyStatus
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
-from market_core import MarketDomainContract, validate_domain_contract
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
@@ -26,13 +24,15 @@ from market_contact_exchange import (
     IntroductionRetentionService,
     SQLiteIntroductionStore,
 )
+from market_core import MarketDomainContract, validate_domain_contract
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_negotiation_runtime import NegotiationRuntime
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
-from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
-from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -41,32 +41,31 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
+from .delivery import storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
-from .negotiation import default_seller_round_hook
-from .listing_source_check import build_listing_source_check
-from .negotiation_runtime import build_bare_metal_negotiation_runtime
-from .settlement import build_bare_metal_settlement_plan
-from .settlement_service import BareMetalSettlementService
 from .fulfillment_service import BareMetalFulfillmentService
 from .lifecycle_steps import register_bare_metal_lifecycle_steps
-from .delivery import storefront_introduction_delivery
+from .listing_source_check import build_listing_source_check
+from .negotiation import default_seller_round_hook
+from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
     compile_publication_clauses,
     configured_max_duration_seconds,
 )
-from .sqlite_client import SQLiteClient
+from .settlement import build_bare_metal_settlement_plan
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    BareMetalStorefrontSettlementComposition,
+)
+from .settlement_service import BareMetalSettlementService
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
     parse_site_bindings,
 )
-from .settlement_composition import (
-    ALKAHEST_MECHANISM,
-    BareMetalStorefrontSettlementComposition,
-)
-
+from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +203,13 @@ class BareMetalStorefrontRuntime:
         except (KeyError, ValueError):
             return None
         return binding.site_id
+
+    def payments_reconciliation_enabled(self) -> bool:
+        """Whether accepted payment deals need a seller-side reconciliation loop."""
+        return (
+            self.settlement_composition is not None
+            and self.settlement_composition.arkhai_payments_stage() is not None
+        )
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build settlement for the mechanisms this storefront composes."""

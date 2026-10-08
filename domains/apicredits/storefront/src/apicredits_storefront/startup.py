@@ -6,22 +6,25 @@ import asyncio
 import logging
 from functools import partial
 
-from apicredits_storefront.utils import config
-from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import stage_event
+from market_arkhai_payments import run_payment_reconciliation
 from market_core import MarketDomainContract
-
-from apicredits_storefront.lifecycle_steps import (
-    CAPACITY_EVENTS_POLLER,
-    NEGOTIATION_WATCHDOG,
-    SETTLEMENT_SERVICING,
-)
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
     run_negotiation_watchdog,
 )
+
+from apicredits_storefront.lifecycle_steps import (
+    CAPACITY_EVENTS_POLLER,
+    NEGOTIATION_WATCHDOG,
+    PAYMENT_RECONCILIATION,
+    SETTLEMENT_SERVICING,
+    payment_reconciliation_service,
+)
+from apicredits_storefront.utils import config
+from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
 logging.basicConfig(
     level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
@@ -84,9 +87,10 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     """Initialize background tasks for the exact app-selected domain."""
-    import apicredits_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
+
+    import apicredits_storefront.container as _container
 
     if _container.resolved_market_domain is not domain:
         raise RuntimeError(
@@ -161,6 +165,22 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
         "[STARTUP] Settlement servicing worker started (interval=%ss)",
         settings.get("claims_sweep_interval", 30),
     )
+
+    if payment_reconciliation_service() is not None:
+        loops.start_loop(
+            StorefrontBackgroundTask(
+                name=PAYMENT_RECONCILIATION,
+                task_factory=partial(
+                    run_payment_reconciliation,
+                    lambda: payment_reconciliation_service().reconcile_once(),
+                    interval_seconds=float(settings.get("payment_reconciliation_interval", 30)),
+                    logger=logger,
+                    paused=loops.loop_gate(PAYMENT_RECONCILIATION),
+                    wait=loops.idle,
+                ),
+            ),
+            task_logger=logger,
+        )
 
     await _preflight_credits_service()
 

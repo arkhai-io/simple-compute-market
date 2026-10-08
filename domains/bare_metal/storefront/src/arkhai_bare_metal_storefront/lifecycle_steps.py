@@ -29,6 +29,7 @@ NEGOTIATION_WATCHDOG = "negotiation_watchdog"
 SETTLEMENT_SERVICING = "settlement_servicing"
 PUBLICATION = "publication"
 INTRODUCTION_RETENTION = INTRODUCTION_RETENTION_LOOP
+PAYMENT_RECONCILIATION = "payment_reconciliation"
 
 
 def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> None:
@@ -68,6 +69,22 @@ def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> 
         NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step
     )
     loops.register_step(PUBLICATION, route="publication", step=publication_step)
+
+    if runtime.payments_reconciliation_enabled():
+
+        async def payment_reconciliation_step() -> Mapping[str, Any]:
+            done = await runtime.settlement_service().reconcile_payments_once()
+            return {
+                "loop": PAYMENT_RECONCILIATION,
+                "attempted": done.attempted,
+                "failed": done.failed,
+            }
+
+        loops.register_step(
+            PAYMENT_RECONCILIATION,
+            route="payment-reconciliation",
+            step=payment_reconciliation_step,
+        )
 
     worker = runtime.settlement_worker
     if worker is not None:

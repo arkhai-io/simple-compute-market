@@ -26,16 +26,16 @@ from fastapi_utils.cbv import cbv
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core.schemas import Agreement
 from market_identity import Identity
+from market_settlement_runtime import SettlementAdminRouteService
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
 import apicredits_storefront.container as _container
-from market_settlement_runtime import SettlementAdminRouteService
-
-from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from apicredits_storefront.domain_runtime import (
     serialize_api_credit_settlement,
     serialize_api_credit_settlement_start,
 )
+from apicredits_storefront.middleware import buyer_auth
+from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from apicredits_storefront.middleware.seller_auth import make_seller_auth_dep
 from apicredits_storefront.services.payment_settlement_service import (
     PaymentSettlementError,
@@ -79,7 +79,7 @@ class SettleController:
             raise HTTPException(status_code=503, detail="storefront is not initialized")
         await buyer_auth._verify(
             request,
-            "settle_escrow",
+            SETTLE.operation,
             escrow_uid,
             expected_principal=body.buyer_principal,
             body=body,
@@ -205,7 +205,7 @@ class SettleController:
         buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
         await buyer_auth._verify(
             request,
-            "settle_status",
+            SETTLE_STATUS.operation,
             escrow_uid,
             expected_principal=buyer_principal,
         )
@@ -324,7 +324,7 @@ class AdminSettleController:
         "start; credits already issued are left in place."
     ),
     dependencies=[
-        Depends(make_seller_auth_dep("refund_settlement", resource_param="negotiation_id"))
+        Depends(make_seller_auth_dep(REFUND.operation, resource_param="negotiation_id"))
     ],
 )
 async def refund_settlement(negotiation_id: str) -> Any:

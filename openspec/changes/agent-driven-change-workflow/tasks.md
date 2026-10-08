@@ -9,7 +9,8 @@ to repair by hand.
 - [ ] 1.1 Create `.agents/skills/` as the single skill source, with relative links
       from `.claude/skills/` and `.codex/skills/`.
 - [ ] 1.2 Resolve the dangling Stripe skill links: commit their source under
-      `.agents/skills/`, or remove them.
+      `.agents/skills/`, or remove them. Since `settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, removal is the
+      expected resolution.
 - [ ] 1.3 Decide whether the generated OpenSpec skills move behind links, by
       testing whether regeneration overwrites a link.
 - [ ] 1.4 Add `make check-agent-skills`: every skill is present for every harness,

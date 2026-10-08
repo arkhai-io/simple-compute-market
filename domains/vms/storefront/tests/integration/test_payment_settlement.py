@@ -512,3 +512,67 @@ async def test_an_operator_fault_is_a_server_error_not_a_retryable_outage(make):
     h.payments.read_error = (401, "authentication_required")
     assert await _status_code(h.settle) == 500
     assert h.delivery.starts == []
+
+
+async def _restart(h, tmp_path, *, approved: bool):
+    """A fresh storefront over the same SQLite file, as after a process restart."""
+    await h.coordinator.stop()
+    delivery = Delivery()
+    domain = replace(
+        build_vm_storefront_domain(),
+        fulfillment=ImmutableFulfillmentCapability(fulfill=delivery),
+    )
+    registry = build_vm_storefront_registry(domain)
+    db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
+    payments = FakePaymentsClient()
+    if approved:
+        payments.serve(build_signed_receipt(signer=SERVICE, mandate=h.data.mandate))
+    stage = PaymentSellerStage(_config(), client_for_owner=payments)
+    coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
+    _container.resolved_sqlite_client = db
+    _container.resolved_domain_registry = registry
+    _container.resolved_settlement_composition = SimpleNamespace(
+        payments_coordinator=coordinator,
+        local_principal=SELLER.identity,
+        arkhai_payments_stage=stage,
+    )
+    h.coordinator = coordinator
+    return SimpleNamespace(db=db, delivery=delivery, coordinator=coordinator)
+
+
+@pytest.mark.asyncio
+async def test_an_approved_payment_converges_after_restart_without_the_buyer(make, tmp_path):
+    """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
+    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
+
+    h = await make()
+    restarted = await _restart(h, tmp_path, approved=True)
+
+    # What the fulfillment resume loop runs each sweep; no buyer request is made.
+    await _reconcile_payment_deals()
+    task = restarted.coordinator.tasks.get(NEGOTIATION)
+    assert task is not None
+    await task
+
+    assert restarted.delivery.starts == [NEGOTIATION]
+    record = await restarted.db.load_vm_payment_record(negotiation_id=NEGOTIATION)
+    assert record["receipt"] is not None
+    escrow = await restarted.db.load_escrow(escrow_uid=NEGOTIATION)
+    assert escrow["status"] == "ready"
+
+    # A later pass finds nothing left to do.
+    await _reconcile_payment_deals()
+    assert restarted.delivery.starts == [NEGOTIATION]
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_leaves_an_unapproved_payment_pending(make, tmp_path):
+    from market_storefront.services.fulfillment_resume_runtime import _reconcile_payment_deals
+
+    h = await make()
+    restarted = await _restart(h, tmp_path, approved=False)
+
+    await _reconcile_payment_deals()
+
+    assert restarted.delivery.starts == []
+    assert await restarted.db.load_escrow(escrow_uid=NEGOTIATION) is None

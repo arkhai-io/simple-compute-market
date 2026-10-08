@@ -38,9 +38,8 @@
 - [ ] 3.1 Collapse `collect` and `reclaim_expired` in `ports.py` into one operation that
       executes a recorded disposition. No compatibility shim — an unconverted mechanism
       fails the `runtime_checkable` protocol at registration.
-- [ ] 3.2 Convert the hosted adapter
-      (`kit/hosted-settlement/src/market_hosted_settlement/adapter.py:430-515`), the
-      Alkahest adapter, and the `contact-exchange.v1` mechanism in the same commit.
+- [ ] 3.2 Convert the Alkahest adapter and the `contact-exchange.v1` mechanism in the
+      same commit.
 - [ ] 3.3 Keep `collect` and `reclaim` as `OperationKind` journal entries; a split records
       both legs under one disposition. No journal migration.
 - [ ] 3.4 Evidence: each mechanism disburses both degenerate dispositions with unchanged
@@ -55,8 +54,8 @@
       carrying a normalized reason and a retry deadline at expiry.
 - [ ] 4.3 Have the scheduler honor that deadline so a refused disbursement backs off to
       expiry rather than re-attempting on every due-work tick.
-- [ ] 4.4 Evidence: a fiat obligation whose disposition owes the payer and whose claimant
-      leg is unsubmitted disburses before expiry; the equivalent Alkahest obligation is
+- [ ] 4.4 Evidence: a test mechanism's obligation whose disposition owes the payer and whose
+      claimant leg is unsubmitted disburses before expiry; the equivalent Alkahest obligation is
       refused by the mechanism and rescheduled at expiry, not retried on the default
       interval. Assert the next-attempt time, not just the refusal.
 
@@ -71,76 +70,51 @@
       split obligation, and one returned obligation, asserting each projection reads
       unambiguously.
 
-## 6. Capability gating on the hosted rail
+## 6. Prove the lifecycle end to end
 
-- [ ] 6.1 Refuse a non-degenerate disposition for a hosted obligation unless the bound
-      release declares the partial-disposition capability, reading the capability name the
-      producer defines and treating absence as "cannot split".
-- [ ] 6.2 Report that refusal as unavailable under the bound release, naming the release —
-      not as a mechanism failure — and never approximate a split with a whole disbursement
-      plus a marketplace-selected refund.
-- [ ] 6.3 Refuse terms at acceptance when their condition evaluator can produce a partial
-      disposition and the bound release declares no such capability.
-- [ ] 6.4 Evidence: a split refused against today's bound release names the release; the two
-      degenerate dispositions are unaffected; terms admitting a split are refused before an
-      obligation is materialized.
-
-## 7. Prove the lifecycle end to end
-
-- [ ] 7.1 Run the settlement-runtime, hosted-settlement, VM storefront, bare metal,
+- [ ] 6.1 Run the settlement-runtime, VM storefront, bare metal,
       apicredits, core buyer, core storefront, and e2e unit suites; record counts.
-- [ ] 7.2 Run one hosted development lane against real Stripe test mode on a funding profile
-      that currently passes end to end, confirming a degenerate disposition settles exactly
-      as it does today. Record the result and the lane used.
-- [ ] 7.3 Re-run the `us_bank_transfer.v1` reclaim lane that a tool timeout cut off, so the
-      payer-leg path has been exercised on all three profiles at least once.
-- [ ] 7.4 Confirm no partial disposition was exercised against hosted, since no release
-      declares the capability, and state that plainly in the evidence.
 
-## 8. Record the decisions
+## 7. Record the decisions
 
-- [ ] 8.1 Promote the disposition model and the accounting invariant into
-      `openspec/specs/settlement-servicing/spec.md` and the capability pin into
-      `openspec/specs/settlement-configuration/spec.md` via this change's deltas at archive.
-- [ ] 8.2 Record in `docs/development/TESTING.md` that partial dispositions are unreachable
-      on the hosted rail until a release declares the capability, and that rollback is safe
-      only while every disposition is degenerate.
+- [ ] 7.1 Promote the disposition model and the accounting invariant into
+      `openspec/specs/settlement-servicing/spec.md` via this change's delta at archive.
 
-## 9. Closeout
+## 8. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 9.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
+- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
       comments and docstrings this change touches for the fuzzier provenance-narration rule
       the target cannot catch mechanically.
-- [ ] 9.2 **Import placement.** Review every import this change adds or touches and move it
+- [ ] 8.2 **Import placement.** Review every import this change adds or touches and move it
       to module level where safe; retain a local import only against an observed circular
       import or a documented lazy-load reason, verified against the real suite.
-- [ ] 9.3 **Documentation compliance.** Re-check this change's accepted decisions against
+- [ ] 8.3 **Documentation compliance.** Re-check this change's accepted decisions against
       `openspec/README.md`'s placement rules. It carries delta specs for
       `settlement-configuration`, `settlement-servicing`; confirm each landed in the owning
       `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in
       the companion `architecture.md` rather than only in `design.md`.
-- [ ] 9.4 **Narrative compression.** Compress completed-task notes to final behavior,
+- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work, and permanent-documentation
       destinations, moving durable rationale into `design.md` first.
-- [ ] 9.5 **Roadmap currency.** This change belongs to no campaign, so it most likely owes
+- [ ] 8.5 **Roadmap currency.** This change belongs to no campaign, so it most likely owes
       `docs/development/ROADMAP.md` nothing. Confirm that and record the disposition
       explicitly rather than omitting the step.
-- [ ] 9.6 **Campaign index currency.** This change has no row in
+- [ ] 8.6 **Campaign index currency.** This change has no row in
       `openspec/changes/README.md`; add one under the campaign that owns it with its status
       and acceptance boundary, or record here why it stands outside every campaign.
-- [ ] 9.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to
+- [ ] 8.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to
       its exact permanent heading, and verify no production source references
       `openspec/changes/disburse-a-settlement-disposition`.
-- [ ] 9.8 **Documentation citations.** Run
+- [ ] 8.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=disburse-a-settlement-disposition` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
       cross-reference rule, and the target also rejects a citation whose
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
-- [ ] 9.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+- [ ] 8.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
@@ -149,7 +123,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
-- [ ] 9.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+- [ ] 8.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
       the root declaration.

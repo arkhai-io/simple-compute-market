@@ -36,9 +36,11 @@ from market_arkhai_payments import (
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    ReconciliationPass,
     RefundBlocked,
     Refunded,
     SignedReceipt,
+    reconcile_accepted_payments,
 )
 from market_identity import Identity
 
@@ -212,6 +214,27 @@ class VmPaymentsCoordinator:
             return PaymentSettleResult(
                 202, self._neutral(negotiation_id, data, row["status"], row=row)
             )
+
+    async def reconcile_once(self, *, limit: int = 100) -> ReconciliationPass:
+        """Advance accepted payment deals a buyer has not settled, without the buyer.
+
+        A deal with a recorded receipt and delivery belongs to the fulfillment
+        resume sweep; this pass takes the deals before that point (no receipt
+        recorded yet) and refunds left `refunding`.
+        """
+        candidates = []
+        for negotiation_id in await self.db.list_accepted_negotiations_settling_through(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
+        ):
+            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
+            if existing is None or existing["status"] == "refunding":
+                candidates.append(negotiation_id)
+
+        async def settle(negotiation_id: str) -> None:
+            thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            await self.start(negotiation_id, thread)
+
+        return await reconcile_accepted_payments(candidates, settle, logger=logger)
 
     async def refund(self, negotiation_id: str, thread: dict[str, Any]) -> PaymentSettleResult:
         """Reverse the deal's held payment at the seller operator's request."""

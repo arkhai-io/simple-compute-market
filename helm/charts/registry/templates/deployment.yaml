@@ -101,7 +101,7 @@ spec:
             {{- end }}
             {{- if and ((.Values.global).rpc) ((.Values.global).rpc.enabled) }}
             # Chain settings are mechanism/indexer inputs, not marketplace
-            # identity. Hosted-only registry profiles omit them completely.
+            # identity. Registry profiles without an on-chain mechanism omit them completely.
             - name: CHAIN_ID
               value: {{ .Values.global.rpc.chainId | quote }}
             {{- end }}

@@ -714,6 +714,16 @@ async def resume_incomplete_fulfillments_once(
 _PAUSED_POLL_SECONDS = 0.05
 
 
+async def _reconcile_payment_deals() -> None:
+    """Advance accepted payment deals a buyer has not settled (none without payments)."""
+    from market_storefront import container as _container
+
+    composition = _container.resolved_settlement_composition
+    coordinator = getattr(composition, "payments_coordinator", None)
+    if coordinator is not None:
+        await coordinator.reconcile_once()
+
+
 async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
     from market_storefront.utils.config import settings
@@ -729,6 +739,7 @@ async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
                 await asyncio.sleep(_PAUSED_POLL_SECONDS)
                 continue
             await resume_incomplete_fulfillments_once(sqlite_client=db)
+            await _reconcile_payment_deals()
         except asyncio.CancelledError:
             logger.info("[FULFILLMENT_RESUME] cancelled, shutting down")
             break

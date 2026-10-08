@@ -466,7 +466,7 @@ Changes with no campaign; each stands alone.
 |---|---|---|
 | [`add-persistent-buyer-profiles`](add-persistent-buyer-profiles/) | active; no blocking dependency | A core-owned buyer profile selects a stable local buyer, retains exact signer history across rotation, and associates authority-owned opaque payer bindings without putting secrets in marketplace state |
 | [`name-unverifiable-responses`](name-unverifiable-responses/) | active; no blocking dependency | A client refusing a response it cannot authenticate distinguishes that case from a malformed or legacy one, so an ordinary `404` stops being reported as a protocol fault |
-| [`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) | active; no blocking dependency | An obligation's amount moves partially and in more than one direction; expiry becomes a mechanism's answer; the hosted rail gates on a declared capability, and rollback stays safe only while every disposition is degenerate |
+| [`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) | active; no blocking dependency; re-scoped 2026-10-08 to Alkahest and contact exchange | An obligation's amount moves partially and in more than one direction; expiry becomes a mechanism's answer, and rollback stays safe only while every disposition is degenerate. Whether the early-reclaim relaxation still has a user is open for its owners |
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Also owns refusing new admission and placement against a disabled host while honouring existing assignments and teardown, handed over by `project-capacity-resources-without-hosts`. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
 | [`add-full-stack-ci-job`](add-full-stack-ci-job/) | proposed; design not started; opened by `pass-through-storefront-config` finding 9 | One CI job that runs `make test`, `make build-dev`, and the Helm render tests together, so checks needing both Helm and a service environment — the storefront chart's chart-to-loader check — run rather than skip |
@@ -484,13 +484,14 @@ Changes with no campaign; each stands alone.
 
 ## Superseded by settle-through-arkhai-payments
 
-Hosted Stripe settlement (`fiat.stripe.v1`) was removed in favour of Arkhai payments. The following active changes are superseded by `settle-through-arkhai-payments`:
+Hosted Stripe settlement (`fiat.stripe.v1`) was removed in favour of Arkhai payments. Four active changes built on it were archived as superseded on 2026-10-08:
 
-- `consume-expanded-stripe-funding`
-- `add-api-credits-hosted-settlement`
-- `add-bare-metal-hosted-settlement`
-- `project-an-authoritative-funding-loss`
-- The hosted sections of `disburse-a-settlement-disposition`; its Alkahest work remains applicable.
+- [`consume-expanded-stripe-funding`](archive/2026-10-08-consume-expanded-stripe-funding/)
+- [`add-api-credits-hosted-settlement`](archive/2026-10-08-add-api-credits-hosted-settlement/)
+- [`add-bare-metal-hosted-settlement`](archive/2026-10-08-add-bare-metal-hosted-settlement/)
+- [`project-an-authoritative-funding-loss`](archive/2026-10-08-project-an-authoritative-funding-loss/)
+
+[`disburse-a-settlement-disposition`](disburse-a-settlement-disposition/) was re-scoped to Alkahest and contact exchange; its re-scope note records what was removed and what is open for its owners.
 
 `bind-one-hosted-release-coordinate`, `carry-the-payer-return-address`, and `resolve-hosted-client-from-an-index` were archived before the removal and stay archived as history; the requirements they promoted were removed from the permanent specs with the mechanism. The mechanism-scoped reclaim options `carry-the-payer-return-address` added to the settlement runtime's port remain, as a general capability.
 

@@ -22,16 +22,13 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
-from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import (
     PaymentSellerStage,
-    create_arkhai_payments_registration,
     servicing_stage,
 )
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
-from market_contact_exchange import create_contact_exchange_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
@@ -53,6 +50,7 @@ from market_settlement_runtime import (
 )
 
 from market_storefront.payment_settlement import VmPaymentsCoordinator
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
     capacity_binding_for_listing,
@@ -295,16 +293,6 @@ class VmSettlementComposition:
         if not accepted_escrows and not settlement_options:
             raise RuntimeError("no enabled settlement mechanism is ready")
         return accepted_escrows, settlement_options, readiness
-
-
-def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    return SettlementConfigurationRegistry(
-        (
-            create_alkahest_registration(),
-            create_arkhai_payments_registration(),
-            create_contact_exchange_registration(),
-        )
-    )
 
 
 def build_storefront_publication_clause_compiler() -> Callable[

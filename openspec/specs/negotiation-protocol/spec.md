@@ -231,16 +231,16 @@ MUST apply only when the selected option advertises no rate. A reference amount 
 from an option the buyer did not select or from a rate in another asset. The negotiation runtime
 MUST give the domain the buyer's pinned proposal when it asks for the reference amount.
 
-#### Scenario: A hosted option is selected on a two-mechanism listing
+#### Scenario: A second mechanism's option is selected on a two-mechanism listing
 
-- **WHEN** a listing offers an Alkahest option and a hosted option, and the buyer selects the hosted
-  option
-- **THEN** the seller's reference amount is derived from the hosted option's rate in its own minor
+- **WHEN** a listing offers an Alkahest option and an Arkhai payments option, and the buyer selects
+  the payments option
+- **THEN** the seller's reference amount is derived from the payments option's rate in its own minor
   units, not from the Alkahest rate
 
-#### Scenario: A hosted-only listing is negotiated
+#### Scenario: A listing offering only non-escrow options is negotiated
 
-- **WHEN** a listing offers only hosted options with rates and the storefront configures a
+- **WHEN** a listing offers only Arkhai payments options with rates and the storefront configures a
   negotiation floor
 - **THEN** the seller's reference amount is derived from the selected option's rate, and the floor
   is not used

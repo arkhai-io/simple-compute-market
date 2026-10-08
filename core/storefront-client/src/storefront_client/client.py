@@ -63,6 +63,7 @@ from storefront_client.auth import (
     build_authenticated_request,
     verify_authenticated_response,
 )
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 from storefront_client.models import (
     AgreementSettleResponse,
     RefundSettlementResponse,
@@ -1730,10 +1731,10 @@ class StorefrontClient(_StorefrontClientBase):
         }
         return SettleResponse.from_dict(
             await self._authenticated_post(
-                f"/api/v1/settle/{escrow_uid}",
+                SETTLE.path(escrow_uid),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )
@@ -1757,10 +1758,10 @@ class StorefrontClient(_StorefrontClientBase):
         }
         return _strict(AgreementSettleResponse,
             await self._authenticated_post(
-                f"/api/v1/settle/{negotiation_id}",
+                SETTLE.path(negotiation_id),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=negotiation_id,
                 request_id=request_id,
             )
@@ -1779,10 +1780,10 @@ class StorefrontClient(_StorefrontClientBase):
         """
         return _strict(RefundSettlementResponse,
             await self._authenticated_post(
-                f"/api/v1/settlements/{negotiation_id}/refund",
+                REFUND.path(negotiation_id),
                 EMPTY_BODY,
-                role="seller",
-                operation="refund_settlement",
+                role=REFUND.role,
+                operation=REFUND.operation,
                 resource=negotiation_id,
                 request_id=request_id,
             )
@@ -1797,9 +1798,9 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
         return SettleStatusResponse.from_dict(
             await self._authenticated_get(
-                f"/api/v1/settle/{escrow_uid}/status",
-                role="buyer",
-                operation="settle_status",
+                SETTLE_STATUS.path(escrow_uid),
+                role=SETTLE_STATUS.role,
+                operation=SETTLE_STATUS.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )
@@ -3194,10 +3195,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         }
         return SettleResponse.from_dict(
             self._authenticated_post(
-                f"/api/v1/settle/{escrow_uid}",
+                SETTLE.path(escrow_uid),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )
@@ -3221,10 +3222,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         }
         return _strict(AgreementSettleResponse,
             self._authenticated_post(
-                f"/api/v1/settle/{negotiation_id}",
+                SETTLE.path(negotiation_id),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=negotiation_id,
                 request_id=request_id,
             )
@@ -3243,10 +3244,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """
         return _strict(RefundSettlementResponse,
             self._authenticated_post(
-                f"/api/v1/settlements/{negotiation_id}/refund",
+                REFUND.path(negotiation_id),
                 EMPTY_BODY,
-                role="seller",
-                operation="refund_settlement",
+                role=REFUND.role,
+                operation=REFUND.operation,
                 resource=negotiation_id,
                 request_id=request_id,
             )
@@ -3261,9 +3262,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
         return SettleStatusResponse.from_dict(
             self._authenticated_get(
-                f"/api/v1/settle/{escrow_uid}/status",
-                role="buyer",
-                operation="settle_status",
+                SETTLE_STATUS.path(escrow_uid),
+                role=SETTLE_STATUS.role,
+                operation=SETTLE_STATUS.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )

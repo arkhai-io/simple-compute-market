@@ -268,7 +268,7 @@ reason), hold, refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Payments-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime registers the ready mechanisms and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
 
 ### Resetting the storefront database
 

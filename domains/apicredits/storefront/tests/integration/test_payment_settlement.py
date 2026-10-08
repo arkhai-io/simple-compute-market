@@ -291,3 +291,61 @@ async def test_a_refund_after_issuance_start_records_both(harness):
     escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
     assert h.issuer.issued == [NEGOTIATION]
     assert escrow["status"] == "refunded" and escrow["fulfillment_uid"] == "grant-1"
+
+
+def _restart(tmp_path, h, *, approved: bool):
+    """A fresh composition over the same SQLite file, as after a process restart."""
+    db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
+    payments = FakePaymentsClient()
+    if approved:
+        payments.serve(build_signed_receipt(signer=SERVICE, mandate=h.data.mandate))
+    config = ArkhaiPaymentsConfig(
+        enabled=True,
+        service_url="http://127.0.0.1:9",
+        service_identity=SERVICE.identity,
+        fee_bps=250,
+        dispute_authority=DISPUTE,
+        development_auth=True,
+    )
+    stage = servicing_stage(config, client_for_owner=payments)
+    issuer = Issuer(db)
+    composition = SimpleNamespace(domain=SimpleNamespace(fulfillment=issuer))
+    composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
+        db=store, composition=composition, stage=stage
+    )
+    _container.resolved_sqlite_client = db
+    _container.resolved_settlement_composition = composition
+    return SimpleNamespace(db=db, issuer=issuer)
+
+
+async def test_an_approved_payment_converges_after_restart_without_the_buyer(harness, tmp_path):
+    """The buyer approved, never settled, and the storefront restarted: the seller issues credits."""
+    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
+
+    h = await harness()
+    restarted = _restart(tmp_path, h, approved=True)
+
+    # The registered step: what the timer loop and an operator's step run.
+    done = await payment_reconciliation_step()
+
+    assert (done["attempted"], done["failed"]) == (1, 0)
+    assert restarted.issuer.issued == [NEGOTIATION]
+    escrow = await restarted.db.load_escrow(escrow_uid=NEGOTIATION)
+    assert escrow["status"] == "ready"
+
+    again = await payment_reconciliation_step()
+    assert again["attempted"] == 0
+    assert restarted.issuer.issued == [NEGOTIATION]
+
+
+async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
+    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
+
+    h = await harness()
+    restarted = _restart(tmp_path, h, approved=False)
+
+    done = await payment_reconciliation_step()
+
+    assert (done["attempted"], done["failed"]) == (1, 0)
+    assert restarted.issuer.issued == []
+    assert await restarted.db.load_escrow(escrow_uid=NEGOTIATION) is None

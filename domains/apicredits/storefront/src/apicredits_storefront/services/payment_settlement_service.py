@@ -16,23 +16,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from core_storefront.models.settle_models import RefundSettlementResponse
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
     MandatePolicyError,
-    NotPaid,
     NothingToReverse,
+    NotPaid,
+    PaymentsBlocked,
     PaymentSellerStage,
     PaymentSettlementData,
-    PaymentsBlocked,
     PaymentsUnavailable,
     ReceiptBlocked,
     ReceiptInvalid,
     ReceiptPending,
     ReceiptUnavailable,
+    ReconciliationPass,
     RefundBlocked,
     Refunded,
+    reconcile_accepted_payments,
 )
-from core_storefront.models.settle_models import RefundSettlementResponse
 from market_core.schemas import Agreement
 from market_identity import Identity
 
@@ -42,6 +44,8 @@ from apicredits_storefront.domain_runtime import (
 )
 from apicredits_storefront.services.payment_selection import (
     agreement_bytes as _agreement_bytes,
+)
+from apicredits_storefront.services.payment_selection import (
     selects_payments,
 )
 
@@ -122,6 +126,31 @@ class ApiCreditPaymentSettlementService:
         if status is not None:
             serialized["status"] = status
         return serialized
+
+    async def reconcile_once(self, *, limit: int = 100) -> ReconciliationPass:
+        """Advance accepted payment deals a buyer has not settled, without the buyer.
+
+        Takes deals with no verified receipt, credit issuance whose outcome is
+        still open, and refunds left `refunding`; the same settle path a buyer's
+        call takes advances each.
+        """
+        candidates = []
+        for negotiation_id in await self.db.list_accepted_negotiations_settling_through(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM, limit=limit
+        ):
+            existing = await self.db.load_escrow(escrow_uid=negotiation_id)
+            if existing is None or existing.get("status") in ("provisioning", "refunding"):
+                candidates.append(negotiation_id)
+
+        async def settle(negotiation_id: str) -> None:
+            thread = await self.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+            await self.settle(
+                negotiation_id,
+                buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+                seller_principal=Identity.model_validate(thread["seller_principal"]),
+            )
+
+        return await reconcile_accepted_payments(candidates, settle, logger=logger)
 
     async def settle(
         self, negotiation_id: str, *, buyer_principal: Identity, seller_principal: Identity

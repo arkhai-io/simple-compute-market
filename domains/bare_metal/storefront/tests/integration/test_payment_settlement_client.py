@@ -260,6 +260,7 @@ async def harness(tmp_path, enabled):
                 disabled = _composition(payments, enabled=False)
                 object.__setattr__(runtime, "settlement_composition", disabled)
             yield Harness(
+                app=app,
                 runtime=runtime,
                 payments=payments,
                 provisioning=provisioning,
@@ -389,3 +390,74 @@ async def test_an_interrupted_refund_completes_on_the_next_call(harness):
     harness.payments.reversed = True
     harness.payments.reverse_error = "hold_not_reversible"
     assert (await harness.refund()).status == "refunded"
+
+
+@pytest.mark.asyncio
+async def test_every_settlement_route_contract_is_mounted(harness):
+    """The settle, status, and refund routes are mounted where the contract declares them."""
+    from storefront_client.settlement_routes import unmounted_settlement_routes
+
+    mounted = [
+        (method, route.path)
+        for route in harness.app.routes
+        if getattr(route, "path", None)
+        for method in (getattr(route, "methods", None) or ())
+    ]
+
+    assert unmounted_settlement_routes(mounted) == []
+
+
+
+def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefrontRuntime, Provisioning]:
+    """A fresh runtime over the same SQLite file, as after a process restart."""
+    domain = get_market_domain_contract()
+    provisioning = Provisioning()
+    runtime = BareMetalStorefrontRuntime(
+        db=SQLiteClient(str(tmp_path / "storefront.db"), domain=domain),
+        domain=domain,
+        seller_principal=SELLER.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN.identity,)),
+        storefront_url="http://test",
+        marketplace_signer=SELLER,
+        settlement_composition=_composition(payments),
+        capacity_client=Capacity(),
+        fulfillment_client=provisioning,
+    )
+    return runtime, provisioning
+
+
+@pytest.mark.asyncio
+async def test_an_approved_payment_converges_after_restart_without_the_buyer(harness, tmp_path):
+    """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
+    payments = FakePaymentsClient()
+    payments.serve(build_signed_receipt(signer=SERVICE, mandate=harness.data.mandate))
+    runtime, provisioning = _restarted_runtime(tmp_path, payments)
+    assert runtime.payments_reconciliation_enabled()
+
+    # The registered step: what the timer loop and an operator's step run.
+    done = await runtime.settlement_service().reconcile_payments_once()
+
+    assert (done.attempted, done.failed) == (1, 0)
+    assert len(provisioning.begin_calls) == 1
+    record = await runtime.db.load_bare_metal_settlement_record(negotiation_id=harness.negotiation_id)
+    assert record["status"] == "settlement_verified"
+    assert await runtime.db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=harness.negotiation_id
+    ) is not None
+
+    # Delivery has started, so a later pass leaves the deal to fulfillment.
+    again = await runtime.settlement_service().reconcile_payments_once()
+    assert again.attempted == 0
+    assert len(provisioning.begin_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
+    runtime, provisioning = _restarted_runtime(tmp_path, FakePaymentsClient())
+
+    done = await runtime.settlement_service().reconcile_payments_once()
+
+    assert (done.attempted, done.failed) == (1, 0)
+    assert provisioning.begin_calls == []
+    record = await runtime.db.load_bare_metal_settlement_record(negotiation_id=harness.negotiation_id)
+    assert record["status"] == "accepted"

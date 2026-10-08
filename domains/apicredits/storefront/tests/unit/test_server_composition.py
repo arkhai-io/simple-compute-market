@@ -142,3 +142,17 @@ async def test_startup_registers_exactly_the_loops_it_starts_each_with_a_step(mo
         handles = list(loops._handles.values())
         loops.clear_loops()
         await asyncio.gather(*handles, return_exceptions=True)
+
+def test_every_settlement_route_contract_is_mounted() -> None:
+    """The settle, status, and refund routes are mounted where the contract declares them."""
+    from storefront_client.settlement_routes import unmounted_settlement_routes
+
+    mounted = [
+        (method, route.path)
+        for route in server.app.routes
+        if getattr(route, "path", None)
+        for method in (getattr(route, "methods", None) or ())
+    ]
+
+    assert unmounted_settlement_routes(mounted) == []
+

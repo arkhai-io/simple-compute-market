@@ -51,10 +51,11 @@ def _validate_settlement_candidate(
     # Mechanism packages and the process-global storefront settings stay lazy:
     # config path/help commands must not initialize operator configuration, and
     # this validator must evaluate the supplied in-memory candidate instead.
-    from market_alkahest import create_alkahest_registration
-    from market_settlement_runtime import SettlementConfigurationRegistry
+    from market_storefront.settlement_registry import (
+        build_storefront_settlement_registry,
+    )
 
-    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    registry = build_storefront_settlement_registry()
     registry.resolve(document.get("Settlement", {}), role=role)
 
     from market_storefront.utils.config import settlement_publication_defaults
@@ -64,16 +65,22 @@ def _validate_settlement_candidate(
     settlement_publication_defaults(candidate)
 
 
+def _installed_settlement_mechanisms() -> dict[str, str]:
+    from market_storefront.settlement_registry import installed_settlement_mechanisms
+
+    return installed_settlement_mechanisms()
+
+
 def _seller_publication_clause_compiler(
     document: Mapping[str, Any],
 ) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
-    from market_alkahest import create_alkahest_registration
-    from market_settlement_runtime import (
-        SettlementConfigurationRegistry,
-        compile_settlement_publication_clause,
+    from market_settlement_runtime import compile_settlement_publication_clause
+
+    from market_storefront.settlement_registry import (
+        build_storefront_settlement_registry,
     )
 
-    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    registry = build_storefront_settlement_registry()
     settlement = document.get("Settlement", document.get("settlement", {}))
     if not isinstance(settlement, Mapping):
         raise SettlementMigrationError("Settlement must be a table")
@@ -289,6 +296,7 @@ def config_migrate(
                 backup=backup,
                 environ=os.environ,
                 validator=_validate_settlement_candidate,
+                installed=_installed_settlement_mechanisms(),
             )
             lines = format_migration_result(result)
         elif scope == "publication":

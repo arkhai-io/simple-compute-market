@@ -52,10 +52,10 @@
 
 ## 8. Focused, integration, and package verification
 
-- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and hosted driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
+- [ ] 8.1 Run focused identity-kit profile/provider/signing/package tests; core profile CLI/resolver/run-log/plugin tests; VM and API-credit buyer suites; generated-config, Compose, and driver unit tests. Record exact commands and prove create/import/rotate/restart/recovery and all named failure cases.
 - [ ] 8.2 Build the changed identity, core buyer, VM buyer, and API-credit buyer wheels into `.dist`; explicitly upgrade/reinstall them through each touched project's reinit target, inspect wheel contents/dependencies, and run typing plus forbidden-import checks without editable sibling paths.
 - [ ] 8.3 Run the ordinary wallet-free Ed25519 VM and API-credit smoke paths with fresh and resumed runs under one persistent profile, then inspect JSONL, TOML, output, reprs, logs, Compose renders, wheels, and images with secret canaries; keep Alkahest wallet regression separate and unchanged.
-- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external hosted/cluster checks rather than replacing them with narrower focused evidence.
+- [ ] 8.4 Run the relevant integration/E2E suites for VM and API-credit buyer injection and run-log migration; disclose unavailable external cluster checks rather than replacing them with narrower focused evidence.
 
 ## 9. Permanent documentation and cutover
 

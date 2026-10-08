@@ -174,7 +174,7 @@ Buyer orchestration MUST filter advertised options by installed/enabled mechanis
 
 Generated buyer configuration MUST use the shared `[Settlement]` vocabulary while omitting seller-only publication, authority administration, onboarding, and provider fields. Mechanism-specific buyer constraints MAY appear only in the owning typed subsection.
 
-#### Scenario: Fiat-only buyer initializes configuration
+#### Scenario: Payments-only buyer initializes configuration
 
 - **WHEN** the user generates an Ed25519 payment buyer config
 - **THEN** the output contains profile-store and settlement preference inputs but no private identity or wallet/chains

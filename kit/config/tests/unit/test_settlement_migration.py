@@ -19,6 +19,8 @@ from market_config.settlement_migration import (
     reject_legacy_settlement_path,
 )
 
+_ALKAHEST_ONLY = {"alkahest.v1": "alkahest"}
+
 
 def _write(path: Path, text: str, mode: int = 0o600) -> bytes:
     path.write_text(text)
@@ -43,7 +45,7 @@ alkahest_address_config_path = "/two.json"
     )
 
     with pytest.raises(SettlementMigrationConflict):
-        migrate_settlement_config(path, role="seller", write=True, backup=True)
+        migrate_settlement_config(path, role="seller", write=True, backup=True, installed=_ALKAHEST_ONLY)
 
     assert path.read_bytes() == original
     assert not path.with_name("storefront.toml.bak").exists()
@@ -68,7 +70,7 @@ mechanism_priority = ["alkahest.v1"]
             role="buyer",
             write=True,
             backup=True,
-            validator=reject,
+            validator=reject, installed=_ALKAHEST_ONLY,
         )
 
     assert secret not in str(error.value)
@@ -89,7 +91,7 @@ mechanism_priority = ["alkahest.v1"]
         SettlementMigrationValidationError,
         match="requires a typed settlement candidate validator",
     ):
-        migrate_settlement_config(path, role="buyer", write=True, backup=True)
+        migrate_settlement_config(path, role="buyer", write=True, backup=True, installed=_ALKAHEST_ONLY)
 
     assert path.read_bytes() == original
     assert not path.with_name("buyer.toml.bak").exists()
@@ -116,7 +118,7 @@ mechanism_priority = ["alkahest.v1"]
             role="buyer",
             write=True,
             backup=True,
-            validator=_accept_typed_candidate,
+            validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
         )
 
     assert path.read_bytes() == original
@@ -151,7 +153,7 @@ mechanism_priority = ["alkahest.v1"]
         role="buyer",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
 
     assert result.backup_path is not None
@@ -180,7 +182,7 @@ mechanism_priority = ["alkahest.v1"]
         role="buyer",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -201,7 +203,7 @@ mechanism_priority = ["alkahest.v1"]
         role="buyer",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
     migrated = path.read_bytes()
     backup = first.backup_path
@@ -213,7 +215,7 @@ mechanism_priority = ["alkahest.v1"]
         role="buyer",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
 
     assert second.changed is False
@@ -225,11 +227,11 @@ mechanism_priority = ["alkahest.v1"]
 
 def test_write_and_check_modes_are_strict() -> None:
     with pytest.raises(SettlementMigrationError, match="exactly one"):
-        migrate_settlement_config("unused", role="buyer")
+        migrate_settlement_config("unused", role="buyer", installed=_ALKAHEST_ONLY)
     with pytest.raises(SettlementMigrationError, match="requires backup"):
-        migrate_settlement_config("unused", role="buyer", write=True)
+        migrate_settlement_config("unused", role="buyer", write=True, installed=_ALKAHEST_ONLY)
     with pytest.raises(SettlementMigrationError, match="only valid"):
-        migrate_settlement_config("unused", role="buyer", check=True, backup=True)
+        migrate_settlement_config("unused", role="buyer", check=True, backup=True, installed=_ALKAHEST_ONLY)
 
 
 def test_buyer_migration_moves_priority_and_one_effective_address_book(
@@ -260,7 +262,7 @@ answer = 42
 """,
     )
 
-    checked = migrate_settlement_config(path, role="buyer", check=True)
+    checked = migrate_settlement_config(path, role="buyer", check=True, installed=_ALKAHEST_ONLY)
 
     assert checked.changed is True
     assert checked.written is False
@@ -272,7 +274,7 @@ answer = 42
         role="buyer",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
     document = tomllib.loads(path.read_text())
     assert written.written is True
@@ -331,7 +333,7 @@ keep = "yes" # unrelated comment
         role="seller",
         write=True,
         backup=True,
-        validator=_accept_typed_candidate,
+        validator=_accept_typed_candidate, installed=_ALKAHEST_ONLY,
     )
 
     migrated_text = path.read_text()
@@ -413,3 +415,56 @@ def test_new_settlement_paths_are_not_treated_as_legacy() -> None:
         "Chains.anvil.rpc_url",
     ):
         assert is_legacy_settlement_path(path) is False
+
+_WITH_PAYMENTS = {"alkahest.v1": "alkahest", "arkhai.payments.v1": "arkhai_payments"}
+
+
+def test_current_payments_configuration_migrates_without_change(tmp_path):
+    path = tmp_path / "storefront.toml"
+    path.write_text(
+        "[Settlement]\nschema_version = 1\npriority = [\"arkhai.payments.v1\"]\n\n"
+        "[Settlement.arkhai_payments]\nenabled = true\n",
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    result = migrate_settlement_config(
+        path, role="seller", check=True, installed=_WITH_PAYMENTS
+    )
+
+    assert result.changed is False
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("entry", ["fiat.stripe.v1", "stripe"])
+def test_stripe_in_priority_is_refused_with_its_removal(tmp_path, entry):
+    path = tmp_path / "storefront.toml"
+    path.write_text(
+        f"[Settlement]\nschema_version = 1\npriority = [\"{entry}\"]\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SettlementMigrationValidationError, match="Stripe settlement .* was removed"):
+        migrate_settlement_config(path, role="seller", check=True, installed=_WITH_PAYMENTS)
+
+
+def test_a_stripe_section_is_refused_with_its_removal(tmp_path):
+    path = tmp_path / "storefront.toml"
+    path.write_text(
+        "[Settlement]\nschema_version = 1\npriority = []\n\n[Settlement.stripe]\nenabled = true\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SettlementMigrationValidationError, match="Stripe settlement .* was removed"):
+        migrate_settlement_config(path, role="seller", check=True, installed=_WITH_PAYMENTS)
+
+
+def test_an_uninstalled_mechanism_is_still_unknown(tmp_path):
+    path = tmp_path / "storefront.toml"
+    path.write_text(
+        "[Settlement]\nschema_version = 1\npriority = [\"arkhai.payments.v1\"]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SettlementMigrationValidationError, match="unknown mechanism"):
+        migrate_settlement_config(path, role="seller", check=True, installed=_ALKAHEST_ONLY)
+

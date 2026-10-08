@@ -4627,6 +4627,44 @@ class SQLiteClient:
     # Negotiations API helpers
     # ------------------------------------------------------------------
 
+    async def list_accepted_negotiations_settling_through(
+        self, *, mechanism: str, limit: int = 100
+    ) -> list[str]:
+        """Accepted negotiations whose Agreement settles through ``mechanism``, oldest first.
+
+        A seller-side reconciliation pass reads this to find deals a buyer may
+        never settle; the domain narrows it to the ones not yet settled.
+        """
+
+        def _list() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, agreement_bytes
+                    FROM negotiation_threads
+                    WHERE terminal_state = 'success' AND agreement_bytes IS NOT NULL
+                    ORDER BY created_at ASC
+                    """
+                )
+                found: list[str] = []
+                for negotiation_id, raw in cur.fetchall():
+                    try:
+                        agreement = json.loads(bytes(raw) if not isinstance(raw, str) else raw)
+                    except (TypeError, ValueError):
+                        continue
+                    settlement = agreement.get("settlement") if isinstance(agreement, dict) else None
+                    if isinstance(settlement, dict) and settlement.get("mechanism") == mechanism:
+                        found.append(str(negotiation_id))
+                        if len(found) >= limit:
+                            break
+                return found
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
     async def list_negotiations_for_listing(
         self,
         *,

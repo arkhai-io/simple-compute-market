@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-
-from collections.abc import Mapping
 import json
-from urllib.parse import quote, urlencode
+from collections.abc import Mapping
 from typing import Annotated, Any
+from urllib.parse import quote, urlencode
 
 from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import (
@@ -26,10 +25,12 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.settle_models import RefundSettlementResponse
-from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP, AdminPauseResponse
+from core_storefront.models.system_models import (
+    STAGE_EVENT_PAGE_CAP,
+    AdminPauseResponse,
+)
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
@@ -38,6 +39,12 @@ from market_contact_exchange import (
     IntroductionStart,
 )
 from market_identity import EMPTY_BODY, Identity
+from market_negotiation_runtime import (
+    NegotiationStateError,
+    NegotiationUnavailableError,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
     PoolOverrideContractError,
@@ -49,12 +56,6 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
     pool_override_contract,
 )
-from market_negotiation_runtime import (
-    NegotiationStateError,
-    NegotiationUnavailableError,
-    OfferUnfulfillableError,
-    StorefrontPausedError,
-)
 from market_storefront_kit import (
     DealControlRouteError,
     LifecycleRouteError,
@@ -65,21 +66,23 @@ from market_storefront_kit import (
     get_storefront_container,
     opening_proposal,
 )
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
+
+from .fulfillment_service import BareMetalFulfillmentError
 from .models import (
     BareMetalAccessDeliveryResponse,
-    BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
+    BareMetalFulfillRequest,
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
-from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
+from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import PaymentSettleResult, SettlementRequestError
-from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
 
@@ -688,7 +691,7 @@ async def settle(
         identity = await _buyer(
             request=request,
             runtime=runtime,
-            operation="settle_escrow",
+            operation=SETTLE.operation,
             resource=escrow_uid,
             body=await _request_body(request),
             expected_principal=body.buyer_principal,
@@ -715,7 +718,7 @@ async def refund_settlement(negotiation_id: str, request: Request) -> JSONRespon
     await _seller(
         request=request,
         runtime=runtime,
-        operation="refund_settlement",
+        operation=REFUND.operation,
         resource=negotiation_id,
     )
     try:
@@ -751,7 +754,7 @@ async def settle_status(
         identity = await _buyer(
             request=request,
             runtime=runtime,
-            operation="settle_status",
+            operation=SETTLE_STATUS.operation,
             expected_principal=Identity.model_validate(thread["buyer_principal"]),
             resource=escrow_uid,
         )
