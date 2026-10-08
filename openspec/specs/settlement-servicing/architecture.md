@@ -123,6 +123,12 @@ Buyer approval validates both the mandate and local policy. Buyer and seller pol
 
 VM and bare-metal retain selected-site physical authority and teardown; API credits retains its grant and credential authority. Those domain journals are not ledger state. Refund uses `reverse`; hold release, fees, disputes, and cash movement remain payments-service responsibilities. The kit has no servicing daemon.
 
+**Delivery start and refund intent are ordered.** Each domain records two transitions with single-statement compare-and-set writes in its own tables. Delivery start, before any external effect, succeeds only while the deal is verified and carries no refund intent. Refund intent records `refunding` before the reversal is requested: if delivery had not started, it can no longer start; if it had, the delivery completes and its details are kept beside the `refunded` status. A refund first confirms a verified payment exists, and abandons its intent if nothing remains to reverse, so an unpaid deal is never left blocked.
+
+**Attachments must match the deal.** Every Agreement attachment is a deal attachment validated against the transaction's deal hash, so the client and its test fake examine every attachment, return the matching one, and refuse any mismatch as a blocked integration fault.
+
+**Snapshot proofs are not evidence.** A transaction snapshot carries a service proof that the marketplace does not verify. Sellers rely only on the independently signed receipt it embeds, which suffices for single-part gating. A change that reads snapshot part state as evidence must first add snapshot verification, a snapshot vector, and a fixture.
+
 ## Current limits
 
 Heartbeat evidence remains persisted but is not an automated adjudication

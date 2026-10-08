@@ -15,6 +15,44 @@ Shared Arkhai payments registration, typed configuration, and owner-scoped clien
 - **WHEN** an Ed25519 buyer selects `arkhai.payments.v1`
 - **THEN** its account travels in `SettlementSelection.params.payer_account` and Agreement `settlement_params`, while its marketplace signer and owner-scoped API credential remain separate
 
+### Requirement: Agreement attachment is a policy each side owns
+
+The buyer's `attach_agreement` setting, default `false`, MUST be the only control that attaches the Agreement at approval. A seller asks for the Agreement through its payment option's `deposit_agreement` and, when the buyer did not attach it, MUST attach it after verifying the receipt and before any delivery effect.
+
+#### Scenario: A seller configuration sets the buyer's attachment policy
+
+- **WHEN** a seller's `[Settlement.arkhai_payments]` section sets `attach_agreement`
+- **THEN** publication preflight reports a blocker, because the setting belongs to the buyer
+
+#### Scenario: The seller deposits what the buyer did not attach
+
+- **WHEN** the selected option sets `deposit_agreement` and the approved transaction has no Agreement attachment
+- **THEN** the seller attaches the Agreement after recording the verified receipt and before any delivery effect
+
+### Requirement: The refund failure action is opt-in and follows the accepted mechanism
+
+A seller's `[fulfillment.failure_policy].actions` MAY include `refund`, off by default, meaning "refund the buyer when my own fulfillment fails". The action MUST dispatch on the deal's accepted Agreement: Alkahest keeps its token refund, and Arkhai payments reverses the held payment.
+
+#### Scenario: A payments deal's fulfillment fails before delivery
+
+- **WHEN** the refund action is enabled and fulfillment of an undelivered payments deal fails
+- **THEN** the seller reverses the held payment and the deal ends `refunded`
+
+#### Scenario: A delivered deal is not refunded automatically
+
+- **WHEN** the refund action is enabled and a payments deal had already been delivered
+- **THEN** the action does not run, and a refund stays an operator decision
+
+#### Scenario: The reversal fails
+
+- **WHEN** the action's reversal fails
+- **THEN** the deal stays failed with the action's recorded failure, and the operator refund route remains the backstop
+
+#### Scenario: The action is not enabled
+
+- **WHEN** a seller has not enabled the refund action
+- **THEN** a failed fulfillment refunds nothing automatically
+
 ### Requirement: Common sanitized mechanism readiness
 
 Preflight for every mechanism MUST report canonical mechanism ID, configured, enabled, ready, stable blocker codes/messages, capabilities, and contract/schema versions, with only allowlisted safe public detail. A status check MUST be observational and MUST NOT publish, create Account Links or Checkout sessions, submit chain/provider mutations, change settlement state, or expose credentials, provider IDs, private RPC data, transient URLs, or administrator state.

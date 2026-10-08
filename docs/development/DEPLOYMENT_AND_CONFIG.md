@@ -646,6 +646,14 @@ EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
+Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
+attaches the exact Agreement when it approves a payment; setting it in a seller
+configuration is a publication blocker. A seller that wants the Agreement on file sets
+`deposit_agreement` on its payment option, and attaches the Agreement itself after
+verifying the receipt and before delivering, whenever the buyer did not. The Agreement
+discloses both principals, the listing, amount, timing, and provision terms, so enable
+either only where that disclosure to the payments service is intended.
+
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.

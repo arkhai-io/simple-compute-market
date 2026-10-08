@@ -299,7 +299,7 @@ The buyer kit MUST check the mandate against the exact Agreement and buyer polic
 
 ### Requirement: Negotiation-scoped payment settlement converges
 
-The seller MUST derive the mandate at acceptance and store it in opaque `settlement_data` beside exact `agreement_bytes` in `negotiation_threads`. Buyer settlement requests MUST carry only the negotiation ID. The seller MUST authenticate the accepted buyer, load accepted state, poll the deterministic transaction ID, and verify the signed receipt against the mandate before VM or bare-metal provisioning or API-credit issuance. Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment/grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it permanently pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon.
+The seller MUST derive the mandate at acceptance and store it in opaque `settlement_data` beside exact `agreement_bytes` in `negotiation_threads`. Buyer settlement requests MUST carry only the negotiation ID. The seller MUST authenticate the accepted buyer, load accepted state, poll the deterministic transaction ID, and verify the signed receipt against the mandate before VM or bare-metal provisioning or API-credit issuance. Missing or pending payment evidence MUST return retryable pending without a protected effect. Repeated calls MUST reuse transaction and fulfillment/grant identities, return completed state idempotently, and re-drive nonterminal domain state rather than leave it permanently pending. Receipt evidence and domain progress MUST remain domain-owned, not a local ledger or payment-servicing daemon. A failure caused by the seller's own integration (an authentication or authorization error, an unknown account, missing credentials or servicing configuration, a protocol or schema violation, another transaction ID, or an Agreement attachment that does not match the deal) is `Blocked`: the storefront answers 500 and logs it as an error, and a refund reports the matching `RefundBlocked`.
 
 #### Scenario: Settlement is called before approval completes
 
@@ -315,6 +315,11 @@ The seller MUST derive the mandate at acceptance and store it in opaque `settlem
 
 - **WHEN** acceptance and start times are not whole seconds
 - **THEN** mandate derivation rounds the hold interval up and approval expiry down without rewriting the Agreement
+
+#### Scenario: The seller's integration fault blocks settlement
+
+- **WHEN** the payments service refuses the seller's credential while a deal settles
+- **THEN** the storefront answers 500, records nothing, and logs the fault as an error rather than reporting a retryable outage
 
 ## Evidence
 

@@ -325,7 +325,8 @@ Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; 
   - `make check-packaging` passed on the reviewer's machine: installs derive internal packages from locks, every lock is current, every Python selection reads the root declaration, and every distribution is one `src/` package that installs editable.
   - The extended `make test` failed at `helm/scripts/test-render.sh`: the payments fixture's render file was never created, because the fiat render it replaced had been removed before the merge. The script now creates and renders it; the fixture and both negative cases were checked against the generated values schemas.
   - The render contracts then failed on stale subchart archives (`helm/charts/*.tgz`, gitignored) packaged before the schema change; `test-render` now runs `helm dependency update` first. With current charts, the development identity-overlap render failed on its own: the chart's default peer identities became EIP-191 principals, so each of the scenario's four added EIP-191 principals duplicated a default. The scenario now adds each peer's Ed25519 principal, keeping two schemes per list. Failed renders now print Helm's error instead of exiting silently.
-  - Remaining: run `make -C helm test-render` to confirm the render contracts pass.
+  - The overlap fixture's provisioning bootstrap identities were also Ed25519 while the chart defaults are EIP-191; the reviewer moved them to EIP-191, and the render contracts then passed.
+  - Remaining: one full `make test` run with the extended chain.
 
 ## 7. Closeout
 
