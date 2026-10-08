@@ -230,3 +230,6 @@ pi-session-*.html
 
 # Local-only mise overrides (machine-specific paths).
 mise.local.toml
+.e2e-bare-metal.env
+.e2e-identities.env
+openspec/changes/*/reviews/*.md
