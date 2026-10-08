@@ -212,10 +212,11 @@ None.
   `publish-multidimensional-listing-shape` (archived): the projection default,
   the hint mechanism, and the site-scoped override store this change makes
   the only tier.
-- Independent of `remove-dead-storefront-physical-surfaces` and
-  `fix-resource-pool-provider-at-creation`; either order. This change's
-  freeze migration covers `compute_allocations` if the former has not landed
-  first.
+- Independent of `fix-resource-pool-provider-at-creation`; either order.
+  `remove-dead-storefront-physical-surfaces` (archived 2026-10-08) has already
+  frozen `compute_allocations` and removed the dead surfaces. Its local-row
+  cleanup in `release_reservations` uses the narrowed resource transition that
+  change left.
 - The repository work order is repair first, retirement second. Sellers
   self-host and choose deployment timing after preparing authoritative site
   inventory and commercial overrides; no fleet-wide rollout signal gates it.
