@@ -273,3 +273,36 @@ override MUST apply again.
   version that held a pool-keyed legacy override record for it
 - **THEN** each commercial field resolves from the pool's hint and then the configured
   default, no legacy value is applied, and system status reports no legacy value in effect
+
+## MODIFIED Requirements
+
+### Requirement: A site whose projection is not held holds its listings
+
+A storefront MUST treat a configured site whose resource-pool projection holds no value as
+unknown, not empty: every listing derived from that site MUST be held, neither closed nor
+refreshed, until the site's projection holds a value. A site whose projection is not held
+MUST NOT yield listings from any other source in its place.
+
+#### Scenario: The storefront starts while a site is unreachable
+
+- **WHEN** a storefront with open listings from a site restarts while that site cannot be
+  reached, and a publication cycle runs
+- **THEN** those listings stay open, and none is closed as having lost its source
+
+#### Scenario: No site's projection is held
+
+- **WHEN** no configured site's projection holds a value and a publication cycle runs
+- **THEN** no listing is derived and no listing is closed
+
+#### Scenario: The site returns
+
+- **WHEN** the unknown site's projection loads
+- **THEN** its listings are reconciled against it as usual
+
+#### Scenario: A bare-metal site is unreachable during a publication run
+
+- **GIVEN** open bare-metal listings derived from a site
+- **WHEN** the operator runs bare-metal publication while that site's projection cannot be
+  fetched
+- **THEN** those listings stay open and unchanged, and the run reports the site as unknown
+- **AND** every other configured site is reconciled as usual

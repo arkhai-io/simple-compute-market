@@ -28,11 +28,20 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
 ### Retire the local-table listing path
 
 - Delete `_pool_rows_from_local_tables` and everything downstream of it in
-  `domains/vms/listings/reconciler.py`; `available_compute_slices` reads the
-  projection unconditionally.
-- Delete `use_site_projection_for_listings`, its readers in
-  `capacity_client.py` and `listing_sources.py`, its `settings.toml` entry, and
-  the `storefront.alice.toml` opt-out.
+  `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`, including the
+  local-only helpers `_capacity_pool_member_rows`,
+  `_accumulate_capacity_pool_member`, and `_local_table_shapes`. Every
+  derivation entry point (`available_compute_slices`,
+  `current_available_resource_keys`, `stale_open_listing_ids`,
+  `closed_available_listing_ids`, and the storefront wrappers that forward
+  them) takes the projection as a required argument; `None` no longer selects
+  a source.
+- Delete `use_site_projection_for_listings`, its readers
+  (`listing_source_projection()` in `capacity_client.py`, which returns `None`
+  to select the local path for all seven of its callers, and
+  `_projection_enabled()` in `listing_sources.py`), its `settings.toml` entry,
+  and the tests that set it. Alice's `storefront.alice.toml` opt-out was
+  already removed by the multi-storefront repair.
 - Retire `hosts` and `compute_pool_members` entirely, `resources`' remaining
   physical and commercial columns, and `compute_capacity_pools.total_gpu_count`.
 - Retire the legacy home-site override tier: `compute_capacity_pools`'
@@ -60,32 +69,45 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
 
 ### Retire CSV import and its deployment contract
 
-- Remove CSV import: `domains/vms/listings/host_csv_importer.py` and
-  `resource_csv_importer.py`, `SQLiteClient.upsert_hosts_from_csv` and
-  `upsert_resources_from_csv*`, `POST /api/v1/admin/portfolio/resources/import`,
-  `storefront_client.admin_import_resources`, and `SQLiteClient.upsert_resource`
-  with `_sync_compute_pool_for_resource`.
+- Remove CSV import: `domains/vms/listings/src/arkhai_vms_listings/host_csv_importer.py`
+  and `resource_csv_importer.py`, `SQLiteClient.upsert_hosts_from_csv` and
+  `upsert_resources_from_csv*`, `POST /api/v1/admin/portfolio/resources/import`
+  with its administrator route contract and multipart signing descriptor in
+  `middleware/admin_identity.py`, both `ImportResourcesResponse` models
+  (storefront and `core/storefront-client`), both client variants'
+  `admin_import_resources`, and `SQLiteClient.upsert_resource` with
+  `_sync_compute_pool_for_resource`.
 - Remove the startup seeding stack: `startup.py`'s `_seed_resources_if_empty`
   and its registered `seed_resources` step, `SystemService.seed_resources_if_empty`,
   the `_DEFAULT_CSV_PATH` constant, and the `resources_csv_path` and
   `resources_csv_inline` settings.
 - **BREAKING (deployment):** retire CSV inventory as an operator contract —
-  `helm/charts/storefront/templates/_helpers.tpl` (two sites), `secrets.yaml`'s
-  `resourcesCsvInline`, `values.yaml`'s `--set-file` guidance,
+  `helm/charts/storefront/templates/_helpers.tpl`'s `resources_csv_inline`
+  rendering, `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s
+  `resourcesCsvInline` guidance and `resources_csv_path` config entry,
+  `helm/Makefile`'s `RESOURCES_CSV_FILE` `--set-file` wiring,
+  `helm/fixtures/eip191-evm-values.yaml`'s `resources_csv_path`,
   `compose/seller.yml`'s volume mount and `SELLER_RESOURCES_CSV`,
-  `domains/vms/compose.yml`'s two mounts, and `docs/seller-quickstart.md`. An
-  operator upgrading past this change must have declared inventory at the
-  provisioning site first, so migration guidance is part of the change.
+  `domains/vms/compose.yml`'s two mounts (Bob's and Alice's),
+  `resources_csv_path` in `storefront.alice.toml` and `storefront.bob.toml`,
+  `domains/vms/storefront/Makefile`'s `RESOURCES_CSV_FILE` mounts, the bundled
+  inventory CSVs under `market_storefront/data/` with
+  `test_bundled_inventory.py`, and `docs/seller-quickstart.md`. An operator
+  upgrading past this change must have declared inventory at the provisioning
+  site first, so migration guidance is part of the change.
 - Remove the CLI import surface: `market-storefront portfolio import-csv`, its
   `cli_portfolio.py` module and `add_typer` registration in `cli.py`, and
   `domains/vms/storefront/scripts/import_resources_csv.py`.
-- Migrate the seven CSV-dependent test files to provisioning-seeded inventory:
+- Migrate the six CSV-dependent test files to provisioning-seeded inventory:
   `e2e-tests/tests/e2e/roles/scenarios/vms/test_buy_oneshot_buyer_cli.py`,
   `test_compute_dynamic_listings.py`, `test_full_deal.py`,
-  `test_full_deal_buyer_cli.py`, `test_multi_registry.py`,
-  `test_non_erc20_settlement.py`, and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
-  Re-ground that set after the separate multi-storefront repair, which moves
-  Alice's stages to projection/provisioning seeding before this cutover.
+  `test_full_deal_buyer_cli.py`, `test_non_erc20_settlement.py`, and
+  `e2e-tests/tests/smoke/test_storefront_smoke.py`. The multi-storefront repair
+  already moved `test_multi_registry.py` to provisioning seeding.
+  `test_compute_dynamic_listings.py` imports rows whose pool identifiers match
+  its projected pools, so the legacy tier currently supplies those pools' SLA
+  and region; its migration declares them on the pool hint or a site-scoped
+  override instead.
 
 ### Retire diagnostics and cleanup that depend on local inventory
 
@@ -141,19 +163,31 @@ None.
 
 ## Impact
 
-- Code: `domains/vms/listings/` (`reconciler.py`, both CSV importers,
-  `pool_descriptors.py`, `resources.py`);
+- Code: `domains/vms/listings/src/arkhai_vms_listings/` (`reconciler.py`, both
+  CSV importers, `pool_descriptors.py`, `pricing_resolution.py`, `resources.py`,
+  `__init__.py`);
   `domains/vms/storefront/src/market_storefront/` (`cli_portfolio.py`, `cli.py`,
-  `startup.py`, `controllers/admin_controller.py`,
-  `services/{capacity_client,listing_sources,system_service,resource_capacity_validator}.py`,
+  `startup.py`, `failure_actions.py`, `server.py`,
+  `controllers/admin_controller.py`, `middleware/admin_identity.py`,
+  `models/{capacity_admin_models,system_status_models}.py`,
+  `services/{capacity_client,listing_sources,listing_source_check,publication_loop,publication_service,system_service,site_projection_cache,resource_capacity_validator,vm_pool_override_contribution}.py`,
   `utils/{sqlite_client,migrations}.py`, `settings.toml`, `groups/config.py`);
-  `domains/vms/storefront/storefront.alice.toml`;
-  `domains/vms/storefront/scripts/import_resources_csv.py`; the import surfaces
-  of `core/storefront` and `core/storefront-client`, including both health
-  models; seven test files; `docs/development/VALIDATION_RUNBOOK.md`.
-- Deployment: Helm, compose, and the seller quickstart lose the CSV contract.
-- Not affected: `kit/resource-pools`, `kit/pool-overrides` (the store stays;
-  the tier beneath it goes), the region/SLA/pricing hint mechanism, bare metal.
+  `domains/vms/storefront/storefront.{alice,bob}.toml`;
+  `domains/vms/storefront/scripts/import_resources_csv.py`;
+  `kit/pool-overrides`, which defines the `inactive` override state and a
+  projection source that may be `None`; the status and import surfaces of
+  `core/storefront` and `core/storefront-client`; six e2e/smoke test files
+  plus the storefront unit and integration tests of the retired surfaces;
+  `scripts/tests/test_multi_storefront_compose.py`;
+  `docs/development/VALIDATION_RUNBOOK.md` and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- Deployment: Helm, compose, both seller TOMLs, the storefront and Helm
+  Makefiles, and the seller quickstart lose the CSV contract.
+- Not affected: `kit/resource-pools`, the pool-override store, routes, clients,
+  and CLI (only the `inactive` state leaves `kit/pool-overrides`), the
+  region/SLA/pricing hint mechanism, bare-metal publication. Bare metal shares
+  the status models and typed client this change edits, so its status output
+  is checked for regressions.
 - Behaviour after upgrade: a home-site pool that took a commercial field from
   the legacy record resolves it from the pool hint, then the configured
   default; `region` has no legacy fallback and must be declared on the pool
@@ -196,15 +230,21 @@ None.
 
 ## Dependencies and Related Changes
 
-- Depends on `repair-multi-storefront-scenario`. The two-storefront e2e
-  scenario's second storefront derives from local tables because provisioning
-  trusts one storefront principal and it can load no projection; the cutover
-  and the migration of `test_multi_registry.py` wait on Alice receiving her
-  own provisioning authority. Multiple storefronts per site are out of scope. Complete that change separately first, including Alice's
-  projection cutover and passing scenario evidence. The local path, CSV
-  contract, startup seeding, schema freeze, and local diagnostic retirement
-  then land together as one coordinated cutover; none of those removals is an
-  independently deployable precursor.
+- Depends on `repair-multi-storefront-scenario` (archived 2026-10-01). Alice
+  has her own provisioning authority and projection-backed listings, her
+  local-path opt-out is gone, and `test_multi_registry.py` seeds through
+  provisioning. Multiple storefronts per site remain out of scope. The local
+  path, CSV contract, startup seeding, schema freeze, and local diagnostic
+  retirement land together as one coordinated cutover; none of those removals
+  is an independently deployable precursor.
+- Depends on `remove-dead-storefront-physical-surfaces`, which lands first. Its
+  surfaces read the tables this change stops creating: the resource
+  `GET`/`PATCH` routes reach `get_resource` and `apply_resource_transition`,
+  `list_hosts` and `host_capacity_remaining` read `hosts`, and migration
+  `20260604_002` builds indexes on `compute_allocations`. Landing this change
+  first would leave those surfaces failing on fresh databases. With that change
+  landed, `compute_allocations` is already frozen and this change's freeze
+  covers only the local inventory tables.
 - Depends on `capacity-resource-administration` (archived): multi-dimensional
   capacity is declarable at the site, so the CSV path is not the only
   expression of it.
@@ -212,10 +252,9 @@ None.
   `publish-multidimensional-listing-shape` (archived): the projection default,
   the hint mechanism, and the site-scoped override store this change makes
   the only tier.
-- Independent of `remove-dead-storefront-physical-surfaces` and
-  `fix-resource-pool-provider-at-creation`; either order. This change's
-  freeze migration covers `compute_allocations` if the former has not landed
-  first.
-- The repository work order is repair first, retirement second. Sellers
+- Independent of `fix-resource-pool-provider-at-creation`; either order.
+- The repository work order is the multi-storefront repair (done), then
+  `remove-dead-storefront-physical-surfaces`, then this retirement. Design and
+  planning proceed before the zero-caller removal lands. Sellers
   self-host and choose deployment timing after preparing authoritative site
   inventory and commercial overrides; no fleet-wide rollout signal gates it.

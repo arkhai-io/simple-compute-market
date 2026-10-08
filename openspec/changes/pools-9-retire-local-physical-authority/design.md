@@ -2,15 +2,22 @@
 
 ## Context
 
-Verified against the tree at planning time; re-verify before implementing.
+Verified against the tree at planning time and re-grounded on 2026-10-08
+(task 1.1, recorded under "Re-grounding" below); re-verify before
+implementing.
 
 **Two listing sources exist.** `available_compute_slices` in
-`domains/vms/listings/reconciler.py` reads the site projection when
-`use_site_projection_for_listings` is `true` (the default) and
-`_pool_rows_from_local_tables` otherwise. The flag is read in
-`services/capacity_client.py` and `services/listing_sources.py`; the
-storefront lifecycle loop derives from the same source selection, so retiring
-the local path retires it for the loop too.
+`domains/vms/listings/src/arkhai_vms_listings/reconciler.py` reads the site
+projection when its `site_pool_projection` argument is a mapping and
+`_pool_rows_from_local_tables` when it is `None`. The storefront chooses that
+argument in one place, `listing_source_projection()` in
+`services/capacity_client.py`, which returns `None` while
+`use_site_projection_for_listings` is `false`; `_projection_enabled()` in
+`services/listing_sources.py` reads the flag separately for listing backing.
+Every derivation caller — the publication loop, the listing-source check,
+failure actions, two admin routes, capacity-change reconciliation, and the
+pool-override service's status source — goes through that selector, so
+retiring the local path retires it for all of them.
 
 **The local tables mix physical and commercial columns.**
 
@@ -53,12 +60,12 @@ projected through a pool's `policy_tags` and resolved as a tier by
 `_projected_pool_rows`. The legacy record is not filling a projection gap; it
 is a second override tier with no write path once the import is gone.
 
-**One deployed storefront depends on the local path.**
-`domains/vms/storefront/storefront.alice.toml` sets
-`use_site_projection_for_listings = false` because provisioning trusts one
-storefront principal; the second storefront in the two-storefront e2e scenario
-can load no projection and derives from local tables, where every source is
-capacity-backed.
+**No deployed storefront depends on the local path any more.** The
+multi-storefront repair gave Alice her own provisioning authority and removed
+her `use_site_projection_for_listings = false` opt-out. Both seller TOMLs
+still set `resources_csv_path`, and compose still mounts the bundled CSV for
+both storefronts, so both still seed local tables at startup that the
+projection path reads only through the legacy override tier.
 
 **Multi-dimensional capacity is declarable at the site.** The registration API
 and capacity-definition documents accept every dimension a resource names, so
@@ -73,6 +80,79 @@ test, both VM full-deal scenarios, `docs/seller-quickstart.md`, and
 `release_reservations` normalizes local held resource rows beside its
 authoritative site-ledger release operation, and e2e cleanup calls that route.
 Those consumers retire with this change's local-inventory cutover.
+
+### Re-grounding (2026-10-08)
+
+Confirmed unchanged: the legacy-resources fallback is unreachable, because
+migration `20260604_002` creates both `compute_capacity_pools` and
+`compute_pool_members` on every database. The legacy tier (`_tier()`, the region
+fallback, `legacy_overrides_in_effect`) is as described above. The projection
+count semantics hold against `kit/site/src/market_site/projections.py`:
+capacity groups count enabled declarations, including exhausted ones, and
+resource-pool members include disabled declarations.
+
+Drift from the earlier plan:
+
+- **Paths.** The listings package is
+  `domains/vms/listings/src/arkhai_vms_listings/`.
+- **Source selection is an argument.** Beyond the flag, every derivation entry
+  point treats `site_pool_projection=None` as "use local tables", and the
+  storefront wrappers (`close_stale_compute_listings_after_capacity_change`,
+  `reopen_available_compute_listings_after_capacity_change`) default it to
+  `None`. Retirement makes the projection a required argument. The derivation's
+  `home_site` parameter is now used only to scope the legacy tier and the local
+  path, so it becomes removable too.
+- **`inactive` is defined in `kit/pool-overrides`.** `OVERRIDE_INACTIVE`, the
+  `ProjectionSource` type that admits `None`, `override_state()`, the package
+  exports, and the kit's status unit test carry it. Bare metal's projection
+  source never returns `None`. The earlier claim that `kit/pool-overrides` is
+  unaffected was wrong (open decision D2).
+- **A CSV pricing migration exists.** `market-storefront config migrate --scope
+  publication --inventory <csv>` (`migrate_publication_csv`) rewrites legacy
+  prices inside a resource CSV. It is described by the "Publication pricing
+  migration is preview-first and atomic" and "Per-resource settlement input
+  uses the common clause contract" requirements, by
+  `openspec/specs/storefront-publication/architecture.md`, by
+  `openspec/specs/settlement-configuration/architecture.md`, by
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, and by the seller quickstart
+  (open decision D3).
+- **Bare metal shares the status surface.** The bare-metal storefront reports
+  its own top-level `resource_count` (open, unpaused bare-metal listings) and
+  builds the shared `ProjectionFamilyStatus` from a version-only fetch that
+  holds no generation. Its tests read `resource_count` through the shared
+  `core/storefront-client` `HealthResponse` (open decision D4).
+- **`remove-dead-storefront-physical-surfaces` is coupled, not independent.**
+  Its resource routes, host helpers, and the `compute_allocations` indexes in
+  migration `20260604_002` read or build on the tables this change stops
+  creating. Decided: that change lands first (see "The zero-caller removal
+  lands first").
+- **Freeze mechanics.** `_ensure_domain_tables` drops and recreates
+  `trg_resources_updated_at` on every startup, so it would change retained
+  schema unless it stops touching the retired tables. The migration runner
+  already supports `Migration.required_tables`, which skips a migration
+  without recording it when a table is absent (open decision D5).
+- **More CSV consumers.** `resources_csv_path` in both seller TOMLs and Alice's
+  compose mount; `domains/vms/storefront/Makefile` and `helm/Makefile`
+  `RESOURCES_CSV_FILE` wiring; `helm/fixtures/eip191-evm-values.yaml` and the
+  chart `values.yaml`'s `resources_csv_path`; the administrator route contract
+  and multipart signing descriptor in `middleware/admin_identity.py`; both
+  `ImportResourcesResponse` models; the bundled inventory CSVs and
+  `test_bundled_inventory.py`; `test_accepted_escrows_csv_dsl.py`; and
+  `scripts/tests/test_multi_storefront_compose.py`'s flag assertion.
+  `_helpers.tpl` now carries one CSV site, not two.
+- **E2E consumers.** Six files import CSV; the repair already migrated
+  `test_multi_registry.py`. `test_compute_dynamic_listings.py` imports rows
+  whose `pool_id` matches its projected pools, so the legacy tier currently
+  supplies those pools' SLA and region. The other imports' pool identifiers
+  match no projected pool and look vestigial; planning confirms each.
+- **Dead models and adapters.** Once import retires, models and adapter code
+  that only the importers use may have no caller left (open decision D6).
+- **Local-table wording elsewhere.** "A site whose projection is not held holds
+  its listings" and `ARCHITECTURE.md`'s "Storefront capacity boundary" still
+  contrast projection derivation with local tables. The statements stay true
+  after retirement but describe a mechanism that no longer exists. The delta
+  modifies the requirement to drop the local-table clauses, and promotion
+  corrects `ARCHITECTURE.md`.
 
 ## Goals / Non-Goals
 
@@ -153,16 +233,16 @@ than a `settlements` clause list.
 
 ### The cutover requires both storefronts to consume projections
 
-Deleting the local path leaves Alice with no listing source until she has a
-working provisioning authority. `repair-multi-storefront-scenario` owns that
-prerequisite and uses separate provisioning services for Alice and Bob.
+Deleting the local path would have left Alice with no listing source until she
+had a working provisioning authority. `repair-multi-storefront-scenario` owned
+that prerequisite and uses separate provisioning services for Alice and Bob.
 Multiple storefronts per site are explicitly out of scope; this decision
 supersedes the earlier shared-authority requirement.
 
-Keep that repair separate and complete it first. Acceptance must prove Alice
+That repair was kept separate and is complete (archived 2026-10-01): Alice
 derives from provisioning-seeded projections without her local-path opt-out,
-both storefronts use their respective authorities, and the two-storefront
-stages run and pass. Configuration edits or continued skips do not suffice.
+both storefronts use their respective authorities, and the 21-stage
+two-storefront scenario passed with no skips in a full local pipeline run.
 
 ### Retire the local inventory contract in one coordinated cutover
 
@@ -215,6 +295,32 @@ The cutover's start trigger is a repository-owner judgment with no fleet-wide
 signal to gate on. Work that lands alone — fixing a pool's provider at
 creation, and removing the storefront's zero-caller physical surfaces — is
 not held behind it; each is its own change.
+
+### The zero-caller removal lands first
+
+`remove-dead-storefront-physical-surfaces` is implemented before this change.
+It was recorded as independent in either order, but the freeze here stops
+creating `resources` and `hosts` on fresh databases, and that change's
+surfaces still read them: the resource `GET`/`PATCH` routes reach
+`get_resource` and `apply_resource_transition`, `list_hosts` and
+`host_capacity_remaining` read `hosts`, and migration `20260604_002` builds
+two indexes on `compute_allocations`. Landing this change first would leave
+those surfaces failing on fresh databases, or require this change to absorb
+their removal.
+
+Alternatives:
+
+- *Absorb the overlapping removals here when this change lands first.*
+  Rejected: this change is already the larger cutover, and the zero-caller
+  removal has no dependency on it.
+- *Merge the two changes.* Rejected: the zero-caller removal needs no operator
+  migration and should not wait on this cutover's operator and test work.
+
+Consequences: this change's freeze covers only the local inventory tables,
+since `compute_allocations` is already frozen when it starts. Task 4.5 deletes
+only the methods whose remaining callers this change removes:
+`release_reservations`' local loop, the status count, the validator, and the
+importers.
 
 ### Local diagnostics and cleanup retire with the cutover
 
@@ -303,17 +409,22 @@ contract and its `architecture.md` companion for the interpretation of counts.
 - **Retained inventory is mistaken for current supply** → an unsafe rollback
   or provisioning seed. Guidance requires checking current site state before
   using the historical records; current storefront code never consults them.
-- **The two-storefront scenario is repaired later than expected** → all local
-  inventory retirement waits, including the freeze and CSV removal; design and
-  read-only investigation can continue.
+- **The zero-caller removal lands later than expected** → this cutover's
+  implementation waits; design and planning continue against the current
+  tree, and planning re-grounds the method list after it lands.
 
 ## Migration Plan
 
 1. Complete `repair-multi-storefront-scenario` separately, including its
-   projection cutover and passing two-storefront evidence.
+   projection cutover and passing two-storefront evidence. Done (archived
+   2026-10-01).
 2. Re-verify the confirming searches against that resulting tree
    (legacy-resources fallback reachability and the remaining CSV consumers).
    Reconcile any files or scenario stages the prerequisite already migrated.
+   Done 2026-10-08; see "Re-grounding".
+2a. Land `remove-dead-storefront-physical-surfaces`, then re-check the
+   `SQLiteClient` method list and migration `20260604_002` against the tree it
+   leaves.
 3. Prepare projection counts, provisioning-seeded tests, and operator guidance
    together with retirement of local derivation, the flag, legacy overrides,
    CSV import, startup seeding, deployment and CLI wiring, and local cleanup.
@@ -332,7 +443,29 @@ The resource-count diagnostic decision is resolved above. Further use of
 physical-resource projections for listing creation does not gate these
 summaries of existing projections.
 
-The repository work order is decided: complete the separate multi-storefront
-repair first, then the coordinated retirement. Each self-hosting operator
-still selects their deployment time after preparing site inventory and
-commercial overrides; there is no fleet-wide rollout signal to wait for.
+The repository work order is decided: the separate multi-storefront repair
+(done), then `remove-dead-storefront-physical-surfaces`, then the coordinated
+retirement. Each self-hosting operator still selects their deployment time
+after preparing site inventory and commercial overrides; there is no
+fleet-wide rollout signal to wait for.
+
+Open decisions raised by the 2026-10-08 re-grounding. Each gates the tasks
+named; no task prescribes an answer until the decision is recorded above.
+
+- **D2 — `inactive` in `kit/pool-overrides`.** Whether the kit drops the state
+  and its nullable projection source, or keeps them for another consumer.
+  Gates task 4.3.
+- **D3 — the CSV pricing migration.** Whether `config migrate --scope
+  publication --inventory` and `migrate_publication_csv` retire with CSV
+  import, and how the two requirements describing CSV input change. Gates
+  Section 5.
+- **D4 — status scope.** How the top-level `resource_count` removal and the
+  per-family count apply to the shared core status model, the shared typed
+  client, and bare metal's own status. Gates tasks 3.4 and 3.8 and the delta's
+  "Operator-visible acceptance and projection state".
+- **D5 — freeze mechanics.** How fresh databases skip the retired tables'
+  migrations and bootstrap, and what an upgraded database with a pending
+  legacy migration does. Gates tasks 4.4 and 6.1–6.2 and the delta's upgrade
+  scenario.
+- **D6 — code left without a caller.** Whether models and adapter code that
+  only the importers use retire here. Gates task 4.5.

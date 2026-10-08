@@ -22,16 +22,17 @@ A change appears exactly once, in its primary home. Where a change serves more t
 
 ```text
 unify-host-identity (archived) ──► capacity-resource-administration (archived) ──┐
-repair-multi-storefront-scenario (archived) ────────────────────────────────────┴──► pools-9-retire-local-physical-authority
+repair-multi-storefront-scenario (archived) ─────────────────────────────────────┤
+remove-dead-storefront-physical-surfaces ────────────────────────────────────────┴──► pools-9-retire-local-physical-authority
 fix-vm-fulfillment-capacity-boundary (archived) ──► retire-vm-remove-job-id (archived)
-remove-dead-storefront-physical-surfaces, fix-resource-pool-provider-at-creation (independent)
+fix-resource-pool-provider-at-creation (independent)
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`version-accepted-artifacts`](version-accepted-artifacts/) | proposed; not planned; must land before bare-metal release | A repository-wide rule for evolving signed and content-addressed state: never rewrite accepted bytes, verify over stored bytes, retire a kind by stopping production while keeping a read-only decoder, and remove the decoder only when a measured count of live references is zero. Fixes bare-metal digest verification, which re-serializes through the live model. Found by `unify-host-identity` |
-| [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; the separate multi-storefront repair prerequisite is archived, including Alice's projection cutover and passing two-storefront evidence | Retires local derivation, its flag, CSV import and deployment contract, startup seeding, legacy home-site overrides, and local diagnostics/cleanup in one coordinated cutover with the schema freeze. Fresh databases omit retired schema; upgrades retain inert history for rollback or operator provisioning seeding. The site-scoped override store remains the only override tier, without legacy carry-over. Inventory counts remain per site and projection family. Self-hosting operators choose deployment timing after preparing site inventory and commercial overrides |
-| [`remove-dead-storefront-physical-surfaces`](remove-dead-storefront-physical-surfaces/) | planned; no blocking dependency | Retires the storefront's zero-caller physical surfaces: the `compute_allocations` execution ledger (frozen, not dropped), the always-`None` `vm_host` plumbing, the orphaned resource admin routes with their client methods, the legacy half of `release_reservations`, four dead `SQLiteClient` methods, and `resource_count` on the health surface. Removes code only; the terminal requirement stays `pools-9`'s |
+| [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | in design review; the multi-storefront repair prerequisite is archived, including Alice's projection cutover and passing two-storefront evidence; `remove-dead-storefront-physical-surfaces` must land first | Retires local derivation, its flag, CSV import and deployment contract, startup seeding, legacy home-site overrides, and local diagnostics/cleanup in one coordinated cutover with the schema freeze. Fresh databases omit retired schema; upgrades retain inert history for rollback or operator provisioning seeding. The site-scoped override store remains the only override tier, without legacy carry-over. Inventory counts remain per site and projection family. Self-hosting operators choose deployment timing after preparing site inventory and commercial overrides |
+| [`remove-dead-storefront-physical-surfaces`](remove-dead-storefront-physical-surfaces/) | planned; no blocking dependency; prerequisite of `pools-9-retire-local-physical-authority` | Retires the storefront's zero-caller physical surfaces: the `compute_allocations` execution ledger (frozen, not dropped), the always-`None` `vm_host` plumbing, the orphaned resource admin routes with their client methods, the legacy half of `release_reservations`, four dead `SQLiteClient` methods, and `resource_count` on the health surface. Removes code only; the terminal requirement stays `pools-9`'s |
 | [`fix-resource-pool-provider-at-creation`](fix-resource-pool-provider-at-creation/) | planned; no blocking dependency | A Resource Pool's provider is fixed at creation: replace and patch refuse a differing provider without deleting existing configuration, matching the immutable backing declaration; inventory moves executors through a second pool and member migration, safe under `capacity-resource-administration`'s drain invariant |
 | [`fix-vm-fulfillment-capacity-boundary`](archive/2026-09-28-fix-vm-fulfillment-capacity-boundary/) | **archived** 2026-09-28 | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2. Proven by a green e2e run on 2026-09-14. Its one deferral, retiring the `vm_remove_job_id` mirror, is complete in `retire-vm-remove-job-id` below |
 | [`bring-host-inventory-under-definition-documents`](bring-host-inventory-under-definition-documents/) | design phase; not planned | Host inventory seeds the registry only when it is empty and is never reconciled against its file, unlike relay, pool, and capacity definition documents. Brings it under the digest-gated definition-document mechanism. Open: what happens to hosts the document stops naming, the first post-upgrade startup, secrets in the inventory, and format |
@@ -274,11 +275,11 @@ was clear those changes price a shape a buyer proposes during negotiation, while
 published asking price prices a listing's fixed advertised shape. The two remain
 forward-compatible — see that change's `design.md`.
 
-`pools-9-retire-local-physical-authority` is a **completion dependency** of
-`unbacked-listing-publication`, not a blocking one: implementation may proceed
-before it, closeout may not. It owns promoting "projection is the listing-candidate
-origination path" into `ARCHITECTURE.md`, alongside which this goal's own promoted
-text sits.
+`unbacked-listing-publication` (archived 2026-09-24) promoted projection-only
+derivation for unbacked listings and left the general statement to
+`pools-9-retire-local-physical-authority`, which owns promoting "projection is the
+listing-candidate origination path" into `ARCHITECTURE.md`, alongside which this
+goal's own promoted text sits.
 
 `pool-declared-advertisement-and-backing` amends `resource-pool-management`, a
 contract established by the archived `pool-declared-offering-modes` change. No

@@ -111,9 +111,10 @@ helpers. The existing operator-visible acceptance requirement and its
 
 ## Dependencies and Related Changes
 
-- Independent of `pools-9-retire-local-physical-authority`; either order. That
-  change's freeze migration covers `compute_allocations` if this one has not
-  landed first.
+- Lands before `pools-9-retire-local-physical-authority`, which depends on it:
+  that change stops creating `resources` and `hosts` on fresh databases, and
+  this change removes the remaining surfaces that read them. This change has
+  no dependency on it.
 - `fix-vm-fulfillment-capacity-boundary` is complete; its committed-claim reads
   in `fulfill_vm_obligation` are adjacent to the `reserved_vm_host` removal and
   must survive it.

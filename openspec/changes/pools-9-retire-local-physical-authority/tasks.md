@@ -14,8 +14,9 @@ is resolved in `design.md` as per-site, per-family projection counts:
    by `_project_legacy_resource_row`, reached only when `compute_capacity_pools`
    or `compute_pool_members` is absent, which no migrated deployment is. Task
    1.1 re-runs the check.
-2. Seven test files depend on CSV import (six VM scenarios plus
-   `e2e-tests/tests/smoke/test_storefront_smoke.py`).
+2. Seven test files depended on CSV import (six VM scenarios plus
+   `e2e-tests/tests/smoke/test_storefront_smoke.py`). Re-grounded 2026-10-08:
+   six remain; the multi-storefront repair migrated `test_multi_registry.py`.
 3. Per-pool commercial values are an upsert against a pool that exists in the
    projection; the site-scoped store is that upsert.
 4. Complete `repair-multi-storefront-scenario` separately before local-inventory
@@ -23,6 +24,13 @@ is resolved in `design.md` as per-site, per-family projection counts:
    the multi-storefront repair, including its projection cutover and passing
    scenario evidence (met; archived). Task 1.6 still re-grounds this plan
    against the resulting tree before retirement begins.
+5. `remove-dead-storefront-physical-surfaces` lands before this change
+   (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
+   Its surfaces read the tables this change stops creating.
+
+Tasks 3.4, 3.8, 4.3, 4.4, 4.5, 6.1, 6.2, and Section 5 are gated on the open
+decisions D2–D6 in `design.md`'s Open Questions; they are amended when each
+decision is recorded.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -41,9 +49,11 @@ tasks 0.1–0.6 under the same numbers.
 Tasks 1.2–1.5 are struck: `kit/pool-overrides` is the per-pool override write
 path, with its own routes, clients, CLI, and precedence contract.
 
-- [ ] 1.1 Re-run the confirming searches `design.md`'s Context records: the
+- [x] 1.1 Re-run the confirming searches `design.md`'s Context records: the
       legacy-resources fallback's reachability and the CSV-dependent test file
-      set. Record drift in `design.md`.
+      set. Record drift in `design.md`. Done 2026-10-08: the fallback is
+      unreachable; six CSV-dependent test files remain; further drift and the
+      open decisions it raised are in `design.md`, "Re-grounding".
 - [x] ~~1.2 Add `PUT`/`PATCH` admin routes against `compute_capacity_pools`'
       surviving commercial columns.~~ Struck: `kit/pool-overrides`' routes.
 - [x] ~~1.3 Confirm the absent-override-row path needs no new handling.~~
@@ -51,22 +61,32 @@ path, with its own routes, clients, CLI, and precedence contract.
 - [x] ~~1.4 Add the corresponding client methods to both storefront clients.~~
       Struck: the store's typed clients.
 - [x] ~~1.5 Focused tests for the endpoint.~~ Struck: delivered with the store.
-- [ ] 1.6 Confirm `repair-multi-storefront-scenario` is complete before
+- [x] 1.6 Confirm `repair-multi-storefront-scenario` is complete before
       starting local-inventory retirement: record its passing two-storefront
       pipeline evidence, verify Alice uses provisioning-seeded projections,
       and re-ground this plan against the resulting tree. Reconcile
       `domains/vms/storefront/storefront.alice.toml` and
       `e2e-tests/tests/e2e/roles/scenarios/vms/test_multi_registry.py` with the
       prerequisite's completed edits rather than repeating them here.
+      Done 2026-10-08: archived 2026-10-01 with the 21-stage scenario passing
+      and a full local pipeline of 127 VM/API-credit and 11 bare-metal tests
+      passing with no skips. Alice's opt-out is absent and
+      `test_multi_registry.py` imports no CSV. Alice's `resources_csv_path`
+      and compose CSV mount remain and retire in task 5.4.
+- [ ] 1.7 Confirm `remove-dead-storefront-physical-surfaces` has landed before
+      starting Sections 3–6, then re-check task 4.5's method list and
+      migration `20260604_002`'s `compute_allocations` indexes against the
+      tree it leaves.
 
 ## 2. Retire `compute_allocations`
 
 Owned by [`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/tasks.md),
-tasks 2.1–2.5 under the same numbers.
+tasks 2.1–2.5 under the same numbers. That change lands before this one.
 
 ## 3. Remove dead physical surfaces
 
-Tasks 3.1, 3.2, and 3.5–3.7 belong to the same change under the same numbers.
+Tasks 3.1, 3.2, and 3.5–3.7 belong to the same change under the same
+numbers and land before this change.
 Former tasks 3.3 (local-row reservation cleanup) and 3.4 (`resource_count`)
 are transferred here and retire with Section 4's local listing path and
 Section 5's CSV contract. The site-ledger half of `release_reservations`
@@ -120,7 +140,22 @@ provisioning can trust two principals leaves it with no listing source.
       `capacity_client.py` and `listing_sources.py`, plus its `settings.toml`
       entry, the `storefront.alice.toml` opt-out, and the config-loader tests.
       The prerequisite owns removing Alice's opt-out; verify its absence
-      rather than treating that already-completed edit as new work here.
+      rather than treating that already-completed edit as new work here
+      (verified absent 2026-10-08). Also update
+      `scripts/tests/test_multi_storefront_compose.py`, which asserts the
+      flag's default, and the tests that set the flag
+      (`tests/publication_app.py`, `test_negotiate_controller.py`,
+      `test_admin_api.py`, `test_pool_overrides_api.py`,
+      `test_listing_source_check.py`, `test_remote_capacity_client.py`).
+- [ ] 4.2a Make the projection a required argument of every derivation entry
+      point in `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`
+      and of the storefront wrappers in `services/publication_service.py`;
+      reduce `listing_source_projection()` in `services/capacity_client.py`
+      to the projection read its callers need (the publication loop, the
+      listing-source check, `failure_actions.py`, two admin routes,
+      capacity-change reconciliation, and the pool-override service's status
+      source in `server.py`). Remove the derivation's `home_site` parameter
+      where only the legacy tier and the local path used it.
 - [ ] 4.3 Retire the legacy home-site override tier: delete
       `_local_pool_pricing`, the legacy arm of `_tier()` and the `region`
       legacy fallback beside it, the `legacy_overrides_in_effect` derivation
@@ -149,7 +184,10 @@ provisioning can trust two principals leaves it with no listing source.
       `get_resource`, `list_resources`, `apply_resource_transition`, and
       `apply_resource_set_transition` once their callers are gone. The
       transferred local cleanup and resource-count readers are among those
-      callers and retire at the same cutover.
+      callers and retire at the same cutover. With
+      `remove-dead-storefront-physical-surfaces` landed first, the remaining
+      callers are `release_reservations`' local loop, `SystemService`'s count
+      and seeding, the validator, and the importers; task 1.7 re-checks this.
 - [ ] 4.6 Document, for operators, that rollback past this section is a code
       rollback rather than a configuration change in
       `docs/development/DEPLOYMENT_AND_CONFIG.md`. Retained data is historical;
@@ -167,15 +205,34 @@ provisioning can trust two principals leaves it with no listing source.
       settings including their `groups/config.py` documentation.
 - [ ] 5.2 Remove `host_csv_importer.py`, `resource_csv_importer.py`,
       `SQLiteClient.upsert_hosts_from_csv` and `upsert_resources_from_csv*`,
-      the `POST /api/v1/admin/portfolio/resources/import` route, and
-      `storefront_client.admin_import_resources`.
+      the `POST /api/v1/admin/portfolio/resources/import` route, its
+      administrator route contract and `_resource_import_descriptor` in
+      `middleware/admin_identity.py`, `ImportResourcesResponse` and its row
+      model in `models/capacity_admin_models.py` and
+      `core/storefront-client/src/storefront_client/models.py`, both client
+      variants' `admin_import_resources`, the importer exports in
+      `arkhai_vms_listings/__init__.py`, and their tests
+      (`test_resource_csv_importer.py`, `test_accepted_escrows_csv_dsl.py`, the
+      import cases in `test_hosts.py` and `test_admin_api.py`).
 - [ ] 5.3 Remove the CLI surface: `cli_portfolio.py` and its `add_typer`
       registration in `cli.py`, and
-      `domains/vms/storefront/scripts/import_resources_csv.py`.
-- [ ] 5.4 Remove the deployment wiring: Helm `_helpers.tpl` (both sites),
-      `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s `--set-file`
-      guidance, `compose/seller.yml`'s mount and `SELLER_RESOURCES_CSV`, and
-      `domains/vms/compose.yml`'s two mounts.
+      `domains/vms/storefront/scripts/import_resources_csv.py`, with
+      `tests/unit/cli/test_portfolio.py`.
+- [ ] 5.4 Remove the deployment wiring: Helm `_helpers.tpl`'s
+      `resources_csv_inline` rendering (one site in the current tree),
+      `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s
+      `resourcesCsvInline` guidance and `resources_csv_path` config entry,
+      `helm/Makefile`'s `RESOURCES_CSV_FILE` `--set-file` wiring,
+      `helm/fixtures/eip191-evm-values.yaml`'s `resources_csv_path`,
+      `compose/seller.yml`'s mount and `SELLER_RESOURCES_CSV`,
+      `domains/vms/compose.yml`'s two mounts (Bob's and Alice's),
+      `resources_csv_path` in `storefront.alice.toml` and
+      `storefront.bob.toml`, `domains/vms/storefront/Makefile`'s
+      `RESOURCES_CSV_FILE` mounts, and the bundled inventory CSVs under
+      `market_storefront/data/` (`kvm1-machine.csv`, `kvm1-host.csv`,
+      `resources.sample.csv`, `hosts.sample.csv`) with
+      `tests/unit/test_bundled_inventory.py`. Run the chart render tests in
+      `helm/charts/storefront/tests/`.
 - [ ] 5.5 Write operator migration guidance in `docs/seller-quickstart.md`
       covering how to move CSV inventory to the provisioning service's host
       inventory, pool definitions, and capacity declarations. This is
@@ -192,9 +249,15 @@ provisioning can trust two principals leaves it with no listing source.
       declarations, after reconciling their historical contents against live
       site state. Use supported provisioning administration surfaces and do not
       prescribe automatic overwrite of live declarations or storefront reads.
-- [ ] 5.6 Migrate the seven CSV-dependent test files to
-      projection/provisioning-service seeding: the six VM scenario files
-      named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`.
+- [ ] 5.6 Migrate the six CSV-dependent test files to
+      projection/provisioning-service seeding: the five VM scenario files
+      named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`
+      (re-grounded 2026-10-08; `test_multi_registry.py` is already migrated).
+      `test_compute_dynamic_listings.py`'s imported rows share pool
+      identifiers with its projected pools, so its listings take SLA and
+      region from the legacy tier today; declare them on the pool hint or a
+      site-scoped override and keep its published-term assertions. Confirm
+      the other files' imports are vestigial before deleting them.
       The resource-count assertions and their import diagnostics must be
       replaced by per-site projection state and counts from Section 3;
       known-empty is distinct from unknown, and inventory presence is distinct
@@ -207,9 +270,9 @@ provisioning can trust two principals leaves it with no listing source.
 ## 6. Freeze migration and validation
 
 - [ ] 6.1 Add the freeze-then-redirect migration covering every table and
-      column frozen in Section 4 (and, if it has not landed first, the
-      `compute_allocations` freeze `remove-dead-storefront-physical-surfaces`
-      owns). Stop writing; redirect reads; no `DROP`.
+      column frozen in Section 4. `compute_allocations` is already frozen by
+      `remove-dead-storefront-physical-surfaces`, which lands first. Stop
+      writing; redirect reads; no `DROP`.
 - [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
       Extend `domains/vms/storefront/tests/unit/test_migrations.py` to prove
@@ -304,7 +367,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | The storefront holds no physical-resource, host, or physical-allocation authority | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority" |
 | Projection-backed derivation is the only listing-candidate path, not the default one | `openspec/specs/storefront-publication/spec.md` — "Storefronts cache independent site projections" (modified) |
-| Projection is the listing-candidate origination path; a local-table path is a rollback opt-in, not a second supported category | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
+| A site whose projection is not held yields no listing from any other source | `openspec/specs/storefront-publication/spec.md` — "A site whose projection is not held holds its listings" (modified) |
+| Projection is the only listing-candidate origination path; no local-table path or configuration option selects another source | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | The site-scoped store is the only storefront-override tier; the legacy home-site record retires with the import that wrote it, and its values are not carried over | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier", replacing "Storefront pool overrides are site-scoped and durable" |
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "Decision: retire the legacy override tier without carrying values over" |
 | Fresh databases omit retired schema; upgrades retain inert schema and rows for rollback or operator provisioning seeding, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
@@ -312,5 +376,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
 | Local resource-count diagnosis and local reservation normalization retire with their inventory source | Temporary sequencing decision in this change's `design.md` |
 | Complete the separate multi-storefront repair first; retire the local inventory contract, its writers and consumers, and fresh-schema creation together | Temporary sequencing decision in this change's `design.md`; dependency/status in `openspec/changes/README.md` |
+| `remove-dead-storefront-physical-surfaces` lands before this change, so this freeze covers only the local inventory tables | Temporary sequencing decision in this change's `design.md`, "The zero-caller removal lands first"; dependency/status in `openspec/changes/README.md` |
 | Inventory counts remain separate per site and projection family, describing the same cached generation as the reported state and identity | `openspec/specs/storefront-publication/spec.md` — "Operator-visible acceptance and projection state"; companion `architecture.md` — "Projection families" |
 | Zero means known-empty, null means unknown, and a stale count describes retained inventory rather than current sellable supply | `openspec/specs/storefront-publication/spec.md`; `docs/seller-quickstart.md`; `docs/development/VALIDATION_RUNBOOK.md` |
