@@ -314,6 +314,14 @@ passing `None` until 5.1 supplies the parsed default.
       `make check-doc-citations CHANGE=capacity-shape-envelope`: OK. mypy over
       `reconciler.py` and `listing_source_check.py`: six errors, all present at HEAD
       before the section; none added.
+      End-to-end, sections 2–4 together: GitHub Actions run 37736356195 at d725cb55
+      (`make run-e2e`, logs fetched with `make fetch-e2e-logs`) passed both lanes. VM lane
+      135 passed, 280 deselected; bare-metal lane 16 passed, 399 deselected; nothing
+      skipped or failed. All 14 cases of `test_listing_shapes.py` passed, which shows
+      unconstrained stated shapes still publish, discover, reserve, and size as before.
+      That is regression evidence only: the scenario states no constraint until 6.1, so
+      it does not satisfy 6.2 or 7.9. ebf12fc2, an API-credits test-fixture change, was not
+      in the run.
 
 Handoff from section 4:
 
