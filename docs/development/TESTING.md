@@ -530,10 +530,10 @@ manifest must fail startup rather than admit mixed identity precedence.
   selected EVM effect resolves and validates only its adapter-owned inputs.
 - Configuration and artifact tests use secret canaries to reject private
   material in public models, persistence, logs, rendered ConfigMaps,
-  arguments, images, wheels, manifests, and fixtures. Payment integration uses
-  generated wire models and shared conformance vectors through the installed
-  payments kit; service implementation imports and copied receipt signing
-  behavior are test failures.
+  arguments, images, wheels, manifests, and fixtures. Payment tests use the
+  installed payments kit's generated wire models and never import the
+  payments service implementation. "Payment Receipts in Tests" below covers
+  how they obtain signed receipts.
 - VM and API-credit plugin conformance uses the same selected-primary and
   retained-principal recovery fixtures. Discovery rejects any plugin missing
   `core.resolved-buyer-identity.v1` before command registration.
@@ -546,6 +546,51 @@ manifest must fail startup rather than admit mixed identity precedence.
   wallet. Local controlled smoke evidence does not establish live ledger or
   physical access. Check readiness before a live run and report unavailable
   service or credential prerequisites rather than run against a down target.
+
+## Payment Receipts in Tests
+
+A seller delivers only after verifying a receipt that the payments service
+signed for the exact mandate derived from the accepted Agreement. Proving that
+gate below the system level needs a receipt for each test's own Agreement. The
+published vectors cannot supply one: their receipt covers a fixed vector
+mandate that no accepted Agreement derives.
+
+Tests get receipts from the payments kit's fixture:
+
+```python
+receipt = build_signed_receipt(signer=SERVICE, mandate=accepted.mandate)
+```
+
+Tests and diagnostics never frame or sign a receipt themselves. Code like this
+is a second framing implementation that nothing checks against the service:
+
+```python
+signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receipt))))
+```
+
+The fixture is trustworthy because it uses the same framing function as the
+kit's verifier, and the kit's unit suite proves it reproduces the published
+vector exactly:
+
+```python
+assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
+assert sign_receipt(Ed25519Signer(vector_seed), vector_body) == vector_receipt
+```
+
+The fixture takes its signer as an argument and ships no key material.
+Integration tests replace `PaymentsClient`, the code that wraps the payments
+HTTP boundary, with a fake that serves fixture receipts. Each test varies one
+property:
+
+```python
+payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate))   # delivers
+payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate))  # 409, no delivery
+payments.serve(None)                                                              # 202 pending
+```
+
+A fake may give the surrounding transaction snapshot a placeholder proof,
+because sellers trust only the embedded receipt. A change that makes snapshot
+state authoritative must first add a snapshot vector and fixture.
 
 ## Boundary-Change Validation
 

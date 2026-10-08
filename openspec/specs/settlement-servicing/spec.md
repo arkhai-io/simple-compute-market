@@ -249,27 +249,53 @@ A settlement mechanism MAY require an EVM address, wallet, RPC endpoint, chain I
 
 The `arkhai.payments.v1` seller kit MUST derive a mandate from the exact accepted Agreement. Its `deal` MUST be `sha256(JCS(agreement))`, and its transaction ID MUST be `sha256(JCS(mandate))`. The mandate MUST identify `settlement_params.payer_account`, the buyer's Arkhai account, as `from`, the payee account declared by the selected option as `to`, and one `once` part for the agreed amount and asset. The hold MUST be `ceil(start_utc - accepted_at) + duration_seconds + window` in whole seconds, with `window` from the selected option. Approval expiry MUST be `floor(accepted_at) + window`. Fractional timestamps MUST remain unchanged in the Agreement and its deal hash. The mandate MUST use the service's published fee policy, authorize `start` and `stop` for the buyer and seller and `reverse` for the seller and Arkhai dispute authority (never the buyer), and use the fixed nonce `arkhai.payments.v1`. The seller MUST return the mandate and Agreement so both parties know the transaction ID before approval.
 
-The buyer kit MUST check the mandate against the exact Agreement and buyer policy before approving it with the owner's WorkOS user-scoped API credential. Approval MAY attach the Agreement for dispute handling. If the seller option enables agreement deposit and the transaction snapshot has no Agreement, the seller kit MUST attach it. Both parties MUST poll the same transaction ID. The seller MUST NOT provision until it verifies an Arkhai-signed receipt matching that transaction and the Agreement's `deal`. A seller refund MUST use `reverse`; the payments service releases an un-reversed hold without a settlement-service call.
+The buyer kit MUST check the mandate against the exact Agreement and buyer policy before approving it with the owner's WorkOS user-scoped API credential. The buyer MUST attach the exact Agreement at approval only when its `attach_agreement` policy is enabled, which it is not by default, and MUST NOT perform the seller's deposit. If the selected option sets `deposit_agreement` and the transaction has no Agreement attachment, the seller MUST attach it after verifying the receipt and before any delivery effect. A failed deposit is retryable and blocks delivery. Both parties MUST poll the same transaction ID. The seller MUST NOT provision until it verifies an Arkhai-signed receipt matching that transaction and the Agreement's `deal`. A seller refund MUST use `reverse`; the payments service releases an un-reversed hold without a settlement-service call.
 
 #### Scenario: Seller derives a mandate before approval
 
 - **WHEN** negotiation accepts an Agreement selecting `arkhai.payments.v1`
 - **THEN** the seller returns the Agreement and its derived mandate, and both parties compute the same transaction ID before the buyer approves
 
-#### Scenario: Buyer approves with an optional Agreement attachment
-
-- **WHEN** the buyer approves the exact mandate with its owner's credentials
-- **THEN** it attaches the exact Agreement only when selected by buyer policy, while the seller's advertised deposit setting remains visible to the buyer
-
 #### Scenario: Seller provisions only on a matching signed receipt
 
 - **WHEN** the seller polls the transaction ID and receives a receipt
 - **THEN** it verifies the Arkhai signature and matching transaction and Agreement deal before provisioning, and rejects an invalid, absent, or mismatched receipt
 
-#### Scenario: Seller reverses a held payment
+#### Scenario: Buyer attaches only by its own policy
 
-- **WHEN** the seller determines the deal must be refunded before the hold releases
-- **THEN** it requests `reverse` for the same transaction, while a hold without a reverse releases in the payments service without a settlement-service daemon
+- **WHEN** the buyer approves a mandate with `attach_agreement` disabled
+- **THEN** the approval carries no attachment, whatever the selected option's
+  `deposit_agreement` setting
+
+#### Scenario: Seller deposits before delivering
+
+- **WHEN** the selected option sets `deposit_agreement` and the verified
+  transaction has no Agreement attachment
+- **THEN** the seller attaches the exact Agreement before any delivery effect,
+  and a deposit failure returns retryable unavailable without delivery
+
+#### Scenario: Seller operator refunds a held payment
+
+- **WHEN** a seller-authenticated refund request names an accepted payment deal
+  with a verified receipt and still-held funds
+- **THEN** the storefront records refund intent, requests `reverse` for that
+  transaction, and records the deal refunded; repeats return the same result
+  without a second reversal
+
+#### Scenario: Refund and delivery start race
+
+- **WHEN** a refund request and the start of delivery for the same deal overlap
+- **THEN** exactly one transition wins: if refund intent was recorded first,
+  delivery does not start; if delivery started first, the refund proceeds and
+  the deal records both the delivery and the refund
+
+#### Scenario: Only the seller initiates a refund
+
+- **WHEN** delivery fails or a buyer requests settlement after any outcome
+- **THEN** no storefront issues `reverse` unless a seller-authenticated refund
+  request names the deal, or the seller has enabled the `refund` failure action
+  and the deal failed before any delivery; the buyer's recourse is a dispute
+  through the payments service
 
 ### Requirement: Negotiation-scoped payment settlement converges
 

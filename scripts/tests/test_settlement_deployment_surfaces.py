@@ -30,13 +30,18 @@ def test_alkahest_profiles_keep_policy_outside_chains() -> None:
         config = _toml(relative_path)
         settlement = config["Settlement"]
         assert settlement["schema_version"] == 1
-        assert settlement["priority"] == ["alkahest.v1"]
+        # A profile may offer other mechanisms beside Alkahest (Bob also offers
+        # contact exchange); what matters here is that Alkahest is configured.
+        assert "alkahest.v1" in settlement["priority"]
         assert settlement["alkahest"]["enabled"] is True
         assert "address_config_path" in settlement["alkahest"]
+        # Each chain names the address book its Alkahest client is built from;
+        # Alkahest policy itself stays in `Settlement.alkahest`.
         assert all(
-            "alkahest" not in field
+            field == "alkahest_address_config_path"
             for chain in config["Chains"].values()
             for field in chain
+            if "alkahest" in field
         )
 
 
@@ -47,12 +52,6 @@ def test_public_deployment_config_examples_exclude_wallet_credentials() -> None:
     ):
         config = _toml(relative_path)
         assert "wallet.private_key" not in _field_paths(config)
-        assert config["Settlement"]["priority"] == ["alkahest.v1"]
+        assert "alkahest.v1" in config["Settlement"]["priority"]
 
 
-#: Every storefront that adopts the hosted mechanism and projects its status.
-_HOSTED_PROJECTIONS = (
-    "domains/vms/storefront/src/market_storefront/settlement_composition.py",
-    "domains/apicredits/storefront/src/apicredits_storefront/settlement_composition.py",
-    "domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/hosted_lifecycle.py",
-)

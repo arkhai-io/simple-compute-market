@@ -177,4 +177,4 @@ test-apicredits-middleware:
 
 
 test-provisioning-adapter: ## VM provisioning adapter tests against built wheels
-	cd vms/provisioning/adapter && $(MAKE) test DIST_DIR=$(abspath $(DIST_DIR))
+	cd vms/provisioning/adapter && $(MAKE) test

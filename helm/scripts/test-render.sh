@@ -8,34 +8,51 @@ CHART_DIR="$SCRIPT_DIR/.."
 RELEASE="${RELEASE:-arkhai-test}"
 
 DEFAULT_RENDERED="$(mktemp)"
+PAYMENTS_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
 trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
 
-helm template "$RELEASE" "$CHART_DIR" \
-    --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
-helm template "$RELEASE-evm" "$CHART_DIR" \
+# Render one release into a file. A render that fails stops the script with
+# Helm's own message rather than exiting silently under `set -e`.
+render() {
+    local out="$1"
+    shift
+    local err
+    if ! err="$(helm template "$@" 2>&1 >"$out")"; then
+        echo "FAIL  helm template $1 did not render:" >&2
+        echo "$err" >&2
+        exit 1
+    fi
+}
+
+render "$DEFAULT_RENDERED" "$RELEASE" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml"
+render "$PAYMENTS_RENDERED" "$RELEASE-payments" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" >"$EVM_RENDERED" 2>/dev/null
-helm template "$RELEASE-overlap" "$CHART_DIR" \
+    --values "$CHART_DIR/fixtures/payments-ed25519-values.yaml"
+render "$EVM_RENDERED" "$RELEASE-evm" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml"
+render "$OVERLAP_RENDERED" "$RELEASE-overlap" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/identity-overlap-values.yaml" \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].scheme=eip191' \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].scheme=eip191' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].identifier=0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].scheme=eip191' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].identifier=0x90f79bf6eb2c4f870365e785982e1f101e93b906' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].scheme=eip191' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' >"$OVERLAP_RENDERED" 2>/dev/null
-helm template "$RELEASE-registries" "$CHART_DIR" \
+    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' \
+    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].identifier=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' \
+    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y' \
+    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI'
+render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --values "$CHART_DIR/fixtures/two-registries-values.yaml" >"$TWO_REGISTRIES_RENDERED" 2>/dev/null
-helm template "$RELEASE-bare-metal" "$CHART_DIR" \
+    --values "$CHART_DIR/fixtures/two-registries-values.yaml"
+render "$BARE_METAL_RENDERED" "$RELEASE-bare-metal" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --set 'bare-metal-storefront.enabled=true' >"$BARE_METAL_RENDERED" 2>/dev/null
+    --set 'bare-metal-storefront.enabled=true'
 
 errors=0
 fail() {

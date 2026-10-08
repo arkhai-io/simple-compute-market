@@ -13,7 +13,7 @@ DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
-.PHONY: test-release-tooling test-deployment-packaging
+.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
@@ -192,7 +192,7 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
@@ -217,6 +217,16 @@ test-provisioning-iac:
 
 test-registry:
 	cd core/registry && make reinit && make test
+
+test-registry-client:
+	cd core/registry-client && $(MAKE) test
+
+test-provisioning-adapter:
+	$(MAKE) -C domains test-provisioning-adapter
+
+# The e2e project's unit tests; its scenarios need the docker-compose stack.
+test-e2e-unit:
+	cd e2e-tests && $(MAKE) test-unit
 
 test-storefront:
 	$(MAKE) -C domains test-storefront

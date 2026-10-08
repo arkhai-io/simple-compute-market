@@ -53,6 +53,9 @@ test:
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
 	.venv/bin/pytest $(PYTEST_ARGS)
 
+test-unit: reinit ## Unit tests only; no stack or external services
+	.venv/bin/pytest tests/unit $(PYTEST_ARGS)
+
 test-module:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \

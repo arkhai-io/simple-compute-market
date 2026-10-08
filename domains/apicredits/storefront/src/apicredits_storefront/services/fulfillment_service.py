@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core_storefront.stage_log import stage_event
 from arkhai_apicredits.settlement import fulfill_api_credits_obligation
-from market_settlement_runtime import FailurePolicy
+from core_storefront.stage_log import stage_event
 from market_identity import Identity
+from market_settlement_runtime import FailurePolicy
 
+import apicredits_storefront.container as _container
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
@@ -126,8 +127,6 @@ async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
     )
     if not selects_payments(thread):
         return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
-    import apicredits_storefront.container as _container
-
     composition = _container.resolved_settlement_composition
     service = composition.payment_service(db) if composition is not None else None
     if service is None:

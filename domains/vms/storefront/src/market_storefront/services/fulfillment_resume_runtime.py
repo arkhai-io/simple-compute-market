@@ -27,14 +27,15 @@ from market_arkhai_payments import (
     MandatePolicyError,
     SignedReceipt,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
 )
-from market_core import VersionedEnvelope
 
-import market_storefront.container as _container
+from market_storefront import container as _container
+from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
@@ -47,7 +48,6 @@ from market_storefront.services.vm_fulfillment_service import (
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 
 logger = logging.getLogger(__name__)
 
@@ -716,8 +716,6 @@ _PAUSED_POLL_SECONDS = 0.05
 
 async def _reconcile_payment_deals() -> None:
     """Advance accepted payment deals a buyer has not settled (none without payments)."""
-    from market_storefront import container as _container
-
     composition = _container.resolved_settlement_composition
     coordinator = getattr(composition, "payments_coordinator", None)
     if coordinator is not None:

@@ -10,6 +10,7 @@ from typing import Any
 from arkhai_apicredits.settlement import (
     CreditsServiceClient,
 )
+from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 from market_alkahest import (
     AlkahestConditionalEscrowClient,
     create_alkahest_registration,
@@ -39,8 +40,10 @@ from apicredits_storefront.services.issuance_evidence import (
     ApiCreditsIssuanceEvidenceService,
     IssuanceEvidenceRepository,
 )
+from apicredits_storefront.services.payment_settlement_service import (
+    ApiCreditPaymentSettlementService,
+)
 from apicredits_storefront.utils import config as storefront_config
-from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +87,6 @@ class ApiCreditsSettlementComposition:
 
     def payment_service(self, db: Any) -> Any:
         """The deal-scoped payment settlement service, or None when payments is off."""
-        from apicredits_storefront.services.payment_settlement_service import (
-            ApiCreditPaymentSettlementService,
-        )
-
         if self.arkhai_payments_stage is None:
             return None
         return ApiCreditPaymentSettlementService(

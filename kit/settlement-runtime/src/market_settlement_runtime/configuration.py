@@ -244,7 +244,7 @@ class MechanismRegistration:
     # exclude); the mechanism owns everything obligation-shaped.
     accepted_obligation_builder: AcceptedObligationBuilder | None = None
     # Mechanism-owned settlement verification: reads the mechanism's own
-    # truth source (chain, hosted authority) and asserts a claimed
+    # truth source (chain, payments service) and asserts a claimed
     # settlement matches the negotiated terms. The call signature is
     # mechanism-specific — callers reach it from the mechanism's own
     # surface — but its ownership lives here so domains resolve it from

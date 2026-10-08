@@ -35,7 +35,9 @@ template:
 ## Deployment mounts both at /etc/arkhai/ with independent checksums,
 ## and no sensitive keys leak across the boundary. Stable across
 ## cosmetic chart edits (no byte-level snapshots).
-test-render:
+# Repackage every local subchart first: a stale charts/*.tgz would otherwise be
+# rendered in place of the chart directory beside it.
+test-render: init
 	@./scripts/test-render.sh
 
 ## Render a single subchart in isolation.

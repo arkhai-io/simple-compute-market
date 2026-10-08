@@ -179,7 +179,7 @@ def _negotiate_new_proposal(
     An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
     fields, literal fields, and expiry, with development defaults for any the
     caller omits. A selection-only opening carries only ``fields`` beside its
-    ``settlement_selection``: a hosted or introduction mechanism has no escrow,
+    ``settlement_selection``: a payments or introduction mechanism has no escrow,
     and a storefront may refuse a proposal that mixes the two carriers. Stating
     an escrow parameter in a selection-only opening is refused here rather than
     silently dropped.
@@ -1642,7 +1642,7 @@ class StorefrontClient(_StorefrontClientBase):
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
         ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a hosted or introduction buyer does.
+        escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -3106,7 +3106,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
         ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a hosted or introduction buyer does.
+        escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,

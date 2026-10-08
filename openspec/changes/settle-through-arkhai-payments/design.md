@@ -477,7 +477,7 @@ Resolved against development head `4c55a328`, merged into this branch's head `ce
 - **M7. Permanent documents.** Development's new documentation is kept and its hosted content removed. This change's sections are re-applied, and its requirements touched by the merge were checked to be unchanged.
 
 - **Live payment qualification.** A deployed payments service is qualified by the payments service's own end-to-end tests, which import this repository's published packages; this repository does not import the private service to test it. This repository's live payment scenario runs only when a target is configured.
-- **Release gate: no hosted production state.** M1's data premise is that no deployed VM storefront has an accepted or in-progress `fiat.stripe.v1` deal and that bare metal never carried production hosted state. The repository cannot prove this; the reviewer confirmed it before merge.
+- **Release gate: no hosted production state (closed).** M1's data premise is that no deployed VM storefront has an accepted or in-progress `fiat.stripe.v1` deal and that bare metal never carried production hosted state. The repository cannot prove this. The change owner attested to it on 2026-10-08, and the gate is closed on that attestation.
 
 Other findings:
 
