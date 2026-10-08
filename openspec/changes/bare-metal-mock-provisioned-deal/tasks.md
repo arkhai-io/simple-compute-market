@@ -3912,7 +3912,7 @@ Decisions 11 and 13. Reviewable alone: `kit/settlement-runtime`, `kit/alkahest`,
       through its stable operation identity and changes nothing.
 - [x] 7A.6 Versions and locks: the three bumps, cascaded through `cascade_pins.py`;
       hand-locked projects relocked by `handlock.py`; `e2e-tests` relocked.
-- [ ] 7A.7 **Gate.** The settlement-runtime, Alkahest, and storefront-client suites, the
+- [x] 7A.7 **Gate.** The settlement-runtime, Alkahest, and storefront-client suites, the
       root aggregate, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation (1.14.0), pyflakes on edited modules, and the VM and
       bare-metal lanes unchanged.
@@ -4009,7 +4009,7 @@ Alkahest path still waits for `begin`.
       file).
 - [x] 7B.6 Versions and locks: `arkhai-bare-metal-storefront` 0.11.2 → 0.12.0, cascaded;
       the storefront hand-locked; `e2e-tests` relocked.
-- [ ] 7B.7 **Gate.** The bare-metal storefront suite, the chart's render tests (or, if
+- [x] 7B.7 **Gate.** The bare-metal storefront suite, the chart's render tests (or, if
       `helm` cannot run here, recorded as unrun), the Compose and e2e unit tests, the root
       aggregate, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation, pyflakes, and both lanes.
@@ -4110,7 +4110,7 @@ settlement, fulfillment, and evidence; teardown still releases directly.
 - [x] 7C.8 Versions and locks: `arkhai-bare-metal` 0.10.0,
       `arkhai-bare-metal-storefront` 0.13.0, `arkhai-bare-metal-buyer` 0.5.0, cascaded;
       the storefront hand-locked; `e2e-tests` relocked.
-- [ ] 7C.9 **Gate.** The bare-metal domain, storefront, and buyer suites, the root
+- [x] 7C.9 **Gate.** The bare-metal domain, storefront, and buyer suites, the root
       aggregate, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation, pyflakes, and both lanes.
   - Notes (2026-10-07; the lanes have not run):
@@ -4171,7 +4171,7 @@ The rest of the original Section 7. Reviewable alone: release and deal controls.
       routes through the canonical client. The bare-metal expiry through the aggregate
       is proven in 5B.8.B.3's `test_lease_release_api.py`.
 - [x] 7D.6 Versions and locks: `arkhai-bare-metal-storefront` 0.14.0, cascaded.
-- [ ] 7D.7 **Gate.** The bare-metal storefront, buyer, provisioning, and
+- [x] 7D.7 **Gate.** The bare-metal storefront, buyer, provisioning, and
       provisioning-service suites, the root aggregate, `make check-packaging`, comment
       hygiene, documentation citations, OpenSpec strict validation, pyflakes, and both
       lanes.
@@ -4256,7 +4256,7 @@ The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispos
       states the refusal count rather than the operation's journal attempts, and
       decision 12 records the evidence route's placement; the wallet-lock test yields
       to the event loop instead of sleeping on the wall clock.
-- [ ] 7E.7 **Gate.** The core buyer, Alkahest kit, and bare-metal storefront and buyer
+- [x] 7E.7 **Gate.** The core buyer, Alkahest kit, and bare-metal storefront and buyer
       suites, the VM storefront and buyer, the root aggregate, `make check-packaging`,
       comment hygiene, documentation citations, OpenSpec strict validation, pyflakes,
       and both lanes; then 7A.7, 7B.7, 7C.9, and 7D.7 close with the same run.
@@ -4294,7 +4294,7 @@ The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispos
       targets, deployment reference, seller quickstart, and this change's deltas.
       Align `helm/Chart.yaml` with the existing bare-metal chart version, and add
       the storefront-client wheel to the API-credit distribution-test fixture.
-- [ ] 7F.4 Validate the merged tree: focused negotiation, settlement, bare-metal
+- [x] 7F.4 Validate the merged tree: focused negotiation, settlement, bare-metal
       domain and storefront suites; the root unit/integration aggregate; typing
       where supported; `make check-packaging`; comment hygiene; documentation
       citations; and strict OpenSpec validation. Record failures and unrun checks.
@@ -4313,11 +4313,18 @@ The implementation review of 7A to 7D (2026-10-08), with the maintainer's dispos
       unchanged on both merge parents).
       Docker E2E and remote pipeline validation remain unrun: local test stacks
       are already running, the standard E2E targets replace their volumes, and
-      the uncommitted merge has no corresponding pipeline revision. Section 7's
-      gates and post-review promotion remain open. The merge adds no function-local
-      imports, completed-task notes retain only decisions and validation, and the
-      campaign dependency graph and roadmap's outstanding full-deal evidence gap
+      the uncommitted merge had no corresponding pipeline revision when this was
+      written; the run below supplies it. Section 7's promotion remains with 11.4.
+      The merge adds no function-local imports, completed-task notes retain only
+      decisions and validation, and the campaign dependency graph and roadmap's outstanding full-deal evidence gap
       remain applicable. The campaign index records the current merge status.
+      End-to-end (2026-10-08): run 37839861525, on the merged tree with Section 8,
+      passed both lanes — VM 135 passed with 3 skipped (the payment deal's three
+      scenarios, blocked without a reachable payments target, as designed), bare
+      metal 16 passed. It is the lane evidence 7A.7, 7B.7, 7C.9, 7D.7, and 7E.7
+      name, and closes them with this task. The bare-metal lane still has no deal
+      scenario, so Alkahest delivery, digest publication, and collection are not yet
+      exercised live; Section 9 adds it.
 
 ## 8. Shared compute deal stages and the VM scenario
 
@@ -4405,7 +4412,7 @@ Paths below are under `e2e-tests/tests/`.
       by VM's scenario module; and every field a stage writes or requires is declared on
       its state class (`ComputeDealState` for the shared module, VM's `DealState` for
       VM's). The domain list is one table, so Section 9 adds bare metal to it.
-- [ ] 8.5 **Gate.**
+- [x] 8.5 **Gate.**
       - The e2e unit suite (`make -C e2e-tests test-unit`), including 8.4.
       - Collection: `pytest --collect-only -q` node IDs for the VM lane's selection
         (`E2E_MODULE` in `e2e-tests/Makefile`) and the bare-metal lane's
@@ -4429,8 +4436,11 @@ Paths below are under `e2e-tests/tests/`.
     - pyflakes reports nothing new in the edited modules; its remaining findings
       were present before (fixture and `require_state` re-exports, unused
       `importlib.resources` and `fulfillment` in the buyer-CLI scenarios).
-    - The VM lane is not yet run on this fileset.
-- [ ] 8.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
+    - Lanes: run 37839861525 passed. VM 135 passed and 3 skipped (the payment deal,
+      blocked without a payments target); all 32 stages of `test_full_deal.py`
+      passed through the shared stages, whose log lines come from
+      `helpers.compute_deal_stages`. Bare metal 16 passed.
+- [x] 8.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 8):
       1. Comment hygiene: `make check-comment-hygiene`, and a direct read of the new
          modules' docstrings for change, task, and review references.
@@ -4447,17 +4457,20 @@ Paths below are under `e2e-tests/tests/`.
          the permanent destinations stay pending for 11.2 (`TESTING.md`) and 11.4
          (the `test-compatibility` delta).
       4. Narrative compression: Section 8's completed-task notes hold final behaviour,
-         validation evidence, and deferred work only.
-      5. Roadmap currency: no Goal 7 change from Section 8; disposition recorded.
+         validation evidence, and deferred work only. Done.
+      5. Roadmap currency: no Goal 7 change from Section 8. `ROADMAP.md`'s gap, that
+         no bare-metal deal runs in the pipeline, still stands until Section 9.
       6. Campaign index currency: this change's row in `openspec/changes/README.md`
-         names Section 8 as implemented once its gate passes.
+         names Sections 4–8 implemented with both lanes passing; the campaign graph
+         is unchanged.
       7. Documentation citations: `make check-doc-citations
          CHANGE=bare-metal-mock-provisioned-deal`, with the tombstoned escrow helper
          cited nowhere in permanent documentation. Passed; no permanent document names a moved
          helper or the escrow helper.
       8. Packaging: `make check-packaging`. Passed; no lock changed.
-      9. End-to-end pipeline: 8.5's lane run, recorded with its run ID.
-      10. Promotion: the promotion record's shared-stages row stays pending until 11.4.
+      9. End-to-end pipeline: run 37839861525 (8.5).
+      10. Promotion: the promotion record's shared-stages row stays pending until 11.4
+          and 11.2, which own the `test-compatibility` and `TESTING.md` edits.
 
 ## 9. The bare-metal mock-provisioned deal
 
