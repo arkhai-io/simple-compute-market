@@ -8,6 +8,11 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 - **THEN** the thread records the canonical buyer and seller principals and the exact listing/site/domain binding, and it is recorded as successful only after its agreement payloads and settlement plan are recorded
 - **AND** no capacity is reserved or held until settlement starts fulfillment
 
+#### Scenario: An opening leaves its escrow contract unpinned
+- **WHEN** a buyer opens, or an administrator previews an opening, with an escrow proposal naming no escrow contract (no address, or the zero address)
+- **THEN** the seller negotiates from the listed rate of the listing's first accepted escrow, as VM's seller does, so its floor holds for every opening, and the preview reports the decision the opening makes
+- **AND** a proposal naming a contract the listing does not accept is refused
+
 #### Scenario: Acceptance is interrupted
 - **WHEN** the storefront stops after an acceptance began but before the thread was recorded as successful
 - **THEN** the thread is never settled, and it cannot be countered, accepted, or force-accepted again; the negotiation watchdog abandons it

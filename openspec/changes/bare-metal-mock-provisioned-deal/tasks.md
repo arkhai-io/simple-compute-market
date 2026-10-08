@@ -4537,7 +4537,7 @@ lane (9.1–9.5).
       `lease_ready_evidence_digest`), which 09bb resolves; proven in
       `test_alkahest_lifecycle.py`, and the delta's "Evidence is resolved" scenario
       states it.
-- [ ] 9.0b Shared stage hooks (e2e-tests; decisions 2 and 3):
+- [x] 9.0b Shared stage hooks (e2e-tests; decisions 2 and 3):
       - `helpers/compute_deal_stages.py`: `ComputeDealDriver` gains
         `release_create_gate()`, `release_teardown_gate()`,
         `settle_dispatched(settle_response, deal_state)`,
@@ -4556,10 +4556,10 @@ lane (9.1–9.5).
       - Gate: the e2e unit suite, identical node IDs for both lanes' selections,
         pyflakes, an AST comparison showing every VM assertion still in a shared stage,
         VM's own stage, or VM's driver, and VM's lane.
-    - Done but VM's lane, which 9.6 runs: the e2e unit suite passes; both lanes'
-      selections keep their node IDs (the 165 before are the same after, beside bare
-      metal's new module); the AST comparison finds every VM assertion in a shared
-      stage, VM's own stage, or VM's driver.
+    - Done: the e2e unit suite passes; both lanes' selections keep their node IDs
+      (the 165 before are the same after, beside bare metal's new module); the AST
+      comparison finds every VM assertion in a shared stage, VM's own stage, or VM's
+      driver; VM's lane passed in run 37850683369.
 - [x] 9.0c Restart recovery (task 3.5; decision 6): `tests/test_restart_recovery.py`
       gains a restart while the lease is active (status and result read twice, access
       and settle status read, each identical to before the restart; one begin, one
@@ -4645,6 +4645,18 @@ lane (9.1–9.5).
       storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
       e2e unit suite, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation, and pyflakes.
+    - Run 37850683369: VM's lane passed (135), meeting 9.0b's gate; bare metal's
+      passed publication, introduction, and the mock deal through 04a, so the
+      readiness checks, supply, publication, and the registry listing hold live, and
+      failed at 05a: the preview accepted at round zero, priced from nothing, for the
+      unpinned proposal the storefront client sends when a buyer names no contract,
+      and the real opening did the same. Fixed in the storefront (design, "Section 9
+      design", implementation findings): an unpinned proposal is priced from the
+      listing's first accepted escrow, as VM's is; three integration tests in
+      `test_http_negotiation.py` (an unpinned opening below the listed rate exits under
+      the default chain and is countered under `bisection`, its preview reporting the
+      same; a pinned unlisted contract is refused in both), each of the first two
+      failing without the fix. Bare metal's lane is to run again.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
@@ -4874,7 +4886,10 @@ service code.
       for an active lease answers the buyer's status read with an unhandled 500 rather
       than a typed refusal; and the storefront's begin reads a scheduled resource's
       nested `bare_metal_publication.physical_host_id`, a shape the site treats as
-      legacy, so the two should agree on one place for it.
+      legacy, so the two should agree on one place for it. An escrow proposal naming
+      no contract is priced, in every compute domain, from the listing's first accepted
+      escrow; which escrow prices it, or whether it is refused, is an open gap with no
+      owning change.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

@@ -252,17 +252,30 @@ def _decision_wire(decision: NegotiationDecision) -> dict[str, Any]:
     return payload
 
 
-def _matching_acceptance(
+def _priced_acceptance(
     listing_record: Mapping[str, Any], proposal: EscrowProposal
 ) -> AcceptedEscrow | None:
-    for raw in listing_record.get("accepted_escrows") or []:
-        accepted = AcceptedEscrow.model_validate(raw)
+    """The accepted escrow whose listed rate prices ``proposal``.
+
+    The one on the proposal's chain at its escrow address; otherwise the
+    listing's first accepted escrow. A buyer may leave the escrow contract
+    unpinned (no address, or the zero address), and is then priced from what
+    the listing offers rather than from nothing, so the seller's floor holds
+    for every opening. A pinned address the listing does not offer is refused
+    by ``escrow_shape_guard`` for its own reason, not priced from this.
+    """
+
+    accepted = [
+        AcceptedEscrow.model_validate(raw)
+        for raw in listing_record.get("accepted_escrows") or []
+    ]
+    for candidate in accepted:
         if (
-            accepted.chain_name == proposal.chain_name
-            and accepted.escrow_address.lower() == proposal.escrow_address.lower()
+            candidate.chain_name == proposal.chain_name
+            and candidate.escrow_address.lower() == proposal.escrow_address.lower()
         ):
-            return accepted
-    return None
+            return candidate
+    return accepted[0] if accepted else None
 
 
 def _escrow_proposal(proposal: Mapping[str, Any] | None) -> EscrowProposal:
@@ -280,7 +293,7 @@ def _seller_reference_amount(
     duration_seconds: int,
     buyer_amount: int | None,
 ) -> int:
-    """The listed rate of the escrow the buyer proposed, over the requested duration."""
+    """The listed rate of the escrow pricing the proposal, over the requested duration."""
 
     if accepted is None:
         return 0
@@ -458,7 +471,7 @@ def build_bare_metal_negotiation_runtime(
             )
         buyer_amount = _proposal_amount(proposal)
         reference = _seller_reference_amount(
-            _matching_acceptance(request.listing_record, opening),
+            _priced_acceptance(request.listing_record, opening),
             duration_seconds=message.duration_seconds,
             buyer_amount=buyer_amount,
         )
@@ -639,7 +652,7 @@ def build_bare_metal_negotiation_runtime(
         if not scalar or pinned is None or "settlement_selection" in pinned:
             return 0
         return _seller_reference_amount(
-            _matching_acceptance(record, _escrow_proposal(pinned)),
+            _priced_acceptance(record, _escrow_proposal(pinned)),
             duration_seconds=int(terms.requested_duration_seconds or 0),
             buyer_amount=None,
         )
