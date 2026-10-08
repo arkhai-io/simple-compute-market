@@ -1,4 +1,4 @@
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.13
 
 # Pin to linux/amd64 — ansible-galaxy collection install hits a SIGILL
 # (illegal instruction) on native arm64 Podman, but runs fine under
@@ -41,7 +41,6 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
 
-COPY --chown=appuser:appuser domains/vms/provisioning/iac/ansible/requirements.yml /tmp/requirements.yml
 # Keep Ansible in its own venv so the Galaxy collection layer does not depend
 # on the application venv, local wheels, or compute-provisioning service source.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
@@ -53,6 +52,10 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
 # curl --retry --retry-all-errors, then install from local files. The timeout
 # and speed guards make zero-throughput connections fail and retry instead of
 # hanging the whole image build.
+#
+# The collections are the union of every composed domain's
+# provisioning/iac/ansible/requirements.yml; a service test holds the list
+# below to exactly that union.
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
@@ -78,27 +81,19 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
         /tmp/galaxy-tarballs/community-docker-2.7.2.tar.gz \
         /tmp/galaxy-tarballs/community-general-4.8.7.tar.gz
 
-# Copy pre-built internal wheels (built by make dist before docker build).
-# arkhai-core-storefront-client and other internal packages are resolved from here.
-COPY --chown=appuser:appuser .dist/ /dist/
-
-# Install the extracted service and both current domain adapters entirely
-# from built wheels. No repository source tree is present in the runtime image.
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY --chown=appuser:appuser .dist/ /repo/.dist/
+COPY --chown=appuser:appuser scripts/uv_project.py /repo/scripts/uv_project.py
+COPY --chown=appuser:appuser provisioning/compute/service/pyproject.toml provisioning/compute/service/uv.lock /repo/provisioning/compute/service/
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+# Both domain adapters come from the lock through the `adapters` extra.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
-    uv venv /app/.venv && \
-    uv pip install --python /app/.venv/bin/python --find-links /dist \
-        --refresh-package arkhai-compute-provisioning-service \
-        --refresh-package arkhai-vms-provisioning-adapter \
-        --refresh-package arkhai-bare-metal-provisioning-adapter \
-        --refresh-package arkhai-bare-metal \
-        --refresh-package arkhai-kit-site \
-        --refresh-package arkhai-kit-resource-pools \
-        --refresh-package arkhai-kit-fulfillment \
-        --refresh-package arkhai-compute-provisioning \
-        --refresh-package arkhai-core-storefront-client \
-        --refresh-package arkhai-kit-identity \
-        --refresh-package arkhai-kit-site-client \
-        'arkhai-compute-provisioning-service[adapters]==0.2.0'
+    python3 /repo/scripts/uv_project.py image --project /repo/provisioning/compute/service -- --no-dev --no-install-project --extra adapters && \
+    python3 /repo/scripts/uv_project.py install-wheel --project /repo/provisioning/compute/service
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
@@ -126,8 +121,9 @@ COPY --from=builder --chown=appuser:appuser /home/appuser/ansible-venv /home/app
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown appuser:appuser /app/data
 COPY --chown=appuser:appuser domains/vms/provisioning/iac /opt/domains/vms/provisioning/iac
+COPY --chown=appuser:appuser domains/bare_metal/provisioning/iac /opt/domains/bare_metal/provisioning/iac
 
 ENV PATH="/app/.venv/bin:/home/appuser/ansible-venv/bin:$PATH"
 ENV ANSIBLE_COLLECTIONS_PATH="/home/appuser/.ansible/collections:/usr/share/ansible/collections"

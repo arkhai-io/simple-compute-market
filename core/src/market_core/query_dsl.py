@@ -100,6 +100,13 @@ class FieldDescriptor:
     on_missing: MissingValueRule = MissingValueRule.FAIL
     repeated: bool = False
     description: str | None = None
+    requires: tuple[str, ...] = ()
+    """Other descriptor ``name``s that must also appear in a query supplying
+    this field. One-directional: a co-requirement target may appear alone.
+    Resolved and validated against the full descriptor set in
+    ``_descriptor_maps``/``validate_query``, not here, since this descriptor
+    alone cannot see its siblings.
+    """
 
     def __post_init__(self) -> None:
         names = (self.name, *self.aliases)
@@ -109,6 +116,8 @@ class FieldDescriptor:
             raise ValueError(f"duplicate query field alias in descriptor {self.name!r}")
         if not self.operators:
             raise ValueError(f"query field {self.name!r} must allow an operator")
+        if self.name in self.requires:
+            raise ValueError(f"query field {self.name!r} requires itself")
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,6 +484,18 @@ def validate_query(
                 span=comparison.span,
             )
         )
+    for comparison in validated:
+        descriptor = canonical[comparison.field]
+        missing = tuple(target for target in descriptor.requires if target not in seen)
+        if missing:
+            raise QueryValidationError(
+                "missing_co_requirement",
+                f"field {descriptor.name!r} requires {', '.join(missing)} "
+                "to also be supplied",
+                position=comparison.span.start,
+                field=descriptor.name,
+                accepted_fields=accepted,
+            )
     return ValidatedQuery(tuple(validated))
 
 
@@ -498,6 +519,13 @@ def _descriptor_maps(
             if name in by_name:
                 raise ValueError(f"duplicate query field or alias: {name!r}")
             by_name[name] = descriptor
+    for descriptor in canonical.values():
+        for target in descriptor.requires:
+            if target not in canonical:
+                raise ValueError(
+                    f"query field {descriptor.name!r} requires undeclared "
+                    f"field {target!r}"
+                )
     return by_name, canonical
 
 
@@ -615,6 +643,11 @@ def field_reference_json(
                 if descriptor.description is not None
                 else {}
             ),
+            **(
+                {"requires": list(descriptor.requires)}
+                if descriptor.requires
+                else {}
+            ),
         }
         for descriptor in ordered
     ]
@@ -628,9 +661,10 @@ def render_field_reference(descriptors: Iterable[FieldDescriptor]) -> str:
         aliases = f" aliases={','.join(item['aliases'])}" if item["aliases"] else ""
         repeated = " repeated" if item["repeated"] else ""
         description = f" — {item['description']}" if "description" in item else ""
+        requires = f" requires={','.join(item['requires'])}" if "requires" in item else ""
         lines.append(
             f"{item['name']}: {item['value_type']} "
             f"operators={','.join(item['operators'])} "
-            f"missing={item['on_missing']}{aliases}{repeated}{description}"
+            f"missing={item['on_missing']}{aliases}{repeated}{requires}{description}"
         )
     return "\n".join(lines)

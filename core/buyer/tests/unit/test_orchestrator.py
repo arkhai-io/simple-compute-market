@@ -209,13 +209,14 @@ def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> Non
     assert delegated == [negotiation]
 
 
-def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
+@pytest.mark.parametrize("second_authority", ["registry-ha", "registry-independent"])
+def test_query_registry_for_matches_multi_dedupes_within_authority(second_authority) -> None:
     buyer = Ed25519Signer(b"\x07" * 32)
     first = Ed25519Signer(b"\x08" * 32)
     second = Ed25519Signer(b"\x09" * 32)
     authorities = {
         "http://r1": _authority("registry-ha", first),
-        "http://r2": _authority("registry-ha", second),
+        "http://r2": _authority(second_authority, second),
     }
 
     def query(url, *_args, **kwargs):
@@ -238,7 +239,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             registry_authorities=authorities,
         )
 
-    assert result == [
+    expected = [
         {
             "listing_id": "L1",
             "seller": "http://r1",
@@ -249,9 +250,18 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             "listing_id": "L2",
             "seller": "http://r2",
             "source_registry_url": "http://r2",
-            "source_registry_authority": "registry-ha",
+            "source_registry_authority": second_authority,
         },
     ]
+
+    if second_authority != "registry-ha":
+        expected.insert(1, {
+            "listing_id": "L1",
+            "seller": "http://r2",
+            "source_registry_url": "http://r2",
+            "source_registry_authority": second_authority,
+        })
+    assert result == expected
 
 
 def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None:
@@ -277,7 +287,7 @@ def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None
                     "filters": [
                         {
                             "name": "region",
-                            "path": "$.offer_resource.region",
+                            "path": "$.listing_resource.region",
                             "op": "in",
                             "value_type": "string",
                         }
@@ -372,7 +382,7 @@ def test_multi_registry_query_rejects_partial_vocabulary_before_listing() -> Non
                     "filters": [
                         {
                             "name": field,
-                            "path": f"$.offer_resource.{field}",
+                            "path": f"$.listing_resource.{field}",
                             "op": "in",
                             "value_type": "string",
                         }
@@ -414,12 +424,12 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
         "source_registry_url": "http://registry",
         "source_registry_authority": "registry",
         "publisher_principals": _trusted(old).model_dump(mode="json"),
-        "offer_resource": {"price": 10},
+        "listing_resource": {"price": 10},
     }
     refreshed = {
         **listing,
         "publisher_principals": _trusted(replacement).model_dump(mode="json"),
-        "offer_resource": {"price": 999},
+        "listing_resource": {"price": 999},
     }
     updates: list[tuple[str, dict]] = []
     with patch(
@@ -433,7 +443,7 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
         )
         assert resolve() == _trusted(replacement)
 
-    assert listing["offer_resource"] == {"price": 10}
+    assert listing["listing_resource"] == {"price": 10}
     assert updates == [
         (
             "publisher_trust_refreshed",

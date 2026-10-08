@@ -1,11 +1,33 @@
 """Shared VM-domain helpers used across buyer and storefront packages."""
 
+from arkhai_vms.capability_shapes import (
+    VM_PRICE_AGGREGATOR,
+    VM_PRICING_PROJECTION,
+    CapabilityShapeError,
+    FamilyRate,
+    FlatShape,
+    ShapePrice,
+    ShapeProblem,
+    canonical_vm_shape,
+    flatten_vm_shape,
+    price_vm_shape,
+    vm_family_rate,
+    vm_shape_digest,
+    vm_shape_problems,
+)
+from arkhai_vms.listing_keys import (
+    listing_pool_key,
+    listing_resource_key,
+    listing_shape_key,
+)
 from arkhai_vms.compute_requirements import (
     DIMENSION_KEYS,
     DISK_GB_DIMENSION,
     GPU_COUNT_DIMENSION,
+    GPU_MODEL_ATTRIBUTE,
     RAM_GB_DIMENSION,
     VCPU_COUNT_DIMENSION,
+    VM_CAPABILITY_SCHEMA,
 )
 from arkhai_vms.provision_terms import (
     VM_PROVISION_KIND,
@@ -18,17 +40,44 @@ from arkhai_vms.provision_terms import (
     provision_ssh_public_key,
     provision_start_utc,
 )
+from arkhai_vms.shape_generation import (
+    DEFAULT_LISTING_SHAPE_GENERATOR,
+    ListingShapeGenerator,
+    gpu_count_shapes,
+)
 from arkhai_vms.schema import (
     VmListing,
     VmMaterialization,
     VmMessage,
     VmReceipt,
+    VmConnectionDetails,
     VmResult,
     VmTerms,
 )
 
 __all__ = [
+    "listing_pool_key",
+    "listing_resource_key",
+    "listing_shape_key",
+    "CapabilityShapeError",
+    "FamilyRate",
+    "FlatShape",
+    "ShapePrice",
+    "ShapeProblem",
+    "VM_PRICE_AGGREGATOR",
+    "VM_PRICING_PROJECTION",
+    "canonical_vm_shape",
+    "flatten_vm_shape",
+    "price_vm_shape",
+    "vm_family_rate",
+    "vm_shape_digest",
+    "vm_shape_problems",
+    "DEFAULT_LISTING_SHAPE_GENERATOR",
     "DIMENSION_KEYS",
+    "GPU_MODEL_ATTRIBUTE",
+    "ListingShapeGenerator",
+    "VM_CAPABILITY_SCHEMA",
+    "gpu_count_shapes",
     "DISK_GB_DIMENSION",
     "GPU_COUNT_DIMENSION",
     "RAM_GB_DIMENSION",
@@ -39,6 +88,7 @@ __all__ = [
     "VmMessage",
     "VmProvisionTerms",
     "VmReceipt",
+    "VmConnectionDetails",
     "VmResult",
     "VmTerms",
     "make_vm_provision_terms",

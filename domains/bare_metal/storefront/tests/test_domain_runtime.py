@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import arkhai_bare_metal_storefront.domain_runtime as domain_runtime
-from arkhai_bare_metal.schema import BARE_METAL_SCHEMA_KIND, BareMetalMessage
-from arkhai_bare_metal_storefront.domain_runtime import (
-    BARE_METAL_STOREFRONT_DOMAIN,
-    get_market_domain_contract,
+from arkhai_bare_metal.schema import (
+    BARE_METAL_DOMAIN_IDENTITY,
+    BARE_METAL_SCHEMA_KIND,
+    BareMetalMessage,
 )
+from market_core import DomainCapability, validate_domain_contract
 from core_storefront import (
     StorefrontDomainBinding,
     StorefrontSettlementBuildContext,
     build_domain_settlement_artifacts,
 )
-from market_core import DomainCapability, validate_domain_contract
 from market_identity import Ed25519Signer
+
+from arkhai_bare_metal_storefront.domain_runtime import (
+    BARE_METAL_STOREFRONT_DOMAIN,
+    get_market_domain_contract,
+)
 
 
 def test_storefront_contract_validates_current_bare_metal_capabilities() -> None:
@@ -20,7 +25,7 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
 
     assert contract is BARE_METAL_STOREFRONT_DOMAIN
     assert validate_domain_contract(contract) is contract
-    assert str(contract.identity) == BARE_METAL_SCHEMA_KIND
+    assert str(contract.identity) == BARE_METAL_DOMAIN_IDENTITY
     assert contract.has_capability(DomainCapability.PUBLICATION)
     assert contract.publication is not None
     assert callable(contract.publication.source_factory)
@@ -51,6 +56,12 @@ def test_storefront_contract_retains_bare_metal_codecs() -> None:
 
     assert isinstance(message, BareMetalMessage)
     assert message.duration_seconds == 3600
+
+
+
+
+
+
 
 
 def test_settlement_hook_consumes_common_context(monkeypatch) -> None:

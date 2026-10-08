@@ -28,7 +28,7 @@ def _source(
         close_stale=lambda _db, _url: [f"stale-{name}"],
         available_candidates=lambda _db: [candidate],
         skip_keys=lambda value: {str(value["resource_id"])},
-        offer_resource=lambda value: {"resource_id": value["resource_id"]},
+        listing_resource=lambda value: {"resource_id": value["resource_id"]},
         record_published=lambda _db, value, listing_id: value.__setitem__(
             "listing_id", listing_id
         ),
@@ -41,10 +41,10 @@ def _payload(*_args):
     return ([{"escrow": "e"}], [{"demand": "d"}], 60)
 
 
-def _publish(offer, *_args):
+def _publish(listing_resource, *_args):
     return {
         "status": "published",
-        "listing_id": f"listing-{offer['resource_id']}",
+        "listing_id": f"listing-{listing_resource['resource_id']}",
     }
 
 
@@ -68,7 +68,7 @@ def test_publish_round_is_schema_opaque() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert failed == []
@@ -83,7 +83,7 @@ def test_publish_round_skips_covered_candidate() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
         skip_ids={"r1"},
     )
 
@@ -102,7 +102,7 @@ def test_selection_reuses_exact_prebuilt_sources_across_cycle() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert result.closed == {"vms": ["stale-vms"]}
@@ -118,7 +118,7 @@ def test_two_domains_publish_in_registry_order_and_isolate_skips() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     ).run(skip_ids={"vm-1"}, close_stale=False, skip_open=False)
 
     assert result.skipped == [{"resource_id": "vm-1"}]
@@ -139,7 +139,7 @@ def test_empty_prebuilt_selection_has_no_new_listings() -> None:
             db_path="db.sqlite",
             base_url="http://seller",
             build_payload=_payload,
-            publish_offer=_publish,
+            publish_listing=_publish,
         )
         .run()
     )
@@ -156,7 +156,7 @@ def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
         db_path="db.sqlite",
         base_url="http://seller",
         build_payload=_payload,
-        publish_offer=_publish,
+        publish_listing=_publish,
     )
 
     assert result.closed == {"test": ["stale-test"]}
@@ -168,9 +168,9 @@ def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
 def test_typed_payload_keeps_settlement_options_independent() -> None:
     captured: dict[str, Any] = {}
 
-    def publish(offer, accepted_escrows, demands, maximum, **kwargs):
+    def publish(listing_resource, accepted_escrows, demands, maximum, **kwargs):
         captured.update(
-            offer=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             demands=demands,
             maximum=maximum,
@@ -184,17 +184,45 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
         base_url="http://seller",
         build_payload=lambda *_args: PublicationPayload(
             accepted_escrows=({"escrow": "alkahest"},),
-            settlement_options=({"option_id": "hosted"},),
+            settlement_options=({"option_id": "rated"},),
             publication_clauses=({"mechanism": "example.payment.v1"},),
             demands=({"demand": "compute"},),
             max_duration_seconds=60,
         ),
-        publish_offer=publish,
+        publish_listing=publish,
     )
 
     assert failed == []
     assert skipped == []
-    assert published[0]["settlement_options"] == [{"option_id": "hosted"}]
+    assert published[0]["settlement_options"] == [{"option_id": "rated"}]
     assert captured["accepted_escrows"] == [{"escrow": "alkahest"}]
-    assert captured["settlement_options"] == [{"option_id": "hosted"}]
+    assert captured["settlement_options"] == [{"option_id": "rated"}]
     assert captured["publication_clauses"] == [{"mechanism": "example.payment.v1"}]
+
+
+def test_an_unchanged_existing_listing_is_skipped_not_failed_or_duplicated() -> None:
+    candidate = {"resource_id": "r1", "price": "1"}
+    source = _source(candidate=candidate)
+    published_calls: list[Any] = []
+    source = PublicationSource(
+        name=source.name,
+        open_keys=source.open_keys,
+        close_stale=source.close_stale,
+        available_candidates=source.available_candidates,
+        skip_keys=source.skip_keys,
+        listing_resource=source.listing_resource,
+        record_published=source.record_published,
+        reopen_existing=lambda *_args, **_kwargs: {"status": "unchanged"},
+        reopen_error_label=source.reopen_error_label,
+    )
+
+    published, failed, skipped = publish_round(
+        (source,),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_listing=lambda *args, **kwargs: published_calls.append(args) or {},
+    )
+
+    assert (published, failed, skipped) == ([], [], [candidate])
+    assert published_calls == []

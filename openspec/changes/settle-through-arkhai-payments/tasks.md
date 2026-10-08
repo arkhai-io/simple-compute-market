@@ -182,7 +182,7 @@ No compatibility shims: the settlement-data shape, settle response fields, and c
 
 - [x] 5.6 **API-credit payment system scenario** (R3, R7).
   - `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_payment_deal.py` (new), on `DomainDealState` and the profiled buyer CLI. Stages: publication, discovery, negotiation selecting `arkhai.payments.v1`, approval, receipt-gated issuance, consumption, status, idempotent re-drive from the buyer's run log, then a seller refund through `StorefrontClient.refund_settlement` with the transaction observed reversed.
-  - `e2e-tests/src/settings.py` and `e2e-tests/config/config.yml`: optional payments target settings (service URL, receipt identity, buyer and payee accounts, credential environment names). `require_state` reports the scenario blocked when they are absent or the target is not ready.
+  - `e2e-tests/src/e2e_harness/settings.py` and `e2e-tests/config/config.yml`: optional payments target settings (service URL, receipt identity, buyer and payee accounts, credential environment names). `require_state` reports the scenario blocked when they are absent or the target is not ready.
   - Register marker `e2e_credits_payment_deal` in `e2e-tests/pyproject.toml` and the API-credit lane expression in `e2e-tests/Makefile`.
   - Validation: e2e unit suite; the scenario runs here only if a payments target is reachable, otherwise its blocked result is disclosed.
 
@@ -313,9 +313,14 @@ Deviations from the task text:
 
 Runs on the conflicted snapshot after `bare-metal-mock-provisioned-deal` lands; the decisions are taken with the reviewer.
 
-- [ ] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`.
-- [ ] 6.2 Make `kit/identity`'s field framing public as `frame_fields`, use it in `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, bump `arkhai-kit-identity` once, and move every pin to it in one step (P1).
+- [x] 6.1 Resolve merge items M1–M7 (`design.md#merge-with-the-development-branch`) and record each outcome in `design.md`. Recorded in `design.md#merge-outcome`; M3's route contract is left to `kit-owned-storefront-shell`.
+- [x] 6.2 Make `kit/identity`'s field framing public as `frame_fields`, use it in `kit/arkhai-payments/src/market_arkhai_payments/receipts.py`, bump `arkhai-kit-identity` once, and move every pin to it in one step (P1). `arkhai-kit-identity` 0.4.0; every exact pin and minor-bump bound moved, with the patch bumps that cascade.
 - [ ] 6.3 Relock `domains/vms/storefront` and `domains/vms/buyer` where `download-r2.pytorch.org` is reachable, re-run every suite from §5 on the merged tree, then `make check-packaging` (P2), and resolve every failure.
+  - Evidence on the merged tree (sandbox without `download-r2.pytorch.org`, Helm, or Cargo): `make dist` builds every wheel; 48 of 51 locks are regenerated and current. Static checks: comment hygiene, uv setup, Python version, and project layout pass; document citations match the development branch's 15 pre-existing problems.
+  - Built-environment suites pass: core 478; kits except `kit/policy` (payments kit: mypy, vectors, generated models, 81 unit); compute provisioning 1,553; registry 253; bare metal 401; compute 6; VM domain 47; API-credit Python suites 232. Release tooling matches the development branch's 4 pre-existing failures.
+  - VM storefront and buyer suites ran from source: storefront unit 1,064 and integration modules pass (payment settlement 17). Failures that also occur on the development tree in the same environment, or come from FastAPI 0.142 or uninstalled entry points, are environmental.
+  - Fixed during the gate: development tests calling `StorefrontClient.settle` and the acceptance validator without an Agreement; the e2e payment scenario's settings import; hosted leftovers in the API-credit filter spec; identity release fixtures; and the VM and API-credit opening guards, which refused a selection's `params` and so every payment negotiation through the default chain (guard tests added).
+  - Remaining, needs a machine with those hosts and tools: `python3 scripts/uv_project.py lock domains/vms/storefront domains/vms/buyer kit/policy`, then `make test-storefront test-vms-buyer test-kits`, `helm/scripts/test-render.sh`, the API-credit Rust middleware parity suite, and `make check-packaging`.
 
 ## 7. Closeout
 

@@ -1,9 +1,9 @@
-{{- $activeIdentity := .Values.global.registryIdentity -}}
-{{- if ne .Values.identity.authority $activeIdentity.authority -}}
-{{- fail "registry identity authority must match global.registryIdentity.authority" -}}
+{{- $activeIdentity := .Values.identity -}}
+{{- if and .Values.config.requireReadApiKey (not .Values.descriptor.accessAcquisitionPointer) -}}
+{{- fail "key-gated registry descriptor requires an access acquisition pointer" -}}
 {{- end -}}
-{{- if or (ne .Values.identity.principal.scheme $activeIdentity.principal.scheme) (ne .Values.identity.principal.identifier $activeIdentity.principal.identifier) -}}
-{{- fail "registry identity principal must match global.registryIdentity.principal" -}}
+{{- if and (not .Values.config.requireReadApiKey) .Values.descriptor.accessAcquisitionPointer -}}
+{{- fail "public registry descriptor must not configure an access acquisition pointer" -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -44,8 +44,20 @@ spec:
               value: {{ required "registry identity principal scheme is required" $activeIdentity.principal.scheme | quote }}
             - name: REGISTRY_AUTHORITY_IDENTIFIER
               value: {{ required "registry identity principal identifier is required" $activeIdentity.principal.identifier | quote }}
+            - name: REGISTRY_FILTER_SPEC_PATH
+              value: {{ required "registry filter specification path is required" .Values.config.filterSpecPath | quote }}
             - name: REGISTRY_AUTHORITY_CREDENTIAL_FILE
               value: /var/run/secrets/arkhai/registry-identity/credential
+            - name: REGISTRY_DESCRIPTOR_BASE_URL
+              value: {{ required "registry descriptor base URL is required" .Values.descriptor.baseUrl | quote }}
+            - name: REGISTRY_DESCRIPTOR_DISPLAY_NAME
+              value: {{ required "registry descriptor display name is required" .Values.descriptor.displayName | quote }}
+            - name: REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY
+              value: {{ required "registry descriptor operator identity is required" .Values.descriptor.operatorIdentity | quote }}
+            {{- if .Values.descriptor.accessAcquisitionPointer }}
+            - name: REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER
+              value: {{ .Values.descriptor.accessAcquisitionPointer | quote }}
+            {{- end }}
             # --- sourced from subchart values ---
             - name: DATABASE_URL
               value: {{ .Values.config.databaseUrl | quote }}

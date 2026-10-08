@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.api.filter_spec import (
+from core_registry.api.filter_spec import (
+    _spec_body,
     compute_etag,
     load_filter_spec,
 )
@@ -22,7 +23,7 @@ from src.api.filter_spec import (
 
 @pytest.fixture(autouse=True)
 def _isolate_filter_spec_cache():
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
 
     fs_mod.reset_cache()
     yield
@@ -46,7 +47,7 @@ def test_loads_minimal_valid_spec(tmp_path: Path) -> None:
           properties:
             listing_id: {type: string}
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     spec = load_filter_spec(path)
@@ -63,7 +64,7 @@ def test_etag_stable_across_loads(tmp_path: Path) -> None:
       properties:
         listing_id: {type: string}
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
     """
     spec1 = load_filter_spec(_write(tmp_path, body))
     spec2 = load_filter_spec(_write(tmp_path, body))
@@ -76,18 +77,19 @@ def test_etag_changes_when_filter_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
     """
     two_filters = """
     version: 1
     listing_shape:
       type: object
     filters:
-      - {name: gpu_model, path: $.offer_resource.gpu_model, op: in, value_type: string, on_missing: fail}
-      - {name: region,    path: $.offer_resource.region,    op: in, value_type: string, on_missing: fail}
+      - {name: gpu_model, path: $.listing_resource.gpu_model, op: in, value_type: string, on_missing: fail}
+      - {name: region,    path: $.listing_resource.region,    op: in, value_type: string, on_missing: fail}
     """
-    assert compute_etag(load_filter_spec(_write(tmp_path, one_filter))) != \
-        compute_etag(load_filter_spec(_write(tmp_path, two_filters)))
+    assert compute_etag(load_filter_spec(_write(tmp_path, one_filter))) != compute_etag(
+        load_filter_spec(_write(tmp_path, two_filters))
+    )
 
 
 def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
@@ -98,8 +100,8 @@ def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     with pytest.raises(ValueError, match="duplicate filter name"):
@@ -116,7 +118,7 @@ def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None
           - name: ram_gb_min
             query_name: ram_gb
             query_aliases: [ram_gb_min]
-            path: $.offer_resource.ram_gb
+            path: $.listing_resource.ram_gb
             op: range
             value_type: integer
             alias_kind: lower_bound
@@ -154,11 +156,8 @@ def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None
 def test_invalid_query_vocabulary_is_rejected(
     tmp_path: Path, declarations: str, message: str
 ) -> None:
-    body = (
-        "version: 1\n"
-        "listing_shape: {type: object}\n"
-        "filters:\n"
-        + textwrap.indent(textwrap.dedent(declarations).strip(), "  ")
+    body = "version: 1\nlisting_shape: {type: object}\nfilters:\n" + textwrap.indent(
+        textwrap.dedent(declarations).strip(), "  "
     )
     path = _write(tmp_path, body)
     with pytest.raises(ValueError, match=message):
@@ -173,7 +172,7 @@ def test_unknown_op_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: gpu_model, path: $.offer_resource.gpu_model, op: contains, value_type: string, on_missing: fail}
+          - {name: gpu_model, path: $.listing_resource.gpu_model, op: contains, value_type: string, on_missing: fail}
         """,
     )
     with pytest.raises(ValidationError):
@@ -189,7 +188,7 @@ def test_unknown_field_in_filter_rejected(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail, indexd: true}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail, indexd: true}
         """,
     )
     with pytest.raises(ValidationError):
@@ -205,7 +204,7 @@ def test_default_on_missing_is_fail(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     spec = load_filter_spec(path)
@@ -228,8 +227,25 @@ def test_repo_default_spec_loads() -> None:
     # The shipped spec declares its schema identity — buyer plugins match
     # registries to schemas on this id.
     assert spec.schema_identity is not None
-    assert spec.schema_identity.id == "vms.compute"
+    assert spec.schema_identity.id == "compute.market"
     assert spec.schema_identity.version >= 1
+
+
+def test_repo_api_credits_spec_loads() -> None:
+    """The second filter specification packaged in the image is valid."""
+    repo_root = Path(__file__).resolve().parents[4]
+    path = repo_root / "domains/apicredits/registry/filter-spec.yaml"
+
+    spec = load_filter_spec(path)
+
+    assert spec.schema_identity is not None
+    assert spec.schema_identity.id == "api_credits"
+    assert spec.schema_identity.version >= 1
+    assert {declaration.name for declaration in spec.filters} >= {
+        "service_name",
+        "settlement_mechanism",
+        "settlement_asset",
+    }
 
 
 def test_schema_identity_parses_and_defaults_version(tmp_path: Path) -> None:
@@ -242,7 +258,7 @@ def test_schema_identity_parses_and_defaults_version(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: service_name, path: $.offer_resource.service_name, op: in, value_type: string}
+          - {name: service_name, path: $.listing_resource.service_name, op: in, value_type: string}
         """,
     )
     spec = load_filter_spec(path)
@@ -260,7 +276,7 @@ def test_schema_identity_is_optional(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     assert load_filter_spec(path).schema_identity is None
@@ -277,7 +293,7 @@ def test_schema_identity_rejects_unknown_keys(tmp_path: Path) -> None:
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     with pytest.raises(ValidationError):
@@ -301,20 +317,82 @@ def test_etag_unchanged_for_specs_without_schema_identity(tmp_path: Path) -> Non
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     spec = load_filter_spec(path)
+    # `requires` defaults to `[]` on every `FilterDecl`, including ones
+    # written before the field existed. A raw `model_dump` therefore now
+    # carries a `requires` key this test's "legacy payload" must not —
+    # dropping it here mirrors what `compute_etag` itself does (see
+    # `_dump_filter`) so this test keeps proving the pre-`requires` etag
+    # contract rather than silently re-deriving whatever the dump produces.
+    dumped = spec.filters[0].model_dump(exclude_none=False)
+    assert dumped.pop("requires") == []
     legacy_payload = json.dumps(
         {
             "version": 1,
             "listing_shape": {"type": "object"},
-            "filters": [spec.filters[0].model_dump(exclude_none=False)],
+            "filters": [dumped],
         },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     assert compute_etag(spec) == hashlib.sha256(legacy_payload).hexdigest()
+    # Literal pin, independent of both sides' construction, so a future
+    # change to `_dump_filter` and this test's own expected-payload logic
+    # drifting together in the same wrong direction still gets caught.
+    assert (
+        compute_etag(spec)
+        == "8cae70cfe8eb09f027a3fd1152c99af1ddc4772428d38b58f64b4a6426a68f1d"
+    )
+
+
+def test_requires_absent_from_etag_and_served_body_when_undeclared(
+    tmp_path: Path,
+) -> None:
+    """A filter declaring no `requires` serializes with no `requires` key.
+
+    An undeclared co-requirement leaves a specification's serialization and
+    etag unchanged. `requires` defaults to `[]` on every `FilterDecl`, so
+    without this exclusion every deployment's spec would gain a
+    `requires: []` key, and so a new etag, from upgrading the engine alone,
+    with no semantic change.
+    """
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+        """,
+    )
+    spec = load_filter_spec(path)
+    served = _spec_body(spec)
+    assert "requires" not in served["filters"][0]
+
+
+def test_requires_present_in_etag_and_served_body_when_declared(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_asset, path: $.listing_resource.asking_rate.asset, op: in, value_type: string, on_missing: fail}
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    spec = load_filter_spec(path)
+    served = _spec_body(spec)
+    by_name = {f["name"]: f for f in served["filters"]}
+    assert by_name["asking_rate_max"]["requires"] == ["asking_rate_asset"]
+    assert "requires" not in by_name["asking_rate_asset"]
 
 
 def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
@@ -323,7 +401,7 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+      - {name: region, path: $.listing_resource.region, op: in, value_type: string}
     """
     with_schema = """
     version: 1
@@ -332,10 +410,11 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
     listing_shape:
       type: object
     filters:
-      - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+      - {name: region, path: $.listing_resource.region, op: in, value_type: string}
     """
-    assert compute_etag(load_filter_spec(_write(tmp_path, without))) != \
-        compute_etag(load_filter_spec(_write(tmp_path, with_schema)))
+    assert compute_etag(load_filter_spec(_write(tmp_path, without))) != compute_etag(
+        load_filter_spec(_write(tmp_path, with_schema))
+    )
 
 
 def _authenticated_filter_client(app, db_session):
@@ -347,7 +426,7 @@ def _authenticated_filter_client(app, db_session):
         canonical_body_hash,
         sign_request,
     )
-    from src.db.database import get_db
+    from core_registry.db.database import get_db
 
     caller = Ed25519Signer(bytes(range(32)))
     registry = Ed25519Signer(bytes(range(1, 33)))
@@ -379,8 +458,11 @@ def _authenticated_filter_client(app, db_session):
         "X-Market-Timestamp": str(request.timestamp),
         "X-Market-Signature": request.proof.value,
     }
-    return TestClient(app), request, headers, TrustedIdentitySet(
-        identities=(registry.identity,)
+    return (
+        TestClient(app),
+        request,
+        headers,
+        TrustedIdentitySet(identities=(registry.identity,)),
     )
 
 
@@ -435,14 +517,16 @@ def test_etag_present_on_endpoint(
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string, on_missing: fail}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
+
     fs_mod.reset_cache()
 
     from fastapi import FastAPI
+
     app = FastAPI()
     app.include_router(fs_mod.router)
     client, request, headers, registry_principals = _authenticated_filter_client(
@@ -464,7 +548,6 @@ def test_endpoint_serves_schema_identity(
     tmp_path: Path,
     db_session,
 ) -> None:
-
     path = _write(
         tmp_path,
         """
@@ -475,14 +558,16 @@ def test_endpoint_serves_schema_identity(
         listing_shape:
           type: object
         filters:
-          - {name: region, path: $.offer_resource.region, op: in, value_type: string}
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
+
     fs_mod.reset_cache()
 
     from fastapi import FastAPI
+
     app = FastAPI()
     app.include_router(fs_mod.router)
     client, request, headers, registry_principals = _authenticated_filter_client(
@@ -493,3 +578,83 @@ def test_endpoint_serves_schema_identity(
     _assert_signed_filter_response(response, request, registry_principals)
     body = response.json()
     assert body["schema"] == {"id": "tokens.api", "version": 2}
+
+
+def test_decimal_text_value_type_accepted(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail}
+        """,
+    )
+    spec = load_filter_spec(path)
+    assert spec.filters[0].value_type == "decimal_text"
+
+
+def test_requires_rejects_undeclared_target(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    with pytest.raises(ValueError, match="undeclared filter"):
+        load_filter_spec(path)
+
+
+def test_requires_rejects_self_reference(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_max]}
+        """,
+    )
+    with pytest.raises(ValueError, match="requires on itself"):
+        load_filter_spec(path)
+
+
+def test_requires_rejects_cycle(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: a, path: $.listing_resource.a, op: in, value_type: string, on_missing: fail, requires: [b]}
+          - {name: b, path: $.listing_resource.b, op: in, value_type: string, on_missing: fail, requires: [a]}
+        """,
+    )
+    with pytest.raises(ValueError, match="cycle in filter requires"):
+        load_filter_spec(path)
+
+
+def test_requires_allows_one_directional_supply(tmp_path: Path) -> None:
+    """A co-requirement target may itself be declared with no `requires` —
+    the dependency is one-directional, not a mutual pairing."""
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_asset, path: $.listing_resource.asking_rate.asset, op: in, value_type: string, on_missing: fail}
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    spec = load_filter_spec(path)
+    assert spec.filters[1].requires == ["asking_rate_asset"]
+    assert spec.filters[0].requires == []

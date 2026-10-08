@@ -62,7 +62,7 @@ Three places ``load_aggregation_policy`` looks, in order:
    name as a built-in overwrites it — the local-tuning override UX,
    matching the storefront's behaviour.
 3. Python entry points in group ``market.buyer_aggregation_policies``
-   (the pre-hoist ``domains.vms.buyer.aggregation_policies`` group is
+   (the pre-hoist ``arkhai_vms_buyer.aggregation_policies`` group is
    still scanned for compatibility).
 """
 
@@ -281,7 +281,7 @@ def load_aggregation_policy(name: str | None) -> AggregationPolicy:
             "market.buyer_aggregation_policies",
             # Pre-hoist group name, kept so installed policy packages
             # keep resolving.
-            "domains.vms.buyer.aggregation_policies",
+            "arkhai_vms_buyer.aggregation_policies",
         ):
             eps.extend(md.entry_points(group=group))
     except Exception:

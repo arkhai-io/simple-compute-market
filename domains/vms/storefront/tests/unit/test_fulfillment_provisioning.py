@@ -30,9 +30,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from arkhai_vms import VmConnectionDetails
 
-from compute_provisioning import ComputeProvisioningTimeoutError
-from market_fulfillment import VersionedEnvelope
+from compute_provisioning_client import ComputeProvisioningTimeoutError
+from market_core import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
 from market_storefront.services import vm_fulfillment_service as vfs
 from tests.fulfillment_fixtures import (
@@ -41,136 +42,79 @@ from tests.fulfillment_fixtures import (
 )
 
 
-class TestFulfillmentResultToLegacyShape:
-    def test_maps_root_and_tenant_credentials(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [{"provisioned_resource_id": "res-1", "status": "active"}],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "connection_info": {
-                            "vm_name": "agent-vm-01",
-                            "host": "kvm1",
-                            "timestamp": "2026-07-26T00:00:00Z",
-                            "tenant_user": "mockuser",
-                            "vm_ip_internal": "192.168.122.2",
-                            "ssh_port": "2222",
-                        },
-                        "credentials": [
-                            {
-                                "role": "root",
-                                "password": "root-pw",
-                                "ssh_commands": {"internal": "ssh root@192.168.122.2"},
-                                "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                            {
-                                "role": "tenant",
-                                "password": "tenant-pw",
-                                "ssh_commands": {"external": "ssh -p 2222 mockuser@127.0.0.1"},
-                                "key_type": "generated",
-                                "provisioned_resource_ids": ["res-1"],
-                            },
-                        ],
-                    },
-                },
-            },
+class TestFulfillmentResultToConnection:
+    def test_the_delivery_becomes_the_deals_connection_details(self):
+        envelope = vm_fulfillment_result(
+            provisioned_resource_id="res-1",
+            credentials=(
+                {"role": "root", "password": "root-pw", "key_type": None},
+                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+            ),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        result = fs._fulfillment_result_to_connection(envelope)
 
-        assert result["vm_name"] == "agent-vm-01"
-        assert result["host"] == "kvm1"
-        assert result["vm_ip_internal"] == "192.168.122.2"
-        assert result["ssh_port"] == "2222"
-        assert result["provisioned_resource_ids"] == ["res-1"]
+        auth = result.pop("authentication")
+        assert VmConnectionDetails.model_validate(result) == VmConnectionDetails(
+            host="203.0.113.10",
+            port=2222,
+            user="tenant1",
+            ready_at="2030-01-01T00:00:01+00:00",
+            provisioned_resource_ids=("res-1",),
+        )
+        assert auth == {
+            "root": {"password": "root-pw", "key_type": None},
+            "tenant": {"password": "tenant-pw", "key_type": "generated"},
+        }
 
-        auth = result["authentication"]
-        assert auth["root"]["password"] == "root-pw"
-        assert auth["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
-        assert "key_type" not in auth["root"]
-        assert auth["tenant"]["password"] == "tenant-pw"
-        assert auth["tenant"]["key_type"] == "generated"
-        assert "ssh_key_path_host" not in auth["tenant"]
-
-    def test_no_domain_result_means_no_authentication_key(self):
+    def test_a_result_without_the_access_delivery_is_refused(self):
         envelope = VersionedEnvelope(
             kind="fulfillment.result.v1",
             schema_version=1,
             payload={"provisioned_resources": [], "domain_result": None},
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
+        with pytest.raises(RuntimeError, match="unsupported delivery"):
+            fs._fulfillment_result_to_connection(envelope)
 
-        assert "authentication" not in result
-        assert result["provisioned_resource_ids"] == []
-        assert result.get("vm_name") is None
-
-    def test_unknown_credential_role_is_ignored(self):
-        envelope = VersionedEnvelope(
-            kind="fulfillment.result.v1",
-            schema_version=1,
-            payload={
-                "provisioned_resources": [],
-                "domain_result": {
-                    "kind": "vm.fulfillment.result.v1",
-                    "schema_version": 1,
-                    "payload": {
-                        "credentials": [
-                            {"role": "admin", "password": "x", "provisioned_resource_ids": []},
-                        ],
-                    },
-                },
-            },
+    def test_an_unknown_credential_role_is_not_kept(self):
+        envelope = vm_fulfillment_result(
+            credentials=({"role": "admin", "password": "x"},),
         )
 
-        result = fs._fulfillment_result_to_legacy_shape(envelope)
-
-        assert "authentication" not in result
+        assert "authentication" not in fs._fulfillment_result_to_connection(envelope)
 
 
-class TestConnectivitySettingsFromStorefrontConfig:
-    def test_returns_none_when_nothing_configured(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(frp_server_addr="", frp_domain="", frp_dashboard_password=""),
-            raising=False,
-        )
-        assert fs._connectivity_settings_from_storefront_config() is None
+class TestTheStorefrontSelectsNoRelay:
+    """The storefront names no relay, on either request-building path.
 
-    def test_returns_configured_values(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(
-                frp_server_addr="relay.example.com:7000",
-                frp_domain="buyer-vm.example.com",
-                frp_dashboard_password="s3cr3t",
-            ),
-            raising=False,
-        )
-        result = fs._connectivity_settings_from_storefront_config()
-        assert result == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": "buyer-vm.example.com",
-            "frp_dashboard_password": "s3cr3t",
-        }
+    Which relay a host dials is recorded on the relay its pool references. A
+    storefront naming one per request would make a fleet-wide fact depend on a
+    caller's configuration, and would let two requests against one host
+    disagree about how that host is reached. The buyer's address and port come
+    back in the fulfillment result.
+    """
 
-    def test_partial_configuration_still_returns_a_dict(self, monkeypatch):
-        monkeypatch.setattr(
-            fs.settings, "provisioning",
-            SimpleNamespace(frp_server_addr="relay.example.com:7000", frp_domain="", frp_dashboard_password=""),
-            raising=False,
-        )
-        result = fs._connectivity_settings_from_storefront_config()
-        assert result == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": None,
-            "frp_dashboard_password": None,
-        }
+    def test_no_builder_remains_to_be_called(self):
+        assert not hasattr(fs, "_connectivity_settings_from_storefront_config")
+
+    def test_neither_request_builder_reads_relay_settings(self):
+        """Asserted against the source of both modules rather than by driving
+        them, because the point is that no code path exists to reach — a
+        behavioural test can only show that the paths exercised did not."""
+        import inspect
+
+        from market_storefront.services import vm_fulfillment_service as vfs
+
+        for module in (fs, vfs):
+            source = inspect.getsource(module)
+            directives = [
+                line for line in source.splitlines()
+                if not line.lstrip().startswith("#")
+            ]
+            body = "\n".join(directives)
+            for key in ("frp_server_addr", "frp_domain", "frp_dashboard_password"):
+                assert key not in body, f"{module.__name__} still reads {key}"
 
 
 class TestDoProvision:
@@ -190,7 +134,6 @@ class TestDoProvision:
             get_fulfillment_result=AsyncMock(
                 return_value=vm_fulfillment_result(
                     provisioned_resource_id="res-1",
-                    connection_info={"vm_name": "vm-1"},
                 )
             ),
         )
@@ -207,7 +150,6 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="", frp_domain="", frp_dashboard_password="",
             ),
             raising=False,
         )
@@ -220,7 +162,6 @@ class TestDoProvision:
             "ssh-ed25519 AAAA",
             sqlite_client=sqlite_client,
             vm_host="kvm1",
-            vm_target="tenant-abcd",
             on_job_submitted=_on_job_submitted,
             capacity_reservation_id="res-1",
             escrow_uid="escrow-1",
@@ -254,10 +195,9 @@ class TestDoProvision:
         fulfillment_client.begin_fulfillment.assert_awaited_once()
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
         assert begin_body.capacity_reservation_id == "res-1"
-        assert begin_body.fulfillment_request.payload["vm_target"] == "tenant-abcd"
         assert begin_body.market == "vms"
-        assert begin_body.fulfillment_request.payload["ssh_pubkey"] == "ssh-ed25519 AAAA"
-        assert "connectivity" not in begin_body.fulfillment_request.payload
+        # Provisioning names the guest; the storefront names nothing else.
+        assert begin_body.fulfillment_request.payload == {"ssh_pubkey": "ssh-ed25519 AAAA"}
         assert fulfillment_client.begin_fulfillment.await_args.kwargs == {
             "site_id": "site-1"
         }
@@ -273,12 +213,19 @@ class TestDoProvision:
         )
 
         assert job_ids == ["fulfillment-1"]
-        assert result["vm_name"] == "vm-1"
+        assert (result["host"], result["port"], result["user"]) == ("203.0.113.10", 2222, "tenant1")
+        assert "vm_name" not in result
         assert result["provisioned_resource_ids"] == ["res-1"]
 
-    async def test_includes_connectivity_when_frp_configured(
+    async def test_no_connectivity_is_placed_in_the_request(
         self, monkeypatch, fulfillment_client, tmp_path,
     ):
+        """Even with relay-shaped storefront settings present.
+
+        A deployment carrying the removed keys must not quietly resume
+        supplying them: the storefront selects no relay, and a leftover setting
+        is inert rather than authoritative.
+        """
         monkeypatch.setattr(fs, "build_fulfillment_client", lambda *_: fulfillment_client)
         monkeypatch.setattr(fs, "build_capacity_client", lambda *_: SimpleNamespace())
         sqlite_client = (
@@ -288,23 +235,19 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="relay.example.com:7000", frp_domain="", frp_dashboard_password="",
+                frp_server_addr="relay.example.com:7000",
             ),
             raising=False,
         )
 
         await fs._do_provision(
-            "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+            "ssh-ed25519 AAAA", vm_host="kvm1",
             sqlite_client=sqlite_client,
             capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
 
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
-        assert begin_body.fulfillment_request.payload["connectivity"] == {
-            "frp_server_addr": "relay.example.com:7000",
-            "frp_domain": None,
-            "frp_dashboard_password": None,
-        }
+        assert "connectivity" not in begin_body.fulfillment_request.payload
 
     async def test_failed_state_raises(
         self, monkeypatch, fulfillment_client, tmp_path,
@@ -321,16 +264,15 @@ class TestDoProvision:
             fs.settings, "provisioning",
             SimpleNamespace(
                 timeout=5.0, poll_interval=0.001,
-                frp_server_addr="", frp_domain="", frp_dashboard_password="",
             ),
             raising=False,
         )
 
-        from compute_provisioning import ComputeProvisioningJobError
+        from compute_provisioning_client import ComputeProvisioningJobError
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
-                "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
+                "ssh-ed25519 AAAA", vm_host="kvm1",
                 sqlite_client=sqlite_client,
                 capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
@@ -444,17 +386,13 @@ class TestPersistEscrowFieldsWithRetry:
 
 
 @pytest.mark.asyncio
-async def test_generated_vm_target_survives_context_fulfillment_and_lease_registration(
+async def test_the_storefront_names_no_guest_and_writes_the_lease_only_at_commit(
     monkeypatch,
     tmp_path,
 ):
-    """Exercise target generation across context, fulfillment, and lease seams.
-
-    The storefront project deliberately does not depend on the provider adapter,
-    so this test validates the shared wire invariant directly rather than importing
-    the adapter's private Pydantic model. Provider-model validation remains covered
-    in the provisioning-adapter suite.
-    """
+    """Provisioning names the guest from the capacity reservation, so the
+    storefront records, sends, and registers without one; it learns the
+    delivery afterwards."""
 
     plan = SimpleNamespace(
         order_id="listing-1",
@@ -462,7 +400,7 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
     )
     monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
 
-    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "target-survival.db")
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "no-guest-name.db")
     sqlite_client = lifecycle.db
 
     async def capacity_binding_for_listing(repository, listing_id):
@@ -478,30 +416,22 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
             "resource_id": "resource-1",
-            "vm_host": "host-1",
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
-    observed: dict[str, str] = {}
+    observed: dict[str, dict] = {}
 
-    async def validating_provision_vm(
-        ssh_public_key: str,
-        *,
-        vm_target: str,
-        on_job_submitted,
-        **_: object,
-    ) -> dict[str, object]:
-        assert isinstance(vm_target, str)
-        assert vm_target.startswith("tenant-")
-        assert len(vm_target) > len("tenant-")
-        assert ssh_public_key
-        observed["provision"] = vm_target
+    async def provision_vm(ssh_public_key: str, *, on_job_submitted, **kwargs) -> dict:
+        observed["provision"] = kwargs
+        observed["commits_before_provisioning"] = capacity.commit.await_count
         await on_job_submitted("fulfillment-1")
-        return {"vm_name": vm_target, "authentication": {}}
-
-    async def register_lease(*, vm_target: str, **_: object) -> None:
-        observed["lease"] = vm_target
+        return {"authentication": {}}
 
     result = await vfs.fulfill_vm_obligation(
         client=None,
@@ -513,34 +443,31 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         get_sqlite_client=lambda: sqlite_client,
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
-        provision_vm=validating_provision_vm,
-        schedule_shutdown=AsyncMock(),
-        register_lease=register_lease,
+        provision_vm=provision_vm,
     )
     await asyncio.sleep(0)
 
     persisted = await sqlite_client.load_escrow(escrow_uid="escrow-1")
     assert persisted is not None
     context = json.loads(persisted["fulfillment_context"])
-    payload = context["payload"]["fulfillment_request"]["payload"]
-    persisted_vm_target = payload["vm_target"]
-    assert isinstance(persisted_vm_target, str)
-    assert persisted_vm_target.startswith("tenant-")
-    assert payload["ssh_pubkey"] == "ssh-ed25519 test"
-    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
-    assert observed == {
-        "provision": persisted_vm_target,
-        "lease": persisted_vm_target,
+    assert context["payload"]["fulfillment_request"]["payload"] == {
+        "ssh_pubkey": "ssh-ed25519 test"
     }
+    assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
+    assert "vm_target" not in observed["provision"]
+    # The lease begins at the one commit before provisioning, which records
+    # the deal's escrow; nothing writes the lease afterwards.
+    assert observed["commits_before_provisioning"] == capacity.commit.await_count == 1
+    assert capacity.commit.await_args.kwargs["deal_ref"] == {"escrow_uid": "escrow-1"}
     assert result["status"] == "fulfilled"
 
 
 @pytest.mark.asyncio
-async def test_post_provision_commit_and_lease_registration_do_not_require_resource_id(
+async def test_the_commit_does_not_require_resource_id(
     monkeypatch,
     tmp_path,
 ):
-    """Regression test for the opaque-reservation post-provision gap.
+    """Regression test for the opaque-reservation gap.
 
     ``kit/site``'s ``/reservations`` endpoint strips ``resource_id``,
     ``capacity_bucket_id``, and ``backing_resource_id`` from every
@@ -548,9 +475,9 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     capacity, not a pinned physical resource, so ``reserve()`` legitimately
     returns without them. The previous test above exercises a ``reserve()``
     double that (unrealistically) still supplies ``resource_id``/``vm_host``,
-    so it cannot catch a regression where the post-provision lease-window
-    refresh or lease registration is gated on those fields being present.
-    This test uses the real, opaque shape and asserts both calls still fire.
+    so it cannot catch a regression where the commit that begins the lease is
+    gated on those fields being present. This test uses the real, opaque
+    shape and asserts the commit still fires.
     """
     plan = SimpleNamespace(
         order_id="listing-1",
@@ -576,16 +503,19 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
             # No resource_id/vm_host -- the real opaque-reservation shape.
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
 
     async def provision_vm(
-        ssh_public_key: str, *, vm_target: str, on_job_submitted, **_: object,
+        ssh_public_key: str, *, on_job_submitted, **_: object,
     ) -> dict[str, object]:
         await on_job_submitted("fulfillment-1")
-        return {"vm_name": vm_target, "authentication": {}}
-
-    register_lease = AsyncMock()
+        return {"authentication": {}}
 
     result = await vfs.fulfill_vm_obligation(
         client=None,
@@ -598,23 +528,83 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
         capacity=capacity,
         stage_event=lambda *args, **kwargs: None,
         provision_vm=provision_vm,
-        schedule_shutdown=AsyncMock(),
-        register_lease=register_lease,
     )
     await asyncio.sleep(0)
 
     assert result["status"] == "fulfilled"
     assert capacity.reserve.await_args.args == (lifecycle.capacity_binding,)
-    # `commit()` is also called earlier, atomically, when there is no
-    # pre-existing TTL hold to refresh (`_reserve_capacity_for_obligation` ->
-    # `_commit_fresh_reservation`); this test only asserts the *post-provision*
-    # lease-window-refresh call this regression targets is not skipped.
-    assert capacity.commit.await_count >= 1
-    post_provision_commit = capacity.commit.await_args
-    assert post_provision_commit.kwargs["capacity_reservation_id"] == "reservation-1"
-    assert post_provision_commit.kwargs["resource_id"] is None
+    capacity.commit.assert_awaited_once()
+    commit = capacity.commit.await_args
+    assert commit.kwargs["capacity_reservation_id"] == "reservation-1"
+    assert commit.kwargs["resource_id"] is None
 
-    register_lease.assert_awaited_once()
-    assert register_lease.await_args.kwargs["capacity_reservation_id"] == "reservation-1"
-    assert register_lease.await_args.kwargs["resource_id"] is None
-    assert register_lease.await_args.kwargs["vm_host"] is None
+
+_RECORDED_WINDOW = {
+    "capacity_reservation_id": "reservation-1",
+    "state": "leased",
+    "lease_start_utc": "2026-01-01T00:00:00+00:00",
+    "lease_end_utc": "2026-01-01 01:00",
+}
+
+
+async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit):
+    """Run the VM main path to past provisioning with the given commit; the VM
+    itself is always provisioned."""
+    plan = SimpleNamespace(order_id="listing-1", required_attributes={"vcpu_count": 2})
+    monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "deferral.db")
+    sqlite_client = lifecycle.db
+
+    async def capacity_binding_for_listing(repository, listing_id):
+        return lifecycle.capacity_binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        capacity_binding_for_listing,
+    )
+    capacity = SimpleNamespace(
+        reserve=AsyncMock(return_value={"capacity_reservation_id": "reservation-1", "site": "site-1"}),
+        commit=commit,
+    )
+    provisioned: list[str] = []
+
+    async def provision_vm(ssh_public_key, *, on_job_submitted, **_):
+        await on_job_submitted("fulfillment-1")
+        provisioned.append(ssh_public_key)
+        return {"authentication": {}}
+
+    result = await vfs.fulfill_vm_obligation(
+        client=None,
+        escrow_uid="escrow-1",
+        ssh_public_key="ssh-ed25519 test",
+        order={"listing_id": "listing-1"},
+        listing_id="listing-1",
+        site_id="site-1",
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=capacity,
+        stage_event=lambda *args, **kwargs: None,
+        provision_vm=provision_vm,
+    )
+    await asyncio.sleep(0)
+    assert provisioned, "the VM was provisioned"
+    return result
+
+
+@pytest.mark.asyncio
+async def test_a_failed_evidence_publication_after_provisioning_is_deferred(
+    monkeypatch, tmp_path
+):
+    """Publishing the fulfillment is retried by the resume pass rather than
+    failing a deal whose VM is running."""
+    monkeypatch.setattr(
+        vfs, "submit_compute_fulfillment", AsyncMock(side_effect=RuntimeError("rpc down"))
+    )
+
+    result = await _fulfil_after_provisioning(
+        monkeypatch,
+        tmp_path,
+        commit=AsyncMock(return_value=_RECORDED_WINDOW),
+    )
+
+    assert result["status"] == "deferred"
+    assert "evidence publication" in result["message"]

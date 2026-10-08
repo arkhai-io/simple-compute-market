@@ -18,7 +18,7 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 
 ## Payments contract this builds on
 
-The payments `rate-parts` spec (arkhai-io/arkhai-payments `docs/issues/rate-parts.md`) settles the seller-side needs below:
+The payments `rate-parts` spec (`arkhai-payments/docs/issues/rate-parts.md`) settles the seller-side needs below:
 - `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
 - `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the domain's teardown time, and the SDK supplies a default.
 - The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated, never future-dated, and any stop ends the whole transaction.

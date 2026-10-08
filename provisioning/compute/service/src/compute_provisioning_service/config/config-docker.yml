@@ -3,16 +3,15 @@
 # Loaded automatically when the container image runs standalone
 # (ACTIVE_PROFILES=docker is baked into the Dockerfile).
 #
-# Provides the IaC paths that match the image's baked-in directory layout
-# and sets ANSIBLE_CONFIG to point at the bundled ansible.cfg.
+# Provides the IaC paths that match the image's baked-in directory layout.
+# ANSIBLE_CONFIG is the Ansible distribution's own defaults (settings.toml).
 # Override specific values at runtime via PROVISIONING_* env vars.
 # ---------------------------------------------------------------------------
 
 playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-bare_metal_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml"
-inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+bare_metal_playbook_path: "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
+inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
-ansible_cfg: "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
 
 # ---------------------------------------------------------------------------
 # Storefront callback target and durable site binding.

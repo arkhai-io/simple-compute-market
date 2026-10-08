@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 .PHONY: help install reinit serve worker migrate test test-unit test-integration clean build build-image deploy
 
 .DEFAULT_GOAL := help
@@ -11,39 +14,25 @@ DIST_DIR ?= ../../../.dist
 # key so a rebuilt adapter/service can never be hidden by a stale final stage.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/vms/provisioning/iac)
+BARE_METAL_IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/bare_metal/provisioning/iac)
 
-install: ## Install service and development dependencies
-	uv sync --dev --find-links $(DIST_DIR)
+install: reinit ## Install service and development dependencies
 
 reinit: ## Refresh local internal packages and adapters
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
-		--upgrade-package arkhai-compute-provisioning-service --reinstall-package arkhai-compute-provisioning-service \
-		--upgrade-package arkhai-vms-provisioning-adapter --reinstall-package arkhai-vms-provisioning-adapter \
-		--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-		--upgrade-package arkhai-vms --reinstall-package arkhai-vms \
-		--upgrade-package arkhai-bare-metal --reinstall-package arkhai-bare-metal \
-		--upgrade-package arkhai-bare-metal-provisioning-adapter --reinstall-package arkhai-bare-metal-provisioning-adapter \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
-		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
-		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client
+	python3 ../../../scripts/uv_project.py reinit
 
 serve: ## Start the compute provisioning API and in-process workers
-	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/hosts" \
+	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/provisioning-hosts.ini" \
 	PROVISIONING_PLAYBOOK_PATH="$(IAC_DIR)/ansible/playbooks/single-tenant/vm-operations.yaml" \
+	PROVISIONING_BARE_METAL_PLAYBOOK_PATH="$(BARE_METAL_IAC_DIR)/ansible/playbooks/node-access.yaml" \
 	PROVISIONING_MANAGEMENT_VARS_PATH="$(IAC_DIR)/ansible/inventory/management-vars.yaml" \
-	ANSIBLE_CONFIG="$(IAC_DIR)/ansible/ansible.cfg" \
-	uv run compute-provisioning-api
+	uv run --find-links $(DIST_DIR) compute-provisioning-api
 
 worker: ## Start the background-only worker role
-	uv run compute-provisioning-worker
+	uv run --find-links $(DIST_DIR) compute-provisioning-worker
 
 migrate: ## Apply ordered service-owned database migrations
-	uv run compute-provisioning-migrate
+	uv run --find-links $(DIST_DIR) compute-provisioning-migrate
 
 test: reinit test-unit test-integration ## Run destination service tests
 
@@ -59,6 +48,7 @@ clean: ## Remove generated files
 
 IMAGE_NAME ?= arkhai
 IMAGE_TAG ?= compute-provisioning
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 APPUSER_UID ?= 1000
 APPUSER_GID ?= 1000
 
@@ -72,6 +62,7 @@ build-image: ## Build the wheel-only destination image
 		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ../../..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 deploy: ## Run the destination image with mock provisioning
 	docker run -d --rm --name compute-provisioning \

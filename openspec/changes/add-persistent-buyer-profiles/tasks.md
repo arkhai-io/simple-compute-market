@@ -46,9 +46,9 @@
 ## 7. Generated config, deployment, and E2E fixtures
 
 - [x] 7.1 Update typed buyer configuration metadata and generated reference/template drift checks to use XDG profile-store/provider-reference inputs and reject direct buyer `[Identity]`, raw credential, seed, mnemonic, and implicit wallet-derived marketplace identity fields.
-- [x] 7.2 Update `e2e-tests/config/hosted-buyer.toml`, `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
+- [x] 7.2 Update the hosted buyer config `hosted-buyer.toml` (removed with hosted settlement by `settle-through-arkhai-payments`), `e2e-tests/tests/e2e/roles/buyer_cli.py`, hosted boundary/driver setup under `e2e-tests/tests/e2e/roles/scenarios/vms/hosted/` and `e2e-tests/src/hosted_real_stripe/`, plus `compose.vms.yml` and `compose.vms-fiat.yml`, to create/mount one persistent buyer profile store and inject the selected headless provider secret only into the buyer process.
 - [x] 7.3 Update API-credit and VM Compose/examples (`compose.apicredits.yml`, `domains/{vms,apicredits}/compose.yml`) and any generated role fixtures to separate mutable XDG metadata from strict file/environment Secret injection; add Podman-compatible `mise` path only if an affected project hardcodes `docker` and lacks the repository convention.
-- [x] 7.4 Extend `e2e-tests/tests/unit/test_hosted_public_boundary.py`, hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
+- [x] 7.4 Extend the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`), hosted driver/workflow unit tests, Compose config checks, Helm/generated-config tests, and secret-canary artifact scans for profile-store persistence, owner/mode enforcement, provider exactness, legacy rejection, and absence of secrets in TOML/ConfigMaps/arguments/evidence.
 
 ## 8. Focused, integration, and package verification
 
@@ -67,3 +67,24 @@
 ## 10. Plan closeout
 
 - [ ] 10.1 Close out the change: run `make check-comment-hygiene` and directly inspect touched comments/docstrings for current-state wording; move every safe touched function-local import to module scope and verify any retained local import with an observed circular-import or deliberate lazy-load reason; re-check every accepted decision against `openspec/README.md` documentation placement; compress completed task notes to final behavior, material evidence, unresolved work, and permanent destinations after moving retained rationale into `design.md`; update the affected identity/buyer goal and change mapping in `docs/development/ROADMAP.md`; and finalize the `design.md` promotion record with exact permanent headings after removing temporary migration/review commentary from production artifacts.
+- [ ] 10.2 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. This change has no row in `openspec/changes/README.md`; add one under the campaign that owns it with its status and acceptance boundary, or record here why it stands outside every campaign.
+- [ ] 10.3 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=add-persistent-buyer-profiles` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 10.4 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 10.5 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.

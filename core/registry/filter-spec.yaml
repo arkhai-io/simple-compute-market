@@ -12,11 +12,11 @@
 # registries whose declared id matches; registries without the header match
 # any domain for compatibility with pre-identity deployments.
 
-version: 4
+version: 6
 
 schema:
-  id: vms.compute
-  version: 1
+  id: compute.market
+  version: 2
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
@@ -26,7 +26,24 @@ listing_shape:
   # matching the GET /publishers entity. gpu_model is gated to a vetted
   # NVIDIA vocabulary; region stays open because city/datacenter naming
   # has no canonical list.
-  required: [listing_id, offer_resource, storefront_url]
+  #
+  # v6: the retired spellings of the published shape are refused outright.
+  # `additionalProperties` stays true, so a seller may carry any attribute
+  # this schema does not name -- the prohibition is exactly the two retired
+  # names, not a closed shape.
+  #
+  # Refused rather than ignored because this is the boundary whose skew is
+  # invisible: the offering-mode field is optional, so a listing carrying the
+  # retired spelling publishes successfully, stores, and then matches nothing
+  # a buyer filters on. The seller gets no signal. The sibling boundary
+  # (seller tooling to storefront) already rejects the retired key, and a
+  # registry that quietly accepts what the storefront refuses is the
+  # inconsistency, not the strictness.
+  required: [listing_id, listing_resource, storefront_url]
+  not:
+    anyOf:
+      - required: [offer_resource]
+      - required: [offer]
   anyOf:
     - properties:
         accepted_escrows: {type: array, minItems: 1}
@@ -37,10 +54,13 @@ listing_shape:
   properties:
     listing_id: {type: string, minLength: 1}
     storefront_url: {type: string, minLength: 1}
-    offer_resource:
+    listing_resource:
       type: object
       required: [gpu_model, region]
       additionalProperties: true
+      # v6: `virtualization_type` is the retired spelling of `offering_mode`.
+      not:
+        required: [virtualization_type]
       properties:
         gpu_model:
           type: string
@@ -104,9 +124,19 @@ listing_shape:
         gpu_interconnect:
           type: string
           enum: [nvlink, nvswitch, pcie_only, infiniband]
-        virtualization_type:
+        offering_mode:
           type: string
           enum: [bare_metal, vm, container]
+        capacity_backing:
+          # Whether an admission authority stands behind the listing: a
+          # `backed` listing can be reserved against; an `unbacked` one cannot,
+          # and any number of buyers may settle against it. It describes what
+          # the marketplace does with the listing, not how far to trust it.
+          # Not required, so a storefront that predates the field can still
+          # publish; the exact filter below excludes such a listing from every
+          # backing query rather than classifying it.
+          type: string
+          enum: [backed, unbacked]
         static_ip: {type: boolean}
         datacenter_grade: {type: boolean}
         gpu_count: {type: integer, minimum: 0}
@@ -121,6 +151,19 @@ listing_shape:
         internet_download_mbps: {type: integer, minimum: 0}
         internet_upload_mbps: {type: integer, minimum: 0}
         open_ports_count: {type: integer, minimum: 0}
+        # A seller's asking price for this listing's whole shape. A listing
+        # attribute, not a settlement option rate: nothing is constructed
+        # from it, and it need not agree with any mechanism rate. The three
+        # parts travel together because a number means nothing without the
+        # asset it is quoted in and the period it is quoted per.
+        asking_rate:
+          type: object
+          additionalProperties: false
+          required: [amount, asset, period]
+          properties:
+            amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+            asset: {type: string, minLength: 1}
+            period: {type: string, enum: [hour]}
     accepted_escrows:
       type: array
       minItems: 0
@@ -174,34 +217,48 @@ listing_shape:
       type: [string, "null"]
 
 filters:
-  # Equality filters — offer_resource axes.  `op: in` covers eq via `in: [x]`.
-  - {name: region,              path: $.offer_resource.region,              op: in, value_type: string,  on_missing: fail}
-  - {name: gpu_model,           path: $.offer_resource.gpu_model,           op: in, value_type: string,  on_missing: fail}
-  - {name: sla,                 path: $.offer_resource.sla,                 op: in, value_type: number,  on_missing: fail}
-  - {name: cpu_type,            path: $.offer_resource.cpu_type,            op: in, value_type: string,  on_missing: fail}
-  - {name: host_disk_type,      path: $.offer_resource.host_disk_type,      op: in, value_type: string,  on_missing: fail}
-  - {name: motherboard,         path: $.offer_resource.motherboard,         op: in, value_type: string,  on_missing: fail}
-  - {name: gpu_interconnect,    path: $.offer_resource.gpu_interconnect,    op: in, value_type: string,  on_missing: fail}
-  - {name: virtualization_type, path: $.offer_resource.virtualization_type, op: in, value_type: string,  on_missing: fail}
-  - {name: static_ip,           path: $.offer_resource.static_ip,           op: in, value_type: boolean, on_missing: fail}
-  - {name: datacenter_grade,    path: $.offer_resource.datacenter_grade,    op: in, value_type: boolean, on_missing: fail}
+  # Equality filters — listing_resource axes.  `op: in` covers eq via `in: [x]`.
+  - {name: region,              path: $.listing_resource.region,              op: in, value_type: string,  on_missing: fail}
+  - {name: gpu_model,           path: $.listing_resource.gpu_model,           op: in, value_type: string,  on_missing: fail}
+  - {name: sla,                 path: $.listing_resource.sla,                 op: in, value_type: number,  on_missing: fail}
+  - {name: cpu_type,            path: $.listing_resource.cpu_type,            op: in, value_type: string,  on_missing: fail}
+  - {name: host_disk_type,      path: $.listing_resource.host_disk_type,      op: in, value_type: string,  on_missing: fail}
+  - {name: motherboard,         path: $.listing_resource.motherboard,         op: in, value_type: string,  on_missing: fail}
+  - {name: gpu_interconnect,    path: $.listing_resource.gpu_interconnect,    op: in, value_type: string,  on_missing: fail}
+  - {name: offering_mode,       path: $.listing_resource.offering_mode,       op: in, value_type: string,  on_missing: fail}
+  - {name: capacity_backing,    path: $.listing_resource.capacity_backing,    op: in, value_type: string,  on_missing: fail}
+  - {name: static_ip,           path: $.listing_resource.static_ip,           op: in, value_type: boolean, on_missing: fail}
+  - {name: datacenter_grade,    path: $.listing_resource.datacenter_grade,    op: in, value_type: boolean, on_missing: fail}
 
   # Numeric ">=" filters — sugared via alias_kind so `?ram_gb_min=16` parses
   # to `range: {min: 16, min_inclusive: true}`.  Offers missing the field
   # are rejected (`on_missing: fail`); an unknown spec can't be assumed
   # to satisfy a stated requirement.
-  - {name: gpu_count_min,              query_name: gpu_count,              query_aliases: [gpu_count_min],              path: $.offer_resource.gpu_count,              op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: vcpu_count_min,             query_name: vcpu_count,             query_aliases: [vcpu_count_min],             path: $.offer_resource.vcpu_count,             op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: ram_gb_min,                 query_name: ram_gb,                 query_aliases: [ram_gb_min],                 path: $.offer_resource.ram_gb,                 op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: disk_gb_min,                query_name: disk_gb,                query_aliases: [disk_gb_min],                path: $.offer_resource.disk_gb,                op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_cpu_cores_min,         query_name: host_cpu_cores,         query_aliases: [host_cpu_cores_min],         path: $.offer_resource.host_cpu_cores,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_ram_gb_min,            query_name: host_ram_gb,            query_aliases: [host_ram_gb_min],            path: $.offer_resource.host_ram_gb,            op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: host_disk_gb_min,           query_name: host_disk_gb,           query_aliases: [host_disk_gb_min],           path: $.offer_resource.host_disk_gb,           op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: total_gpu_count_min,        query_name: total_gpu_count,        query_aliases: [total_gpu_count_min],        path: $.offer_resource.total_gpu_count,        op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: nic_speed_gbps_min,         query_name: nic_speed_gbps,         query_aliases: [nic_speed_gbps_min],         path: $.offer_resource.nic_speed_gbps,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: internet_download_mbps_min, query_name: internet_download_mbps, query_aliases: [internet_download_mbps_min], path: $.offer_resource.internet_download_mbps, op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: internet_upload_mbps_min,   query_name: internet_upload_mbps,   query_aliases: [internet_upload_mbps_min],   path: $.offer_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
-  - {name: open_ports_count_min,       query_name: open_ports_count,       query_aliases: [open_ports_count_min],       path: $.offer_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: gpu_count_min,              query_name: gpu_count,              query_aliases: [gpu_count_min],              path: $.listing_resource.gpu_count,              op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: vcpu_count_min,             query_name: vcpu_count,             query_aliases: [vcpu_count_min],             path: $.listing_resource.vcpu_count,             op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: ram_gb_min,                 query_name: ram_gb,                 query_aliases: [ram_gb_min],                 path: $.listing_resource.ram_gb,                 op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: disk_gb_min,                query_name: disk_gb,                query_aliases: [disk_gb_min],                path: $.listing_resource.disk_gb,                op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_cpu_cores_min,         query_name: host_cpu_cores,         query_aliases: [host_cpu_cores_min],         path: $.listing_resource.host_cpu_cores,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_ram_gb_min,            query_name: host_ram_gb,            query_aliases: [host_ram_gb_min],            path: $.listing_resource.host_ram_gb,            op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: host_disk_gb_min,           query_name: host_disk_gb,           query_aliases: [host_disk_gb_min],           path: $.listing_resource.host_disk_gb,           op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: total_gpu_count_min,        query_name: total_gpu_count,        query_aliases: [total_gpu_count_min],        path: $.listing_resource.total_gpu_count,        op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: nic_speed_gbps_min,         query_name: nic_speed_gbps,         query_aliases: [nic_speed_gbps_min],         path: $.listing_resource.nic_speed_gbps,         op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: internet_download_mbps_min, query_name: internet_download_mbps, query_aliases: [internet_download_mbps_min], path: $.listing_resource.internet_download_mbps, op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: internet_upload_mbps_min,   query_name: internet_upload_mbps,   query_aliases: [internet_upload_mbps_min],   path: $.listing_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+  - {name: open_ports_count_min,       query_name: open_ports_count,       query_aliases: [open_ports_count_min],       path: $.listing_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+
+  # Asking-rate filters. The amount is decimal text compared exactly, and a
+  # bound is meaningless without the asset and period it is quoted in, so
+  # both bounds require them; listings in another asset or period are
+  # excluded rather than converted. The bare query name is the upper bound
+  # because a buyer searches price from above, where every capacity field
+  # above is searched from below: a bare name follows the direction a buyer
+  # searches that field in, not a fixed bound position. A listing publishing
+  # no rate has not shown it is within a buyer's bound (`on_missing: fail`).
+  - {name: asking_rate_max,    query_name: asking_rate, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_min,                             path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: lower_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_asset,                           path: $.listing_resource.asking_rate.asset,  op: in,    value_type: string,       on_missing: fail}
+  - {name: asking_rate_period,                          path: $.listing_resource.asking_rate.period, op: in,    value_type: string,       on_missing: fail}
 
   # Payment-token filter: array projection over accepted_escrows[*].literal_fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no

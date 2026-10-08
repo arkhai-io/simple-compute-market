@@ -7,11 +7,12 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
+from market_core import RegistryDescriptor
 from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 
 from registry_client import RegistryClient
-from src.db.database import get_db
-from src.main import app
+from core_registry.db.database import get_db
+from core_registry.main import app
 
 MAKER_SECRET = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -38,16 +39,32 @@ def taker_signer() -> Eip191Signer:
 def ed25519_signer() -> Ed25519Signer:
     return Ed25519Signer(ED25519_SECRET)
 
+
 @pytest.fixture(autouse=True)
 def registry_authority(monkeypatch):
     signer = Ed25519Signer(bytes(range(1, 33)))
     app.state.registry_authority_signer = signer
+    app.state.registry_descriptor = RegistryDescriptor.model_validate(
+        {
+            "access": {"posture": "public"},
+            "authority": {
+                "name": "test-registry",
+                "principals": [signer.identity.model_dump(mode="json")],
+            },
+            "baseUrl": "http://test",
+            "displayName": "Test Registry",
+            "operatorIdentity": "test-operator",
+            "schema": {"id": "compute.market", "version": "1"},
+        }
+    )
     monkeypatch.setattr(
-        "src.config.settings.registry_authority_id",
+        "core_registry.config.settings.registry_authority_id",
         "test-registry",
     )
     yield signer
     del app.state.registry_authority_signer
+    del app.state.registry_descriptor
+
 
 @pytest.fixture(autouse=True)
 def sign_raw_marketplace_requests(monkeypatch, registry_authority, db_session):
@@ -65,6 +82,8 @@ def sign_raw_marketplace_requests(monkeypatch, registry_authority, db_session):
         parts = [part for part in path.split("/") if part]
         if path == "/filter-spec":
             return "filter.get", "filter-spec"
+        if path == "/.well-known/arkhai/registry-descriptor.json":
+            return "registry.descriptor.read", "registry-descriptor"
         if path == "/api/v1/listings/validate-publish":
             return "listing.validate", "listings"
         if path == "/api/v1/system/health":
@@ -152,7 +171,8 @@ def sign_raw_marketplace_requests(monkeypatch, registry_authority, db_session):
         )
         kwargs["headers"] = headers
         return await original(client, method, url, **kwargs)
-    from src.db.database import get_db
+
+    from core_registry.db.database import get_db
 
     def override_get_db():
         yield db_session
@@ -191,7 +211,7 @@ async def registry_client(
 
 
 def _make_publisher(db_session, signer, storefront_url: str):
-    from src.db.models import Publisher, PublisherIdentity
+    from core_registry.db.models import Publisher, PublisherIdentity
 
     publisher = Publisher(storefront_url=storefront_url)
     publisher.identities.append(
@@ -219,12 +239,12 @@ def taker_publisher(db_session, taker_signer):
 
 @pytest.fixture
 def open_order(db_session, maker_publisher):
-    from src.db.models import Listing, OrderStatusEnum
+    from core_registry.db.models import Listing, OrderStatusEnum
 
     order = Listing(
         listing_id="integ-open-order-1",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource={
+        listing_resource={
             "gpu_model": "A100",
             "region": "us-west",
             "quantity": 1,
@@ -248,12 +268,12 @@ def open_order(db_session, maker_publisher):
 
 @pytest.fixture
 def authenticated_open_order(db_session, maker_publisher):
-    from src.db.models import Listing, OrderStatusEnum
+    from core_registry.db.models import Listing, OrderStatusEnum
 
     order = Listing(
         listing_id="integ-auth-order-1",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource={
+        listing_resource={
             "gpu_model": "A100",
             "region": "us-west",
             "quantity": 1,

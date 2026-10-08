@@ -6,7 +6,9 @@
 # --platform=linux/amd64 is intentional: production targets x86_64, and
 # alkahest_py's wheel is resolved for that platform.
 
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+ARG PYTHON_VERSION=3.13
+
+FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 # No UV_COMPILE_BYTECODE: builds under x86 emulation where uv's
 # bytecode-compile workers deadlock under Rosetta sporadically.
@@ -18,9 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -
 
 WORKDIR /app
 
-COPY .dist/ /.dist/
-COPY domains/apicredits/storefront/pyproject.toml domains/apicredits/storefront/uv.lock ./
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock || true
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY .dist/ /repo/.dist/
+COPY scripts/uv_project.py /repo/scripts/uv_project.py
+COPY domains/apicredits/storefront/pyproject.toml domains/apicredits/storefront/uv.lock /repo/domains/apicredits/storefront/
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
 ARG GAR_STG_READER_KEY=""
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -28,30 +36,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
-    uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-        --refresh-package arkhai-core \
-        --refresh-package arkhai-core-storefront \
-        --refresh-package arkhai-kit-capacity-publication \
-        --refresh-package arkhai-core-registry-client \
-        --refresh-package arkhai-kit-policy \
-        --refresh-package arkhai-kit-settlement-runtime \
-        --refresh-package arkhai-kit-storefront \
-        --refresh-package arkhai-kit-negotiation-runtime \
-        --refresh-package arkhai-kit-alkahest \
-        --refresh-package arkhai-kit-identity \
-        --refresh-package arkhai-kit-config \
-        --refresh-package arkhai-apicredits-domain \
-        --refresh-package arkhai-kit-site-client
+    python3 /repo/scripts/uv_project.py image --project /repo/domains/apicredits/storefront -- --no-dev --no-install-project
 
-# Install the storefront distribution itself from the staged wheel. The
-# runtime image never receives repository source, a project checkout, or an
-# editable path that could bypass the package boundary exercised by release.
+# The storefront itself is installed from its staged wheel at the version its
+# pyproject declares; the runtime image never receives repository source.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python --no-deps --find-links /.dist \
-        --reinstall arkhai-apicredits-storefront==0.3.0
+    python3 /repo/scripts/uv_project.py install-wheel --project /repo/domains/apicredits/storefront
 
 # Stage 2: runtime
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
+FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS runtime
 
 ENV UV_HTTP_RETRIES=10
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \

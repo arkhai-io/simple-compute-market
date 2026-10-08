@@ -60,7 +60,7 @@ _SELLER_WALLET = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 _LISTING_ROW = {
     "listing_id": _LISTING_ID,
     "status": "open",
-    "offer_resource": {"gpu_model": "H200", "gpu_count": 1, "region": "California, US"},
+    "listing_resource": {"gpu_model": "H200", "gpu_count": 1, "region": "California, US"},
     "demand_resource": {"token": {"symbol": "MOCK", "contract_address": "0x01", "decimals": 0}, "amount": 5000},
 }
 
@@ -183,12 +183,11 @@ class TestEvaluateSettleDryRun:
         assert result["reason"]
 
     async def test_returns_would_submit_true_with_host_details(self, svc, db):
-        """_build_provisioning_job_spec returns spec → would_submit=True with vm_host."""
+        """_build_provisioning_job_spec returns spec → would_submit=True with host_id."""
         db.load_listing.return_value = _LISTING_ROW
         fake_spec = {
             "resource_id": "r-1",
-            "vm_host": "host-1",
-            "vm_target": "tenant-abcd",
+            "host_id": "host-1",
             "required_attributes": {"gpu_model": "H200"},
             "ssh_public_key": "ssh-ed25519 test",
             "duration_seconds": 3600,
@@ -205,9 +204,111 @@ class TestEvaluateSettleDryRun:
             )
         assert result["would_submit"] is True
         assert result["escrow_uid"] == _ESCROW_UID
-        assert result["vm_host"] == "host-1"
-        assert result["vm_target"] == "tenant-abcd"
+        assert result["host_id"] == "host-1"
+        # A preview cannot know the guest's name, which provisioning derives
+        # from the reservation settle commits.
+        assert "vm_target" not in result
         assert result["required_attributes"] == {"gpu_model": "H200"}
+
+    async def test_a_held_negotiation_previews_its_held_resource(self, svc, db):
+        """Settle commits the acceptance hold, so the preview reports the held
+        resource's host rather than probing for free capacity."""
+        db.load_listing.return_value = {
+            **_LISTING_ROW,
+            "listing_resource": {
+                **dict(_LISTING_ROW.get("listing_resource") or {}),
+                "resource_id": "r-held",
+                "offering_mode": "vm",
+            },
+        }
+        # Shaped as the site returns a reservation from reserving: its
+        # placement (resource and host) is withheld; it names its site.
+        db.load_capacity_hold.return_value = {
+            "capacity_reservation_id": "res-held",
+            "payload": {"capacity_reservation_id": "res-held", "site": "default"},
+        }
+        site = MagicMock()
+        site.get_reservation = AsyncMock(
+            return_value={"capacity_reservation_id": "res-held", "host_id": "host-held"}
+        )
+        runtime = MagicMock()
+        runtime.site_client.return_value = site
+        probe = AsyncMock()
+        with patch(
+            "market_storefront.services.admin_settle_service.build_capacity_runtime",
+            return_value=runtime,
+        ), patch(
+            "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
+            new=probe,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="ssh-ed25519 test",
+                duration_seconds=3600,
+                negotiation_id="neg-held",
+            )
+        runtime.site_client.assert_called_once_with("default")
+        site.get_reservation.assert_awaited_once_with("res-held")
+        db.load_capacity_hold.assert_awaited_once_with(negotiation_id="neg-held")
+        probe.assert_not_awaited()
+        assert result["would_submit"] is True
+        assert result["host_id"] == "host-held"
+        assert result["capacity_reservation_id"] == "res-held"
+
+    async def test_a_hold_the_site_no_longer_has_previews_no_host(self, svc, db):
+        from market_site_client import SiteCapacityClientError
+
+        db.load_listing.return_value = {
+            **_LISTING_ROW,
+            "listing_resource": {
+                **dict(_LISTING_ROW.get("listing_resource") or {}),
+                "resource_id": "r-held",
+                "offering_mode": "vm",
+            },
+        }
+        db.load_capacity_hold.return_value = {
+            "capacity_reservation_id": "res-gone",
+            "payload": {"capacity_reservation_id": "res-gone", "site": "default"},
+        }
+        site = MagicMock()
+        site.get_reservation = AsyncMock(
+            side_effect=SiteCapacityClientError("not found", status_code=404)
+        )
+        runtime = MagicMock()
+        runtime.site_client.return_value = site
+        with patch(
+            "market_storefront.services.admin_settle_service.build_capacity_runtime",
+            return_value=runtime,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="",
+                duration_seconds=3600,
+                negotiation_id="neg-gone",
+            )
+        assert result["capacity_reservation_id"] == "res-gone"
+        assert result["host_id"] is None
+
+    async def test_a_negotiation_without_a_hold_probes(self, svc, db):
+        """With no hold, settle reserves fresh capacity, so the preview probes."""
+        db.load_listing.return_value = _LISTING_ROW
+        db.load_capacity_hold.return_value = None
+        probe = AsyncMock(return_value=None)
+        with patch(
+            "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
+            new=probe,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="",
+                duration_seconds=3600,
+                negotiation_id="neg-free",
+            )
+        probe.assert_awaited_once()
+        assert result["would_submit"] is False
 
     async def test_passes_correct_args_to_build_spec(self, svc, db):
         """_build_provisioning_job_spec is called with listing and caller-supplied ssh_public_key."""

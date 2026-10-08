@@ -8,7 +8,6 @@ import json
 import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
-from decimal import Decimal
 from typing import Any
 
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
@@ -40,22 +39,25 @@ from market_policy.scalar_policies import _amount_from_proposal
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
     build_capacity_runtime,
-    capacity_binding_from_offer,
+    capacity_binding_from_listing_resource,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
-from domains.apicredits.listings.models import coerce_resource_dict
-from domains.apicredits.listings.pricing import (
-    determine_strategy_from_order,
-    extract_unit_price_from_order,
+from arkhai_apicredits.listings.models import coerce_resource_dict
+from arkhai_apicredits.listings.pricing import determine_strategy_from_order
+from arkhai_apicredits.negotiation.storefront_round import (
+    ApiCreditsSellerRoundHook,
+    _seller_reference_amount,
 )
-from domains.apicredits.negotiation.storefront_round import ApiCreditsSellerRoundHook
-from domains.apicredits.negotiation.terms import (
+from arkhai_apicredits.negotiation.terms import (
     provision_key_id,
     provision_key_mode,
     provision_quantity,
 )
-from domains.apicredits.settlement import validate_payer_account
+from arkhai_apicredits.settlement import validate_payer_account
+from market_core.schemas import (
+    ProvisionTerms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +113,40 @@ def _decode_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTe
         else raw_terms
     )
     decoded = domain.codecs.message(raw)
-    wire = (
-        decoded.model_dump(mode="json") if hasattr(decoded, "model_dump") else dict(raw)
-    )
+    wire = _provision_terms_wire(decoded, raw)
     return NegotiationTerms(decoded=decoded, wire=wire)
+
+
+#: `ProvisionTerms`' own field names, read off the model so a field added
+#: there is carried without editing this.
+_PROVISION_TERMS_FIELDS = frozenset(ProvisionTerms.model_fields)
+
+
+def _provision_terms_wire(decoded: Any, raw: Any) -> dict[str, Any]:
+    """The provision-terms wire form, narrowed to `ProvisionTerms`' own fields.
+
+    `ApiCreditsMessage` is a superset of `ProvisionTerms`: it also carries
+    `settlement_selection`, `buyer_principal` and `seller_principal`, which
+    are negotiation-envelope facts rather than a description of what is
+    being provisioned. Dumping the whole message here put those three keys
+    into what the runtime echoes back as `accepted_provision_terms`, and
+    `ProvisionTerms` forbids extras -- so `NegotiateNewResponse` rejected
+    every accepted round-0 result with three `extra_forbidden` errors.
+
+    Only `wire` is narrowed. `decoded` keeps the full message, which is
+    what the policies and guards read. The envelope fields are not lost
+    from the response either: `settlement_selection` travels in the
+    proposal carrier that `negotiate_controller._proposal_payload` builds,
+    and the principals are top-level response fields.
+    """
+    if not hasattr(decoded, "model_dump"):
+        return dict(raw)
+    dumped = decoded.model_dump(mode="json")
+    return {
+        key: value
+        for key, value in dumped.items()
+        if key in _PROVISION_TERMS_FIELDS
+    }
 
 
 def _validate_opening(
@@ -290,19 +322,17 @@ def _reference_amount(
     _listing_record: Mapping[str, Any],
     terms: NegotiationTerms,
     uses_scalar_amount: bool,
+    pinned_proposal: Mapping[str, Any] | None,
 ) -> int:
+    """quantity × the rate of the option the buyer's pinned proposal selects."""
     if not uses_scalar_amount:
         return 0
-    unit = Decimal(
-        str(
-            extract_unit_price_from_order(
-                listing,
-                default_min_price=_default_min_price(),
-            )
-        )
+    return _seller_reference_amount(
+        listing,
+        provision_quantity(terms.decoded),
+        default_min_price=_default_min_price(),
+        proposal=pinned_proposal,
     )
-    quantity = provision_quantity(terms.decoded)
-    return int(unit * int(quantity if quantity is not None else 1))
 
 
 def build_api_credit_accepted_artifacts(
@@ -626,15 +656,15 @@ async def _place_quota_hold(
     if ttl <= 0 or not quantity:
         return
     try:
-        offer = coerce_resource_dict(acceptance.listing_record.get("offer_resource"))
+        listing_resource = coerce_resource_dict(acceptance.listing_record.get("listing_resource"))
         claim: dict[str, Any] = {
-            "executor_kind": "api_credits",
+            "offering_mode": "api_credits",
             "units": int(quantity),
         }
-        if offer.get("resource_id"):
-            claim["resource_id"] = str(offer["resource_id"])
+        if listing_resource.get("resource_id"):
+            claim["resource_id"] = str(listing_resource["resource_id"])
         capacity = build_capacity_runtime(lambda: repository)
-        binding = capacity_binding_from_offer(offer)
+        binding = capacity_binding_from_listing_resource(listing_resource)
         held = await capacity.reserve(
             binding,
             claim=claim,
@@ -800,9 +830,9 @@ def build_api_credit_negotiation_runtime(
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     def storefront_is_paused() -> bool:
-        from apicredits_storefront.server import is_globally_paused
+        import apicredits_storefront.container as _container
 
-        return bool(is_globally_paused())
+        return _container.trading_pause.paused
 
     from core_storefront.stage_log import stage_event
 

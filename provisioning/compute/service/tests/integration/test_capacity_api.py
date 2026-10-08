@@ -5,16 +5,48 @@ SiteCapacityClient will speak — payload shapes here are the wire contract.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 from typing import Any
 
 import pytest
+from compute_provisioning.hosts import ConnectionEnvelope
+from compute_provisioning.hosts.db import Host
 from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
+from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.main import app
-from market_site_client import SiteCapacityClient
+from market_site_client import (
+    SiteCapacityAdminClient,
+    SiteCapacityAdminClientError,
+    SiteCapacityAuthenticationError,
+    SiteCapacityClient,
+    SiteCapacityClientError,
+)
+from arkhai_bare_metal.fixtures.publication_view import (
+    validate_bare_metal_publication_view,
+)
+from market_resource_pools_contracts import PoolCreate
+from market_resource_pools import read_site_declarations
+from market_resource_pools_contracts import resolve_pool_declarations
+from market_site_client.fixtures.resource_pools import (
+    validate_resource_pool_projection,
+)
+from compute_provisioning_contracts import HostCreate
+
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+
+def _host_row(**fields) -> Host:
+    """A host row reached over ssh; its connection is incidental here."""
+    host = Host(**fields)
+    host.set_connection(ConnectionEnvelope(
+        kind="ssh",
+        version=1,
+        public={"ssh_host": "10.0.0.1", "ssh_user": "root", "key_path": "/dev/null"},
+    ))
+    return host
 
 
 def _site_capacity_client(base_url: str, *, transport):
@@ -27,39 +59,40 @@ def _site_capacity_client(base_url: str, *, transport):
 
 
 class CapacityApi:
-    """Typed helper over the capacity endpoints (no raw HTTP in tests)."""
+    """The capacity surface as the canonical typed clients present it.
 
-    def __init__(self, client: AsyncClient) -> None:
-        self._client = client
+    Every call goes through ``SiteCapacityAdminClient`` (registration) or
+    ``SiteCapacityClient`` (everything a storefront does), so a route, body,
+    or response-shape change breaks these tests through the clients rather
+    than through a second, test-local copy of the wire contract. This class
+    only shortens call sites; it builds no request of its own and holds no
+    raw HTTP client, so a test that bypasses the clients has to say so
+    locally.
+    """
 
-    async def register(self, resource_id: str, **body: Any) -> dict:
-        resp = await self._client.put(
-            f"/api/v1/capacity/resources/{resource_id}", json=body
-        )
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+    def __init__(
+        self,
+        admin: SiteCapacityAdminClient,
+        site: SiteCapacityClient,
+    ) -> None:
+        self.admin = admin
+        self.site = site
+
+    async def register(self, resource_id: str, **declaration: Any) -> dict:
+        return await self.admin.register_resource(resource_id, **declaration)
 
     async def snapshot(self) -> list[dict]:
-        resp = await self._client.get("/api/v1/capacity/snapshot")
-        assert resp.status_code == 200, resp.text
-        return resp.json()["resources"]
+        return await self.site.snapshot()
 
     async def probe(self, claim: dict) -> dict | None:
-        resp = await self._client.post(
-            "/api/v1/capacity/probe", json={"claim": claim}
-        )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["match"]
+        return await self.site.probe(claim=claim)
 
     async def reserve(
         self, claim: dict, deal_ref: dict, ttl_seconds: float | None = None
     ) -> dict | None:
-        body: dict = {"claim": claim, "deal_ref": deal_ref}
-        if ttl_seconds is not None:
-            body["ttl_seconds"] = ttl_seconds
-        resp = await self._client.post("/api/v1/capacity/reservations", json=body)
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
+        return await self.site.reserve(
+            claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds
+        )
 
     async def commit(
         self,
@@ -68,79 +101,141 @@ class CapacityApi:
         resource_id: str,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-    ) -> dict:
-        body: dict = {"resource_id": resource_id}
-        if lease_start_utc is not None:
-            body["lease_start_utc"] = lease_start_utc
-        if lease_end_utc is not None:
-            body["lease_end_utc"] = lease_end_utc
-        resp = await self._client.post(
-            f"/api/v1/capacity/reservations/{capacity_reservation_id}/commit",
-            json=body,
+        deal_ref: dict | None = None,
+    ) -> dict | None:
+        return await self.site.commit(
+            capacity_reservation_id=capacity_reservation_id,
+            resource_id=resource_id,
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+            deal_ref=deal_ref,
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
 
-    async def release(self, **body: Any) -> dict | None:
-        resp = await self._client.post("/api/v1/capacity/releases", json=body)
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
+    async def release(self, **target: Any) -> dict | None:
+        return await self.site.release(**target)
 
     async def truncate(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
-        resp = await self._client.post(
-            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
-            json={"lease_end_utc": lease_end_utc},
+        return await self.site.truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end_utc,
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
 
     async def events(self, after: int = 0) -> tuple[list[dict], int]:
-        resp = await self._client.get(
-            "/api/v1/capacity/events", params={"after": after}
-        )
-        assert resp.status_code == 200, resp.text
-        data = resp.json()
-        return data["events"], data["latest_version"]
+        return await self.site.events_after(after)
+
+
+async def _create_pool(provisioning_client, pool_id: str) -> None:
+    """A declaration's pool must exist; create it through the operator client."""
+    await provisioning_client.pools.create_pool(PoolCreate(
+        id=pool_id, label=pool_id, provider="ansible",
+        policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
 
 
 @pytest.fixture
 async def capacity(client_and_queue) -> CapacityApi:
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        yield CapacityApi(http)
+    admin = SiteCapacityAdminClient(
+        "http://test", STOREFRONT_SIGNER, SERVICE_AUTHORITIES, transport=transport,
+    )
+    site = _site_capacity_client("http://test", transport=transport)
+    return CapacityApi(admin, site)
+
+
+@pytest.mark.asyncio
+async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
+    capacity: CapacityApi,
+):
+    """The offering mode a storefront names crosses the site boundary through
+    `SiteCapacityClient` and is persisted on the reservation as sent, not
+    re-derived from the resource or reported under a second key."""
+    await capacity.register(
+        "site-claim-1", pool_id="default",
+        total_units=4,
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
+    )
+
+    reservation = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"escrow_uid": "escrow-claim-1"},
+    )
+
+    assert reservation is not None
+    assert reservation["offering_mode"] == "vm"
+    assert "executor_kind" not in reservation
+
+
+@pytest.mark.asyncio
+async def test_a_claim_omitting_the_offering_mode_is_refused(capacity: CapacityApi):
+    """The field is required, so its absence is refused before any resource is
+    matched — never inferred from `host_id` or a default. The refusal reaches
+    the storefront as the client's own error, carrying the site's status."""
+    await capacity.register(
+        "site-claim-2", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={}
+    )
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve({"gpu_count": 1, "host_id": "kvm1"}, {})
+
+    assert refused.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
+    capacity: CapacityApi,
+):
+    """The retired key is not the required one, so the claim carries no
+    offering mode and is refused rather than being honoured under a second
+    spelling."""
+    await capacity.register(
+        "site-claim-3", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={}
+    )
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve(
+            {"executor_kind": "vm", "gpu_count": 1, "host_id": "kvm1"}, {}
+        )
+
+    assert refused.value.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     await capacity.register(
-        "compute-kvm1-001",
+        "compute-kvm1-001", pool_id="default",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
     assert await capacity.probe(
-        {"executor_kind": "vm", "gpu_model": "H200", "vm_host": "kvm1"}
+        {"offering_mode": "vm", "gpu_model": "H200", "host_id": "kvm1"}
     ) is not None
     assert await capacity.probe(
-        {"executor_kind": "vm", "gpu_model": "A100"}
+        {"offering_mode": "vm", "gpu_model": "A100"}
     ) is None
 
     reserved = await capacity.reserve(
-        {"executor_kind": "vm", "gpu_count": 3, "vm_host": "kvm1"},
+        {"offering_mode": "vm", "gpu_count": 3, "host_id": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
-    # vm_host is intentionally opaque across this boundary (see
+    # host_id is intentionally opaque across this boundary (see
     # openspec/specs/site-capacity/spec.md's "Capacity accounting is
     # private to the site authority" requirement) -- the claim above
-    # already proves vm_host-attribute matching selected the right
+    # already proves host_id-attribute matching selected the right
     # resource, evidenced by the unit counts below, not by reading a
     # physical-placement field back off the reservation.
-    assert "vm_host" not in reserved
+    assert "host_id" not in reserved
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
+    # The commit answers with the reservation as the site recorded it.
     committed = await capacity.commit(
         reserved["capacity_reservation_id"],
         resource_id="compute-kvm1-001",
@@ -148,6 +243,7 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         lease_end_utc="2099-01-01T01:00:00Z",
     )
     assert committed["state"] == "leased"
+    assert committed["lease_end_utc"] == "2099-01-01T01:00:00Z"
 
     truncated = await capacity.truncate(reserved["capacity_reservation_id"], "2026-06-01 00:00")
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
@@ -170,14 +266,14 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
 
 @pytest.mark.asyncio
 async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
-    assert await capacity.reserve({"executor_kind": "vm", "gpu_count": 1}, {}) is None
+    assert await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {}) is None
     assert await capacity.release(capacity_reservation_id="missing") is None
 
 
 @pytest.mark.asyncio
 async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: CapacityApi):
     await capacity.register(
-        "bare-metal-node-1",
+        "bare-metal-node-1", pool_id="default", host_id="bm-node-1",
         total_units=1,
         attributes={
             "physical_host_id": "host-physical-1",
@@ -186,11 +282,11 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
     )
 
     assert await capacity.probe(
-        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"}
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"}
     ) is None
     reserved = await capacity.reserve(
         {
-            "executor_kind": "bare_metal",
+            "offering_mode": "bare_metal",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
@@ -199,28 +295,28 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
 
     assert reserved is not None
     assert "resource_id" not in reserved
-    assert "vm_host" not in reserved
+    assert "host_id" not in reserved
 
 
 @pytest.mark.asyncio
 async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityApi):
     await capacity.register(
-        "compute-host-1",
+        "compute-host-1", pool_id="default",
         total_units=8,
         resource_subtype="h200",
+        host_id="kvm1",
         attributes={
-            "vm_host": "kvm1",
             "gpu_model": "H200",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
         },
     )
     await capacity.register(
-        "bare-metal-node-1",
+        "bare-metal-node-1", pool_id="default",
         total_units=1,
         resource_subtype="h200",
+        host_id="node-1",
         attributes={
-            "machine_id": "node-1",
             "gpu_model": "H200",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
@@ -232,7 +328,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert initial["bare-metal-node-1"]["available_units"] == 1
 
     reserved = await capacity.reserve(
-        {"executor_kind": "vm", "gpu_count": 2, "vm_host": "kvm1"},
+        {"offering_mode": "vm", "gpu_count": 2, "host_id": "kvm1"},
         {"escrow_uid": "0xvm-cross-mode"},
     )
 
@@ -241,7 +337,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert blocked["compute-host-1"]["available_units"] == 6
     assert blocked["bare-metal-node-1"]["available_units"] == 0
     assert await capacity.probe({
-        "executor_kind": "bare_metal",
+        "offering_mode": "bare_metal",
         "physical_host_id": "host-physical-1",
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
@@ -254,73 +350,51 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
 
 
 @pytest.mark.asyncio
-async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityApi):
-    """POST /leases records the lease tail on the reservation row — the
-    leases surface is a view over the ledger."""
-    from compute_provisioning_service import container as _container_module
-
-    await capacity.register(
-        "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
-    )
-    reserved = await capacity.reserve(
-        {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
-        {"escrow_uid": "0xlease"},
-    )
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post("/api/v1/leases/", json={
-            "resource_id": "compute-kvm1-001",
-            "capacity_reservation_id": reserved["capacity_reservation_id"],
-            "escrow_uid": "0xlease",
-            "vm_host": "kvm1",
-            "vm_target": "tenant-led1",
-            "lease_end_utc": "2099-01-01T00:00:00Z",
-        })
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["id"] == reserved["capacity_reservation_id"]
-        assert body["status"] == "active"
-
-        listing = await http.get("/api/v1/leases/")
-        assert listing.json()["total"] == 1
-        assert listing.json()["leases"][0]["id"] == reserved["capacity_reservation_id"]
-
-    ledger = _container_module.resolved_capacity_ledger_service
-    row = ledger.get_reservation(reserved["capacity_reservation_id"])
-    assert row["vm_target"] == "tenant-led1"
-    assert row["state"] == "leased"
-    assert row["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
-
-
-@pytest.mark.asyncio
-async def test_register_lease_without_ledger_reservation_404s(
+async def test_a_repeat_commit_answers_with_the_recorded_window_and_records_the_escrow(
     capacity: CapacityApi,
 ):
-    """Every reservation lives in the ledger; an unknown reservation means
-    the hold lapsed or was already released — registration refuses."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post("/api/v1/leases/", json={
-            "resource_id": "compute-legacy-001",
-            "capacity_reservation_id": "local-alloc-1",
-            "escrow_uid": "0xlegacy",
-            "vm_host": "kvm1",
-            "vm_target": "tenant-leg1",
-            "lease_end_utc": "2099-01-01T00:00:00Z",
-        })
-        assert resp.status_code == 404, resp.text
+    """A lease's window is its first commit's: a repeat leaves it alone and the
+    answer says so. A hold placed at negotiation learns the deal's escrow at
+    commit, over the wire."""
+    await capacity.register(
+        "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1", attributes={}
+    )
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"listing_id": "lst-window"},
+    )
+    reservation_id = reserved["capacity_reservation_id"]
+    await capacity.commit(
+        reservation_id,
+        resource_id="compute-kvm1-001",
+        lease_start_utc="2099-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01 01:00",
+        deal_ref={"escrow_uid": "0xwindow-escrow"},
+    )
+
+    again = await capacity.commit(
+        reservation_id,
+        resource_id="compute-kvm1-001",
+        lease_start_utc="2099-02-01T00:00:00+00:00",
+        lease_end_utc="2099-02-01 01:00",
+    )
+
+    assert (again["lease_start_utc"], again["lease_end_utc"]) == (
+        "2099-01-01T00:00:00+00:00",
+        "2099-01-01 01:00",
+    )
+    found = await capacity.site.list_reservations(escrow_uid="0xwindow-escrow")
+    assert [row["capacity_reservation_id"] for row in found] == [reservation_id]
 
 
 @pytest.mark.asyncio
 async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post(
-            "/api/v1/capacity/reservations/missing/commit",
-            json={"resource_id": "r", "lease_end_utc": "2099-01-01 00:00"},
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.commit(
+            "missing", resource_id="r", lease_end_utc="2099-01-01 00:00"
         )
-        assert resp.status_code == 404
+
+    assert refused.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -331,7 +405,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     than a direct DB insert on the write side or a raw HTTP call on the
     read side:
 
-    ProvisioningClient.create_pool(default_vm_* in provider_config)
+    ResourcePoolClient.create_pool(default_vm_* in provider_config)
         -> real /api/v1/pools API -> real AnsiblePoolConfigHandler -> DB
         -> resource-pool projection
         -> SiteCapacityClient.resource_pool_projection()
@@ -341,17 +415,14 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     reachable by writing directly to the database or reading an HTTP
     route by hand.
     """
-    from compute_provisioning import PoolCreate
-    from market_site_client import SiteCapacityClient
-    from compute_provisioning_service.db.models import Host
-    from compute_provisioning_service.container import container
-
+    from market_resource_pools_contracts import PoolCreate
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(
+    await provisioning_client.pools.create_pool(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
             provider="ansible",
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config={
                 "playbook_path": "playbooks/vm-operations.yaml",
                 "default_vm_ram": 65536,
@@ -361,32 +432,19 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         )
     )
 
-    # The resource-pool projection is built from Host rows (see
-    # capacity_inventory.load_capacity_resource_inventory), not directly
-    # from the ledger's registered resources -- a Host row is required
-    # for anything to appear here at all. No typed client covers Host
-    # creation against an arbitrary pool in this fixture set, so this
-    # part still goes through the DB directly.
-    with container.session_factory()() as db:
-        db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
-            pool_id="hetzner-eu",
-        ))
-        db.commit()
-
     await capacity.register(
         "compute-kvm1-001",
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
     assert pool_row["pool_metadata"]["enabled"] is True
@@ -398,11 +456,8 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
             "default_vm_disk_size": "500G",
         },
     }
-    # Host.gpu_model -> capacity_inventory._project_host -> resource-pool
-    # projection's per-resource attributes -> the real SiteCapacityClient
-    # response. Distinct from the ledger resource's own attributes dict
-    # (registered above) -- proves the Host column specifically survives
-    # the full producer -> client path, not just the ledger-side value.
+    # The declaration's own attribute -> resource-pool projection -> the real
+    # SiteCapacityClient response.
     resource_row = next(
         r for r in pool_row["resources"] if r["physical_resource_id"] == "compute-kvm1-001"
     )
@@ -417,23 +472,25 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     more keys inside the already-projected `policy_tags` dict (see the
     pool-metadata test above). Proves the full path:
 
-    ProvisioningClient.create_pool(policy_tags={region, sla, pricing})
+    ResourcePoolClient.create_pool(policy_tags={region, sla, pricing})
         -> real /api/v1/pools API -> real ResourcePoolService -> DB
         -> resource-pool projection
         -> SiteCapacityClient.resource_pool_projection()
     """
-    from compute_provisioning import PoolCreate
+    from market_resource_pools_contracts import PoolCreate
     from market_site_client import SiteCapacityClient
     from compute_provisioning_service.db.models import Host
     from compute_provisioning_service.container import container
 
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(
+    await provisioning_client.pools.create_pool(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
             provider="ansible",
             policy_tags={
+                "advertisable_modes": [],
+                "capacity_backing": "backed",
                 "region": "California, US",
                 "sla": 99.9,
                 "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
@@ -443,9 +500,8 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     )
 
     with container.session_factory()() as db:
-        db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+        db.add(_host_row(
+            host_id="kvm1", gpu_count=8, gpu_model="H200",
             pool_id="hetzner-eu",
         ))
         db.commit()
@@ -455,19 +511,229 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["policy_tags"] == {
+        "advertisable_modes": [],
+        "capacity_backing": "backed",
         "region": "California, US",
         "sla": 99.9,
         "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
     }
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
+    capacity: CapacityApi, client_and_queue,
+):
+    """A pool's `listing_shapes` hint reaches the storefront exactly as stored:
+    policy tags are projected verbatim, and the reading domain interprets them."""
+    from market_resource_pools_contracts import PoolCreate
+
+    shapes = {
+        "vm": [
+            {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 8},
+             "memory": {"gib": 64}, "storage": {"gib": 200}},
+            {"gpu": {"count": 2, "model": "H200"}},
+        ],
+    }
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.pools.create_pool(
+        PoolCreate(
+            id="shaped",
+            label="Shaped",
+            provider="ansible",
+            policy_tags={
+                "advertisable_modes": [],
+                "capacity_backing": "backed",
+                "listing_shapes": shapes,
+            },
+            provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+        )
+    )
+
+    # A pool is projected with its members, so it needs one declaration.
+    await capacity.register(
+        "shaped-001", pool_id="shaped", total_units=2, attributes={"gpu_model": "H200"},
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    pool_row = next(row for row in data["resource_pools"] if row["pool_id"] == "shaped")
+    assert pool_row["pool_metadata"]["policy_tags"]["listing_shapes"] == shapes
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_declares_every_pool(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Every projected pool carries both advertisement and backing
+    declarations, and each resolves through the shared resolver.
+
+    A consumer distinguishes a site predating these declarations (no pool
+    carries them) from a defective one (some pool lacks them) only because
+    the producer emits them on every pool; that is a property of this side
+    of the projection, which the consumer cannot verify on its own.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.pools.create_pool(PoolCreate(
+        id="bare-metal-west",
+        label="Bare metal west",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": ["bare_metal", "vm"],
+            "advertisable_modes": ["bare_metal"],
+            "capacity_backing": "backed",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await capacity.register("default-001", pool_id="default", total_units=4, host_id="kvm1")
+    await capacity.register(
+        "west-001", pool_id="bare-metal-west", total_units=4, host_id="kvm2",
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    rows = (await remote.resource_pool_projection())["resource_pools"]
+
+    resolved = {
+        row["pool_id"]: resolve_pool_declarations(
+            row["pool_metadata"]["policy_tags"]
+        )
+        for row in rows
+    }
+    assert set(resolved) == {"default", "bare-metal-west"}
+    assert resolved["bare-metal-west"].advertisable_modes == frozenset({"bare_metal"})
+    assert all(declarations.backed for declarations in resolved.values())
+
+
+@pytest.mark.asyncio
+async def test_the_projection_carries_both_declarations_as_storefronts_read_them(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The producer half of the resource-pool projection contract.
+
+    A backed and an unbacked pool, written through the pool API, reach the
+    canonical site client in the shape storefront tests build with the same
+    contract fixture, and resolve through the reader a storefront uses. The
+    unbacked pool's member names no host, as a declaration with no admission
+    authority behind it may.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.pools.create_pool(PoolCreate(
+        id="vm-backed",
+        label="VM backed",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": ["vm"],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "backed",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await provisioning_client.pools.create_pool(PoolCreate(
+        id="broker-unbacked",
+        label="Broker",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": [],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "unbacked",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await capacity.register(
+        "backed-001",
+        pool_id="vm-backed",
+        total_units=4,
+        host_id="kvm1",
+        attributes={"gpu_model": "H100"},
+    )
+    await capacity.register(
+        "broker-001",
+        pool_id="broker-unbacked",
+        total_units=8,
+        attributes={"gpu_model": "H100"},
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    reading = read_site_declarations(projection["resource_pools"])
+    assert reading.compatibility_rule is False
+    assert dict(reading.unresolvable) == {}
+    assert reading.resolved["vm-backed"].backed
+    assert not reading.resolved["broker-unbacked"].backed
+    assert reading.resolved["broker-unbacked"].advertises("vm")
+    assert reading.resolved["broker-unbacked"].enabled
+
+
+@pytest.mark.asyncio
+async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_read_it(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The producer half of the bare-metal publication view contract, over HTTP.
+
+    A whole-host declaration registered through the operator client reaches the
+    canonical site client carrying a ``bare_metal.v2`` view that meets the
+    bare-metal contract, naming the resource and the pool entry containing it,
+    and a declaration it disabled still carries its enablement beside the view.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.pools.create_pool(PoolCreate(
+        id="whole-host",
+        label="Whole host",
+        provider="bare_metal.ansible",
+        policy_tags={
+            "deliverable_modes": ["bare_metal"],
+            "advertisable_modes": ["bare_metal"],
+            "capacity_backing": "backed",
+        },
+        provider_config={},
+    ))
+    for resource_id, enabled in (("bm-1", True), ("bm-2", False)):
+        await capacity.register(
+            resource_id,
+            pool_id="whole-host",
+            host_id=f"{resource_id}-host",
+            total_units=1,
+            enabled=enabled,
+            attributes={
+                "physical_host_id": f"physical-{resource_id}",
+                "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+                "bare_metal_publication": {
+                    "enabled": True,
+                    "access_methods": ["ssh"],
+                    "capabilities": {},
+                },
+            },
+        )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    (pool,) = [
+        row for row in projection["resource_pools"] if row["pool_id"] == "whole-host"
+    ]
+    members = {member["physical_resource_id"]: member for member in pool["resources"]}
+    for resource_id in ("bm-1", "bm-2"):
+        validate_bare_metal_publication_view(
+            members[resource_id]["publication_views"]["bare_metal.v2"],
+            physical_resource_id=resource_id,
+            pool_id="whole-host",
+        )
+    assert members["bm-1"]["enabled"] is True
+    assert members["bm-1"]["publication_views"]["bare_metal.v2"]["available"] is True
+    assert members["bm-2"]["enabled"] is False
+    assert members["bm-2"]["publication_views"]["bare_metal.v2"]["available"] is False
 
 
 @pytest.mark.asyncio
@@ -482,9 +748,8 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     from compute_provisioning_service.db.models import Host
 
     with container.session_factory()() as db:
-        db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, pool_id="default",
+        db.add(_host_row(
+            host_id="kvm1", gpu_count=8, pool_id="default",
         ))
         db.commit()
 
@@ -492,20 +757,21 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
         "compute-kvm1-001",
         pool_id="default",
         total_units=8,
-        attributes={"vm_host": "kvm1"},
+        host_id="kvm1",
+        attributes={},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    default_row = next(row for row in rows if row["resource_pool_id"] == "default")
+    default_row = next(row for row in rows if row["pool_id"] == "default")
 
     assert "pool_views" not in default_row["pool_metadata"]
 
 
 @pytest.mark.asyncio
 async def test_site_capacity_projection_version_endpoints_through_the_real_client(
-    capacity: CapacityApi,
+    capacity: CapacityApi, client_and_queue,
 ):
     """The one gap left after the four projection-data tests above: the
     `_version()` siblings (a cheap poll-for-change check, not the full
@@ -517,6 +783,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     from compute_provisioning_service.db.models import Host
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    await _create_pool(client_and_queue[0], "version-pool")
 
     pool_version_before = await remote.resource_pool_projection_version()
     bucket_version_before = await remote.capacity_bucket_projection_version()
@@ -526,16 +793,16 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     assert "digest" in bucket_version_before
 
     with container.session_factory()() as db:
-        db.add(Host(
-            name="kvm-version-test", kvm_host="10.0.0.2", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=4, pool_id="version-pool",
+        db.add(_host_row(
+            host_id="kvm-version-test", gpu_count=4, pool_id="version-pool",
         ))
         db.commit()
     await capacity.register(
         "compute-version-test-001",
         pool_id="version-pool",
         total_units=4,
-        attributes={"vm_host": "kvm-version-test"},
+        host_id="kvm-version-test",
+        attributes={},
     )
 
     pool_version_after = await remote.resource_pool_projection_version()
@@ -546,7 +813,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
 
 @pytest.mark.asyncio
 async def test_site_capacity_buckets_projection_through_the_real_client(
-    capacity: CapacityApi,
+    capacity: CapacityApi, client_and_queue,
 ):
     """Proves the real `SiteCapacityClient.capacity_bucket_projection()`
     wire contract end to end, mirroring `resource_pool_projection()`'s own
@@ -560,30 +827,33 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
 
     and that the response has the exact shape reconciler.py's
     `_fungible_availability_from_buckets` actually consumes
-    (`resource_pool_id`, `available.gpu_count`, `resource_count`,
+    (`pool_id`, `available.gpu_count`, `resource_count`,
     `grouping_attributes`).
     """
     from market_site_client import SiteCapacityClient
 
+    await _create_pool(client_and_queue[0], "hetzner-eu")
     await capacity.register(
         "compute-kvm1-001",
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
     await capacity.register(
         "compute-kvm1-002",
         pool_id="hetzner-eu",
         total_units=6,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
+        host_id="kvm1-b",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.capacity_bucket_projection()
     buckets = [
-        b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"
+        b for b in data["capacity_buckets"] if b.get("pool_id") == "hetzner-eu"
     ]
 
     # Two freshly-registered resources with different capacity (hence
@@ -596,3 +866,180 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
     assert by_available[8]["resource_count"] == 1
     assert by_available[6]["resource_count"] == 1
     assert by_available[8]["grouping_attributes"].get("gpu_model") == "H200"
+
+
+
+async def test_a_registration_restating_a_field_as_an_attribute_is_refused(
+    capacity: CapacityApi,
+):
+    """The admin client sends any attributes mapping, so the refusal is
+    observed through it: a 422 the site acknowledged, and nothing written."""
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register(
+            "restated", pool_id="default", total_units=1,
+            attributes={"host_id": "kvm1", "gpu_model": "H200"},
+        )
+
+    assert not isinstance(refused.value, SiteCapacityAuthenticationError)
+    assert refused.value.status_code == 422
+    assert "host_id" in str(refused.value)
+    assert await capacity.snapshot() == []
+
+async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
+    """Rejection-path test (docs/development/TESTING.md): the typed admin
+    client requires ``pool_id`` and cannot construct this registration, so
+    the body is posted by hand to prove the server's own validation boundary
+    refuses it. Status code only."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        resp = await http.put(
+            "/api/v1/capacity/resources/no-pool", json={"total_units": 1},
+        )
+    assert resp.status_code == 422
+
+
+async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
+    capacity: CapacityApi, client_and_queue,
+):
+    """An INI host gains a derived declaration and is projected from it, with
+    live availability; a host registered with no declaration is not projected
+    at all. Written through the canonical clients, read through
+    SiteCapacityClient.resource_pool_projection."""
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.host_import.import_hosts_from_text(
+        "[kvm_hosts]\n"
+        "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
+        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n",
+        ssh_key_type="path",
+    )
+    await provisioning_client.family.register_host(HostCreate(
+        host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
+    ))
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "resource_id": "kvm1"}, {}
+    )
+    assert reserved is not None
+
+    projection = await capacity.site.resource_pool_projection()
+
+    resources = {
+        row["physical_resource_id"]: row
+        for pool in projection["resource_pools"]
+        for row in pool["resources"]
+    }
+    assert set(resources) == {"kvm1"}
+    assert resources["kvm1"]["capacity"] == {"gpu_count": 4}
+    assert resources["kvm1"]["available"] == {"gpu_count": 3}
+    assert resources["kvm1"]["attributes"]["gpu_model"] == "H200"
+    assert "gpu_count" not in resources["kvm1"]["attributes"]
+
+
+async def test_a_registration_naming_an_unknown_pool_is_refused(capacity: CapacityApi):
+    """The same rule a capacity document meets: the declaration's pool must
+    exist, and the refusal writes nothing."""
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register("r-nowhere", pool_id="no-such-pool", total_units=1)
+
+    assert not isinstance(refused.value, SiteCapacityAuthenticationError)
+    assert refused.value.status_code == 422
+    assert "no-such-pool" in str(refused.value)
+    assert await capacity.snapshot() == []
+
+
+async def test_a_declaration_naming_no_compute_dimension_is_stored_as_declared(
+    capacity: CapacityApi,
+):
+    """Through the typed admin client: a declaration naming only memory has no
+    GPU dimension added, and no scalar total, since it names no dimension
+    the scalar mirrors."""
+    resource = await capacity.register(
+        "memory-only", pool_id="default", capacity={"ram_gb": 64},
+    )
+
+    assert resource["capacity"] == {"ram_gb": 64}
+    assert resource["value"] is None
+    assert resource["available_units"] is None
+    (listed,) = await capacity.admin.list_resources()
+    assert listed["capacity"] == {"ram_gb": 64}
+
+
+async def test_a_held_resource_moves_pools_only_once_released(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Both halves in one test, so the refusal cannot be mistaken for a
+    resource that could never move."""
+    await _create_pool(client_and_queue[0], "pool-b")
+    await capacity.register("held", pool_id="default", host_id="kvm-held", total_units=4)
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "resource_id": "held"}, {}
+    )
+    assert reserved is not None
+
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register("held", pool_id="pool-b", host_id="kvm-held", total_units=4)
+    assert refused.value.status_code == 409
+    assert (await capacity.admin.list_resources())[0]["pool_id"] == "default"
+
+    await capacity.release(capacity_reservation_id=reserved["capacity_reservation_id"])
+    moved = await capacity.register("held", pool_id="pool-b", host_id="kvm-held", total_units=4)
+
+    assert moved["pool_id"] == "pool-b"
+
+
+async def test_a_declaration_naming_no_host_is_not_admitted_in_a_host_requiring_pool(
+    capacity: CapacityApi,
+):
+    """The default pool's Ansible provider delivers through a host, so a
+    declaration naming none is refused the ordinary way, while one naming a
+    host is admitted. Registered and reserved through the canonical clients."""
+    await capacity.register("no-host", pool_id="default", total_units=4)
+
+    assert await capacity.probe({"offering_mode": "vm", "gpu_count": 1}) is None
+    assert await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {}) is None
+
+    await capacity.register("hosted", pool_id="default", host_id="kvm1", total_units=4)
+    reserved = await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {})
+
+    assert reserved is not None
+    snapshot = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert snapshot["no-host"]["available_units"] == 4
+    assert snapshot["hosted"]["available_units"] == 3
+
+
+
+async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The projection is built from declarations, so one naming no host is
+    visible to storefronts with its declared shape, and no entry carries host
+    connection identity. Registered and read through the canonical clients."""
+    provisioning_client, _ = client_and_queue
+    # The host record carries a GPU model; the declaration naming it does not.
+    await provisioning_client.family.register_host(HostCreate(
+        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", public_host="203.0.113.10", key_path="/keys/id"), gpu_model="H100",
+    ))
+    await capacity.register(
+        "no-host", pool_id="default",
+        capacity={"gpu_count": 2, "ram_gb": 64},
+        attributes={"gpu_model": "H200"},
+    )
+    await capacity.register(
+        "hosted", pool_id="default", host_id="kvm1", total_units=4,
+    )
+
+    projection = await capacity.site.resource_pool_projection()
+
+    resources = {
+        row["physical_resource_id"]: row
+        for pool in projection["resource_pools"]
+        for row in pool["resources"]
+    }
+    assert set(resources) == {"no-host", "hosted"}
+    assert resources["no-host"]["capacity"] == {"gpu_count": 2, "ram_gb": 64}
+    assert resources["no-host"]["attributes"] == {"gpu_model": "H200"}
+    # A value only the host record holds never fills an undeclared attribute.
+    assert resources["hosted"]["attributes"] == {}
+    for row in resources.values():
+        assert "host_id" not in row["attributes"]
+        assert "public_host" not in row["attributes"]

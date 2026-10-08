@@ -7,22 +7,24 @@ pinned seller trust, and signed seller responses.
 
 from __future__ import annotations
 
+
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
-from core_storefront.domain_registry import (
-    StorefrontListingBinding,
-    build_storefront_derivation_key,
-)
 from fastapi import FastAPI
-from market_capacity_publication import CapacityBinding
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_capacity_publication import publication_binding
 
 import market_storefront.container as _container
+import market_storefront.middleware.admin_identity as _admin_identity
+from market_storefront.controllers.negotiations_controller import (
+    router as negotiations_router,
+)
+from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
@@ -66,6 +68,65 @@ async def db(tmp_path):
     )
 
 
+# The site-test projection the storefront reads each listing's own source from.
+# Seeding a listing declares its source here, as the site would.
+_SITE_POOLS: list[dict] = []
+# The fixture's recorded site requests, for tests asserting no site call.
+_SITE_REQUESTS: list[list[str]] = []
+# The fixture's application, for tests that also drive it as an administrator.
+_APPS: list[FastAPI] = []
+# A deterministic development key for these tests only; never used on any network.
+_ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
+
+
+def _declare_source(
+    listing_id: str,
+    *,
+    gpu_model: str,
+    available_gpu_count: int,
+    capacity_backing: str = "backed",
+) -> None:
+    _SITE_POOLS.append({
+        "pool_id": f"pool-{listing_id}",
+        "pool_metadata": {
+            "enabled": True,
+            "policy_tags": {
+                "deliverable_modes": [] if capacity_backing == "unbacked" else ["vm"],
+                "advertisable_modes": ["vm"],
+                "capacity_backing": capacity_backing,
+                "region": "California, US",
+            },
+        },
+        "resources": [{
+            "physical_resource_id": f"res-{listing_id}", "resource_type": "compute.gpu",
+            "enabled": True,
+            "capacity": {"gpu_count": 8},
+            "available": {"gpu_count": available_gpu_count},
+            # A claim matches region against the declaration itself.
+            "attributes": {"gpu_model": gpu_model, "region": "California, US"},
+        }],
+    })
+
+
+def _site_projection_caches():
+    from core_storefront.site_projections import (
+        ProjectionCache,
+        ProjectionIdentity,
+        ProjectionState,
+    )
+    from market_storefront.services import site_projection_cache
+
+    _SITE_POOLS.clear()
+    resource_pools = ProjectionCache(client=None)
+    resource_pools._value = _SITE_POOLS
+    resource_pools._state = ProjectionState.loaded
+    resource_pools._identity = ProjectionIdentity(revision=1, digest="site-test")
+    return site_projection_cache.SiteProjectionCaches(
+        resource_pools=resource_pools,
+        capacity_buckets=ProjectionCache(client=None),
+    )
+
+
 async def _upsert_bound_listing(
     db,
     listing_id: str,
@@ -73,41 +134,43 @@ async def _upsert_bound_listing(
     demand_amount: int | None = 5000,
     max_duration_seconds: int | None = 7200,
     gpu_model: str = "H200",
+    declared_gpu_model: str = "H200",
+    available_gpu_count: int = 8,
+    capacity_backing: str = "backed",
     escrow_address: str = "0x" + "11" * 20,
     literal_fields: dict | None = None,
 ) -> None:
-    registration = db.domain_registry.resolve_mode("vm")
+    _declare_source(
+        listing_id,
+        gpu_model=declared_gpu_model,
+        available_gpu_count=available_gpu_count,
+        capacity_backing=capacity_backing,
+    )
     pool_id = f"pool-{listing_id}"
-    binding = StorefrontListingBinding.from_source_envelope(
+    # Bound as publication binds it: the listing's shape and the resource it
+    # publishes, so every reader finds the listing's key in its binding.
+    binding = prepare_vm_listing_binding(
         listing_id=listing_id,
-        site_id="site-test",
-        pool_id=pool_id,
-        binding=registration.binding,
-        derivation_key=build_storefront_derivation_key(
-            site_id="site-test",
-            offering_mode=registration.offering_mode,
-            binding=registration.binding,
-            source_identity={"pool_id": pool_id},
-        ),
-        source_envelope={
-            "kind": "vm.test-listing-source.v1",
-            "schema_version": 1,
-            "payload": {"pool_id": pool_id},
+        candidate={
+            "site_id": "site-test",
+            "pool_id": pool_id,
+            "resource_id": f"res-{listing_id}",
+            "capacity_backing": capacity_backing,
+            "listing_shape": {"gpu": {"count": 1, "model": gpu_model}},
         },
-        last_reconciled_at=datetime.now().isoformat(),
     )
     await db.upsert_listing_with_binding(
         binding=binding,
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "resource_id": f"res-{listing_id}",
             "gpu_model": gpu_model,
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=[
             {
@@ -184,9 +247,18 @@ async def client(db, monkeypatch):
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = db.domain_registry
     _container.resolved_marketplace_signer = _SELLER_SIGNER
+    monkeypatch.setattr(
+        _admin_identity,
+        "get_administrator_configs",
+        lambda: {"operator": TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))},
+    )
+    _admin_identity.initialize_administrator_identities(db.db_path)
     app = FastAPI()
     app.include_router(negotiate_router)
+    app.include_router(negotiations_router)
     app.middleware("http")(listing_lifecycle_middleware)
+    app.middleware("http")(_admin_identity.administrator_identity_middleware)
+    _APPS[:] = [app]
 
     # The injected seller-round and acceptance-hold collaborator runs against
     # an in-memory site ledger with the same exact durable site binding.
@@ -202,11 +274,7 @@ async def client(db, monkeypatch):
             "vm_host": "kvm1",
         },
     )
-    address_config_path = (
-        Path(_negotiation_runtime.__file__).resolve().parent
-        / "data"
-        / "alkahest_anvil_addresses.json"
-    )
+    address_config_path = anvil_address_book_path()
     monkeypatch.setattr(
         _negotiation_runtime,
         "CHAINS",
@@ -220,16 +288,27 @@ async def client(db, monkeypatch):
         },
     )
 
+    site_requests: list[str] = []
+    original_handle = fake_site._handle
+
+    def _recording_handle(request):
+        site_requests.append(f"{request.method} {request.url.path}")
+        return original_handle(request)
+
+    fake_site._handle = _recording_handle
+    _SITE_REQUESTS[:] = []
+    _SITE_REQUESTS.append(site_requests)
     capacity_runtime = capacity_runtime_over(fake_site, site_name="site-test")
 
     async def capacity_binding_for_listing(repository, listing_id):
         assert repository is db
         listing_binding = await repository.load_listing_binding(listing_id=listing_id)
         assert listing_binding is not None
-        return CapacityBinding(
-            listing_binding.site_id,
-            listing_binding.binding.offering_mode,
-            str(listing_binding.pool_id),
+        return publication_binding(
+            capacity_backing=listing_binding.capacity_backing,
+            site_id=listing_binding.site_id,
+            offering_mode=listing_binding.binding.offering_mode,
+            source_id=str(listing_binding.pool_id),
         )
 
     monkeypatch.setattr(
@@ -246,6 +325,10 @@ async def client(db, monkeypatch):
         )
     )
     transport = httpx.ASGITransport(app=app)
+    from unittest.mock import patch as _patch
+
+    from market_storefront.services import site_projection_cache
+
     with settings_overrides(
         **{
             "provisioning.identity.principals": [
@@ -253,7 +336,12 @@ async def client(db, monkeypatch):
                 _SELLER_SIGNER.identity.model_dump(mode="json"),
             ],
             "wallet.address": _RECIPIENT,
+            "capacity.use_site_projection_for_listings": True,
         }
+    ), _patch.dict(
+        site_projection_cache._caches,
+        {"site-test": _site_projection_caches()},
+        clear=True,
     ):
         async with StorefrontClient(
             "http://test",
@@ -366,6 +454,7 @@ class TestNegotiateNew:
         await db.update_listing(
             listing_id="neg-listing-closed",
             status="closed",
+            closed_by="seller",
         )
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
@@ -377,8 +466,8 @@ class TestNegotiateNew:
         assert "409" in msg
         assert "listing_not_open" in msg
 
-    async def test_no_matching_inventory_returns_409(self, client, db):
-        """A bound listing without matching site capacity is refused."""
+    async def test_listing_its_source_does_not_declare_returns_409(self, client, db):
+        """A listing publishing a model its own source does not declare is refused."""
         c, db = client
         await _upsert_bound_listing(
             db,
@@ -388,6 +477,28 @@ class TestNegotiateNew:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
                 listing_id="neg-listing-empty",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+            )
+        msg = str(exc_info.value)
+        assert "409" in msg
+        assert "no_matching_declaration" in msg
+
+    async def test_backed_listing_with_nothing_free_returns_409(self, client, db):
+        """A listing its source still declares, with nothing free, is refused.
+
+        The declared match passes, so the refusal is the availability reason,
+        not the declared-match one.
+        """
+        c, db = client
+        await _upsert_bound_listing(
+            db,
+            "neg-listing-taken",
+            available_gpu_count=0,
+        )
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-taken",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
             )
@@ -517,7 +628,7 @@ class TestNegotiateNew:
             gpu_model="RTX 4090",
         )
         # The H200 resource seeded by _seed_listing doesn't match the
-        # RTX 4090 offer; the seller should refuse.
+        # RTX 4090 listing_resource; the seller should refuse.
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
                 listing_id="neg-listing-rtx",
@@ -525,7 +636,7 @@ class TestNegotiateNew:
                 provision_terms=_vm_provision(),
             )
         assert "409" in str(exc_info.value)
-        assert "no_matching_inventory" in str(exc_info.value)
+        assert "no_matching_declaration" in str(exc_info.value)
 
 
 class TestNegotiateContinue:
@@ -561,3 +672,184 @@ class TestNegotiateContinue:
             )
 
         assert exc_info.value.status_code == 400
+
+
+class TestUnbackedListingNegotiation:
+    async def test_an_unbacked_listing_negotiates_to_acceptance_without_the_site(
+        self, client, db
+    ):
+        """An unbacked listing enters the ordinary negotiation lifecycle.
+
+        The inventory guard checks it against its declaration only, acceptance
+        builds its settlement artifacts, and nothing asks the site anything: no
+        availability read and no capacity hold, even with holds enabled.
+        """
+        c, db = client
+        escrow_address = "0x" + "44" * 20
+        await _upsert_bound_listing(
+            db,
+            "neg-listing-unbacked",
+            demand_amount=None,
+            escrow_address=escrow_address,
+            capacity_backing="unbacked",
+            available_gpu_count=0,
+        )
+        (site_requests,) = _SITE_REQUESTS
+        site_requests.clear()
+
+        with settings_overrides(
+            **{
+                "negotiation.policies": [
+                    "has_matching_inventory_guard",
+                    "escrow_shape_guard",
+                    "accept_exact_listing",
+                ],
+                "capacity.hold_ttl_seconds": 900,
+            }
+        ):
+            result = await c.negotiate_new(
+                listing_id="neg-listing-unbacked",
+                initial_amount=None,
+                provision_terms=_vm_provision(),
+                chain_name="anvil",
+                escrow_address=escrow_address,
+                proposal_fields={},
+                literal_fields={"token": _TOKEN},
+                rates=[],
+                escrow_expiration_unix=1_800_000_000,
+            )
+
+        assert result["action"] == "accept"
+        assert result["accepted_escrow_terms"]
+        assert site_requests == []
+        assert await db.load_capacity_hold(negotiation_id=result["negotiation_id"]) is None
+
+    async def test_an_unbacked_listing_its_declaration_no_longer_supports_is_refused(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(
+            db,
+            "neg-listing-unbacked-shrunk",
+            capacity_backing="unbacked",
+            gpu_model="B300",
+        )
+        (site_requests,) = _SITE_REQUESTS
+        site_requests.clear()
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-unbacked-shrunk",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+            )
+
+        assert "no_matching_declaration" in str(exc_info.value)
+        assert site_requests == []
+
+
+class TestAdministrativeAcceptance:
+    """Force-accept, sent through the canonical administrator client, goes
+    through the runtime's acceptance, so the domain's hold is attempted and its
+    accepted settlement artifacts recorded exactly as after a negotiated
+    acceptance."""
+
+    async def test_force_accept_records_the_hold_and_settlement_plan(
+        self, client, db
+    ):
+        c, db = client
+        await _seed_listing(db, "neg-listing-force", demand_amount=5000)
+        with settings_overrides(**{"capacity.hold_ttl_seconds": 900}):
+            opened = await c.negotiate_new(
+                listing_id="neg-listing-force",
+                initial_amount=4500,
+                provision_terms=_vm_provision(),
+                token=_TOKEN,
+                chain_name="anvil",
+                escrow_address="0x" + "11" * 20,
+                escrow_expiration_unix=1_800_000_000,
+            )
+            assert opened["action"] == "counter"
+            negotiation_id = opened["negotiation_id"]
+            (site_requests,) = _SITE_REQUESTS
+            site_requests.clear()
+
+            (app,) = _APPS
+            async with StorefrontClient(
+                "http://test",
+                signer=_ADMIN_SIGNER,
+                caller_role="admin",
+                expected_publishers=_EXPECTED_PUBLISHERS,
+                transport=httpx.ASGITransport(app=app),
+            ) as admin:
+                accepted = await admin.force_accept_negotiation(
+                    "neg-listing-force", negotiation_id, amount=5000
+                )
+
+        assert accepted.action == "accept"
+        assert accepted.amount == 5000
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        plan = thread["settlement_plan"]
+        assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
+        assert thread["terminal_state"] == "success"
+        assert int(thread["agreed_price"]) == 5000
+        # The acceptance hold reserves at the listing's site, as it does after
+        # a negotiated acceptance.
+        assert any("reserv" in request for request in site_requests), site_requests
+
+
+class TestAcceptanceRechecksTheSource:
+    """A buyer's accept rechecks the listing against its source, as a round does.
+
+    The negotiation opens while the source matches, so the seller counters; the
+    source then changes, or becomes unreadable, before the buyer accepts.
+    """
+
+    async def _open_countered(self, c, db, listing_id: str) -> str:
+        await _upsert_bound_listing(db, listing_id)
+        opened = await c.negotiate_new(
+            listing_id=listing_id,
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+        )
+        assert opened["action"] == "counter"
+        return opened["negotiation_id"]
+
+    async def test_an_accept_after_the_source_changed_is_refused(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-changed")
+        (pool,) = [p for p in _SITE_POOLS if p["pool_id"] == "pool-neg-recheck-changed"]
+        pool["resources"][0]["attributes"]["gpu_model"] = "B300"
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 409
+        assert "no_matching_declaration" in str(refused.value)
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        assert thread["terminal_state"] is None
+        assert thread["agreed_at"] is None
+
+    async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_continue(negotiation_id, action="accept")
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+
+    async def test_a_buyer_exits_whatever_the_source(self, client, db):
+        c, db = client
+        negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
+        from market_storefront.services import site_projection_cache
+
+        site_projection_cache._caches.pop("site-test")
+
+        result = await c.negotiate_continue(negotiation_id, action="exit")
+
+        assert result["action"] == "exit"

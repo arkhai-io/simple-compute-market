@@ -12,7 +12,7 @@ From the repository root:
 make dist
 make -C domains/vms/storefront reinit
 uv run --project domains/vms/storefront --locked --find-links .dist \
-  --with "$PWD/.dist/arkhai_vms_buyer-0.3.5-py3-none-any.whl" \
+  --with "$PWD/.dist/arkhai_vms_buyer-0.7.0-py3-none-any.whl" \
   --with "$PWD/.dist/arkhai_kit_arkhai_payments-0.2.0-py3-none-any.whl" \
   python domains/vms/storefront/examples/payment_smoke.py
 ```

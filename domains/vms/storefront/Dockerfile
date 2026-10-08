@@ -2,7 +2,9 @@
 # Keep this pin in all FROM lines.
 
 # Stage 1: Install Python dependencies using uv
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+ARG PYTHON_VERSION=3.13
+
+FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 # No UV_COMPILE_BYTECODE here: this image builds under x86 emulation
 # and uv's post-install bytecode-compile python workers deadlock under
@@ -21,16 +23,16 @@ WORKDIR /app
 ARG DIST_FINGERPRINT=unknown
 LABEL org.arkhai.builder-dist-fingerprint="${DIST_FINGERPRINT}"
 
-# Copy the pre-built wheels from the monorepo .dist/ directory.
-# These are built on the host by `make dist` before `docker build`.
-COPY .dist/ /.dist/
-
-COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock domains/vms/storefront/entrypoint.sh ./
-# The lock records the internal-wheel find-links dir relative to the repo
-# (../../../.dist), which cannot normalize from /app. Point it at the
-# in-image wheel dir instead. (uv re-canonicalizes the path on every
-# relock, so this is normalized here rather than in the committed lock.)
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY .dist/ /repo/.dist/
+COPY scripts/uv_project.py /repo/scripts/uv_project.py
+COPY domains/vms/storefront/pyproject.toml domains/vms/storefront/uv.lock /repo/domains/vms/storefront/
+COPY domains/vms/storefront/entrypoint.sh ./
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
@@ -42,61 +44,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
-    if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
-        uv sync --no-sources --no-dev --no-install-project --extra rl --find-links /.dist \
-            --refresh-package arkhai-core \
-            --refresh-package arkhai-core-storefront \
-            --refresh-package arkhai-kit-capacity-publication \
-            --refresh-package arkhai-core-registry-client \
-            --refresh-package arkhai-core-storefront-client \
-            --refresh-package arkhai-kit-policy \
-            --refresh-package arkhai-kit-settlement-runtime \
-            --refresh-package arkhai-kit-storefront \
-            --refresh-package arkhai-kit-negotiation-runtime \
-            --refresh-package arkhai-kit-alkahest \
-            --refresh-package arkhai-kit-identity \
-            --refresh-package arkhai-kit-config \
-            --refresh-package arkhai-kit-site-client \
-            --refresh-package arkhai-kit-site \
-            --refresh-package arkhai-kit-resource-pools \
-            --refresh-package arkhai-kit-fulfillment \
-            --refresh-package arkhai-vms \
-            --refresh-package arkhai-bare-metal \
-            --refresh-package arkhai-bare-metal-storefront \
-            --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-compute-provisioning; \
-    else \
-        uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-            --refresh-package arkhai-core \
-            --refresh-package arkhai-core-storefront \
-            --refresh-package arkhai-kit-capacity-publication \
-            --refresh-package arkhai-core-registry-client \
-            --refresh-package arkhai-core-storefront-client \
-            --refresh-package arkhai-kit-policy \
-            --refresh-package arkhai-kit-settlement-runtime \
-            --refresh-package arkhai-kit-storefront \
-            --refresh-package arkhai-kit-negotiation-runtime \
-            --refresh-package arkhai-kit-alkahest \
-            --refresh-package arkhai-kit-identity \
-            --refresh-package arkhai-kit-config \
-            --refresh-package arkhai-kit-site-client \
-            --refresh-package arkhai-kit-site \
-            --refresh-package arkhai-kit-resource-pools \
-            --refresh-package arkhai-kit-fulfillment \
-            --refresh-package arkhai-vms \
-            --refresh-package arkhai-bare-metal \
-            --refresh-package arkhai-bare-metal-storefront \
-            --refresh-package arkhai-vms-storefront \
-            --refresh-package arkhai-compute-provisioning; \
-    fi
+    extra="" && \
+    if [ "${INSTALL_RL_DEPS}" = "true" ]; then extra="--extra rl"; fi && \
+    python3 /repo/scripts/uv_project.py image --project /repo/domains/vms/storefront -- --no-dev --no-install-project $extra && \
+    python3 /repo/scripts/uv_project.py install-wheel --project /repo/domains/vms/storefront
 
 # Stage 2: Lean runtime image
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
+FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS runtime
 
-
-# ENV does not cross FROM; retain the raised retry policy for runtime wheel
-# installation (see the builder-stage rationale above).
-ENV UV_HTTP_RETRIES=10
 
 USER root
 
@@ -127,18 +82,12 @@ LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV XDG_CONFIG_HOME="/etc"
-# The runtime contains only installed artifacts.  Contribution packages and the
-# common shell are resolved from the staged wheelhouse; repository source trees
-# are never copied into the image.
-COPY .dist/ /.dist/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python --no-deps --no-index \
-        --find-links /.dist \
-        arkhai-vms-storefront==0.3.6 \
-        arkhai-bare-metal-storefront==0.2.6
+# The runtime contains only the environment the builder installed; neither the
+# wheelhouse nor repository source is copied into it.
 
-# Runtime distributions must not be editable source installations.
-RUN python -c 'import importlib.metadata as m, json; import domains.vms.listings, domains.vms.negotiation, domains.vms.settlement, market_storefront.cli; assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
+# Fail the image build if any repository dependency was installed as an
+# editable sibling source.
+RUN python -c 'import importlib.metadata as m, json; import arkhai_vms_listings, arkhai_vms_negotiation, arkhai_vms_settlement, market_storefront.cli; assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
 
 ARG PORT=8080
 ENV PORT=${PORT}

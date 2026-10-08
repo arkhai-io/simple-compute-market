@@ -66,7 +66,8 @@ These are all valid:
   buyers.
 - A seller runs a private registry next to its storefront for direct
   customers.
-- A buyer queries several unrelated registries and deduplicates listings.
+- A buyer queries several registries and deduplicates by registry authority and
+  listing ID. Identical IDs from unrelated authorities remain separate records.
 - A domain maintainer publishes a standalone domain package consumed by
   multiple registries and storefronts.
 

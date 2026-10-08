@@ -129,7 +129,7 @@ phases:
       - build
     commands:
       - id: buyer_sync
-        run: uv sync --python 3.12 --extra test
+        run: uv sync --extra test
         workdir: buyer
         timeout_seconds: 600
       - id: buyer_pytest
@@ -270,7 +270,7 @@ phases:
           fi
           curl -fsS -X POST http://localhost:8081/api/v1/hosts/ \
             -H 'Content-Type: application/json' \
-            -d '{"name":"kvm1","kvm_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' \
+            -d '{"host_id":"kvm1","connection":{"kind":"ssh","public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"gpu_count":1,"enabled":true}' \
             | jq .
 
   - id: smoke_marker_tests

@@ -21,7 +21,7 @@ from market_arkhai_payments import ArkhaiPaymentsConfig, payments_client_for_own
 from market_identity import Ed25519Signer, IdentityScheme, TrustedIdentitySet
 from storefront_client import SyncStorefrontClient
 
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import (
     DealStage,

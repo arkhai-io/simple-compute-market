@@ -307,6 +307,26 @@ def _buyer_response_contract(request: Request, body: Any) -> tuple[str, str] | N
         and path.endswith("/heartbeat")
     ):
         return "deal_heartbeat", path.split("/")[-2]
+    if path == "/api/v1/settlements" and method == "POST":
+        resource = (
+            str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""
+        )
+        return "settlement_start", resource
+    if path.startswith("/api/v1/settlements/"):
+        suffix = path[len("/api/v1/settlements/") :]
+        if method == "GET" and "/" not in suffix:
+            return "settlement_status", suffix
+        if method == "POST" and suffix.endswith("/reclaim"):
+            return "settlement_reclaim", suffix[: -len("/reclaim")]
+    if path == "/api/v1/introductions" and method == "POST":
+        resource = (
+            str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""
+        )
+        return "introduction_start", resource
+    if path.startswith("/api/v1/introductions/") and method == "GET":
+        suffix = path[len("/api/v1/introductions/") :]
+        if "/" not in suffix:
+            return "introduction_read", suffix
     return None
 
 

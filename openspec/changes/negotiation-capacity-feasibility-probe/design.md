@@ -2,10 +2,14 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `_place_capacity_hold` is called only when `decision.action == "accept"`, at three
-  call sites in `sync_negotiation.py`. Nothing consults the site authority earlier.
+- Negotiation is `kit/negotiation-runtime`'s lifecycle; the VM storefront injects
+  `NegotiationDomainHooks` from
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`.
+  `_place_capacity_hold` is reached only through the `place_hold` hook on
+  acceptance, and with the shipped `hold_ttl_seconds = 0` it returns immediately.
+  Nothing consults the site authority before settlement.
 - `kit/site`'s `probe()` runs `_expire_stale_holds`, then the same `_find_candidate`
   used by `reserve()`, and returns the match payload without writing. It is the
   non-consuming twin of the admission path, not an approximation of it.
@@ -13,8 +17,16 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   `vm_job_spec_service` already calls it in the fulfillment path.
 - `probe` takes the ledger's process-wide `threading.RLock`, the same lock as `reserve`,
   `commit`, and `release`.
-- `has_matching_inventory_guard` reads an advisory snapshot and compares two categorical
-  fields.
+- `has_matching_inventory_guard` checks a declared match against the listing's own
+  source for every listing and an advisory availability snapshot for capacity-backed
+  listings only. This change's probe replaces the advisory snapshot; it never runs for
+  an unbacked listing, whose `UnbackedBinding` is on `Acceptance` and on the opening
+  record.
+- Until `negotiation-driven-capacity-resize` lets a round carry a shape, the only shape
+  a round has is the listing's own, and the claim for it is
+  `compute_capacity_claim_from_order` over the listing record. A listing whose site has
+  nothing left is the case the advisory snapshot misses, so the probe is worth running
+  for that shape alone.
 
 ## Goals / Non-Goals
 
@@ -117,3 +129,15 @@ lose the early check and fail at acceptance as they do today.
   into a shape recommender, which needs `capacity-shape-envelope`'s range query and a
   negotiation vocabulary for suggestions. Deferrable and better decided once shape
   counter-offers exist.
+
+## Placement
+
+The probe runs inside the VM `evaluate_round` composition, after admissibility
+(`capacity-shape-envelope`, if composed) and before the commercial feasibility guard
+and pricing — the order `negotiation-driven-capacity-resize` fixes for a round carrying
+a shape. Whether it is a distinct `NegotiationDomainHooks` member or a step inside the
+domain's `evaluate_round` is decided in task 1.2: a distinct hook lets the kit report
+"not checked" uniformly for a domain that composes none, which that change's contract
+requires. The distinct-outcome rule this change adds is one of the refusal reasons that
+change's "A round may revise the capacity shape" requirement enumerates; the two deltas
+are written to agree.

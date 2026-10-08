@@ -5,10 +5,10 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from importlib import resources
 from typing import Any
 
 import pytest
+from market_alkahest.dev_chain import anvil_address_book_path
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -22,21 +22,29 @@ from market_alkahest.alkahest import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
+    _signer,
+    capacity_source_for,
     delete_mock_rules_if_present,
+    pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_non_erc20_settlement
+pytestmark = [
+    pytest.mark.e2e_non_erc20_settlement,
+    # This module advances fulfillment convergence itself, so the
+    # 30s timer is stopped for its duration -- otherwise a timer
+    # cycle can claim a row mid-provider-call and the module's own
+    # explicit cycle reaches nothing.
+    pytest.mark.usefixtures("convergence_advanced_explicitly"),
+]
 
 _CHAIN_NAME = "anvil"
-_ALKAHEST_ADDRESSES_PATH = str(
-    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
-)
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
 _MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _ANVIL_GOD_PRIVATE_KEY = (
@@ -175,6 +183,9 @@ def _resource_csv(cases: list[SettlementCase]) -> str:
 
 def _offer(case: SettlementCase) -> dict[str, Any]:
     return {
+        # The storefront refuses a listing whose resource does not declare the
+        # offering mode its domain binding selected.
+        "offering_mode": "vm",
         "resource_id": case.resource_id,
         "gpu_model": "RTX 5080",
         "gpu_count": 1,
@@ -284,23 +295,25 @@ def _assert_services_ready(storefront_admin_client, provisioning_client) -> None
     assert "anvil" in ((status.checks or {}).get("alkahest", ""))
 
     provisioning_health = provisioning_client.get_health()
-    assert provisioning_health.get("status") == "ok"
+    assert provisioning_health.status == "ok"
 
-    ansible = provisioning_client.get_ansible_readiness()
-    assert ansible.get("ansible_mode") == "mock"
+    assert provisioning_client.get_system_status().execution.mocked
 
 
 @pytest.mark.parametrize("case", _settlement_cases(), ids=lambda c: c.name)
 def test_scalar_non_erc20_settlement_reaches_ready(
     case: SettlementCase,
     storefront_client,
-    storefront_admin_client,
+    storefront_admin_client, storefront_seller_client,
     provisioning_client,
     provisioning_test_client,
     buyer_config,
     seller_wallet,
 ):
     """Native-token and ERC1155 escrows settle through provisioning."""
+    # The listing below is created explicitly; a running publication loop
+    # could bind the same slice first and the create would be refused.
+    pause_storefront(storefront_admin_client)
     _assert_services_ready(storefront_admin_client, provisioning_client)
 
     import_result = storefront_admin_client.admin_import_resources(
@@ -309,9 +322,9 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     assert import_result.failed_count == 0, import_result
 
-    listing_resp = storefront_admin_client.create_listing(
-        agent_wallet_address=seller_wallet,
-        offer=_offer(case),
+    listing_resp = storefront_seller_client.create_listing(
+        listing_resource=_offer(case),
+        capacity_source=capacity_source_for(_offer(case)),
         accepted_escrows=_accepted_escrows(case),
         demands=_recipient_demands(seller_wallet),
         max_duration_seconds=_DURATION_SECONDS,
@@ -331,8 +344,19 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     eval_result = storefront_admin_client.evaluate_negotiate(
         listing_id,
         proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
-        requested_duration_seconds=_DURATION_SECONDS,
-        buyer_address=buyer_config["wallet_address"],
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": _DURATION_SECONDS,
+                "ssh_public_key": buyer_config["ssh_public_key"],
+            },
+        },
+        buyer_principal=_signer(
+            "eip191",
+            settings.BUYER.MARKETPLACE_CREDENTIAL,
+            "BUYER.MARKETPLACE_CREDENTIAL",
+        ).identity,
     )
     assert eval_result.would_negotiate, (
         f"{case.name} evaluate-negotiate exited: {eval_result}"
@@ -341,14 +365,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
-        buyer_address=buyer_config["wallet_address"],
         initial_amount=_BUYER_INITIAL_AMOUNT,
         provision_terms={
             "kind": "compute.v1",
             "version": 1,
             "payload": {
                 "duration_seconds": _DURATION_SECONDS,
-                "ssh_public_key": "",
+                # The key is a negotiated term, not a settle-time input:
+                # settle reads it from the accepted terms and refuses to
+                # substitute the caller's, so an empty value here cannot
+                # be supplied later.
+                "ssh_public_key": buyer_config["ssh_public_key"],
             },
         },
         chain_name=_CHAIN_NAME,
@@ -373,7 +400,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     escrow_uid = _create_on_chain_escrow(
         case=case,
         buyer_private_key=buyer_config["private_key"],
-        buyer_address=buyer_config["wallet_address"],
         seller_wallet_address=seller_wallet,
         rpc_url=buyer_config["rpc_url"],
     )
@@ -391,13 +417,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         rule_id=case.rule_id,
         match={"vm_action": "create"},
         pause_before_result=True,
+        # The create fact the VM playbook prints, with the forwarded port and
+        # the time access became ready: a create reporting neither says
+        # nothing a buyer can use, and fails.
         result_stdout=(
-            '{"vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
-            '"tenant_ssh_key_path": "/tmp/e2e.key", '
-            '"frp": {"enabled": false}, '
+            'ok: [kvm1] => {\n    "vm_creation_data": '
+            '{"action": "create", "vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+            '"external_ssh_port": "2222", "timestamp": "2030-01-01T00:00:01Z", '
+            '"tenant_ssh_key_path": "/tmp/e2e.key", "frp": {"enabled": false}, '
             '"authentication": {"tenant": {"ssh_commands": '
             '{"external": "ssh vmuser@localhost", '
-            '"internal": "ssh vmuser@10.0.0.1"}}}}'
+            '"internal": "ssh vmuser@10.0.0.1"}}}}\n}\n'
         ),
         fail_with=None,
     )
@@ -407,16 +437,13 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         ssh_public_key=buyer_config["ssh_public_key"],
         duration_seconds=_DURATION_SECONDS,
+        negotiation_id=negotiation_id,
     )
     assert evaluate.get("would_submit") is True, evaluate
-    vm_host = evaluate.get("vm_host")
-    assert vm_host
+    host_id = evaluate.get("host_id")
+    assert host_id
 
-    job_eval = provisioning_test_client.evaluate_job(
-        vm_host,
-        vm_target=evaluate.get("vm_target") or "eval-target",
-        vm_action="create",
-    )
+    job_eval = provisioning_test_client.evaluate_job(host_id, vm_action="create")
     assert job_eval.get("params_valid") is True, job_eval
     assert job_eval.get("rule_matched") == case.rule_id, job_eval
     assert job_eval.get("would_pause") is True, job_eval
@@ -424,8 +451,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     settle = storefront_client.settle_evm(
         escrow_uid,
         negotiation_id=negotiation_id,
-        buyer_address=buyer_config["wallet_address"],
-        ssh_public_key=buyer_config["ssh_public_key"],
+        buyer_evm_address=buyer_config["wallet_address"],
     )
     assert settle.status == "provisioning", settle
 
@@ -440,7 +466,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     status = storefront_client.get_settle_status(
         escrow_uid,
-        buyer_address=buyer_config["wallet_address"],
     )
     # provisioning_job_id is always None for a fulfillment on the durable
     # path; fulfillment_id is that path's durable identity. See
@@ -450,8 +475,11 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     provisioning_test_client.resume_rule(case.rule_id)
     provisioning_test_client.drain(timeout=30)
-    provisioning_client.run_fulfillment_convergence_cycle()
-    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
+    # `advance` rather than `run`: a plain cycle cannot reach a row whose
+    # claim lease is still live, which is the case straight after a pending
+    # poll. See test_full_deal.py's stage 09a.
+    provisioning_client.advance_fulfillment_convergence_cycle()
+    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
     assert fulfillment_status.get("state") == "active", fulfillment_status
 
     wait = storefront_admin_client.wait_for_settlement(escrow_uid, timeout=60.0)
@@ -460,7 +488,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     final_status = storefront_client.get_settle_status(
         escrow_uid,
-        buyer_address=buyer_config["wallet_address"],
     )
     assert final_status.status == "ready"
     assert final_status.tenant_credentials

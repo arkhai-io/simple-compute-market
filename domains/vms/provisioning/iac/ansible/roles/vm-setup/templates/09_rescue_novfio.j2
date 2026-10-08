@@ -1,0 +1,50 @@
+#!/bin/sh
+# GRUB entry that binds nothing.
+#
+# This is the rollback target, and its correctness must not depend on what the
+# host is currently configured to do. It deliberately does NOT inherit
+# GRUB_CMDLINE_LINUX_DEFAULT: a host may carry a stale `vfio-pci.ids=` there,
+# and inheriting it would reproduce, inside the rescue entry, exactly the state
+# the rescue entry exists to escape. A rollback target must be a state that
+# cannot fail rather than the most recent state that has not yet failed.
+#
+# The command line is therefore built from a fixed minimal set: root device,
+# read-only mount, the IOMMU token (which binds no device), and the rescue
+# token the bind unit recognises as an instruction to do nothing.
+#
+# The kernel and initramfs are resolved at grub-mkconfig time from the
+# distribution's current symlinks, so this entry tracks kernel upgrades. That
+# is resolution of the running kernel, not inheritance of a configuration.
+
+set -e
+
+RESCUE_TOKEN="{{ rescue_cmdline_token }}"
+IOMMU_PARAM="{{ iommu_cmdline_param }}"
+TITLE="{{ rescue_boot_entry_title }}"
+
+[ -e /boot/vmlinuz ] || exit 0
+[ -e /boot/initrd.img ] || exit 0
+
+KERNEL="/boot/$(basename "$(readlink -f /boot/vmlinuz)")"
+INITRD="/boot/$(basename "$(readlink -f /boot/initrd.img)")"
+
+ROOT_UUID="$(findmnt -no UUID / 2>/dev/null || true)"
+if [ -n "${ROOT_UUID}" ]; then
+    ROOT_SPEC="root=UUID=${ROOT_UUID}"
+else
+    ROOT_SOURCE="$(findmnt -no SOURCE / 2>/dev/null || true)"
+    [ -n "${ROOT_SOURCE}" ] || exit 0
+    ROOT_SPEC="root=${ROOT_SOURCE}"
+fi
+
+cat <<EOF
+menuentry '${TITLE}' --class ubuntu --class gnu-linux --class os \$menuentry_id_option 'vfio-rescue' {
+    recordfail
+    load_video
+    insmod gzio
+    insmod part_gpt
+    insmod ext2
+    linux   ${KERNEL} ${ROOT_SPEC} ro ${IOMMU_PARAM} ${RESCUE_TOKEN}
+    initrd  ${INITRD}
+}
+EOF

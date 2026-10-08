@@ -103,7 +103,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
         status="open",
         created_at=now,
         updated_at=now,
-        offer_resource={"service": "sample", "unit": "credit"},
+        listing_resource={"service": "sample", "unit": "credit"},
         accepted_escrows=[],
         fulfillment_resource=None,
         max_duration_seconds=None,

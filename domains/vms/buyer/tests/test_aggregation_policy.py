@@ -34,12 +34,12 @@ from identity_helpers import (
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
-from domains.vms.buyer.aggregation import (
+from arkhai_vms_buyer.aggregation import (
     NegotiateFn,
     gather_outcomes,
     register_aggregation_policy,
 )
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
     BuyConstraints,
@@ -47,7 +47,7 @@ from domains.vms.buyer.buy_orchestrator import (
     make_legacy_settle_hook,
     run_buy,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 _BUYER_ADDR = "0x" + "cc" * 20

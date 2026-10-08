@@ -19,6 +19,7 @@ from .domain_lifecycle import (
     fulfill_domain,
 )
 from .domain_registry import (
+    CAPACITY_BACKING_VALUES,
     DomainContractKey,
     PreparedStorefrontDomainArtifact,
     StorefrontDomainBinding,
@@ -31,6 +32,7 @@ from .domain_registry import (
 )
 
 __all__ = [
+    "CAPACITY_BACKING_VALUES",
     "DomainContractKey",
     "StorefrontDomainLifecycleError",
     "StorefrontFulfillmentContext",

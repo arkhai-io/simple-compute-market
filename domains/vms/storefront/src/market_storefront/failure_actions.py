@@ -9,9 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
-    mark_derived_listings_open,
 )
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_settlement_runtime import FailurePolicy
@@ -19,6 +18,12 @@ from market_identity import Identity
 
 import market_storefront.container as _container
 
+from market_storefront.services.capacity_client import (
+    listing_source_projection,
+    site_capacity_buckets,
+)
+from market_storefront.services.site_projection_cache import refresh_site_projections
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
     get_evm_wallet_address,
     get_evm_wallet_private_key,
@@ -304,14 +309,26 @@ async def _release_capacity(
         home_site = next(iter(remote_site_clients(runtime.client())), None)
         reopened: list[str] = []
         if home_site is not None:
+            # The same source publication derives from, refreshed for the site
+            # this release just changed, so a reopen here agrees with what
+            # publication would keep open and reports this release's own effect.
+            await refresh_site_projections(binding.site_id)
+            projection = listing_source_projection()
             reopened = closed_available_listing_ids(
                 db.db_path,
                 home_site=home_site,
                 member_availability=await capacity_availability(runtime.client()),
+                site_pool_projection=projection,
+                site_capacity_buckets=(
+                    site_capacity_buckets() if projection is not None else None
+                ),
+                shape_feasible=vm_shape_feasibility(),
+                configured_sites=runtime.site_ids,
             )
         for listing_id in reopened:
-            await db.update_listing(listing_id=listing_id, status="open")
-        mark_derived_listings_open(db.db_path, reopened)
+            await db.update_listing(
+                listing_id=listing_id, status="open", reopened_by="reconciliation"
+            )
         result.reopened_listing_ids = reopened
     return result
 

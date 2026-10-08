@@ -1,0 +1,30 @@
+---
+# Read-only passthrough viability audit.
+#
+# Run this against newly rented hardware before anything else. It writes
+# nothing, so it costs one SSH session and tells you whether the machine's
+# GPUs can be passed through at all — which is worth knowing before paying for
+# a full preparation run and a reboot to find out.
+#
+# A GPU sharing an IOMMU group with a network or storage controller cannot be
+# passed through on that hardware. Reporting that is a successful outcome of
+# this playbook, not a failure of it.
+- name: Host Kit / GPU passthrough audit
+  hosts: kvm_hosts
+  become: yes
+  # No facts are gathered: the audit reads sysfs directly and nothing here
+  # needs them, so the play touches the machine as little as it can.
+  gather_facts: no
+  vars:
+    # Also defined in the vm-setup role's defaults. Repeated here because this
+    # play runs the task file without the role, so the role's defaults are not
+    # in scope; it is only used to tell the operator what to select if they
+    # ever need the rescue entry.
+    rescue_boot_entry_title: "Ubuntu (no vfio binding)"
+  tasks:
+    # import_tasks, not include_tasks: a static import is parsed when the
+    # playbook is parsed, so `ansible-playbook --syntax-check` covers the task
+    # file rather than stopping at this line. Nothing here needs the runtime
+    # resolution a dynamic include buys.
+    - name: Run passthrough audit
+      import_tasks: ../../roles/vm-setup/tasks/passthrough-audit.yml

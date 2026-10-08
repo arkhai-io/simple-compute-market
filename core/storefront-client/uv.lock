@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.18.0"
+version = "0.25.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -40,7 +40,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-identity", specifier = "==0.3.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
 ]
 
@@ -49,7 +49,7 @@ dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "cryptography" },
@@ -59,7 +59,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 ## Context
 
-The payments service's cross-product decisions are recorded in `arkhai-io/arkhai-payments` (`docs/issues/scm-settlement-port.md`); its wire contract is JSON Schema in that repository (`schema/payments.schema.json`) with test vectors, so this repository generates pydantic models rather than importing TypeScript.
+The payments service's cross-product decisions are recorded in `arkhai-io/arkhai-payments` (`arkhai-payments/docs/issues/scm-settlement-port.md`); its wire contract is JSON Schema in that repository (`schema/payments.schema.json`) with test vectors, so this repository generates pydantic models rather than importing TypeScript.
 
 A mandate is `{from, to, parts, deal, fee, authorities, nonce, expires}`. Parties and authorities are Arkhai account UUIDs. Each part is `once` with an asset, an amount and a hold. The transaction id is `sha256(JCS(mandate))`, so a retried approval converges on one transaction and one receipt. The receipt is Ed25519-signed with `kit/identity` framing (`arkhai.payments.receipt.v1`).
 
@@ -343,7 +343,7 @@ The receipt-outcome classification (R2), the neutral settle response fields (R4)
 
 Found while naming files for the review-round plan. Each refines how a decision is carried out; none reopens one.
 
-### P1. The identity framing function goes public after the merge
+### P1. The identity framing function goes public after the merge (done in the merge)
 
 Exposing framing publicly is new API on `arkhai-kit-identity`, which needs a version bump. About fifteen packages here and twenty-five on the development branch pin it exactly (`==0.3.0`), so bumping now means repinning and relocking every one of them, then repeating that in the merge. Until the merge, `receipt_message` in the payments kit remains the single framing implementation that both the verifier and the receipt fixture call, still importing `_frame`; R3's test rule holds without the identity change. After the merge, `frame_fields` becomes public, the identity kit is bumped once, and every pin moves in one step.
 
@@ -458,6 +458,31 @@ This change lands after `bare-metal-mock-provisioned-deal` on the development br
 - **M6. Bare-metal fulfillment trigger.** Development-branch §7.1 removes `begin` and starts Alkahest fulfillment from the obligation servicing worker. R6 keeps payments independent of both. Verify after the merge that the settle-starts-fulfillment path survives intact.
 - **M7. Permanent documents.** `TESTING.md`, `ARCHITECTURE.md`, `ROADMAP.md`, and the specs have diverged; this change's sections are re-applied over the development text. The registry package moved from `core/registry/src/` to `core/registry/src/core_registry/`.
 
+## Merge outcome
+
+Resolved against development head `4c55a328`, merged into this branch's head `cea7760a`.
+
+- **M1. Hosted Stripe is removed.** The hosted stack integrates the earlier `stripe-settlement-service`, which the Arkhai payments service supersedes, and the payments team confirmed the removal. Development's hosted code, packaging, workflows, Helm and Compose files, and real-Stripe e2e lane are removed, with the permanent requirements they promoted. Its three active hosted changes are superseded; its three archived ones stay as history.
+  - Kept: the settlement runtime port's mechanism-scoped reclaim options, a general capability, and the provider-neutral conditional escrow client requirement without its hosted clauses.
+  - For later work: a live payment qualification lane should adapt `gates.py`, `evidence.py` and `runtime.py` from the e2e harness's `hosted_real_stripe` package at `4c55a328`, and `kit-owned-storefront-shell` can take `kit/settlement-runtime/src/market_settlement_runtime/hosted_routes.py` from the same commit as a framework-free route-service precedent.
+  - Data: VM's hosted migration created no tables, and no deployed VM storefront has open hosted deals. A development bare-metal database keeps an orphaned hosted lifecycle table; bare metal has not launched, so it stays.
+- **M2. The Agreement on the development negotiation runtime.**
+  - The kit runtime's plan-then-persist opening fixes the acceptance time before building accepted artifacts. Development's administrative acceptance built them without `accepted_at` and now fixes it too.
+  - Bare metal's `negotiation_service.py` was retired on development, and its payment path moved into the new runtime. That runtime refused any exact selection whose mechanism has no obligation builder, which was every bare-metal payment negotiation; an Agreement-only mechanism is now admitted. Bare metal builds the Agreement for every accepted deal, as VM does, and acceptance records the settlement data and payment record.
+  - Bare metal follows VM's rule for what a deal provisions: a per-mechanism capacity declaration, the round hook's admission rules applied to every provisioning deal, and terms derived from the trusted listing and the buyer's message whatever the mechanism. The hosted-only `bare_metal` option-parameter path is removed.
+- **M3. Settle surface.** `settle_evm` keeps development's narrower signature, the admin settle route service is development's, and development's callers of `StorefrontClient.settle` now call `settle_evm`. The payment routes have four of the five pieces (wire models, typed client, framework-free route service, binding) but no shared route contract: their operation names and paths are repeated in authentication and the client. The reviewer left the contract to `kit-owned-storefront-shell`, which extracts these bindings.
+- **M4. Restart re-drive.** Unchanged: payment deals re-drive on buyer retries, and seller-side re-drive stays with `kit-owned-listing-and-fulfillment-lifecycles`.
+- **M5. Bare-metal failure policy.** Unchanged: development's §7 has not landed, so bare metal has no failure policy and the `refund` action does not reach it yet.
+- **M6. Bare-metal fulfillment trigger.** Development's §7.1 has not landed; `begin` remains for Alkahest and now names the escrow. Payment settlement still starts fulfillment itself (R6), through development's capacity commit, and the bare-metal integration suite proves it through real negotiation.
+- **M7. Permanent documents.** Development's new documentation is kept and its hosted content removed. This change's sections are re-applied, and its requirements touched by the merge were checked to be unchanged.
+
+Other findings:
+
+- **Capacity declarations.** Development's unbacked publication refuses a mechanism whose capacity fulfillment is undeclared; VM declares `arkhai.payments.v1: True`, and bare metal now has the same declaration.
+- **Renames.** This change's tests and examples use development's names: `listing_resource`, `offering_mode`, `host_id`, and the `bare_metal.v2` listing kind.
+- **Versions.** Each package this change modifies takes development's version and one bump: minor for changed code, patch for a docstring-only change or a moved pin. Exact pins always move; `>=` bounds rise only for a minor bump; every other specifier is development's. `arkhai-kit-arkhai-payments` stays 0.2.0, and P1 made `frame_fields` public in `arkhai-kit-identity` 0.4.0.
+- **Coverage gaps.** Development tested three general behaviours only through hosted selections, and those tests are gone: API credits rejecting a mid-negotiation selection switch, API credits revalidating the listing's option at acceptance, and the VM buyer pricing from the selected option's rate. Payment-based equivalents need the payments stage composed into those tests' runtimes.
+
 ## Planned promotion
 
 | Decision | Planned permanent location |
@@ -483,7 +508,7 @@ These rows move into the design promotion record as each promotion lands.
 
 ## Superseded changes
 
-Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-funding`, `add-api-credits-hosted-settlement`, `add-bare-metal-hosted-settlement`, `bind-one-hosted-release-coordinate`, `carry-the-payer-return-address`, `project-an-authoritative-funding-loss`, and the hosted sections of `disburse-a-settlement-disposition`. The old service never ran with production money, so nothing deployed needs migration. Archive or withdraw them when this change is accepted.
+Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-funding`, `add-api-credits-hosted-settlement`, `add-bare-metal-hosted-settlement`, `project-an-authoritative-funding-loss`, and the hosted sections of `disburse-a-settlement-disposition`. `bind-one-hosted-release-coordinate`, `carry-the-payer-return-address`, and `resolve-hosted-client-from-an-index` were archived on the development branch before the merge and stay archived ([M1](#merge-outcome)). The old service never ran with production money, so nothing deployed needs migration. Archive or withdraw them when this change is accepted.
 
 ## Deferred
 

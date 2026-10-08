@@ -8,30 +8,27 @@ import threading
 import time
 
 import pytest
-from fastapi.testclient import TestClient
+from market_contact_exchange import IntroductionPayloadsDeletedError
 from market_delivery import (
     ConfiguredSink,
     DeliveryConfigurationError,
     DeliveryError,
+    SellerIntroductionDelivery,
     build_delivery_sinks,
     load_delivery_config,
 )
+from market_identity import Ed25519Signer
 
-from arkhai_bare_metal_storefront.delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    redeliver_introduction,
-    storefront_delivery_section,
-)
+from arkhai_bare_metal_storefront.delivery import storefront_introduction_delivery
 
+from loopback import serving
 from test_http_introductions import (
-    BUYER_SIGNER,
     _BUYER_CONTACT,
     _SELLER_CONTACT,
     _accept_and_start,
     _app,
-    _headers,
     _insert_contact_listing,
+    _introductions,
     _runtime,
 )
 
@@ -53,35 +50,18 @@ async def _await_delivery(received: list, *, expected: int = 1) -> None:
         await asyncio.sleep(0.01)
 
 
-def _start_again(client, negotiation_id: str, obligation_ref: str):
-    """Post the same start once more -- a repeat, not an authorized replay."""
-
-    body = {
-        "negotiation_id": negotiation_id,
-        "obligation_ref": obligation_ref,
-        "contact_payload": dict(_BUYER_CONTACT),
-    }
-    return client.post(
-        "/api/v1/introductions",
-        json=body,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "introduction_start", obligation_ref, body
-        ),
-    )
-
-
 async def test_the_reveal_tells_the_seller_its_own_half(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     received: list = []
     object.__setattr__(
         runtime,
         "introduction_delivery",
-        build_introduction_delivery((_recording_sink(received),)),
+        SellerIntroductionDelivery((_recording_sink(received),)),
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, projection = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, projection = await _accept_and_start(base_url, option)
         assert projection["counterparty_contact"] == _SELLER_CONTACT
         await _await_delivery(received)
 
@@ -107,20 +87,20 @@ async def test_every_sink_failing_leaves_the_reveal_and_the_deal_intact(
     object.__setattr__(
         runtime,
         "introduction_delivery",
-        build_introduction_delivery(
+        SellerIntroductionDelivery(
             (ConfiguredSink(name="broken", sink=explode),)
         ),
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, projection = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, projection = await _accept_and_start(base_url, option)
 
     assert projection["revealed"] is True
     assert projection["counterparty_contact"] == _SELLER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
-    record = await runtime.db.load_contact_introduction(obligation_ref=obligation_ref)
+    record = await runtime.contact_exchange.store.load(obligation_ref)
     assert record is not None
 
 
@@ -136,16 +116,16 @@ async def test_a_hanging_sink_does_not_extend_the_counterparty_request(
     object.__setattr__(
         runtime,
         "introduction_delivery",
-        build_introduction_delivery(
+        SellerIntroductionDelivery(
             (ConfiguredSink(name="hangs", sink=hangs, timeout_seconds=5.0),)
         ),
     )
     option = await _insert_contact_listing(runtime)
 
     try:
-        with TestClient(_app(runtime)) as client:
+        with serving(_app(runtime)) as base_url:
             started = time.monotonic()
-            _, _, projection = _accept_and_start(client, option)
+            _, _, projection = await _accept_and_start(base_url, option)
             elapsed = time.monotonic() - started
             assert projection["revealed"] is True
             # The counterparty's request is finished while the sink it
@@ -163,16 +143,20 @@ async def test_a_repeat_start_announces_one_introduction_once(tmp_path) -> None:
     object.__setattr__(
         runtime,
         "introduction_delivery",
-        build_introduction_delivery((_recording_sink(received),)),
+        SellerIntroductionDelivery((_recording_sink(received),)),
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, _ = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, _ = await _accept_and_start(base_url, option)
         await _await_delivery(received)
         first = len(received)
-        again = _start_again(client, negotiation_id, obligation_ref)
-        assert again.status_code == 200, again.text
+        again = _introductions(base_url).start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=dict(_BUYER_CONTACT),
+        )
+        assert again["revealed"] is True
         await asyncio.sleep(0.2)
 
     assert first == 1
@@ -182,12 +166,12 @@ async def test_a_repeat_start_announces_one_introduction_once(tmp_path) -> None:
 async def test_redelivery_sends_the_same_introduction_again(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        _, obligation_ref, _ = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
 
     received: list = []
-    outcomes = await redeliver_introduction(
-        runtime.db, obligation_ref, (_recording_sink(received),)
+    outcomes = SellerIntroductionDelivery((_recording_sink(received),)).redeliver(
+        *await runtime.contact_exchange.seller_view(obligation_ref)
     )
 
     assert [outcome.delivered for outcome in outcomes] == [True]
@@ -195,7 +179,23 @@ async def test_redelivery_sends_the_same_introduction_again(tmp_path) -> None:
     assert received[0].role == "seller"
 
     with pytest.raises(ValueError, match="not been revealed"):
-        await redeliver_introduction(runtime.db, "f" * 64, (_recording_sink([]),))
+        await runtime.contact_exchange.seller_view("f" * 64)
+
+
+async def test_redelivery_of_a_deleted_introduction_contacts_no_sink(tmp_path) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
+    deleted = await runtime.introduction_retention().delete_one(obligation_ref)
+
+    received: list = []
+    with pytest.raises(IntroductionPayloadsDeletedError) as refused:
+        SellerIntroductionDelivery((_recording_sink(received),)).redeliver(
+            *await runtime.contact_exchange.seller_view(obligation_ref)
+        )
+    assert refused.value.payloads_deleted_at == deleted["payloads_deleted_at"]
+    assert received == []
 
 
 def test_delivery_configuration_is_read_from_this_storefronts_environment(
@@ -207,19 +207,23 @@ def test_delivery_configuration_is_read_from_this_storefronts_environment(
         json.dumps({"enabled": ["file"], "file": {"path": str(target)}}),
     )
 
-    sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+    delivery = storefront_introduction_delivery(
+        known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+    )
 
-    assert [sink.name for sink in sinks.sinks] == ["file"]
-    assert build_introduction_delivery(sinks.sinks) is not None
+    assert delivery is not None
+    assert [sink.name for sink in delivery.sinks] == ["file"]
 
 
 def test_no_delivery_configured_installs_no_dispatch(monkeypatch) -> None:
     monkeypatch.delenv("BARE_METAL_STOREFRONT_DELIVERY", raising=False)
 
-    sinks = load_storefront_delivery_sinks(storefront_delivery_section())
-
-    assert sinks.sinks == ()
-    assert build_introduction_delivery(sinks.sinks) is None
+    assert (
+        storefront_introduction_delivery(
+            known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+        )
+        is None
+    )
 
 
 def test_an_operator_mistake_fails_before_any_deal_exists(monkeypatch) -> None:
@@ -229,7 +233,9 @@ def test_an_operator_mistake_fails_before_any_deal_exists(monkeypatch) -> None:
     )
 
     with pytest.raises(DeliveryConfigurationError, match="not installed"):
-        load_storefront_delivery_sinks(storefront_delivery_section())
+        storefront_introduction_delivery(
+            known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+        )
 
 
 async def test_a_credentialed_sink_stays_out_of_every_public_surface(tmp_path) -> None:
@@ -243,7 +249,7 @@ async def test_a_credentialed_sink_stays_out_of_every_public_surface(tmp_path) -
 
     runtime = _runtime(str(tmp_path / "storefront.db"))
     object.__setattr__(
-        runtime, "introduction_delivery", build_introduction_delivery(built.sinks)
+        runtime, "introduction_delivery", SellerIntroductionDelivery(built.sinks)
     )
     composition = runtime.settlement_composition
     readiness = await composition.readiness(clauses=())
@@ -257,3 +263,15 @@ async def test_a_credentialed_sink_stays_out_of_every_public_surface(tmp_path) -
     )
 
     assert "secret-token" not in published
+
+
+def test_a_multi_site_storefront_must_route_its_deliveries(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_DELIVERY",
+        json.dumps({"enabled": ["file"], "file": {"path": str(tmp_path / "x.jsonl")}}),
+    )
+
+    with pytest.raises(DeliveryConfigurationError, match="Delivery.origins"):
+        storefront_introduction_delivery(
+            known_origins={"rack-a", "rack-b"}, signer=Ed25519Signer(b"s" * 32)
+        )

@@ -162,6 +162,15 @@ def _add_column_if_missing(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
+def migrate_listing_rate_structure(conn: sqlite3.Connection) -> None:
+    """Add the listing's rate structure: a domain-owned JSON term of sale.
+
+    Nullable, and null for every listing whose domain records none, so adding
+    it changes no existing listing.
+    """
+    _add_column_if_missing(conn, "listings", "rate_structure", "TEXT")
+
+
 # ---------------------------------------------------------------------------
 # Legacy accepted_escrows backfill — synthesis is domain vocabulary.
 # ---------------------------------------------------------------------------
@@ -1555,6 +1564,95 @@ def _migrate_marketplace_principals(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
 
+def migrate_listing_resource_column(conn: sqlite3.Connection) -> None:
+    """Rename ``listings.offer_resource`` to ``listings.listing_resource`` and
+    move the offering mode onto its settled key inside the stored payload.
+
+    Both halves run here because a row must never be observable with the column
+    migrated and its payload not: the payload's mode is read back as the
+    listing's offering mode, so a half-migrated row would publish a listing
+    whose mode looks absent.
+
+    The column is renamed rather than mapped at the read boundary because a
+    search for the retired name across the codebase is this rename's
+    verification strategy, and a surviving column keeps producing hits an
+    auditor has to dismiss one at a time.
+    """
+    if not _table_exists(conn, "listings"):
+        return
+
+    if _column_exists(conn, "listings", "offer_resource") and not _column_exists(
+        conn, "listings", "listing_resource"
+    ):
+        # SQLite has supported RENAME COLUMN since 3.25; this repository
+        # supports SQLite only, so there is no reason to rebuild the table.
+        conn.execute(
+            "ALTER TABLE listings RENAME COLUMN offer_resource TO listing_resource"
+        )
+
+    if not _column_exists(conn, "listings", "listing_resource"):
+        return
+
+    rows = conn.execute(
+        "SELECT listing_id, listing_resource FROM listings"
+    ).fetchall()
+    for row in rows:
+        raw = row[1]
+        if raw is None:
+            continue
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            # An unparseable payload is left exactly as stored rather than
+            # discarded: it is the seller's published shape, and this migration
+            # has no basis for rewriting something it cannot read.
+            continue
+        if not isinstance(payload, dict) or "virtualization_type" not in payload:
+            continue
+        # A payload already carrying the settled key keeps it: that value is the
+        # one a live publication wrote, and the retired key is the stale copy.
+        payload.setdefault("offering_mode", payload["virtualization_type"])
+        del payload["virtualization_type"]
+        conn.execute(
+            "UPDATE listings SET listing_resource=? WHERE listing_id=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), row[0]),
+        )
+
+
+def count_listings_carrying_retired_offering_mode_key(
+    conn: sqlite3.Connection,
+) -> int:
+    """Listing rows whose stored payload still names the retired mode key.
+
+    A cutover gate rather than a migration step. The payload is JSON, so a row
+    the backfill missed is not a type error and would surface only when a buyer
+    filters on the offering mode and the listing silently fails to match.
+    """
+    if not _table_exists(conn, "listings"):
+        return 0
+    # Reads whichever shape column is present, so the count is meaningful both
+    # before and after the rename. Checking only the settled column would
+    # report zero on a database that has not been migrated at all -- the exact
+    # state the gate exists to catch.
+    for column in ("listing_resource", "offer_resource"):
+        if _column_exists(conn, "listings", column):
+            shape_column = column
+            break
+    else:
+        return 0
+    stale = 0
+    for row in conn.execute(f"SELECT {shape_column} FROM listings"):
+        raw = row[0]
+        if raw is None:
+            continue
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and "virtualization_type" in payload:
+            stale += 1
+    return stale
+
 
 def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
     """Create immutable listing, negotiation, and domain-artifact bindings."""
@@ -1819,6 +1917,125 @@ def _migrate_replay_attempt_leases(conn: sqlite3.Connection) -> None:
     )
 
 
+# Recreated with ``capacity_backing`` in both the column list and the guard, so
+# a bound listing can never change category. Kept as the one definition the
+# expand migration installs; the binding-schema migration that first created
+# the trigger stays frozen.
+_LISTING_BINDING_IMMUTABLE_TRIGGER = """
+    CREATE TRIGGER storefront_listing_binding_immutable
+    BEFORE UPDATE OF
+      listing_id, site_id, pool_id, physical_resource_id, offering_mode,
+      domain_identity, contract_major, contract_minor, derivation_key,
+      source_envelope_json, capacity_backing
+    ON storefront_listing_bindings
+    WHEN NOT (OLD.listing_id IS NEW.listing_id)
+      OR NOT (OLD.site_id IS NEW.site_id)
+      OR NOT (OLD.pool_id IS NEW.pool_id)
+      OR NOT (OLD.physical_resource_id IS NEW.physical_resource_id)
+      OR NOT (OLD.offering_mode IS NEW.offering_mode)
+      OR NOT (OLD.domain_identity IS NEW.domain_identity)
+      OR NOT (OLD.contract_major IS NEW.contract_major)
+      OR NOT (OLD.contract_minor IS NEW.contract_minor)
+      OR NOT (OLD.derivation_key IS NEW.derivation_key)
+      OR NOT (OLD.source_envelope_json IS NEW.source_envelope_json)
+      OR NOT (OLD.capacity_backing IS NEW.capacity_backing)
+    BEGIN
+      SELECT RAISE(ABORT, 'storefront listing binding is immutable');
+    END
+"""
+
+
+def migrate_listing_binding_capacity_backing(conn: sqlite3.Connection) -> None:
+    """Add the binding's backing discriminator and make it immutable.
+
+    The column is nullable with no default: SQLite cannot add a ``NOT NULL``
+    column without a default, and a default would silently classify any insert
+    that omitted it. Every row that exists before this migration is backed,
+    because nothing could publish an unbacked listing until the column existed.
+    The backfill runs before the immutability trigger is recreated to cover the
+    column, or the recreated trigger would refuse it. The companion migration
+    ``migrate_listing_binding_capacity_backing_required`` makes the value
+    mandatory on insert.
+    """
+    if not _table_exists(conn, "storefront_listing_bindings"):
+        return
+    _add_column_if_missing(
+        conn,
+        "storefront_listing_bindings",
+        "capacity_backing",
+        "TEXT CHECK (capacity_backing IN ('backed', 'unbacked'))",
+    )
+    conn.execute(
+        "UPDATE storefront_listing_bindings SET capacity_backing='backed' "
+        "WHERE capacity_backing IS NULL"
+    )
+    conn.execute("DROP TRIGGER IF EXISTS storefront_listing_binding_immutable")
+    conn.execute(_LISTING_BINDING_IMMUTABLE_TRIGGER)
+
+
+def migrate_listing_binding_capacity_backing_required(
+    conn: sqlite3.Connection,
+) -> None:
+    """Refuse a listing binding that names no backing.
+
+    Equivalent to ``NOT NULL`` with no default, without rebuilding a table that
+    other tables' triggers reference by name. A writer that omits the column
+    fails loudly instead of being classified; the immutability trigger already
+    refuses any later change.
+    """
+    if not _table_exists(conn, "storefront_listing_bindings"):
+        return
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS storefront_listing_binding_backing_required
+        BEFORE INSERT ON storefront_listing_bindings
+        WHEN NEW.capacity_backing IS NULL
+        BEGIN
+          SELECT RAISE(ABORT, 'listing binding requires capacity_backing');
+        END
+        """
+    )
+
+
+def migrate_listing_closed_by(conn: sqlite3.Connection) -> None:
+    """Record who closed each listing: its seller or reconciliation.
+
+    Reconciliation reopens only what reconciliation closed, so a seller's close
+    must be distinguishable from one a capacity change or a source change made.
+    Rows closed before this column existed are backfilled as
+    ``reconciliation``: until now every closed listing could be reopened by a
+    capacity event, so that value reproduces how those rows already behaved.
+    The triggers require the value exactly when a listing is closed, so no close
+    path can omit it and no reopen path can leave a stale one behind.
+    """
+    if not _table_exists(conn, "listings"):
+        return
+    _add_column_if_missing(
+        conn,
+        "listings",
+        "closed_by",
+        "TEXT CHECK (closed_by IN ('seller', 'reconciliation'))",
+    )
+    conn.execute(
+        "UPDATE listings SET closed_by='reconciliation' "
+        "WHERE status='closed' AND closed_by IS NULL"
+    )
+    for event, name in (("INSERT", "insert"), ("UPDATE", "update")):
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS listing_closed_by_consistent_{name}
+            BEFORE {event} ON listings
+            WHEN (NEW.status = 'closed' AND NEW.closed_by IS NULL)
+              OR (NEW.status IS NOT 'closed' AND NEW.closed_by IS NOT NULL)
+            BEGIN
+              SELECT RAISE(
+                ABORT, 'a closed listing records closed_by; an open one does not'
+              );
+            END
+            """
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -1854,5 +2071,30 @@ _MIGRATIONS: tuple[Migration, ...] = (
         "20260815_001_storefront_domain_bindings",
         migrate_storefront_domain_bindings_schema,
         required_tables=("listings", "negotiation_threads"),
+    ),
+    Migration(
+        "20260911_001_listing_resource_column",
+        migrate_listing_resource_column,
+        required_tables=("listings",),
+    ),
+    Migration(
+        "20260923_001_listing_binding_capacity_backing",
+        migrate_listing_binding_capacity_backing,
+        required_tables=("storefront_listing_bindings",),
+    ),
+    Migration(
+        "20260923_002_listing_binding_capacity_backing_required",
+        migrate_listing_binding_capacity_backing_required,
+        required_tables=("storefront_listing_bindings",),
+    ),
+    Migration(
+        "20260923_003_listing_closed_by",
+        migrate_listing_closed_by,
+        required_tables=("listings",),
+    ),
+    Migration(
+        "20261001_001_listing_rate_structure",
+        migrate_listing_rate_structure,
+        required_tables=("listings",),
     ),
 )

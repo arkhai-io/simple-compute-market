@@ -12,8 +12,8 @@ from decimal import Decimal
 import pytest
 from web3 import Web3
 
-from src.settings import active_profiles, config_directory, settings
-from src.web3_client import OWNABLE_ABI, get_web3
+from e2e_harness.settings import active_profiles, config_directory, settings
+from e2e_harness.web3_client import OWNABLE_ABI, get_web3
 
 log = logging.getLogger(__name__)
 
@@ -44,17 +44,20 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
+        "authority_id": settings.REGISTRY.get("authority_id", ""),
+        "identifier": settings.REGISTRY.get("identifier", ""),
     }
 
 
 @pytest.fixture(scope="session")
 def buyer_settings() -> dict:
-    """Buyer wallet config. The buyer is a pure HTTP client (domains.vms.buyer
+    """Buyer wallet config. The buyer is a pure HTTP client (arkhai_vms_buyer
     CLI / library) — there is no buyer api_url because no buyer-side
     server runs. Only the wallet keys are exposed: they sign negotiation
     requests against the seller's storefront and on-chain escrow calls.
     """
     return {
+        "marketplace_credential": settings.BUYER.get("marketplace_credential", ""),
         "private_key": settings.BUYER.PRIVATE_KEY,
         "wallet_address": settings.BUYER.WALLET_ADDRESS,
     }

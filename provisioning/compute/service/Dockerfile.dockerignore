@@ -3,3 +3,9 @@
 !.dist/*.whl
 !domains/vms/provisioning/iac/
 !domains/vms/provisioning/iac/**
+!domains/bare_metal/provisioning/iac/
+!domains/bare_metal/provisioning/iac/**
+!provisioning/compute/service/pyproject.toml
+!provisioning/compute/service/uv.lock
+!scripts/
+!scripts/uv_project.py

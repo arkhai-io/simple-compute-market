@@ -6,7 +6,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .pool_override_cli import pool_override_app
+
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(
+    pool_override_app,
+    name="pool-override",
+    help="Read and replace the storefront's own per-pool terms over its admin API.",
+)
 
 
 def _version_callback(value: bool) -> None:
@@ -70,20 +77,32 @@ def redeliver_introduction_cmd(
     import asyncio
     import json
 
-    from .delivery import (
-        load_storefront_delivery_sinks,
-        redeliver_introduction,
-        storefront_delivery_section,
-    )
+    from market_contact_exchange import IntroductionPayloadsDeletedError
+
     from .runtime import build_runtime_from_environment
 
-    sinks = load_storefront_delivery_sinks(storefront_delivery_section())
-    if not sinks:
-        raise typer.BadParameter("no delivery sinks are configured")
     runtime = build_runtime_from_environment()
-    outcomes = asyncio.run(
-        redeliver_introduction(runtime.db, obligation_ref, sinks.sinks)
-    )
+    delivery = runtime.introduction_delivery
+    if delivery is None:
+        raise typer.BadParameter("no delivery sinks are configured")
+    try:
+        outcomes = delivery.redeliver(
+            *asyncio.run(runtime.contact_exchange.seller_view(obligation_ref))
+        )
+    except IntroductionPayloadsDeletedError as exc:
+        # Nothing was sent: the payloads are gone, and no sink was contacted.
+        typer.echo(
+            json.dumps(
+                {
+                    "obligation_ref": obligation_ref,
+                    "delivered": False,
+                    "payloads_deleted_at": exc.payloads_deleted_at,
+                },
+                sort_keys=True,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     typer.echo(
         json.dumps(
             [

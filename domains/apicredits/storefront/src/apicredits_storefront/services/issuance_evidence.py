@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
-from domains.apicredits.settlement.issuance_evidence import (
+from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
     ExpectedApiCreditsIssuanceEvidenceV1,
     SignedApiCreditsIssuanceEvidenceV1,

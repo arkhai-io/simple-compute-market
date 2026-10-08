@@ -7,11 +7,15 @@ from typing import Any
 
 from market_identity import (
     Identity as MarketplaceIdentity,
+)
+from market_identity import (
     IdentityScheme,
-    SignatureProof as MarketplaceSignatureProof,
+    frame_fields,
     get_identity_verifier,
 )
-from market_identity.canonical import _frame
+from market_identity import (
+    SignatureProof as MarketplaceSignatureProof,
+)
 from pydantic import BaseModel, ValidationError
 
 from market_arkhai_payments.canonical import agreement_hash, jcs_sha256
@@ -35,7 +39,7 @@ def receipt_message(receipt: Mapping[str, Any] | BaseModel) -> bytes:
         if isinstance(receipt, BaseModel)
         else dict(receipt)
     )
-    return _frame((RECEIPT_PROTOCOL, jcs_sha256(receipt_json)))
+    return frame_fields((RECEIPT_PROTOCOL, jcs_sha256(receipt_json)))
 
 
 def verify_receipt_signature(

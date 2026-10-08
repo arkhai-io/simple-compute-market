@@ -1,10 +1,10 @@
-"""VM fulfillment request, prepared operation, and provider metadata models."""
+"""VM fulfillment requirements and Ansible pool configuration models."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VmConnectivitySettings(BaseModel):
@@ -19,13 +19,27 @@ class VmConnectivitySettings(BaseModel):
     yet implemented.
     """
 
-    frp_server_addr: str | None = None
-    frp_domain: str | None = None
-    frp_dashboard_password: str | None = None
+    # Relay-neutral names: the buyer receives a host and a port and has no
+    # reason to learn which relay implementation produced them. The remote port
+    # is an input, leased by the service before dispatch; the playbook applies
+    # what it is given and chooses nothing.
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    relay_token: str | None = None
+    vm_remote_port: int | None = None
 
 
 class VmFulfillmentRequirements(BaseModel):
-    vm_target: str = Field(min_length=1)
+    """What a storefront asks of a VM fulfillment.
+
+    It never names the guest: provisioning names it from the capacity
+    reservation (see ``vm_provisioning_adapter.guest_names``). Unknown fields
+    are refused rather than ignored, so a request naming a guest fails loudly
+    instead of being provisioned under a name its sender did not choose.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     image_setup_type: str = "scratch"
     vm_ram: int | None = Field(default=None, gt=0)
     vm_vcpus: int | None = Field(default=None, gt=0)
@@ -41,7 +55,14 @@ class VmFulfillmentRequirements(BaseModel):
 
 
 class AnsiblePoolConfig(BaseModel):
-    """Validated, snapshotted Ansible provider configuration."""
+    """Validated, snapshotted Ansible provider configuration.
+
+    ``relay_id`` is the pool's own configuration. The four fields beneath it
+    are the referenced relay's, present only when this was built from an
+    execution read; a redacted read carries the reference alone. They are
+    accepted here rather than fetched so that what a job runs against is
+    snapshotted with it, as the playbook path and extra vars already are.
+    """
 
     playbook_path: str = Field(min_length=1)
     requirement_delegate: str = "vm_management_v1"
@@ -49,56 +70,9 @@ class AnsiblePoolConfig(BaseModel):
     default_vm_ram: int | None = Field(default=None, gt=0)
     default_vm_vcpus: int | None = Field(default=None, gt=0)
     default_vm_disk_size: str | None = Field(default=None, min_length=1)
-
-
-class AnsiblePreparedJobParameters(BaseModel):
-    """Validated, JSON-safe snapshot passed to the Ansible executor."""
-
-    vm_host: str = Field(min_length=1)
-    vm_action: str = Field(min_length=1)
-    vm_target: str | None = None
-    executor_kind: str = Field(min_length=1)
-    executor_action: str | None = None
-    executor_target: str | None = None
-    executor_ref: dict[str, Any] | None = None
-    image_setup_type: str = "scratch"
-    vm_ram: int | None = None
-    vm_vcpus: int | None = None
-    vm_disk_size: str | None = None
-    vm_os_variant: str | None = None
-    ssh_pubkey: str | None = None
-    gpu_provisioned: bool | None = None
-    vm_gpu_count: int | None = None
-    vm_gpu_device: str | None = None
-    vm_gpu_devices: list[str] | None = None
-    vm_gpu_partition_size: str | None = None
-    frp_server_addr: str | None = None
-    frp_domain: str | None = None
-    frp_dashboard_password: str | None = None
-    golden_image_name: str | None = None
-    gcs_bucket_url: str | None = None
-    gcs_image_path: str | None = None
-    escrow_uid: str | None = None
-    physical_host_id: str | None = None
-    ssh_user: str | None = None
-    ssh_public_key: str | None = None
-    access_ref: dict[str, Any] | None = None
-    bare_metal_reclaim_policy: str | None = None
-    max_retries: int | None = None
-    playbook_path: str | None = None
-    provider_extra_vars: dict[str, Any] = Field(default_factory=dict)
-
-
-class AnsiblePreparedOperation(BaseModel):
-    capacity_reservation_id: str = Field(min_length=1)
-    action: Literal["create", "teardown"]
-    parameters: AnsiblePreparedJobParameters
-
-
-class AnsibleFulfillmentMetadata(BaseModel):
-    create_job_id: str
-    vm_host: str
-    vm_target: str
-    teardown_job_id: str | None = None
-    current_job_id: str
-    operation: Literal["create", "teardown"]
+    relay_id: str | None = None
+    relay_addr: str | None = None
+    relay_port: int | None = None
+    vm_port_range_start: int | None = None
+    vm_port_range_count: int | None = None
+    relay_token: str | None = None

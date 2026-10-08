@@ -27,7 +27,14 @@ from core_storefront.identity_lifecycle import (
     identity_subject_resource,
 )
 from fastapi import Request
+from market_contact_exchange import DELETE_INTRODUCTION_PAYLOADS_OPERATION
 from market_identity import EMPTY_BODY, Identity
+from market_storefront_kit import DealControlRouteError, StageEventRouteService
+from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
+    PoolOverrideContractError,
+    pool_override_contract,
+)
 from starlette.responses import JSONResponse, Response
 
 import market_storefront.container as _container
@@ -115,38 +122,10 @@ def _resource_import_descriptor(request: Request, raw: bytes) -> dict[str, Any]:
 
 
 def _system_events_resource(request: Request) -> str:
-    query = request.query_params
-    allowed = {
-        "limit",
-        "since_id",
-        "stream",
-        "listing_id",
-        "negotiation_id",
-        "stage",
-    }
-    if not set(query.keys()).issubset(allowed) or any(
-        len(query.getlist(name)) != 1 for name in query.keys()
-    ):
-        raise AuthError(
-            "system event query contains an unauthenticated alias", status_code=400
-        )
-    if query.get("stream", "false").lower() != "false":
-        raise AuthError(
-            "signed event streaming is unsupported; use authenticated polling",
-            status_code=400,
-        )
-    values: dict[str, str] = {
-        "limit": query.get("limit", "100"),
-        "since_id": query.get("since_id", "0"),
-        "stream": query.get("stream", "false").lower(),
-    }
-    for name in ("listing_id", "negotiation_id", "stage"):
-        value = query.get(name)
-        if value is not None:
-            values[name] = value
-    return "system-events?" + urlencode(
-        sorted(values.items()), quote_via=quote, safe=""
-    )
+    try:
+        return StageEventRouteService.signed_resource(request.query_params.multi_items())
+    except DealControlRouteError as exc:
+        raise AuthError(str(exc.detail), status_code=exc.status_code) from exc
 
 
 def _negotiation_list_resource(request: Request, listing_id: str) -> str:
@@ -180,6 +159,20 @@ def _negotiation_list_resource(request: Request, listing_id: str) -> str:
     return f"{listing_id}/negotiations?" + urlencode(
         sorted(values.items()), quote_via=quote, safe=""
     )
+
+
+def _pool_override_contract(
+    request: Request, *, method: str, body: Any
+) -> AdminRouteContract:
+    """Bind an override route through the pool-override kit's contract, which
+    the kit's client builds its resources with too."""
+    try:
+        contract = pool_override_contract(
+            method, request.query_params.multi_items(), body
+        )
+    except PoolOverrideContractError as exc:
+        raise AuthError(str(exc), status_code=400) from exc
+    return AdminRouteContract(contract.operation, contract.resource, contract.body)
 
 
 def _identity_contract(
@@ -256,6 +249,14 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     if matched is not None:
         return AdminRouteContract(*matched, body)
 
+    if path == POOL_OVERRIDES_PATH and method in {"PUT", "GET", "DELETE"}:
+        return _pool_override_contract(request, method=method, body=body)
+
+    if method == "GET" and path == "/api/v1/system/status":
+        return AdminRouteContract(
+            "admin_system_status", "system/status", EMPTY_BODY
+        )
+
     if method == "GET" and path == "/api/v1/system/events":
         if request.headers.get("last-event-id") is not None:
             raise AuthError("Last-Event-ID is not an authenticated query alias")
@@ -263,8 +264,39 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
             "admin_system_events", _system_events_resource(request), EMPTY_BODY
         )
 
+    if method == "POST" and path == "/api/v1/admin/lifecycle/pause":
+        return AdminRouteContract("admin_pause_lifecycle_loops", "lifecycle", body)
+
+    if method == "POST" and path == "/api/v1/admin/lifecycle/resume":
+        return AdminRouteContract("admin_resume_lifecycle_loops", "lifecycle", body)
+
+    prefix = "/api/v1/admin/lifecycle/"
+    if method == "POST" and path.startswith(prefix) and path.endswith("/run-cycle"):
+        loop = path[len(prefix) : -len("/run-cycle")]
+        return AdminRouteContract("admin_run_lifecycle_cycle", loop, body)
+
+    if method == "POST" and path.startswith(prefix) and path.endswith("/dry-run"):
+        # Its own operation name rather than the advance's: the two differ in
+        # whether they change anything, and a replayed request is answered
+        # from the recorded outcome of the operation it names.
+        loop = path[len(prefix) : -len("/dry-run")]
+        return AdminRouteContract("admin_dry_run_lifecycle_cycle", loop, body)
+
+    if method == "POST" and path == "/api/v1/admin/capacity/projections/refresh":
+        return AdminRouteContract(
+            "admin_refresh_site_projections", "capacity/projections", body
+        )
+
     if method == "POST" and path == "/api/v1/admin/portfolio/resources/import":
         return AdminRouteContract("admin_import_resources", "portfolio/resources", body)
+
+    prefix = "/api/v1/admin/introductions/"
+    if method == "DELETE" and path.startswith(prefix) and path.endswith("/payloads"):
+        return AdminRouteContract(
+            DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+            path[len(prefix) : -len("/payloads")],
+            EMPTY_BODY,
+        )
 
     prefix = "/api/v1/admin/deals/"
     if method == "POST" and path.startswith(prefix) and path.endswith("/interrupt"):

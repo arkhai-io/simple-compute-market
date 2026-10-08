@@ -69,7 +69,7 @@ def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
 def vm_pool_projection():
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
+        "pool_id": "pool-vm",
         "pool_metadata": {
             "policy_tags": {"deliverable_modes": ["vm"]},
         },
@@ -105,17 +105,21 @@ def patched_sqlite(db):
 
 
 async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
 
     listing = Listing.model_validate(order)
     wire = listing.model_dump(mode="json")
     binding = prepare_vm_listing_binding(
         listing_id=listing.listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": "site-a",
             "pool_id": "pool-vm",
-            "resource_id": listing.offer_resource.resource_id,
-            "gpu_count": listing.offer_resource.gpu_count,
+            "resource_id": listing.listing_resource.resource_id,
+            "listing_shape": {"gpu": {
+                "count": listing.listing_resource.gpu_count,
+                "model": listing.listing_resource.gpu_model,
+            }},
         },
     )
     await db.upsert_listing_with_binding(
@@ -123,7 +127,7 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
         status="open",
         created_at="2026-08-11T00:00:00",
         updated_at="2026-08-11T00:00:00",
-        offer_resource=wire["offer_resource"],
+        listing_resource=wire["listing_resource"],
         fulfillment_resource=None,
         max_duration_seconds=listing.max_duration_seconds,
         storefront_url=listing.storefront_url,
@@ -140,13 +144,13 @@ def _compute_order(listing_id: str) -> dict:
         "listing_id": listing_id,
         "storefront_url": BASE_URL_OVERRIDE,
         "seller_principal": _SELLER_PRINCIPAL,
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": f"res-{listing_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "test",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         "accepted_escrows": [{
             "chain_name": "anvil",
@@ -186,16 +190,16 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    service._parse_offer_and_escrows(
+    service._parse_listing_resource_and_escrows(
         CreateListingRequest(
-            offer={
+            listing_resource={
                 "resource_type": "compute",
                 "resource_id": "resource-1",
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "region": "test",
                 "sla": 99.0,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             accepted_escrows=[
                 {
@@ -255,12 +259,12 @@ class TestPublishOrderRecordsPublications:
             "listing_id": "legacy-invalid",
             "storefront_url": BASE_URL_OVERRIDE,
             "seller_principal": _SELLER_PRINCIPAL,
-            "offer_resource": {
+            "listing_resource": {
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "sla": 99.9,
                 "region": "test",
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             "accepted_escrows": [],
         }
@@ -279,11 +283,11 @@ class TestPublishOrderRecordsPublications:
 
     @pytest.mark.asyncio
     async def test_mutated_listing_model_is_revalidated_before_publish(self, db):
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         listing = Listing.model_validate(_compute_order("mutated-listing"))
-        listing.offer_resource.resource_id = None
-        listing.offer_resource.pool_id = None
+        listing.listing_resource.resource_id = None
+        listing.listing_resource.pool_id = None
         factory = Mock()
 
         with settings_overrides(
@@ -492,7 +496,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"
@@ -541,7 +546,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"

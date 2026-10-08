@@ -88,19 +88,20 @@ async def _persist_accepted_negotiation(
             "payload": {"pool_id": pool_id},
         },
         last_reconciled_at=timestamp,
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,
         status="open",
         created_at=timestamp,
         updated_at=timestamp,
-        offer_resource={
+        listing_resource={
             "resource_id": f"resource-{listing_id}",
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         fulfillment_resource=None,
         max_duration_seconds=3600,
@@ -247,12 +248,19 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         {"anvil": SimpleNamespace(alkahest_address_config_path="/addresses.json")},
     )
 
+    # A bare `object()` here would pass whatever it was given straight to a
+    # mocked verifier, which is how a mechanism adapter reached a function
+    # that needs the chain client. The stub resolves a chain client the way
+    # the real adapter does, and the assertion below binds it.
+    chain_client = object()
+    mechanism_client = SimpleNamespace(chain_client=lambda chain: chain_client)
+
     prepared = await prepare_vm_settlement(
         domain=domain,
         escrow_uid="0xverified",
         negotiation_id="neg-1",
         local_principal=_SELLER,
-        mechanism_client=object(),
+        mechanism_client=mechanism_client,
         chain_name="anvil",
         request={"ssh_public_key": "ssh-ed25519 substituted"},
         sqlite_client=db,
@@ -277,6 +285,10 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert build_context.buyer_principal == _BUYER
     assert build_context.seller_principal == _SELLER
     verify.assert_awaited_once()
+    assert verify.await_args.kwargs["alkahest_client"] is chain_client, (
+        "escrow verification reads the chain through the alkahest client's "
+        "escrow codecs; the mechanism adapter does not carry them"
+    )
     assert (
         prepared.fulfillment_input.domain_input["provision"].ssh_public_key
         == "ssh-ed25519 accepted"
@@ -402,7 +414,10 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     outcome = await fulfill_vm_settlement(
         domain,
         prepared,
-        mechanism_client=object(),
+        # Peer evidence publication resolves the chain client from the
+        # mechanism adapter, so a bare object() is nothing the production
+        # path can use.
+        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
         sqlite_client=db,
     )
 
@@ -464,6 +479,50 @@ async def test_persist_outcome_preserves_legacy_ready_projection(db):
     assert json.loads(row["tenant_credentials"]) == {"password": "secret"}
 
 
+@pytest.mark.asyncio
+async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass(
+    tmp_path,
+):
+    """A VM that exists but whose lease or evidence step is pending is deferred:
+    the outcome says so, and the escrow is neither ready nor failed."""
+    deferred = {
+        "negotiation_id": "neg-1",
+        "escrow_uid": "0xescrow",
+        "site_id": "site-1",
+        "state": "deferred",
+        "domain_result": {
+            "status": "deferred",
+            "message": "lease registration did not complete after provisioning: down",
+        },
+    }
+    domain = build_vm_storefront_domain()
+    domain = replace(
+        domain,
+        fulfillment=replace(domain.fulfillment, fulfill=AsyncMock(return_value=deferred)),
+    )
+    db = SQLiteClient(
+        db_path=str(tmp_path / "deferred-fulfillment.db"),
+        registry=build_vm_storefront_registry(domain),
+    )
+    prepared = _prepared(db)
+    await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
+    status_before = (await db.load_escrow(escrow_uid="0xescrow"))["status"]
+
+    outcome = await fulfill_vm_settlement(
+        domain,
+        prepared,
+        mechanism_client=SimpleNamespace(chain_client=lambda chain: object()),
+        sqlite_client=db,
+    )
+    await persist_vm_settlement_outcome(prepared, outcome)
+
+    assert outcome.status == "deferred"
+    assert "lease registration" in outcome.reason
+    row = await db.load_escrow(escrow_uid="0xescrow")
+    assert row["status"] == status_before
+    assert row["status"] not in {"ready", "failed", "refunded"}
+
+
 def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
     serialized = serialize_settlement_job(
         {
@@ -485,10 +544,11 @@ def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
     assert "obligation_ref" not in serialized
 
 
-def test_storefront_installs_alkahest_registration():
+def test_storefront_installs_every_mechanism_registration():
     registry = build_storefront_settlement_registry()
 
     assert [registration.mechanism_id for registration in registry.registrations] == [
         "alkahest.v1",
         "arkhai.payments.v1",
+        "contact-exchange.v1",
     ]

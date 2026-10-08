@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_utils.cbv import cbv
 
-from compute_provisioning.contracts import (
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -26,8 +26,8 @@ from market_fulfillment import (
     ProviderNotFoundError,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 
 router = APIRouter(prefix="/fulfillment", tags=["fulfillment"])
 

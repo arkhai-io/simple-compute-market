@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from apicredits_storefront.services import credits_service_client, keys_lookup
-from domains.apicredits.settlement.credits_client import CreditsServiceClient
+from arkhai_apicredits.settlement.credits_client import CreditsServiceClient
 
 
 @pytest.mark.asyncio

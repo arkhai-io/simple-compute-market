@@ -23,6 +23,7 @@ class FakeSite:
         self.broken = broken
         self.reservations: dict[str, int] = {}
         self.committed: list[str] = []
+        self.committed_deals: list[dict | None] = []
         self.reserve_call_count = 0
         self._seq = 0
 
@@ -41,7 +42,7 @@ class FakeSite:
             "value": self.units,
             "available_units": self.available,
             "state": "available" if self.available else "leased",
-            "attributes": {"vm_host": "h"},
+            "attributes": {"host_id": "h"},
         }]
 
     async def probe(
@@ -82,11 +83,18 @@ class FakeSite:
 
     async def commit(self, *, resource_id, capacity_reservation_id=None,
                      lease_start_utc=None, lease_duration_seconds=None,
-                     lease_end_utc=None, idempotency_ref=None) -> None:
+                     lease_end_utc=None, idempotency_ref=None, deal_ref=None) -> dict:
         self._check()
         if capacity_reservation_id not in self.reservations:
             raise LookupError(f"unknown reservation {capacity_reservation_id}")
         self.committed.append(capacity_reservation_id)
+        self.committed_deals.append(deal_ref)
+        return {
+            "capacity_reservation_id": capacity_reservation_id,
+            "state": "leased",
+            "lease_start_utc": lease_start_utc,
+            "lease_end_utc": lease_end_utc,
+        }
 
     async def release(self, *, capacity_reservation_id=None, deal_ref=None, **extra):
         self._check()
@@ -142,13 +150,13 @@ async def test_reserve_fill_first_packs_then_falls_back():
     # dc-a (4 units) fills first…
     for _ in range(4):
         reserved = await client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             deal_ref={},
         )
         assert reserved["site"] == "dc-a"
     # …then dc-b takes the overflow.
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
     )
     assert reserved["site"] == "dc-b"
@@ -159,11 +167,11 @@ async def test_reserve_fill_first_packs_then_falls_back():
 async def test_reserve_returns_none_only_when_every_site_refuses():
     client, a, b = _aggregate()
     assert await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 6},
+        claim={"offering_mode": "vm", "gpu_count": 6},
         deal_ref={},
     ) is not None  # b fits
     assert await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 6},
+        claim={"offering_mode": "vm", "gpu_count": 6},
         deal_ref={},
     ) is None
 
@@ -173,7 +181,7 @@ async def test_reserve_falls_back_past_a_broken_site():
     client, a, b = _aggregate(placement=fill_first)
     a.broken = True
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
     )
     assert reserved["site"] == "dc-b"
@@ -185,7 +193,7 @@ async def test_most_available_spreads():
     # b (8 free) beats a (4 free).
     assert (
         await client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             deal_ref={},
         )
     )["site"] == "dc-b"
@@ -195,18 +203,23 @@ async def test_most_available_spreads():
 async def test_writes_route_to_the_owning_site():
     client, a, b = _aggregate(placement=fill_first)
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 2},
+        claim={"offering_mode": "vm", "gpu_count": 2},
         deal_ref={},
     )
     capacity_reservation_id = reserved["capacity_reservation_id"]
 
-    await client.commit(
+    committed = await client.commit(
         resource_id=reserved["resource_id"],
         capacity_reservation_id=capacity_reservation_id,
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 01:00",
+        deal_ref={"escrow_uid": "0xdeal"},
     )
     assert a.committed == [capacity_reservation_id]
+    # The deal reaches the owning site, which records its escrow.
+    assert a.committed_deals == [{"escrow_uid": "0xdeal"}]
+    # The owning site's recorded reservation, tagged with the site.
+    assert (committed["site"], committed["lease_end_utc"]) == ("dc-a", "2099-01-01 01:00")
 
     truncated = await client.truncate_lease(
         capacity_reservation_id=capacity_reservation_id, lease_end_utc="2026-01-01 00:00",
@@ -225,7 +238,7 @@ async def test_reserve_with_no_site_still_uses_placement_fan_out():
     mapping."""
     client, a, b = _aggregate(placement=fill_first)
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
         site=None,
     )
@@ -236,7 +249,7 @@ async def test_reserve_with_no_site_still_uses_placement_fan_out():
 async def test_reserve_pinned_to_a_site_reserves_there():
     client, a, b = _aggregate()
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
         site="dc-b",
     )
@@ -254,13 +267,13 @@ async def test_reserve_pinned_to_a_site_ignores_placement_preference():
     # Confirm placement really would pick the other site if left to
     # choose -- otherwise this test wouldn't actually exercise anything.
     unpinned = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
     )
     assert unpinned["site"] == "dc-b"
 
     pinned = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
         site="dc-a",
     )
@@ -272,7 +285,7 @@ async def test_reserve_pinned_to_an_unknown_site_raises():
     client, a, b = _aggregate()
     with pytest.raises(KeyError):
         await client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             deal_ref={},
             site="dc-ghost",
         )
@@ -287,7 +300,7 @@ async def test_reserve_pinned_to_a_broken_site_propagates_not_falls_back():
     a.broken = True
     with pytest.raises(ConnectionError):
         await client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             deal_ref={},
             site="dc-a",
         )
@@ -301,7 +314,7 @@ async def test_reserve_pinned_returns_none_on_refusal_not_an_exception():
     still returns None, same as the placement path's per-site refusal."""
     client, a, b = _aggregate()
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 99},
+        claim={"offering_mode": "vm", "gpu_count": 99},
         deal_ref={},
         site="dc-a",
     )
@@ -312,7 +325,7 @@ async def test_reserve_pinned_returns_none_on_refusal_not_an_exception():
 async def test_reserve_pinned_records_the_reservation_site():
     client, a, b = _aggregate()
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
         site="dc-b",
     )
@@ -334,7 +347,7 @@ async def test_reserve_by_placement_actually_calls_the_winning_sites_reserve():
     client, a, b = _aggregate(placement=fill_first)
     assert a.reserve_call_count == 0
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
     )
     assert reserved["site"] == "dc-a"
@@ -349,7 +362,7 @@ async def test_reserve_by_placement_calls_every_site_it_actually_falls_back_thro
     client, a, b = _aggregate(placement=fill_first)
     a.units = 0  # a refuses immediately, no capacity
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
     )
     assert reserved["site"] == "dc-b"
@@ -362,7 +375,7 @@ async def test_reserve_pinned_to_a_site_actually_calls_that_sites_reserve():
     client, a, b = _aggregate()
     assert b.reserve_call_count == 0
     await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={},
         site="dc-b",
     )
@@ -377,7 +390,7 @@ async def test_reserve_pinned_call_count_is_exactly_one_even_on_refusal():
     answering "no" without a live round trip."""
     client, a, b = _aggregate()
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 99},
+        claim={"offering_mode": "vm", "gpu_count": 99},
         deal_ref={},
         site="dc-a",
     )
@@ -391,7 +404,7 @@ async def test_cold_cache_fans_out_to_find_the_owner():
     every site and the holder answers."""
     client, a, b = _aggregate()
     reserved = await client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 5},
+        claim={"offering_mode": "vm", "gpu_count": 5},
         deal_ref={},
     )  # lands on b
     assert reserved["site"] == "dc-b"

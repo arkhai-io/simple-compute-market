@@ -10,6 +10,9 @@ Subcommands:
                  `market buy` on the buyer side.
     escrow       Seller-side escrow lifecycle (claim, refund, show).
     settlement    Inspect readiness and administer installed mechanisms.
+    pool-override
+                 Set, show, list, or delete the storefront's own terms and
+                 listing shapes for one site's pool.
     portfolio    Manage local resource portfolio data.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
@@ -28,6 +31,7 @@ from .cli_publish import register as register_publish_command
 from .groups.config import config_app
 from .groups.escrow import escrow_app
 from .groups.network import network_app
+from .groups.pool_overrides import pool_override_app
 from .groups.settlement import settlement_app
 
 app = typer.Typer(no_args_is_help=True)
@@ -133,6 +137,11 @@ app.add_typer(
     settlement_app,
     name="settlement",
     help="Inspect readiness and administer installed settlement mechanisms.",
+)
+app.add_typer(
+    pool_override_app,
+    name="pool-override",
+    help="Set, show, list, or delete the storefront's own terms for one site's pool.",
 )
 register_publish_command(app)
 

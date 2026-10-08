@@ -1,17 +1,20 @@
 """API-credit configuration and candidate hooks for kit-owned capacity."""
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from core_storefront.aggregation import PLACEMENT_POLICIES, AggregateCapacityClient
 from market_capacity_publication import (
+    run_capacity_event_pollers,
     CapacityBinding,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite as KitCapacitySite,
 )
 from market_identity import Identity, TrustedIdentitySet
+from market_storefront_kit import StorefrontLoopController
 
 SQLiteClientFactory = Callable[[], Any]
 
@@ -54,6 +57,7 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
     async def reconcile(context: CapacityReconcileContext) -> None:
         from apicredits_storefront.services.publication_service import (
             close_token_listings_after_capacity_change,
+            converge_registries,
             reopen_token_listings_after_capacity_change,
         )
         delta = context.delta
@@ -62,6 +66,7 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
             await close_token_listings_after_capacity_change(db, dict(context.availability))
         if delta is None or delta.kind == "released" or delta.kind in _MIXED:
             await reopen_token_listings_after_capacity_change(db, dict(context.availability))
+        await converge_registries(db)
     return reconcile
 
 
@@ -93,19 +98,36 @@ def build_capacity_client(sqlite_client_factory: SQLiteClientFactory) -> Aggrega
     return build_capacity_runtime(sqlite_client_factory).client()
 
 
-def capacity_binding_from_offer(offer: dict[str, Any] | str) -> CapacityBinding:
-    if isinstance(offer, str):
+def capacity_binding_from_listing_resource(listing_resource: dict[str, Any] | str) -> CapacityBinding:
+    if isinstance(listing_resource, str):
         import json
-        offer = json.loads(offer)
+        listing_resource = json.loads(listing_resource)
     return CapacityBinding(
-        str(offer.get("capacity_site_id") or ""),
-        str(offer.get("offering_mode") or ""),
-        str(offer.get("resource_id") or ""),
+        str(listing_resource.get("capacity_site_id") or ""),
+        str(listing_resource.get("offering_mode") or ""),
+        str(listing_resource.get("resource_id") or ""),
     )
 
 
-async def capacity_events_poller_loop() -> None:
+async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:
+    """Tail every quota authority's capacity-event feed under the loop controller.
+
+    The aggregate name is what the advance route addresses; each site's poller
+    gates under its own declared name, since the kit owns the fan-out.
+    """
+    # Imported when the loop starts: the steps module imports this one for the
+    # capacity runtime its step drains.
+    from apicredits_storefront.lifecycle_steps import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_loop_name,
+    )
     from apicredits_storefront.utils import config
     from apicredits_storefront.utils.sqlite_client import get_sqlite_client
     interval = float(config.settings.get("capacity.poll_interval", 5) or 5)
-    await build_capacity_runtime(get_sqlite_client).poll_events(interval_seconds=interval)
+    runtime = build_capacity_runtime(get_sqlite_client)
+    await run_capacity_event_pollers(
+        functools.partial(runtime.poll_events, interval_seconds=interval),
+        gate=loops.loop_gate(CAPACITY_EVENTS_POLLER),
+        site_gate=lambda site: loops.declare(capacity_site_loop_name(site)),
+        wait=loops.idle,
+    )

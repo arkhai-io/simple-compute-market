@@ -1,37 +1,71 @@
 ---
-# FRP Client Installation and Configuration
-# Install and configure FRP (Fast Reverse Proxy) client for secure remote access
+# VM-facing tunnel client.
+#
+# A host holds two reverse tunnels that answer to different authorities. This
+# role owns only the buyer-facing one: /etc/frp/frpc-vms.toml, carrying one
+# proxy per rented VM, added and removed continuously. The host's own
+# management tunnel is written when the host is prepared, outside this
+# repository, and no VM operation touches it.
+#
+# They cannot share a process: frpc.toml carries exactly one serverAddr,
+# serverPort, and auth.token at the top level and a proxy cannot override them,
+# so the moment the two layers may address different relays two clients follow
+# as a consequence rather than as a choice. Two files and two units also mean
+# re-running host setup cannot re-template a file holding live VM proxies.
 
-- name: Display FRP configuration
+- name: Report the relay this host's VM client will dial
   debug:
     msg:
-      - "FRP Server Address: {{ frp_server_addr | default('127.0.0.1') }}"
-      - "FRP Server Port: {{ frp_server_port | default(7000) }}"
+      - "Relay address: {{ frp_server_addr }}"
+      - "Relay port: {{ frp_server_port | default(7000) }}"
+      - "Client version: {{ frp_version }}"
 
-- name: Set FRP version
-  set_fact:
-    frp_version: "0.54.0"
+- name: Require a relay address for the VM tunnel client
+  # No default. A client configured against 127.0.0.1 starts, retries forever,
+  # and looks healthy while every VM on the host is unreachable.
+  assert:
+    that:
+      - frp_server_addr is defined
+      - frp_server_addr | length > 0
+    fail_msg: >-
+      frp_server_addr is required to configure the VM tunnel client. It is
+      supplied by the provisioning service from the relay the host's pool
+      references.
 
-- name: Check if FRP client is already installed
+- name: Require a relay admission token
+  # Previously frp_auth_token defaulted to a literal published in this
+  # repository, so a host initialized without a token was configured with a
+  # value anyone could read. Replacing that literal with a better literal would
+  # preserve the failure mode; an undefined token must fail the task.
+  assert:
+    that:
+      - frp_auth_token is defined
+      - frp_auth_token | length > 0
+    fail_msg: >-
+      frp_auth_token is required to configure the VM tunnel client. There is no
+      default: a published fallback token admits anyone holding this repository
+      to the relay.
+
+- name: Check whether the tunnel client binary is already installed
   stat:
     path: /usr/local/bin/frpc
   register: frpc_binary
 
-- name: Download FRP client
+- name: Download the tunnel client
   get_url:
     url: "https://github.com/fatedier/frp/releases/download/v{{ frp_version }}/frp_{{ frp_version }}_linux_amd64.tar.gz"
     dest: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
     mode: '0644'
   when: not frpc_binary.stat.exists
 
-- name: Extract FRP client archive
+- name: Extract the tunnel client archive
   unarchive:
     src: "/tmp/frp_{{ frp_version }}_linux_amd64.tar.gz"
     dest: /tmp
     remote_src: yes
   when: not frpc_binary.stat.exists
 
-- name: Install FRP client binary
+- name: Install the tunnel client binary
   copy:
     src: "/tmp/frp_{{ frp_version }}_linux_amd64/frpc"
     dest: /usr/local/bin/frpc
@@ -39,42 +73,47 @@
     remote_src: yes
   when: not frpc_binary.stat.exists
 
-- name: Create FRP configuration directory
+- name: Create the tunnel configuration directory
   file:
     path: /etc/frp
     state: directory
     mode: '0755'
 
-- name: Create FRP log directory
+- name: Create the tunnel log directory
   file:
     path: /var/log/frp
     state: directory
     mode: '0755'
 
-- name: Deploy FRP client configuration
+- name: Deploy the VM tunnel client configuration
+  # 0640: the file carries the relay admission token. World-readable would put
+  # a credential within reach of any account on the host, including a service
+  # account a later role adds for something unrelated.
   template:
-    src: frpc.toml.j2
-    dest: /etc/frp/frpc.toml
-    mode: '0644'
-  notify: restart frpc
+    src: frpc-vms.toml.j2
+    dest: /etc/frp/frpc-vms.toml
+    mode: '0640'
+    owner: root
+    group: root
+  notify: restart frpc-vms
 
-- name: Deploy FRP client systemd service
+- name: Deploy the VM tunnel client systemd unit
   template:
-    src: frpc.service.j2
-    dest: /etc/systemd/system/frpc.service
+    src: frpc-vms.service.j2
+    dest: /etc/systemd/system/frpc-vms.service
     mode: '0644'
   notify:
     - reload systemd
-    - restart frpc
+    - restart frpc-vms
 
-- name: Enable and start FRP client service
+- name: Enable and start the VM tunnel client
   systemd:
-    name: frpc
+    name: frpc-vms
     enabled: yes
     state: started
     daemon_reload: yes
 
-- name: Clean up temporary files
+- name: Clean up downloaded archive
   file:
     path: "{{ item }}"
     state: absent
@@ -83,15 +122,14 @@
     - "/tmp/frp_{{ frp_version }}_linux_amd64"
   when: not frpc_binary.stat.exists
 
-- name: Display FRP client status
+- name: Report VM tunnel client state
   debug:
     msg:
-      - "=== FRP Client Installation Complete ==="
-      - "FRP client installed and configured"
-      - "Service: frpc"
-      - "Config: /etc/frp/frpc.toml"
-      - "Logs: /var/log/frp/frpc.log"
+      - "=== VM tunnel client ready ==="
+      - "Unit: frpc-vms"
+      - "Config: /etc/frp/frpc-vms.toml"
+      - "Admin API: 127.0.0.1:{{ frp_admin_port | default(7400) }} (loopback only)"
+      - "Logs: /var/log/frp/frpc-vms.log"
       - ""
-      - "Check status: sudo systemctl status frpc"
-      - "View logs: sudo journalctl -u frpc -f"
-      - "View FRP logs: sudo tail -f /var/log/frp/frpc.log"
+      - "The host's own management tunnel is a separate unit, written when the"
+      - "host was prepared. No VM operation touches it."

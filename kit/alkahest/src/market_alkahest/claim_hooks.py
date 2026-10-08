@@ -417,6 +417,22 @@ class AlkahestConditionalEscrowClient:
             return _ConditionResult("pending", receipt_ref), state
         return _ConditionResult("ready", receipt_ref), state
 
+    def chain_client(self, chain_name: str | None = None) -> Any:
+        """Return the chain client this adapter resolves for ``chain_name``.
+
+        This adapter is the mechanism's materialize/check surface, built over
+        a chain-client resolver. Escrow verification is a different job: it
+        reads an attestation straight off the chain through the alkahest
+        client's own escrow codecs, so it needs the resolved client and not
+        this wrapper. Handing it the wrapper failed with
+        ``'AlkahestConditionalEscrowClient' object has no attribute 'erc20'``
+        -- after the escrow had already been created and paid for, which is
+        the worst place to discover a plumbing mismatch. Public so a caller
+        holding the mechanism client can reach the chain client it stands on
+        without reaching into composition for a second copy.
+        """
+        return self._client(chain_name or self._default_chain)
+
     def _context(
         self, obligation: dict[str, Any]
     ) -> tuple[str | None, Any, dict[str, Any], str | None]:

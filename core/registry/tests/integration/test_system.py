@@ -26,7 +26,7 @@ class TestHealth:
         from sqlalchemy import text as sql_text
 
         monkeypatch.setattr(
-            "src.api.system_routes.text",
+            "core_registry.api.system_routes.text",
             lambda _statement: sql_text("SELECT * FROM missing_health_table"),
         )
         with pytest.raises(RegistryClientError) as exc_info:
@@ -57,11 +57,11 @@ class TestSystemStats:
         assert stats.orders_by_status.get("closed", 0) == 0
 
     async def test_closed_order_counted(self, registry_client, db_session, maker_publisher):
-        from src.db.models import Listing, OrderStatusEnum
+        from core_registry.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
             listing_id="stats-closed-1",
             publisher_id=maker_publisher.publisher_id,
-            offer_resource={"gpu_model": "A100"},
+            listing_resource={"gpu_model": "A100"},
             accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "literal_fields": {"token": "USDC"}}],
             max_duration_seconds=3600,
             status=OrderStatusEnum.closed,

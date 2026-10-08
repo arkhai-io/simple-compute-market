@@ -8,6 +8,24 @@ step, no agent-card publication, and no heartbeat loop.
 import asyncio
 import logging
 from functools import partial
+
+from market_storefront.services.listing_identity_carryover import carry_over_seller_state
+from market_storefront.services.publication_terms import (
+    configured_family_rate_problems,
+    retired_pricing_configuration_keys,
+)
+from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
+    FULFILLMENT_RESUME,
+    INTRODUCTION_RETENTION,
+    NEGOTIATION_WATCHDOG,
+    SETTLEMENT_SERVICING,
+    PUBLICATION,
+    SITE_PROJECTION_POLLER,
+    idle,
+    loop_gate,
+    start_registered_loop,
+)
 from typing import Any
 
 from core_storefront.app_startup import (
@@ -17,6 +35,7 @@ from core_storefront.app_startup import (
     start_storefront_background_task,
 )
 from core_storefront.stage_log import stage_event
+from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
@@ -80,6 +99,35 @@ async def _preflight_provisioning() -> None:
             "service is reachable)."
         )
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
+
+
+def _require_readable_family_rates() -> None:
+    """Refuse to start with a configured family rate that cannot be read.
+
+    The configured defaults are the operator's own file: a rate in it that cannot
+    be read is a configuration error, not a pool to hold, and starting anyway
+    would hold every pool that falls through to it.
+    """
+    problems = configured_family_rate_problems()
+    if problems:
+        raise RuntimeError(
+            "configured family rates cannot be read: " + "; ".join(problems)
+        )
+
+
+def _report_retired_pricing_keys() -> None:
+    """Name pricing keys the configuration states that nothing reads any more.
+
+    They are accepted rather than refused, so an upgraded storefront starts with
+    its existing configuration; this is where an operator learns to remove them.
+    """
+    retired = retired_pricing_configuration_keys()
+    if retired:
+        logger.warning(
+            "[STARTUP] Configuration states retired pricing keys that are not "
+            "read: %s",
+            ", ".join(retired),
+        )
 
 
 def _maybe_join_zerotier_network() -> None:
@@ -161,15 +209,17 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 def _start_negotiation_watchdog(sqlite_client: Any) -> None:
     policy = _negotiation_watchdog_policy()
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="negotiation_watchdog",
+            name=NEGOTIATION_WATCHDOG,
             task_factory=partial(
                 run_negotiation_watchdog,
                 sqlite_client,
                 policy,
                 emit_stage_event=stage_event,
                 logger=logger,
+                paused=loop_gate(NEGOTIATION_WATCHDOG),
+                wait=idle,
             ),
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
@@ -179,7 +229,7 @@ def _start_negotiation_watchdog(sqlite_client: Any) -> None:
                 policy.timeout_seconds,
             ),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -220,14 +270,41 @@ def _start_settlement_servicing() -> None:
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="settlement_servicing",
-            task_factory=composition.worker.run,
+            name=SETTLEMENT_SERVICING,
+            task_factory=partial(
+                composition.worker.run,
+                paused=loop_gate(SETTLEMENT_SERVICING),
+                wait=idle,
+            ),
             log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
+    )
+
+
+def _start_introduction_retention() -> None:
+    """Every storefront composing contact exchange runs the retention sweep."""
+    import market_storefront.container as _container
+
+    composition = _container.resolved_contact_exchange
+    retention = composition.retention() if composition is not None else None
+    if retention is None:
+        return
+    start_registered_loop(
+        StorefrontBackgroundTask(
+            name=INTRODUCTION_RETENTION,
+            task_factory=partial(
+                run_introduction_retention_sweep,
+                retention,
+                paused=loop_gate(INTRODUCTION_RETENTION),
+                wait=idle,
+            ),
+            log_message="[STARTUP] Introduction retention sweep started",
+        ),
+        task_logger=logger,
     )
 
 
@@ -236,14 +313,14 @@ def _start_fulfillment_resume(sqlite_client: Any) -> None:
         fulfillment_resume_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="fulfillment_resume",
+            name=FULFILLMENT_RESUME,
             task_factory=partial(fulfillment_resume_loop, sqlite_client),
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -251,12 +328,27 @@ def _start_capacity_events_poller(sqlite_client: Any) -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="capacity_events_poller",
+            name=CAPACITY_EVENTS_POLLER,
             task_factory=partial(capacity_events_poller_loop, sqlite_client),
         ),
-        logger=logger,
+        task_logger=logger,
+    )
+
+
+def _start_publication_loop(sqlite_client: Any) -> None:
+    # Publication follows what sites declare without an operator command; the
+    # loop is held by the lifecycle pause like every other loop.
+    del sqlite_client
+    from market_storefront.services.publication_loop import publication_loop
+
+    start_registered_loop(
+        StorefrontBackgroundTask(
+            name=PUBLICATION,
+            task_factory=publication_loop,
+        ),
+        task_logger=logger,
     )
 
 
@@ -271,12 +363,12 @@ def _start_site_projection_poller(sqlite_client: Any) -> None:
         site_projection_poller_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
-            name="site_projection_poller",
+            name=SITE_PROJECTION_POLLER,
             task_factory=partial(site_projection_poller_loop, sqlite_client),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -323,6 +415,15 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
         (
             StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),
             StorefrontStartupStep(
+                "configured_family_rates",
+                _require_readable_family_rates,
+            ),
+            StorefrontStartupStep(
+                "retired_pricing_keys",
+                _report_retired_pricing_keys,
+                continue_on_error=True,
+            ),
+            StorefrontStartupStep(
                 "negotiation_thread_store",
                 _initialize_negotiation_thread_store,
             ),
@@ -330,6 +431,13 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 "seed_resources",
                 _seed_resources_if_empty,
                 error_message="[STARTUP] Resource seeding failed: %s",
+            ),
+            # Before any lifecycle loop: the first publication cycle would
+            # otherwise publish a pre-shape listing's successor without the
+            # seller's close or pause. Fail-fast, for the same reason.
+            StorefrontStartupStep(
+                "listing_identity_carryover",
+                partial(carry_over_seller_state, sqlite_client),
             ),
             StorefrontStartupStep(
                 "negotiation_watchdog",
@@ -345,6 +453,9 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
             StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
+            StorefrontStartupStep(
+                "introduction_retention", _start_introduction_retention
+            ),
             StorefrontStartupStep(
                 "fulfillment_resume",
                 partial(_start_fulfillment_resume, sqlite_client),
@@ -362,6 +473,10 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep(
                 "capacity_events_poller",
                 partial(_start_capacity_events_poller, sqlite_client),
+            ),
+            StorefrontStartupStep(
+                "publication_loop",
+                partial(_start_publication_loop, sqlite_client),
             ),
         ),
         logger=logger,

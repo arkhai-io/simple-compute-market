@@ -5,17 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from domains.vms.settlement import submit_compute_fulfillment
+from arkhai_vms_settlement import submit_compute_fulfillment
+from market_capacity_publication import CapacityBinding
 
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 
 logger = logging.getLogger(__name__)
-_background_tasks: set[asyncio.Task[None]] = set()
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
@@ -117,10 +116,12 @@ async def _commit_capacity_hold(
 ) -> dict[str, Any] | None:
     """Secure an acceptance-time hold for this deal, or None to reserve fresh.
 
-    Committing before provisioning turns the soft hold into a lease
-    immediately, so it cannot lapse mid-provision; the lease window set
-    here starts at settlement and is refreshed to provision-complete +
-    duration by the normal post-provision commit.
+    Committing before provisioning turns the soft hold into the deal's lease
+    immediately, so it cannot lapse mid-provision. The window set here is the
+    lease's: a lease with no negotiated start begins at settlement, because
+    the capacity is reserved for the deal's exclusive use from then. The
+    commit also records the deal's escrow, which a hold placed at negotiation
+    lacks.
     """
     if not held_reservation or not held_reservation.get("capacity_reservation_id"):
         return None
@@ -144,6 +145,7 @@ async def _commit_capacity_hold(
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=escrow_uid,
+            deal_ref={"escrow_uid": escrow_uid},
         )
     except Exception as exc:
         logger.warning(
@@ -174,7 +176,10 @@ async def _commit_fresh_reservation(
     stage_event: StageEventFn,
     start_utc: str | None = None,
 ) -> None:
-    """Promote a settlement-time fallback reservation before provisioning."""
+    """Promote a settlement-time fallback reservation before provisioning.
+
+    The window committed here is the lease's, as for an acceptance hold.
+    """
     capacity_reservation_id = reserved.get("capacity_reservation_id")
     resource_id = reserved.get("resource_id")
     if not capacity_reservation_id:
@@ -190,6 +195,7 @@ async def _commit_fresh_reservation(
         lease_start_utc=lease_start_utc,
         lease_end_utc=lease_end_utc,
         idempotency_ref=escrow_uid,
+        deal_ref={"escrow_uid": escrow_uid},
     )
     stage_event(
         "provision",
@@ -205,15 +211,12 @@ async def _commit_fresh_reservation(
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
-ScheduleShutdownFn = Callable[..., Awaitable[Any]]
-RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
 async def _build_vm_fulfillment_context(
     *,
     escrow_uid: str,
-    vm_target: str,
     ssh_public_key: str,
     order: str | dict[str, Any] | None,
     duration_seconds: int,
@@ -230,24 +233,11 @@ async def _build_vm_fulfillment_context(
         settlement_mechanism=settlement_mechanism,
         chain_configs=chain_configs,
     )
-    connectivity = None
-    try:
-        from market_storefront.services.fulfillment_service import (
-            _connectivity_settings_from_storefront_config,
-        )
-
-        connectivity = _connectivity_settings_from_storefront_config()
-    except Exception:
-        logger.exception(
-            "[PROVISIONING] Failed to resolve connectivity context for escrow %s",
-            escrow_uid,
-        )
-    request_payload: dict[str, Any] = {
-        "vm_target": vm_target,
-        "ssh_pubkey": ssh_public_key,
-    }
-    if connectivity:
-        request_payload["connectivity"] = connectivity
+    # No connectivity terms and no guest name; see the sibling builder in
+    # fulfillment_service for why a storefront names neither. The two payloads
+    # must stay identical: a VM reached differently depending on which path
+    # requested it is a defect visible on only one of them.
+    request_payload: dict[str, Any] = {"ssh_pubkey": ssh_public_key}
     context = {
         "kind": "vm.storefront.fulfillment-context",
         "schema_version": 1,
@@ -303,7 +293,7 @@ async def _reserve_capacity_for_obligation(
     )
     if reserved is None:
         claim = dict(required_attributes or {})
-        claim["executor_kind"] = "vm"
+        claim["offering_mode"] = "vm"
         reserved = await capacity.reserve(
             binding,
             claim=claim,
@@ -343,8 +333,6 @@ async def fulfill_vm_obligation(
     capacity: CapacityClientLike,
     stage_event: StageEventFn,
     provision_vm: ProvisionVmFn,
-    schedule_shutdown: ScheduleShutdownFn,
-    register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
     site_id: str | None = None,
@@ -352,11 +340,13 @@ async def fulfill_vm_obligation(
     """Provision VM capacity and submit settlement fulfillment.
 
     ``held_reservation`` is the TTL soft hold the negotiation's
-    acceptance placed (two-phase reserve). It is committed into a lease
-    *before* provisioning starts — that removes the
-    hold-expires-during-provisioning race entirely, and the post-provision
-    commit below simply refreshes the lease window. A hold that already
-    lapsed falls back to the plain atomic reserve.
+    acceptance placed (two-phase reserve). It is committed into the deal's
+    lease *before* provisioning starts, which removes the
+    hold-expires-during-provisioning race entirely; that commit records the
+    lease's window. A hold that already lapsed falls back to the plain atomic
+    reserve, committed the same way. Provisioning records the lease's target
+    when the fulfillment becomes active, so nothing after provisioning writes
+    the lease.
     """
     fulfillment_uid = None
     connection_details: str | None = None
@@ -364,7 +354,6 @@ async def fulfill_vm_obligation(
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
     order_id: str | None = None
-    vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(
         "[SETTLEMENT] Order for fulfillment: type=%s keys=%s",
@@ -375,7 +364,6 @@ async def fulfill_vm_obligation(
     try:
         plan, recovery_context = await _build_vm_fulfillment_context(
             escrow_uid=escrow_uid,
-            vm_target=vm_target,
             ssh_public_key=ssh_public_key,
             order=order,
             duration_seconds=duration_seconds,
@@ -400,6 +388,13 @@ async def fulfill_vm_obligation(
         )
 
         binding = await capacity_binding_for_listing(get_sqlite_client(), listing_id)
+        if not isinstance(binding, CapacityBinding):
+            # Publication gives an unbacked listing no settlement option that
+            # reaches this path; refuse before any reservation if one does.
+            raise RuntimeError(
+                "VM fulfillment requires a capacity-backed listing; "
+                f"listing {listing_id!r} has no admission authority"
+            )
         if site_id is not None and site_id != binding.site_id:
             raise RuntimeError("requested fulfillment site differs from listing binding")
 
@@ -433,11 +428,8 @@ async def fulfill_vm_obligation(
         # response (kit/site's opaque-reservation boundary -- see
         # openspec/specs/site-capacity/spec.md); reserved.get("vm_host")
         # is therefore always None. Kept as a variable, not deleted,
-        # because provision_vm/register_lease/schedule_shutdown already
-        # treat it as an accepted-but-unused compatibility parameter
-        # (documented on _do_provision and _register_vm_lease_with_settings)
-        # -- removing it from every call site is a larger signature change
-        # than stripping it from the API response requires.
+        # because provision_vm treats it as an accepted-but-unused
+        # compatibility parameter (documented on _do_provision).
         reserved_vm_host = reserved.get("vm_host")
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
@@ -509,7 +501,6 @@ async def fulfill_vm_obligation(
         provision_result = await provision_vm(
             ssh_public_key,
             vm_host=reserved_vm_host,
-            vm_target=vm_target,
             capacity_reservation_id=reserved_capacity_reservation_id,
             escrow_uid=escrow_uid,
             on_job_submitted=_record_fulfillment_id,
@@ -558,37 +549,6 @@ async def fulfill_vm_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    lease_start_utc, lease_end_utc = _lease_window_strings(
-        start_utc=start_utc,
-        duration_seconds=duration_seconds,
-    )
-
-    if reserved_capacity_reservation_id:
-        # capacity_reservation_id is the durable identity commit() actually
-        # needs; resource_id is accepted only for a resource-id-only lookup
-        # path with no current caller (see CapacityLedgerService.commit's
-        # docstring) and is never guaranteed present -- the opaque
-        # capacity-reservation boundary negotiates on pooled capacity, not a
-        # specific physical resource, so a real reservation response
-        # legitimately omits it. Gating this refresh on resource_id would
-        # skip the lease-window refresh for every ordinary pool-scoped
-        # reservation, which is the common case, not an edge case.
-        try:
-            await capacity.commit(
-                binding,
-                resource_id=reserved_resource_id,
-                capacity_reservation_id=reserved_capacity_reservation_id,
-                lease_start_utc=lease_start_utc,
-                lease_end_utc=lease_end_utc,
-                idempotency_ref=escrow_uid,
-            )
-        except Exception as lease_err:
-            logger.warning(
-                "[LOCAL DB] Failed to mark reservation %s as leased after provisioning: %s",
-                reserved_capacity_reservation_id,
-                lease_err,
-            )
-
     cred_order_id = seller_order_id or order_id
     if authentication and cred_order_id:
         try:
@@ -628,63 +588,37 @@ async def fulfill_vm_obligation(
                 cred_err,
             )
 
-    if reserved_capacity_reservation_id and vm_target and escrow_uid:
-        # register_lease's downstream LeaseRegistration call does not read
-        # resource_id/vm_host at all (executor_ref self-heals from the
-        # commit-time-written reservation.vm_host instead -- see
-        # openspec/specs/physical-provisioning/spec.md's lease-registration
-        # requirement). Requiring them here would make lease registration,
-        # and therefore the watchdog's ability to auto-release this VM,
-        # depend on the negotiation having pinned a specific physical
-        # resource -- which is the exception, not the ordinary pool-scoped
-        # capacity-reservation case this path exists to serve.
-        try:
-            await register_lease(
-                resource_id=reserved_resource_id,
-                capacity_reservation_id=reserved_capacity_reservation_id,
-                escrow_uid=escrow_uid,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-                lease_start_utc=lease_start_utc,
-                lease_end_utc=lease_end_utc,
-            )
-            logger.info(
-                "[LEASE] Registered lease with provisioning service "
-                "(reservation=%s escrow=%s expires=%s)",
-                reserved_capacity_reservation_id,
-                escrow_uid,
-                lease_end_utc,
-            )
-        except Exception as lease_err:
-            logger.warning(
-                "[LEASE] Failed to register lease with provisioning service "
-                "(reservation=%s escrow=%s): %s - watchdog will not auto-release "
-                "this resource",
-                reserved_capacity_reservation_id,
-                escrow_uid,
-                lease_err,
-            )
+    def _deferred(step: str, error: Any) -> dict[str, Any]:
+        """The VM exists, but a step after it did not complete.
 
-    async def _schedule_shutdown_best_effort() -> None:
-        try:
-            await schedule_shutdown(
-                lease_end_utc,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-            )
-        except Exception as shutdown_err:
-            logger.warning(
-                "[LEASE] Failed to schedule VM expiry with provisioning service "
-                "(resource=%s escrow=%s vm=%s): %s",
-                reserved_resource_id,
-                escrow_uid,
-                vm_target,
-                shutdown_err,
-            )
-
-    shutdown_task = asyncio.create_task(_schedule_shutdown_best_effort())
-    _background_tasks.add(shutdown_task)
-    shutdown_task.add_done_callback(_background_tasks.discard)
+        Settlement leaves the deal open rather than failing it with a running
+        VM; the fulfillment resume pass finishes it from the recorded
+        fulfillment, submitting the evidence, without provisioning again.
+        """
+        logger.warning(
+            "[SETTLEMENT] Escrow %s deferred after provisioning: %s did not "
+            "complete (%s); the fulfillment resume pass finishes it",
+            escrow_uid,
+            step,
+            error,
+        )
+        stage_event(
+            "settlement",
+            "deferred_after_provisioning",
+            listing_id=order_id,
+            escrow_uid=escrow_uid,
+            capacity_reservation_id=reserved_capacity_reservation_id,
+            step=step,
+            error=str(error),
+        )
+        return {
+            "status": "deferred",
+            "message": f"{step} did not complete after provisioning: {error}",
+            "escrow_uid": escrow_uid,
+            "capacity_reservation_id": reserved_capacity_reservation_id,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
 
     try:
         if settlement_mechanism == "arkhai.payments.v1":
@@ -699,32 +633,9 @@ async def fulfill_vm_obligation(
                 connection_details=connection_details,
             )
     except Exception as error:
-        logger.error(
-            "[SETTLEMENT] EVENT=settlement_failed_after_provisioning "
-            "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
-            "error=%s",
-            escrow_uid,
-            order_id,
-            reserved_resource_id,
-            reserved_capacity_reservation_id,
-            error,
-        )
-        stage_event(
-            "settlement",
-            "failed_after_provisioning",
-            listing_id=order_id,
-            escrow_uid=escrow_uid,
-            resource_id=reserved_resource_id,
-            capacity_reservation_id=reserved_capacity_reservation_id,
-            error=str(error),
-        )
-        return {
-            "status": "error",
-            "message": f"Fulfillment evidence publication failed after provisioning: {error}",
-            "escrow_uid": escrow_uid,
-            "connection_details": None,
-            "ssh_public_key": ssh_public_key,
-        }
+        # The VM is running: publishing its evidence is retried by the
+        # fulfillment resume pass, never answered by failing the deal.
+        return _deferred("fulfillment evidence publication", error)
 
     if order_id:
         try:
@@ -761,7 +672,6 @@ async def fulfill_vm_obligation(
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
         capacity_reservation_id=reserved_capacity_reservation_id,
-        lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,
         order_id=order_id,
     )

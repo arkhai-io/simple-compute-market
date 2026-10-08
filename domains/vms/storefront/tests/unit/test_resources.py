@@ -2,20 +2,20 @@
 
 import pytest
 
-from domains.vms.listings.models import (
+from arkhai_vms_listings.models import (
     ComputeResource,
     ERC20TokenMetadata,
     GPUModel,
     Region,
     TokenResource,
 )
-from domains.vms.listings.resources import (
+from arkhai_vms_listings.resources import (
     adapt_db_resource_to_domain_resource,
     adapt_domain_resource_to_db_resource,
     parse_resource_from_dict,
     register_resource_adapter,
 )
-from domains.vms.listings import resources as _resource_registry
+from arkhai_vms_listings import resources as _resource_registry
 
 USDT = ERC20TokenMetadata(
     symbol="USDT",

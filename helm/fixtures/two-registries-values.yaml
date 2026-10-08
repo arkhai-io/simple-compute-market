@@ -1,0 +1,29 @@
+api-credits-registry:
+  enabled: true
+  identity:
+    authority: registry-credits
+    principal:
+      scheme: ed25519
+      identifier: "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+    credentialSecret:
+      name: credits-registry-identity
+      key: credential
+  descriptor:
+    baseUrl: "https://credits.example.test"
+    displayName: "Example API Credits Registry"
+    operatorIdentity: "Example operator"
+    accessAcquisitionPointer: ""
+  auth:
+    bootstrapKeySecret:
+      name: credits-registry-bootstrap
+      key: api-key
+    adminKeySecret:
+      name: credits-registry-admin
+      key: api-key
+  persistence:
+    enabled: true
+    storageClass: standard
+    size: 4Gi
+    accessMode: ReadWriteOnce
+    mountPath: /var/lib/arkhai-registry
+    existingClaim: ""

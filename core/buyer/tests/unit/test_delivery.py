@@ -44,6 +44,22 @@ def test_the_buyer_delivers_the_sellers_half(tmp_path) -> None:
     assert written["agreement_ref"] == "neg-1"
 
 
+def test_documented_delivery_section_is_loaded(tmp_path) -> None:
+    target = tmp_path / "introductions.jsonl"
+    config = tmp_path / "buyer.toml"
+    config.write_text(
+        "[Delivery]\nenabled = ['file']\n\n[Delivery.file]\npath = "
+        f"'{target}'\n",
+        encoding="utf-8",
+    )
+
+    sinks = delivery.load_buyer_delivery_sinks(str(config))
+    outcomes = delivery.deliver_introduction(_projection(), sinks=sinks)
+
+    assert [outcome.delivered for outcome in outcomes] == [True]
+    assert json.loads(target.read_text(encoding="utf-8"))["contact"] == SELLER_CONTACT
+
+
 def test_no_delivery_configured_delivers_nothing(tmp_path) -> None:
     config = tmp_path / "buyer.toml"
     config.write_text("[registry]\nurls = []\n", encoding="utf-8")

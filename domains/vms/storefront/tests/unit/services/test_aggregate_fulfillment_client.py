@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from compute_provisioning import (
-    ComputeProvisioningError,
+from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -22,7 +22,7 @@ from compute_provisioning import (
     FulfillmentStatusResponse,
 )
 from core_storefront.aggregation import AggregateCapacityClient
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_storefront.services.capacity_client import AggregateFulfillmentClient
 
 

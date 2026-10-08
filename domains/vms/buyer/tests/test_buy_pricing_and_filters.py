@@ -20,7 +20,7 @@ from market_core.schemas import (
 )
 from registry_client import FilterSpecResponse
 
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
@@ -29,7 +29,7 @@ from domains.vms.buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 def _config(registry_url: str = "http://reg") -> BuyConfig:

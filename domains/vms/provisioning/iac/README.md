@@ -51,15 +51,26 @@ older control-node runtimes. Updating the pins should be paired with a matching
 Ansible baseline update and validation of the playbook syntax checks below.
 
 ### 3. Setup Inventory
-Configure your hosts in `inventory/hosts`:
+The inventory is a directory with two files, and every command below runs
+against the whole directory (`-i inventory/`):
+
+- `inventory/hosts` (from `hosts.example`): infrastructure you manage with
+  these playbooks.
+- `inventory/provisioning-hosts.ini` (from `provisioning-hosts.example`): the
+  hosts you sell. The provisioning service is given this file alone and
+  registers every host entry in it, whatever its section.
 
 ```ini
+# inventory/hosts
 [frp_servers]
 proxy-dev ansible_host=<your-frp-server-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
 
 [provisioning_servers]
 provisioning-dev ansible_host=<your-provisioning-server-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
+```
 
+```ini
+# inventory/provisioning-hosts.ini
 [kvm_hosts]
 kvm1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file=<key-path>
 # Add more KVM hosts as needed
@@ -68,7 +79,8 @@ kvm1 ansible_host=<kvm-host-ip> ansible_user=<user> ansible_ssh_private_key_file
 **Inventory Group Descriptions**:
 - `[frp_servers]`: Public-facing VPS/servers running the FRP server daemon. Acts as the secure tunnel entry point for VM SSH access and hosts the FRP admin dashboard. Targeted by `frp-server-setup.yaml` and `docker-app-setup.yaml` playbooks.
 - `[provisioning_servers]`: Servers running the Async Provisioning Service. These handle inbound VM provisioning API requests, manage the job queue, and execute Ansible playbooks against KVM hosts. Targeted by `docker-app-setup.yaml`.
-- `[kvm_hosts]`: Bare-metal or dedicated servers running KVM/QEMU hypervisors where guest VMs are created and managed. These are the actual compute nodes. Targeted by `vm-setup.yaml` and `vm-operations.yaml` playbooks.
+- `[kvm_hosts]`: Bare-metal or dedicated servers running KVM/QEMU hypervisors where guest VMs are created and managed. These are the actual compute nodes, and the hosts the provisioning service sells. Targeted by `vm-setup.yaml` and `vm-operations.yaml` playbooks.
+- `[kvms]`: The VMs the VM-operations playbook has created, recorded in `inventory/hosts` when each is created and removed when it is undefined. Not edited by hand.
 
 ### 4. Generate SSH Keypair
 Generate an ed25519 SSH keypair to be used for provisioning operations. The **private key** will be injected into the Docker app (Async Provisioning Service) as a credential for connecting to VMs, and the **public key** will be added to `authorized_keys` on the KVM host during `vm-setup`.
@@ -127,7 +139,7 @@ Pass the encoded credentials via `SSH_PRIVATE_KEY` and `MANAGEMENT_VARS_YAML` in
 export SSH_PRIVATE_KEY=$(base64 < ~/.ssh/provisioner_ed25519 | tr -d '\n')
 export MANAGEMENT_VARS_YAML=$(base64 < inventory/management-vars.yaml | tr -d '\n')
 
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=<gcp-project-id>" \
   -e "gcp_registry_region=<registry-region>" \
@@ -211,7 +223,7 @@ make validate-tests
 
 These targets currently cover:
 
-- inventory parsing via `ansible-inventory -i ansible/inventory/hosts --list`
+- inventory parsing via `ansible-inventory -i ansible/inventory/ --list`
 - syntax checks for:
   - `playbooks/frp/frp-server-setup.yaml`
   - `playbooks/frp/docker-app-setup.yaml`
@@ -311,7 +323,7 @@ The FRP server acts as a secure bridge for buyers to access their leased VM reso
 **Note**: This is optional as direct port SSH access is still supported, but FRP is highly recommended for enhanced security as it eliminates the need to expose multiple ports on your infrastructure.
 
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
   -e "frp_domain=vm.arkhai.io" \
   -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
@@ -325,7 +337,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
 This step configures the required drivers, BIOS setup adjustments on the kernel, installs necessary packages, and prepares the host for VM management, especially when using FRP for remote access.
 
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "@build-vars.yaml" \
   -e "frp_server_addr=<frp-server-ip>" \
   -e "frp_server_port=7000" \
@@ -350,7 +362,7 @@ Create a variables file with your VM configuration and run the playbook:
 
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu  
 vm_action: create
 vm_ram: 4096
@@ -365,7 +377,7 @@ frp_server_addr: "<frp-server-vm-ip-address>"
 frp_dashboard_password: "<some-random-dashboard-api-password>"                        
 EOF                                 
     
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
     --limit kvm1
@@ -373,8 +385,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Parameter Explanations**:
 - `@inventory/management-vars.yaml`: Variables file containing Golden Image Management configuration (Image Name, Bucket and Image Path, Root SSH details)
-- `vm_host`: The KVM host where the VM will be created (from your inventory)
-- `vm_target`: Name of the VM to create
+- `host_id`: The host where the VM will be created (from your inventory)
+- `vm_target`: Name of the VM, which must satisfy every use the playbooks make of it (see [Guest names](#guest-names))
 - `vm_action`: Action to perform (create, start, stop, etc.)
 - `vm_ram`: RAM allocation in MB (4096 = 4GB)
 - `vm_vcpus`: Number of virtual CPUs to allocate
@@ -400,15 +412,15 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 ### 4. Monitor VM Performance
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --limit kvm1
 ```
 
 **Parameter Explanations**:
-- `vm_host`: The KVM host where the VM is running (from your inventory)
+- `host_id`: The host where the VM is running (from your inventory)
 - `vm_target`: Name of the VM to monitor
 - `vm_action`: Action to perform (monitor for performance metrics)
 
@@ -416,8 +428,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Shutdown VM Gracefully**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
     --limit kvm1
@@ -425,8 +437,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Reboot VM**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
     --limit kvm1
@@ -434,8 +446,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Force Shutdown/Destroy VM**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
     --limit kvm1
@@ -443,9 +455,9 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Delete/Remove VM Completely**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
     --limit kvm1
@@ -453,8 +465,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Schedule VM Lease End** (set when the lease will expire and VM will be destroyed):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
@@ -462,7 +474,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```
 
 **Parameter Explanations** (applies to all Additional VM operation commands above):
-- `vm_host`: The KVM host where the VM operation will be performed (from your inventory)
+- `host_id`: The host where the VM operation will be performed (from your inventory)
 - `vm_target`: Name of the VM to operate on
 - `vm_action`: Action to perform (shutdown, reboot, destroy, undefine)
 
@@ -606,7 +618,7 @@ packer_variables:
 
 **Standard Host Setup (Base Ubuntu Image)**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "@build-vars.yaml" \
   -e "frp_server_addr=192.168.100.61" \
   -e "frp_server_port=7000" \
@@ -617,7 +629,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Host Setup with Libvirt Security Skip** (when BIOS/OS doesn't support SELinux):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "@build-vars.yaml" \
   -e "frp_server_addr=192.168.100.61" \
   -e "frp_server_port=7000" \
@@ -629,7 +641,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Golden Image Build Setup**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "@build-vars.yaml" \
   -e "frp_server_addr=192.168.100.61" \
   -e "frp_server_port=7000" \
@@ -644,7 +656,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Minimal Setup (No FRP, Base Image Only)**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "skip_libvirt_security=true" \
   --limit kvm1
@@ -652,7 +664,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Inject a Single SSH Public Key into authorized_keys**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
   --limit kvm1
@@ -660,7 +672,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Inject Multiple SSH Public Keys into authorized_keys**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e '{"vm_ssh_authorized_keys": ["ssh-ed25519 AAAA... user@host", "ssh-rsa BBBB... other@host"]}' \
   --limit kvm1
@@ -668,7 +680,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Inject SSH Key for a Specific User**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   -e "vm_ssh_key_user=ubuntu" \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
@@ -677,7 +689,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Only Inject SSH Keys (skip everything else)**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "vm_ssh_authorized_key='ssh-ed25519 AAAA... user@host'" \
   --tags "ssh_keys" \
   --limit kvm1
@@ -686,18 +698,18 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 **Setup with Specific Tags** (selective installation):
 ```bash
 # Only install system packages and KVM
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "image_setup_type=scratch" \
   --tags "system_setup,kvm_config" \
   --limit kvm1
 
 # Only configure GPU passthrough
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   --tags "gpu_passthrough" \
   --limit kvm1
 
 # Only setup FRP client
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "frp_server_addr=192.168.100.61" \
   -e "frp_server_port=7000" \
   -e "frp_auth_token=your-frp-token-here" \
@@ -705,7 +717,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
   --limit kvm1
 
 # Only build golden image (requires prior host setup)
-ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
+ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
   -e "@build-vars.yaml" \
   -e "vm_image_type=golden" \
   -e "packer_build_name=ubuntu_noble" \
@@ -760,7 +772,7 @@ ansible-playbook -i inventory/hosts playbooks/host-kit/vm-setup.yaml \
 
 **Standard FRP Server Setup with SSL**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
   -e "frp_domain=vm.arkhai.io" \
   -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
@@ -768,7 +780,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
 
 **FRP Server Setup with Custom Credentials**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
   -e "frp_domain=vm.arkhai.io" \
   -e "certbot_email=admin@vm.arkhai.io" \
   -e "frp_auth_token=your-custom-64-char-token-here-make-it-secure-and-random" \
@@ -778,7 +790,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
 
 **FRP Server Setup with Subdomain Host** (alternative parameter):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/frp-server-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/frp-server-setup.yaml \
   -e "frp_subdomain_host=vm.arkhai.io" \
   -e "certbot_email=admin@vm.arkhai.io" \
   --limit proxy-dev
@@ -1044,7 +1056,7 @@ The modular architecture orchestrates VM operations in the following flow:
 **Create VM with GPU Passthrough** (recommended method using variables file):
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 8192
@@ -1059,7 +1071,7 @@ frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
 
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
     --limit kvm1
@@ -1068,7 +1080,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Create VM without GPU**:
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 4096
@@ -1082,7 +1094,7 @@ frp_server_addr: 192.168.100.61
 frp_dashboard_password: "prFHMe8bsiOgTOM8I39udN0lD9h4Nt2W"
 EOF
 
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @inventory/management-vars.yaml \
     --extra-vars @/tmp/vm_vars.yml \
     --limit kvm1
@@ -1090,8 +1102,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Start VM**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=start \
     --limit kvm1
@@ -1099,8 +1111,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Shutdown VM Gracefully**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
     --limit kvm1
@@ -1108,8 +1120,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Reboot VM**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
     --limit kvm1
@@ -1117,8 +1129,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Force Destroy VM** (immediate shutdown):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
     --limit kvm1
@@ -1126,9 +1138,9 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Undefine VM** (delete VM and all resources):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
     --limit kvm1
@@ -1136,8 +1148,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Monitor VM Performance**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --limit kvm1
@@ -1145,24 +1157,24 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **List All VMs on Host**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_action=list \
     --limit kvm1
 ```
 
 **Check Host Resources and Status**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_action=check \
     --limit kvm1
 ```
 
 **Reset VM Tenant Password**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reset_password \
     --limit kvm1
@@ -1170,8 +1182,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Schedule VM Lease End** (set when lease expires and VM will be automatically destroyed and cleaned up):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
@@ -1185,8 +1197,8 @@ ssh kvm1 'cat /var/log/vm-lease-end/vm-base-gpu/lease_end_*.log'
 
 **Cancel Scheduled Lease End** (remove scheduled lease termination):
 ```bash
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_remove \
     --limit kvm1
@@ -1195,14 +1207,14 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Create VM with Specific Tags**:
 ```bash
 # Only run VM creation tasks
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
     --extra-vars @/tmp/vm_vars.yml \
     --tags vm_create \
     --limit kvm1
 
 # Only run monitoring tasks
-ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+ansible-playbook -i inventory/ playbooks/single-tenant/vm-operations.yaml \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --tags vm_monitor \
@@ -1210,8 +1222,8 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```
 
 **Parameter Reference for VM Creation**:
-- `vm_host`: KVM host where VM will be created (from inventory, e.g., `kvm1`)
-- `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`)
+- `host_id`: Host where VM will be created (from inventory, e.g., `kvm1`)
+- `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`), which must satisfy every use the playbooks make of it (see [Guest names](#guest-names))
 - `vm_action`: Operation to perform (`create`, `start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `list`, `check`, `reset_password`, `lease_end`, `lease_remove`)
 - `vm_ram`: RAM allocation in MB (e.g., `4096` = 4GB, `8192` = 8GB)
 - `vm_vcpus`: Number of virtual CPUs (e.g., `2`, `4`, `8`)
@@ -1224,6 +1236,26 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)
 - `frp_dashboard_password`: FRP dashboard API password for proxy registration
 - `vm_lease_end`: Lease expiration datetime in UTC format `YYYY-MM-DD HH:MM` (e.g., `2026-02-23 10:45`) - use JSON format in command: `-e '{"vm_lease_end":"2026-02-23 10:45"}'`
+
+#### Guest names
+
+The playbooks use `vm_target` four ways, and a name must satisfy all of them:
+
+- **Hostname.** cloud-init's `local-hostname` and `hostnamectl` set it as the
+  guest's hostname, so it is a hostname label: lowercase letters, digits, and
+  hyphens, starting and ending with a letter or digit, at most 63 characters.
+- **Shell text.** It appears unquoted in shell commands, so nothing outside that
+  character set.
+- **The tenant's login.** `vm-create.yml` strips it to letters and digits,
+  lowercases it, and creates the tenant with `useradd`, which refuses a login
+  over 32 characters or one not starting with a letter.
+- **A substring.** Every create ends by deleting each `/tmp` file whose name
+  contains the guest's, so no guest's name on a host may contain another's.
+
+A fulfillment's guest is named by the provisioning service from its capacity
+reservation, `tenant-` and 24 hex characters, which satisfies all four by
+construction (`vm_provisioning_adapter.guest_names`). A name an operator chooses
+for a direct VM operation is not checked; it must satisfy the same rules.
 
 **Available Actions**:
 - `create`: Create new VM with specified resources
@@ -1259,7 +1291,7 @@ All VM operations provide JSON-formatted output for API integration. Example cre
 ```json
 {
   "vm_name": "vm-base-gpu",
-  "vm_host": "kvm1",
+  "host_id": "kvm1",
   "status": "running",
   "resources": {
     "ram_mb": 8192,
@@ -1327,7 +1359,7 @@ Flow: **External:8888 → Nginx:8888 → localhost:8002 → Container:8080**
 
 **1. Public Docker Hub Image (e.g., nginx)**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_image_name=nginx" \
   -e "docker_image_tag=alpine" \
   -e "app_container_name=my-nginx" \
@@ -1340,7 +1372,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **2. GCP Artifact Registry**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=my-project" \
   -e "gcp_registry_region=us-central1" \
@@ -1360,7 +1392,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **3. Private Docker Hub Image**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "dockerhub_username=myuser" \
   -e "dockerhub_password=mypass" \
   -e "docker_image_name=myuser/myapp" \
@@ -1374,7 +1406,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **4. Generic Registry**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=generic" \
   -e "docker_registry_url=registry.example.com" \
   -e "docker_registry_username=user" \
@@ -1389,7 +1421,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **5. With FRP Subdomain and SSL Certificate**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=principia-infrastructure-dev" \
   -e "gcp_registry_region=asia-southeast1" \
@@ -1503,7 +1535,7 @@ Set `docker_network_mode=host` to enable this:
 
 **Example — Async Provisioning Service accessible over ZeroTier**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=arkhai-io" \
   -e "gcp_registry_region=us-east4" \
@@ -1532,7 +1564,7 @@ Deploy multiple apps on the same server using different ports and names:
 
 ```bash
 # App 1
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_image_name=nginx" \
   -e "app_container_name=app1" \
   -e "app_container_internal_port=80" \
@@ -1542,7 +1574,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
   --limit myserver
 
 # App 2
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_image_name=httpd" \
   -e "app_container_name=app2" \
   -e "app_container_internal_port=80" \
@@ -1687,7 +1719,7 @@ The role returns JSON deployment information via `ansible_stats`:
 
 **Deploy from GCP Artifact Registry with SSL and Environment Variables**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=my-gcp-project-123" \
   -e "gcp_registry_region=asia-southeast1" \
@@ -1740,7 +1772,7 @@ ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
 
 **Deploy Registry from GCP Artifact Registry**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=<gcp-project-id>" \
   -e "gcp_registry_region=asia-southeast1" \
@@ -1828,7 +1860,7 @@ still time out.
 
 **Deploy Async Provisioning Service from GCP Artifact Registry**:
 ```bash
-ansible-playbook -i inventory/hosts playbooks/frp/docker-app-setup.yaml \
+ansible-playbook -i inventory/ playbooks/frp/docker-app-setup.yaml \
   -e "docker_registry_type=gcp" \
   -e "gcp_project_id=<gcp-project-id>" \
   -e "gcp_registry_region=asia-southeast1" \

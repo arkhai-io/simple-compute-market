@@ -3,7 +3,7 @@
 Turns negotiated ``EscrowProposal``s into the accepted-escrow response
 artifacts (settlement plan + legacy flat terms) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
-every scalar-escrow domain (moved here from ``domains.vms.settlement``
+every scalar-escrow domain (moved here from ``arkhai_vms_settlement``
 when the API-credits domain became the second consumer).
 """
 

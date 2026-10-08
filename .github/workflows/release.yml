@@ -24,6 +24,8 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Use the repository's declared Python version
+        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - name: Set up Python and uv
         uses: astral-sh/setup-uv@v6
         with:
@@ -41,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           make dist-clean
-          make dist
+          make dist-release
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

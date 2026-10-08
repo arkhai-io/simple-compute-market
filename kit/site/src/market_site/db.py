@@ -32,7 +32,7 @@ class ReservationState(str, enum.Enum):
     provisioning — executor is building the workload.
     provisioning_failed  — provisioning failed before a usable lease existed.
     leased       — committed into an active lease (``lease_end_utc`` set).
-    releasing    — lease ended; teardown/vm_remove job in flight.
+    releasing    — lease ended; teardown in flight under ``release_job_id``.
     released             — teardown succeeded and capacity returned to the pool.
     release_failed       — teardown failed/timed out; capacity remains held.
     unmanaged            — lifecycle oversight released; capacity remains held until admin repair.
@@ -64,10 +64,11 @@ HELD_RESERVATION_STATES = (
 
 
 class CapacityBucket(Base):
-    """Provisioning-private host-level capacity accounting boundary.
+    """Provisioning-private per-declaration capacity accounting boundary.
 
     A bucket carries the currently reservable multidimensional balance for one
-    backing domain resource.  Its opaque identity and debit mappings never
+    capacity declaration, keyed by its backing resource, whether or not that
+    declaration names a host.  Its opaque identity and debit mappings never
     cross the storefront reservation contract.
     """
 
@@ -81,9 +82,17 @@ class CapacityBucket(Base):
         String, nullable=False, index=True,
     )
     pool_id = Column(String, nullable=True, index=True)
+    # The host this capacity is delivered through, when there is one. Opaque
+    # to the ledger: it is stored and copied into a reservation's
+    # ``executor_ref``, never resolved. Unique because one host carries one
+    # declaration — a second would sell the same connection twice. Null for
+    # capacity with no host, such as logical quota.
+    host_id = Column(String, nullable=True, unique=True)
     resource_type = Column(String, nullable=False, default="compute.gpu")
     resource_subtype = Column(String, nullable=True)
-    total_units = Column(Integer, nullable=False, default=0)
+    # Mirror of the composition's mirror dimension; null when the
+    # declaration does not name that dimension.
+    total_units = Column(Integer, nullable=True)
     capacity = Column(JSON, nullable=False, default=dict)
     attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
@@ -116,26 +125,41 @@ class CapacityReservation(Base):
     # capacity-accounting choice is private to CapacityReservationDebit.
     settlement_resource_id = Column(String, nullable=True, index=True)
     units = Column(Integer, nullable=False, default=1)
-    # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
-    # May be null when the multidimensional map is absent, in which case dimensions is {"gpu_count": units}.
+    # units mirrors the composition's mirror dimension in ``dimensions`` for
+    # payload/caller compatibility; when ``dimensions`` is null the held
+    # quantity is ``{<mirror>: units}``.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     state = Column(
         String, nullable=False, default=ReservationState.reserved.value, index=True
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
     hold_expires_at = Column(String, nullable=True)  # TTL soft hold (two-phase reserve)
-    executor_kind = Column(String, nullable=True)
+    offering_mode = Column(String, nullable=True)
     executor_target = Column(String, nullable=True)
     release_job_id = Column(String, nullable=True)
     executor_ref = Column(JSON, nullable=True)
     lease_start_utc = Column(String, nullable=True)
     lease_end_utc = Column(String, nullable=True)
     create_job_id = Column(String, nullable=True)
-    vm_remove_job_id = Column(String, nullable=True)
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
     released_at = Column(String, nullable=True)
+    # When the reservation last entered ``releasing``: the start of the release
+    # attempt a stalled teardown is timed from, whatever the lease's end.
+    release_requested_at = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -188,4 +212,16 @@ class CapacityEvent(Base):
     # Null for events that don't change held capacity (e.g. "committed",
     # "lease_truncated") or when no dimensional delta is recorded.
     dimensions = Column(JSON, nullable=True)
+    # The categorical half of the claim this reservation was admitted
+    # against, as matched at reserve time. Ledger-owned, never
+    # caller-supplied: `deal_ref` is the caller's dict, and a caller that
+    # could restate its own constraints here could also relax them.
+    #
+    # `dimensions` records how much was committed; this records what kind
+    # of resource was sold. Without it, scheduling can re-place a deal on
+    # any resource with room, because the only constraints surviving
+    # admission were the quantitative ones. NULL means a row predating
+    # this column, which is a different answer from `{}` ("admitted
+    # against no categorical constraint").
+    claim_attributes = Column(JSON, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

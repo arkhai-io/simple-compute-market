@@ -15,14 +15,14 @@ from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import ImmutableFulfillmentCapability
 from market_identity import Ed25519Signer
 
-from domains.apicredits.settlement import fulfillment as fulfillment_module
-from domains.apicredits.settlement.credits_client import (
+from arkhai_apicredits.settlement import fulfillment as fulfillment_module
+from arkhai_apicredits.settlement.credits_client import (
     CreditIssuanceRequest,
     CreditIssuanceResult,
     CreditsServiceClient,
     CreditsServiceError,
 )
-from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
@@ -110,7 +110,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=None,  # simulated on-chain fulfillment
         escrow_uid="0xescrow1",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         listing_id="L-tok",
@@ -160,7 +160,7 @@ async def test_payment_receipt_gate_issues_without_chain_fulfillment(monkeypatch
         escrow_uid="payment-tx-1",
         mechanism="arkhai.payments.v1",
         authoritative_gate="payments_receipt_verified",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=2,
         buyer_principal=_BUYER_PRINCIPAL,
         service_url="http://tokens:8082",
@@ -189,7 +189,7 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=None,
         escrow_uid="0xescrow2",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         service_url="http://tokens:8082",
@@ -226,7 +226,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
     result = await fulfill_api_credits_obligation(
         client=object(),
         escrow_uid="0xescrow3",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         key_mode="new",
@@ -276,7 +276,7 @@ async def test_fulfillment_service_keeps_capacity_hold_until_retry_completes(
     kwargs = {
         "client": None,
         "escrow_uid": "neg-payment",
-        "order": {"offer_resource": dict(_OFFER)},
+        "order": {"listing_resource": dict(_OFFER)},
         "quantity": 3,
         "buyer_principal": _BUYER_PRINCIPAL,
         "negotiation_id": "neg-payment",
@@ -314,7 +314,7 @@ async def test_payment_issuance_unavailable_stays_retryable(monkeypatch):
         escrow_uid="neg-payment",
         mechanism="arkhai.payments.v1",
         authoritative_gate="payments_receipt_verified",
-        offer_resource=_OFFER,
+        listing_resource=_OFFER,
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         service_url="http://tokens:8082",
@@ -348,7 +348,7 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
     result = await fulfillment_service.fulfill_credit_obligation(
         client=None,
         escrow_uid="neg-payment",
-        order={"offer_resource": dict(_OFFER)},
+        order={"listing_resource": dict(_OFFER)},
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
         mechanism="arkhai.payments.v1",
@@ -356,11 +356,9 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
     )
 
     assert result["status"] == "fulfilled"
-    assert captured["offer_resource"]["kind"] == "api_credits.v1"
-    assert captured["offer_resource"]["service_name"] == _OFFER["service_name"]
-    assert captured["offer_resource"]["resource_id"] == _OFFER["resource_id"]
-    assert captured["mechanism"] == "arkhai.payments.v1"
-    assert captured["authoritative_gate"] == "payments_receipt_verified"
+    assert captured["listing_resource"]["kind"] == "api_credits.v1"
+    assert captured["listing_resource"]["service_name"] == _OFFER["service_name"]
+    assert captured["listing_resource"]["resource_id"] == _OFFER["resource_id"]
 
 
 async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
@@ -380,7 +378,7 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
             client=None,
             escrow_uid="0xescrow-invalid",
             order={
-                "offer_resource": {
+                "listing_resource": {
                     "kind": "api_credits.v1",
                     "service_name": " ",
                     "resource_id": "svc-quota",
@@ -524,7 +522,7 @@ async def settled_db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource=dict(_OFFER),
+        listing_resource=dict(_OFFER),
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -796,3 +794,68 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
             request=_settlement_request(neg_id),
         )
     assert await db.load_escrow(escrow_uid="0xbad") is None
+
+
+def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
+    """The fulfillment input carries a domain listing, not a database row.
+
+    `prepare` reads the seller's order with `load_listing`, which returns
+    this storefront's own row: the domain payload plus its bookkeeping
+    columns. That row then reaches the domain's `normalize_listing` hook,
+    and `ApiCreditsListing` sets `extra="forbid"` -- so issuance failed
+    with eleven `extra_forbidden` errors before making a single call to the
+    credits service, and the only record was the reason persisted on the
+    escrow row.
+
+    Both halves are asserted. The raw row must still be refused: that
+    strictness is the wire contract for a listing arriving from a
+    registry, and narrowing the model instead of the caller would have
+    traded this bug for a weaker guard on untrusted input.
+    """
+    from apicredits_storefront.domain_runtime import _domain_order
+    from arkhai_apicredits.domain_runtime import _normalize_listing
+    from arkhai_apicredits.schema import ApiCreditsListing
+    from pydantic import ValidationError
+
+    resource = {
+        "service_name": "weather-api",
+        "resource_id": "weather-quota",
+        "price_per_token": "1",
+        "token": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "chain": "anvil",
+        "base_url": "http://sample-app:8085",
+        "capacity_site_id": "default",
+    }
+    row = {
+        "kind": "api_credits.v1",
+        # Stored as JSON text, which the domain model's own before-validator
+        # already handles; this test is about the surrounding columns.
+        "listing_resource": json.dumps(resource),
+        "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0x1111"}],
+        "settlement_options": [],
+        "demands": [],
+        # The bookkeeping the model forbids, named by the e2e failure.
+        "listing_id": "d6f4e4dc-06de-4a2f-a4df-b2f1bf64abab",
+        "agent_url": "http://credits-storefront:8000/",
+        "oracle_address": None,
+        "paused": False,
+        "publication_clauses": None,
+        "seller_principal": {"scheme": "eip191", "identifier": "0x90f7"},
+        "status": "open",
+        "registry_status": "published",
+        "created_at": "2026-09-14T00:00:00+00:00",
+        "updated_at": "2026-09-14T00:00:00+00:00",
+        "max_duration_seconds": 3600,
+    }
+
+    with pytest.raises(ValidationError):
+        _normalize_listing(row)
+
+    projected = _domain_order(row)
+    assert set(projected) <= set(ApiCreditsListing.model_fields)
+
+    listing = _normalize_listing(projected)
+    assert listing.listing_resource.service_name == "weather-api"
+    assert listing.listing_resource.resource_id == "weather-quota"
+    # The payload the issuance call actually needs survives the projection.
+    assert listing.accepted_escrows == row["accepted_escrows"]

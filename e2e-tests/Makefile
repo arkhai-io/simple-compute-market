@@ -1,13 +1,16 @@
 # PyPI intermittently serves 5xx where internal package names should
 # 404 (they resolve from .dist); back off through the flap instead of
 # failing after uv's default 3 tries.
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
+
 export UV_HTTP_RETRIES ?= 10
 
 PYTHON      ?= python3
 
 # Default profile if none supplied
 ACTIVE_PROFILES ?= local
-CONFIG_DIRECTORY ?= $(PWD)/config
+CONFIG_DIRECTORY ?= $(CURDIR)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
@@ -17,7 +20,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e
+.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal e2e-vm-down
 
 # -----------------------------------------------------------------------
 # Setup
@@ -26,33 +29,10 @@ DIST_DIR ?= ../.dist
 init-venv:
 	uv venv --allow-existing
 
-init: init-venv
-	uv sync --find-links $(DIST_DIR)
+init: init-venv reinit
 
 reinit: init-venv
-	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core                           --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-buyer                     --reinstall-package arkhai-core-buyer \
-	--upgrade-package arkhai-core-storefront                --reinstall-package arkhai-core-storefront \
-	--upgrade-package arkhai-core-registry-client            --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client          --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-config                      --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-identity                    --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-policy                      --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-kit-storefront                 --reinstall-package arkhai-kit-storefront \
-	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
-	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
-	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
-	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
-	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
-	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
-	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
-	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
-	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer
+	python3 ../scripts/uv_project.py reinit
 
 # -----------------------------------------------------------------------
 # Build
@@ -61,14 +41,12 @@ reinit: init-venv
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= e2e-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
-PYTHON_VERSION := 3.13
 
 build: build-images
 
 build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
-
 
 test:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
@@ -109,7 +87,10 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_credits_payment_deal or e2e_bare_metal_deal
+              or e2e_credits_deal or e2e_credits_payment_deal or e2e_listing_shapes or e2e_vm_introduction
+# The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
+# needs a real whole host to SSH into, which the pipeline never has.
+E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction
 
 test-buyer-machine:
 	docker run --rm \
@@ -145,8 +126,94 @@ test-ci:
 # the buyer-machine scenarios from inside the compose network. This target is
 # intentionally heavier than test-module: it verifies the deployed images and
 # clears persisted compose state before each run.
-test-e2e:
-	cd .. && docker compose down -v --remove-orphans
+# Generated, never committed: the resolved paths of the committed development
+# identities, in the form `docker compose --env-file` wants.
+E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
+
+# The base stack is assembled by `include`, which resolves each included file's
+# relative paths against that file's own directory -- `domains/vms/compose.yml`
+# and `domains/apicredits/compose.yml` need that and sit in different
+# directories, so no single project directory could replace it. The development
+# bindings are layered with `-f` because `include` refuses to let an including
+# file redefine an imported service. See compose.local-identities.yml.
+E2E_COMPOSE_FILES := -f docker-compose.yml -f compose.local-identities.yml
+
+# Both lanes, one after the other. Each lane's stack runs its own `anvil`
+# container under that fixed name, so the VM stack is taken down before the
+# bare-metal stack comes up. CI runs the lanes as separate jobs instead.
+test-e2e: test-e2e-vm e2e-vm-down test-e2e-bare-metal
+
+e2e-vm-down:
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
+
+test-e2e-vm:
+	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
+	@# files is guarded with a required-variable form, so *any* compose
+	@# subcommand that reads the config -- down as much as up -- refuses to run
+	@# until all of them are set. They come from committed development values,
+	@# which is what lets this run without repository secrets; see
+	@# dev-env/identities/README.md.
+	@#
+	@# The env file is generated first and passed to every compose invocation
+	@# below. Passing it only to `up` left `down` able to fail on the same
+	@# interpolation, for a reason that has nothing to do with the run.
+	@#
+	@# The values reach compose through --env-file rather than an eval of
+	@# captured make output: a recursive make implies -w and would print
+	@# "Entering directory" into the capture, and compose reading the file
+	@# itself has nothing to quote wrong.
+	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
 	cd .. && $(MAKE) build-dev
-	cd .. && docker compose up -d --wait
+	@# On failure, print the state and the container output *here*, in the
+	@# failing step. `up --wait` reports only which container went unhealthy,
+	@# never why: the reason is in that container's log. Leaving it to the
+	@# `always()` collection step means the answer lands in an uploaded
+	@# artifact that has to be downloaded separately, which is a slow loop for
+	@# something the job log can carry.
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait \
+		|| { \
+		  echo "::group::compose ps"; \
+		  docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a; \
+		  echo "::endgroup::"; \
+		  for svc in $$(docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a --services); do \
+		    echo "::group::logs $$svc"; \
+		    docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) logs --no-color --tail=120 "$$svc" || true; \
+		    echo "::endgroup::"; \
+		  done; \
+		  exit 1; \
+		}
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"
+
+# -----------------------------------------------------------------------
+# Bare-metal lane
+# -----------------------------------------------------------------------
+# One mock-profile site, the bare-metal storefront, its registry, and the dev
+# chain, as a compose project of its own so its network and volumes never mix
+# with the VM stack's. Every value comes from `make e2e-bare-metal-dev-env`,
+# which generates the publication deadlines at each run; see
+# compose.bare-metal-local.yml.
+E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
+E2E_BARE_METAL_PROJECT := simple-market-bare-metal
+E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \
+	-f compose.bare-metal.yml -f compose.dev.yml -f compose.bare-metal-local.yml
+
+test-e2e-bare-metal:
+	cd .. && $(MAKE) -s --no-print-directory e2e-bare-metal-dev-env > "$(E2E_BARE_METAL_ENV)"
+	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
+	cd .. && $(MAKE) build-dev
+	@# As in test-e2e-vm: on failure, print each container's own output here,
+	@# in the failing step, rather than only in the uploaded artifact.
+	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) up -d --wait \
+		|| { \
+		  echo "::group::compose ps"; \
+		  docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a; \
+		  echo "::endgroup::"; \
+		  for svc in $$(docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a --services); do \
+		    echo "::group::logs $$svc"; \
+		    docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) logs --no-color --tail=120 "$$svc" || true; \
+		    echo "::endgroup::"; \
+		  done; \
+		  exit 1; \
+		}
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)"

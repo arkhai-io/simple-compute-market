@@ -9,12 +9,14 @@ from typing import Any, Optional, cast
 import httpx
 from market_identity import (
     EMPTY_BODY,
+    AuthenticatedRequest,
     Identity,
     RotationIntent,
     Signer,
     TrustedIdentitySet,
     sign_rotation,
 )
+from market_core import RegistryDescriptor
 
 from registry_client.auth import (
     REQUEST_ID_HEADER,
@@ -37,7 +39,6 @@ from registry_client.models import (
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
-
 
 
 class _RegistryClientBase:
@@ -102,6 +103,8 @@ class _RegistryClientBase:
             return "listing.validate", "listings"
         if path == "/filter-spec":
             return "filter.get", "filter-spec"
+        if path == "/.well-known/arkhai/registry-descriptor.json":
+            return "registry.descriptor.read", "registry-descriptor"
         if parts[:1] == ["listings"]:
             if len(parts) == 1:
                 return (
@@ -140,9 +143,7 @@ class _RegistryClientBase:
         }
         if_match = httpx.Headers(headers or {}).get("If-Match")
         if if_match is not None:
-            body["if_match"] = (
-                if_match.strip().removeprefix("W/").strip().strip('"')
-            )
+            body["if_match"] = if_match.strip().removeprefix("W/").strip().strip('"')
         return body
 
     @staticmethod
@@ -171,6 +172,72 @@ class _RegistryClientBase:
             return None
         normalized = etag if etag.startswith('"') else f'"{etag}"'
         return {"If-Match": normalized}
+
+    @staticmethod
+    def _request_identity_headers(
+        request_id: str | None,
+        timestamp: int | None,
+    ) -> dict[str, str] | None:
+        headers: dict[str, str] = {}
+        if request_id is not None:
+            headers[REQUEST_ID_HEADER] = request_id
+        if timestamp is not None:
+            headers[TIMESTAMP_HEADER] = str(timestamp)
+        return headers or None
+
+    @classmethod
+    def _descriptor_bootstrap_request(
+        cls,
+        *,
+        signer: Signer,
+        caller_role: str,
+    ) -> AuthenticatedRequest:
+        if caller_role not in {"buyer", "seller", "service"}:
+            raise ValueError("caller_role must be buyer, seller, or service")
+        return authenticate_request(
+            signer=signer,
+            role=caller_role,
+            method="GET",
+            operation="registry.descriptor.read",
+            resource="registry-descriptor",
+            body=cls._query_body(None, None),
+        )
+
+    @staticmethod
+    def _verify_bootstrap_descriptor(
+        *,
+        response: httpx.Response,
+        request: AuthenticatedRequest,
+        url: str,
+    ) -> RegistryDescriptor:
+        if response.status_code != 200:
+            raise RegistryClientError("GET", url, response.status_code, response.text)
+        try:
+            descriptor = RegistryDescriptor.model_validate(response.json())
+        except ValueError as exc:
+            raise RegistryClientError(
+                "GET",
+                url,
+                502,
+                "registry descriptor is not canonical JSON",
+            ) from exc
+        expected_registries = TrustedIdentitySet(
+            identities=tuple(
+                Identity.model_validate(principal.model_dump(mode="json"))
+                for principal in descriptor.authority.principals
+            )
+        )
+        try:
+            verify_authenticated_response(
+                headers=response.headers,
+                expected_registries=expected_registries,
+                request=request,
+                status=response.status_code,
+                body=descriptor.to_wire(),
+            )
+        except ValueError as exc:
+            raise RegistryClientError("GET", url, 502, str(exc)) from exc
+        return descriptor
 
     def _publish_listing_request(
         self,
@@ -358,6 +425,39 @@ class RegistryClient(_RegistryClientBase):
     async def __aexit__(self, *_: Any) -> None:
         await self.close()
 
+    @classmethod
+    async def bootstrap_registry_descriptor(
+        cls,
+        base_url: str,
+        *,
+        signer: Signer,
+        caller_role: str,
+        timeout: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> RegistryDescriptor:
+        """Read a descriptor and verify possession of its advertised key."""
+
+        path = "/.well-known/arkhai/registry-descriptor.json"
+        request = cls._descriptor_bootstrap_request(
+            signer=signer,
+            caller_role=caller_role,
+        )
+        async with httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout,
+            transport=transport,
+            headers={"Accept": "application/json"},
+        ) as client:
+            response = await client.get(
+                path,
+                headers=authentication_headers(request),
+            )
+        return cls._verify_bootstrap_descriptor(
+            response=response,
+            request=request,
+            url=f"{base_url.rstrip('/')}{path}",
+        )
+
     async def _request(
         self,
         method: str,
@@ -421,9 +521,7 @@ class RegistryClient(_RegistryClientBase):
         return None if empty_response else response_body
 
     async def get_health(self) -> HealthResponse:
-        return self._parse_health(
-            await self._request("GET", "/api/v1/system/health")
-        )
+        return self._parse_health(await self._request("GET", "/api/v1/system/health"))
 
     async def get_system_stats(self) -> SystemStatsResponse:
         return self._parse_system_stats(
@@ -488,8 +586,20 @@ class RegistryClient(_RegistryClientBase):
         return ValidatePublishResponse.from_dict(data)
 
     async def get_filter_spec(self) -> FilterSpecResponse:
-        return FilterSpecResponse.from_dict(
-            await self._request("GET", "/filter-spec")
+        return FilterSpecResponse.from_dict(await self._request("GET", "/filter-spec"))
+
+    async def get_registry_descriptor(
+        self,
+        *,
+        request_id: str | None = None,
+        timestamp: int | None = None,
+    ) -> RegistryDescriptor:
+        return RegistryDescriptor.model_validate(
+            await self._request(
+                "GET",
+                "/.well-known/arkhai/registry-descriptor.json",
+                headers=self._request_identity_headers(request_id, timestamp),
+            )
         )
 
     async def list_listings(
@@ -691,6 +801,39 @@ class SyncRegistryClient(_RegistryClientBase):
     def __exit__(self, *_: Any) -> None:
         self.close()
 
+    @classmethod
+    def bootstrap_registry_descriptor(
+        cls,
+        base_url: str,
+        *,
+        signer: Signer,
+        caller_role: str,
+        timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> RegistryDescriptor:
+        """Read a descriptor and verify possession of its advertised key."""
+
+        path = "/.well-known/arkhai/registry-descriptor.json"
+        request = cls._descriptor_bootstrap_request(
+            signer=signer,
+            caller_role=caller_role,
+        )
+        with httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout,
+            transport=transport,
+            headers={"Accept": "application/json"},
+        ) as client:
+            response = client.get(
+                path,
+                headers=authentication_headers(request),
+            )
+        return cls._verify_bootstrap_descriptor(
+            response=response,
+            request=request,
+            url=f"{base_url.rstrip('/')}{path}",
+        )
+
     def _request(
         self,
         method: str,
@@ -754,14 +897,10 @@ class SyncRegistryClient(_RegistryClientBase):
         return None if empty_response else response_body
 
     def get_health(self) -> HealthResponse:
-        return self._parse_health(
-            self._request("GET", "/api/v1/system/health")
-        )
+        return self._parse_health(self._request("GET", "/api/v1/system/health"))
 
     def get_system_stats(self) -> SystemStatsResponse:
-        return self._parse_system_stats(
-            self._request("GET", "/api/v1/system/stats")
-        )
+        return self._parse_system_stats(self._request("GET", "/api/v1/system/stats"))
 
     def list_publishers(
         self,
@@ -822,6 +961,20 @@ class SyncRegistryClient(_RegistryClientBase):
 
     def get_filter_spec(self) -> FilterSpecResponse:
         return FilterSpecResponse.from_dict(self._request("GET", "/filter-spec"))
+
+    def get_registry_descriptor(
+        self,
+        *,
+        request_id: str | None = None,
+        timestamp: int | None = None,
+    ) -> RegistryDescriptor:
+        return RegistryDescriptor.model_validate(
+            self._request(
+                "GET",
+                "/.well-known/arkhai/registry-descriptor.json",
+                headers=self._request_identity_headers(request_id, timestamp),
+            )
+        )
 
     def list_listings(
         self,

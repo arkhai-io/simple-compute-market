@@ -2,7 +2,7 @@ apiVersion: v2
 name: arkhai-node-operator
 description: Arkhai node operator cloud stack
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"
 
 dependencies:
@@ -14,10 +14,19 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/registry"
     condition: registry.enabled
-  - name: storefront
+  - name: registry
+    alias: api-credits-registry
     version: "0.1.0"
+    repository: "file://charts/registry"
+    condition: api-credits-registry.enabled
+  - name: storefront
+    version: "0.2.0"
     repository: "file://charts/storefront"
     condition: storefront.enabled
+  - name: bare-metal-storefront
+    version: "0.1.0"
+    repository: "file://charts/bare-metal-storefront"
+    condition: bare-metal-storefront.enabled
   - name: provisioning
     version: "0.1.0"
     repository: "file://charts/provisioning"

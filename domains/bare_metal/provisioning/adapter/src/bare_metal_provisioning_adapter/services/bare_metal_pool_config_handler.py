@@ -54,6 +54,18 @@ class BareMetalPoolConfigHandler:
         del unit_of_work, pool_id
         return {}
 
+    def read_config_for_execution(
+        self, unit_of_work: Any, pool_id: str
+    ) -> dict[str, Any]:
+        """This provider holds no configuration, and so holds no secret.
+
+        Implemented rather than inherited so the two-level read is satisfied
+        explicitly by every handler: a provider that later gains a credential
+        has a place to decrypt it, and a caller can rely on the method existing
+        on the protocol rather than testing for it.
+        """
+        return self.read_config(unit_of_work, pool_id)
+
     def replace_config(
         self,
         unit_of_work: Any,

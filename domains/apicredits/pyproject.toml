@@ -1,17 +1,17 @@
 [project]
 name = "arkhai-apicredits-domain"
-version = "0.3.0"
+version = "0.5.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-core>=0.2.0",
+    "arkhai-core>=0.4.0",
     "arkhai-kit-policy",
-    "arkhai-kit-alkahest>=0.2.0",
-    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-alkahest>=0.4.0",
+    "arkhai-kit-identity==0.4.0",
     "httpx>=0.27",
     "pydantic>=2",
-    "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-settlement-runtime>=0.4.0",
     "arkhai-kit-arkhai-payments>=0.2.0",
 ]
 
@@ -23,31 +23,24 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-only-include = ["__init__.py"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"__init__.py" = "domains/apicredits/__init__.py"
-"domain_runtime.py" = "domains/apicredits/domain_runtime.py"
-"schema.py" = "domains/apicredits/schema.py"
-"listings/__init__.py" = "domains/apicredits/listings/__init__.py"
-"listings/models.py" = "domains/apicredits/listings/models.py"
-"listings/pricing.py" = "domains/apicredits/listings/pricing.py"
-"listings/reconciler.py" = "domains/apicredits/listings/reconciler.py"
-"negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
-"negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
-"negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
-"negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
-"negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
-"settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"
-"settlement/credits_client.py" = "domains/apicredits/settlement/credits_client.py"
-"settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
-"settlement/issuance_evidence.py" = "domains/apicredits/settlement/issuance_evidence.py"
-"settlement/payments.py" = "domains/apicredits/settlement/payments.py"
+packages = ["src/arkhai_apicredits"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+filterwarnings = [
+    # Three contract models carry a field named `schema`, which shadows
+    # Pydantic's deprecated `BaseModel.schema()`. The name is the wire key: it
+    # is serialized into HTTP request bodies and into the canonical JSON that
+    # issuance evidence is digested and signed over, so renaming it is a
+    # contract change rather than a rename, and every `model_dump` call would
+    # have to start passing `by_alias=True` in step or the emitted key changes
+    # silently. Scoped to these two modules so the same shadow appearing
+    # anywhere else still surfaces.
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_apicredits.settlement.credits_client",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_apicredits.settlement.issuance_evidence",
+]
 
 [dependency-groups]
 dev = [

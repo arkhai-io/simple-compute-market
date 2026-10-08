@@ -12,7 +12,7 @@
     LIBVIRT_DEFAULT_URI: qemu:///system
   vars:
     # target_host: how the provisioner addresses the KVM host (inventory alias).
-    target_host: "{{ vm_host | default('localhost') }}"
+    target_host: "{{ host_id | default('localhost') }}"
     # tenant_ssh_host: address buyers use to reach this host's VM port-forwards.
     # Set per host via the `public_host` inventory var when buyers reach the
     # host on a different network than the provisioner; otherwise falls back to

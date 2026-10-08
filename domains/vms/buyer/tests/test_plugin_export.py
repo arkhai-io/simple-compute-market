@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from core_buyer.plugins import discover_domains
+from arkhai_vms_buyer import cli as buyer_cli
+from arkhai_vms_buyer.cli import app, domain
+from market_settlement_runtime import MechanismReadiness, SettlementConfig
 from market_core import DomainCapability, MarketDomainContract
 from typer.testing import CliRunner
 
-from domains.vms.buyer.cli import app, domain
+from arkhai_vms_buyer.cli import app, domain
 
 runner = CliRunner()
 

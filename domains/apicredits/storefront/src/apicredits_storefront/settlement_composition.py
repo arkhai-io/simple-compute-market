@@ -7,6 +7,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from arkhai_apicredits.settlement import (
+    CreditsServiceClient,
+)
 from market_alkahest import (
     AlkahestConditionalEscrowClient,
     create_alkahest_registration,
@@ -37,8 +40,7 @@ from apicredits_storefront.services.issuance_evidence import (
     IssuanceEvidenceRepository,
 )
 from apicredits_storefront.utils import config as storefront_config
-from domains.apicredits.settlement import CreditsServiceClient
-from domains.apicredits.settlement.payments import validate_payment_publication_clause
+from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 
 logger = logging.getLogger(__name__)
 

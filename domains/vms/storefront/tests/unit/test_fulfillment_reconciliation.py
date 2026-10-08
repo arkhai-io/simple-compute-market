@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from domains.vms.settlement.fulfillment import (
+from arkhai_vms_settlement.fulfillment import (
     FulfillmentReconciliationUnavailable,
     reconcile_or_submit_compute_fulfillment,
 )

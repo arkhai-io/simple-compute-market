@@ -14,7 +14,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None:
-    from src.main import app
+    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -29,7 +29,7 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 
     assert body["listing_shape"]["type"] == "object"
     required = set(body["listing_shape"].get("required") or [])
-    assert {"listing_id", "offer_resource", "storefront_url"} <= required
+    assert {"listing_id", "listing_resource", "storefront_url"} <= required
     settlement_requirements = {
         tuple(branch.get("required") or [])
         for branch in body["listing_shape"].get("anyOf") or []
@@ -53,13 +53,13 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 
     # The shipped spec declares its schema identity; the buyer matches
     # plugins to registries on this id.
-    assert body["schema"]["id"] == "vms.compute"
+    assert body["schema"]["id"] == "compute.market"
     assert body["schema"]["version"] >= 1
 
 
 @pytest.mark.asyncio
 async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:
-    from src.main import app
+    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

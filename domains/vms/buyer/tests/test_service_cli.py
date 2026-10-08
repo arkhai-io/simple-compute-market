@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
-from domains.vms.buyer import service_cli
+from arkhai_vms_buyer import service_cli
 
 SIGNER = Ed25519Signer(b"\x31" * 32)
 SELLER = Ed25519Signer(b"\x32" * 32).identity

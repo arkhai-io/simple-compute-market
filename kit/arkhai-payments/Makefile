@@ -1,40 +1,31 @@
-DIST_DIR ?= ../../.dist
-PYTHON ?= 3.12
-.PHONY: build dist-core dist-identity dist-settlement-runtime reinit test test-unit check-vectors check-generated typecheck generate-models
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
 
-build:
+DIST_DIR ?= ../../.dist
+
+.PHONY: build init reinit test test-unit typecheck check-vectors check-generated generate-models
+
+build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
-dist-core:
-	mkdir -p $(DIST_DIR)
-	uv build --no-sources --wheel --out-dir $(DIST_DIR) ../../core
+init: reinit ## Create or update the environment
 
-dist-identity:
-	mkdir -p $(DIST_DIR)
-	uv build --no-sources --wheel --out-dir $(DIST_DIR) ../identity
+reinit: ## Reinstall the local package environment
+	python3 ../../scripts/uv_project.py reinit
 
-dist-settlement-runtime: dist-core dist-identity
-	mkdir -p $(DIST_DIR)
-	uv build --no-sources --wheel --out-dir $(DIST_DIR) ../settlement-runtime
+test: reinit typecheck check-vectors check-generated test-unit ## Run every kit gate
 
-reinit: dist-core dist-identity dist-settlement-runtime
-	uv sync --dev --python $(PYTHON) --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+test-unit: ## Run the unit suite
+	uv run pytest tests -q
 
-test: reinit typecheck check-vectors check-generated test-unit
+typecheck: ## Type-check the package and the local example
+	uv run mypy src examples/local_e2e.py
 
-test-unit:
-	uv run --python $(PYTHON) --find-links $(DIST_DIR) pytest tests -q
-typecheck:
-	uv run --python $(PYTHON) --find-links $(DIST_DIR) mypy src examples/local_e2e.py
+check-vectors: ## Verify the published conformance vectors
+	uv run python scripts/check_vectors.py
 
-check-vectors:
-	uv run --python $(PYTHON) --find-links $(DIST_DIR) python scripts/check_vectors.py
+check-generated: ## Fail if the generated models differ from the published schemas
+	uv run python scripts/generate_models.py --check
 
-check-generated:
-	uv run --python $(PYTHON) --find-links $(DIST_DIR) python scripts/generate_models.py --check
-
-generate-models:
-	uv run --python $(PYTHON) --find-links $(DIST_DIR) python scripts/generate_models.py
+generate-models: ## Regenerate the models from the published schemas
+	uv run python scripts/generate_models.py

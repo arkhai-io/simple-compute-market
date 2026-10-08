@@ -4,11 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-e2e-tests"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "arkhai-compute-provisioning-contracts>=0.9.0",
+    "arkhai-compute-provisioning-client>=0.6.0",
+    "arkhai-kit-resource-pools-client>=0.1.0",
+    "arkhai-kit-resource-pools-contracts>=0.1.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-html>=4.0",
@@ -25,24 +29,29 @@ dependencies = [
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
-    "arkhai-core-storefront-client>=0.18.0",
-    "arkhai-core-registry-client>=0.11.0",
-    "arkhai-kit-alkahest>=0.1.0",
-    "arkhai-kit-site-client>=0.1.0",
-	"arkhai-vms-storefront>=0.3.0",
-    "arkhai-vms-provisioning-operator-client>=0.3.0",
+    "arkhai-core-storefront-client>=0.25.0",
+    # Stage 06 of the listing-shapes scenario writes storefront pool overrides
+    # through the kit's typed client.
+    "arkhai-kit-pool-overrides>=0.2.0",
+    "arkhai-kit-config",
+    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-kit-alkahest>=0.4.0",
+    "arkhai-kit-site-client>=0.9.0",
+	"arkhai-vms-storefront>=0.16.0",
+    "arkhai-vms-provisioning-operator-client>=0.9.0",
+    "arkhai-bare-metal>=0.10.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "arkhai-vms-buyer>=0.3.0",
+    "arkhai-vms-buyer>=0.7.0",
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.3.2",
+    "arkhai-apicredits-buyer>=0.5.0",
     "arkhai-kit-arkhai-payments>=0.2.0",
-    "arkhai-kit-policy>=0.1.0",
+    "arkhai-kit-policy>=0.4.0",
 ]
 
 [tool.uv]
@@ -56,7 +65,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/e2e_harness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -85,11 +94,15 @@ markers = [
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
+    "e2e_listing_shapes: A pool's stated listing shape publishes every declared quantity and is discoverable by a typed memory query",
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_credits_payment_deal: API-credit deal settled through arkhai.payments.v1 — approval, receipt-gated issuance, run-log re-drive, and a seller refund; blocked without a reachable payments target",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
+    "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, and reinstatement against a mock-profile site",
+    "e2e_vm_introduction: VM lane — backed and unbacked VM listings found by one rate-bounded query; an unbacked listing's introduction negotiated and revealed through the `market` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit",
+    "e2e_bare_metal_introduction: Bare-metal lane — an introduction offered by pool override, revealed with its retention disclosed, then deleted by an operator and by the held, stepped retention sweep",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
     "smoke: Quick smoke tests",

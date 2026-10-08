@@ -19,7 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
-- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, documentation compliance, and tasks compression. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, documentation citations, end-to-end pipeline evidence, and promotion. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 
@@ -32,7 +32,8 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - permanent documentation describes the current system rather than announcing completion;
 - temporary migration and changelog commentary has been removed from production code;
 - the active change records where each material decision was promoted;
-- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed.
+- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
+- `make check-packaging` passes.
 
 ## Documentation ownership
 
@@ -57,6 +58,15 @@ Do not reference:
 - the feature, migration, or review that introduced the code;
 - tombstones or generated-artifact instructions;
 - temporary implementation phases as though they were permanent rationale.
+
+`make check-comment-hygiene` enforces this on `.py`, `.toml`, `.yml` and
+`.yaml`: it rejects task-number and `tasks.md` references, and separately
+rejects any comment naming an OpenSpec change directory — including a change
+that has not landed yet, since a reader of the code cannot see either one and
+the name goes stale as soon as the change is archived. `docs/` is exempt,
+because naming the change that owns a gap is the roadmap's job. Say *why* the
+current invariant holds instead; if the reason is only "a change is coming",
+the comment is describing a plan rather than the system.
 
 Use comments for:
 
@@ -89,7 +99,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - Follow the dependency layers defined in `ARCHITECTURE.md` and the relevant subsystem specification.
 - `TYPE_CHECKING` imports count as architectural dependencies.
 - Internal Python dependencies are built into `.dist` and installed from wheels. Do not add editable sibling paths merely to make local development work.
-- Reinit targets must explicitly upgrade/reinstall changed internal packages from `.dist`.
+- Environments, images, and locks are built through `scripts/uv_project.py`, which derives the internal packages from each project's lock; never list internal packages by hand. `docs/development/BUILD_AND_PACKAGING.md` owns the conventions and names the check enforcing each.
 
 ## Tests and diagnostics
 
@@ -98,11 +108,104 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
+- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before returning a fileset. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
 ## Generated implementation artifacts
 
 Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
 
 ```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
+# TOMBSTONE: delete this file — replaced by domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py
 ```
+
+## Public repository discipline
+
+This repository is public. Everything in it — code, comments, documentation,
+specifications, change documents, fixtures, test data, commit messages, and pull
+request descriptions — is world-readable, permanently, including after a later
+edit removes it.
+
+Some work here is paired with work in separate private repositories. That
+pairing never appears here.
+
+### Never enters this repository
+
+- Private repository names, branch names, or commit SHAs.
+- Cloud project, account, cluster, namespace, or host identifiers.
+- Internal endpoints, private URLs, or non-public service addresses.
+- Wallet addresses, keys, or credentials of any kind, including expired ones and
+  including ones believed to be test-only on a private network.
+- Filesystem paths from a private repository or a private working environment.
+- Raw logs, evidence bundles, or run artifacts produced by private tooling.
+- The names or contents of private planning documents.
+
+A change document, a `design.md` rationale, and a task note are as public as
+production code. "It is only in the change directory" is not an exception.
+
+### Test fixtures and local development configuration
+
+Local development configuration in this repository is public by design and must
+stay obviously so. Where a fixture needs an address, a key, or a host, use a
+well-known deterministic development value and say in a comment that it is one
+and must never be used on a public network.
+
+A value that looks plausible and is not obviously a fixture is worse than no
+comment, because a later reader cannot tell whether removing it is safe.
+
+### Referring to work that is not here
+
+When a change here exists because of work elsewhere, describe the requirement in
+terms of this repository's own behaviour, not in terms of the external
+consumer's identity.
+
+Prefer:
+
+```
+Exposes a stable invocation target so an external test harness can run the
+suite without reproducing the internal command sequence.
+```
+
+Avoid:
+
+```
+Needed by the harness runner in <private repo>, see <private plan document>.
+```
+
+The first is a durable statement about this repository's interface. The second
+is a leak, and it also rots the moment the external caller is renamed.
+
+### Cross-references must resolve
+
+Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by
+a permanent document must exist on the branch that cites it.
+
+A permanent document describing behaviour this branch does not implement is not
+a harmless forward reference — it is how work from another branch or another
+plan epoch gets treated as inherited without anyone deciding to inherit it. This
+has happened in this repository: a closeout commit promoted a documentation
+section describing a subsystem that has never existed on `dev`, citing a
+specification requirement that has never existed on `dev`.
+
+Note the shape of that failure, because the usual controls do not catch it. The
+commit was inside its author's permitted paths and violated no scope rule; the
+content came from a plan epoch the author had no authority over. Path
+permissions cannot detect that. A cross-reference check can, in one pass — so
+run one before promoting documentation, and treat an unresolvable citation as a
+blocking defect rather than a stale link to fix later.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues handle intake and triage through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context: one platform context over `core/`, `kit/`, and `provisioning/`, plus a
+subcontext per market domain under `domains/`. ADRs are dated decision records and live in
+`docs/adr/`, separate from the current-state contracts in `openspec/specs/`. See
+`docs/agents/domain.md`.

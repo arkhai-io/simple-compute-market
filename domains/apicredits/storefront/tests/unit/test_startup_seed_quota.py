@@ -96,7 +96,9 @@ async def test_register_seed_quota_sends_expected_request_via_the_typed_client(m
 
     assert captured["path"] == "/api/v1/capacity/resources/demo-quota"
     assert captured["headers"]["x-market-role"] == "seller"
-    assert captured["body"]["total_units"] == 100
+    # Declared explicitly in the quota's own dimension, in its pool.
+    assert captured["body"]["capacity"] == {"units": 100}
+    assert captured["body"]["pool_id"] == "default"
     assert captured["body"]["resource_type"] == "api_credits"
 
 

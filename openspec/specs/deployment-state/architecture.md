@@ -8,6 +8,15 @@ Registry, seller stack, and buyer are independently operable roles. A buyer is n
 
 Local development composes domain stacks with development-only dependencies such as the local chain. Deployment charts compose the same roles conditionally without making test fixtures part of the production authority model.
 
+One umbrella release may instantiate the schema-opaque registry role more than
+once. The primary `registry` instance selects the compute filter specification;
+the optional `api-credits-registry` alias selects the API-credit specification.
+The alias changes Kubernetes resource identity, while instance-local values
+keep signer authority, credential reference, descriptor, API-key posture, and
+SQLite volume independent. `global.registryIdentity` remains a compute
+storefront trust input rather than a shared signer constraint on every
+registry.
+
 ## State ownership
 
 Each stateful service owns its database and migration history. Cross-service relationships use public identifiers and APIs rather than foreign keys into another service's database. This keeps backup, rollout, failure, and authority boundaries aligned.
@@ -25,9 +34,21 @@ Where a service has an explicit migration phase, deployment runs it before appli
 
 ## Artifact and package boundary
 
-Internal Python boundaries are exercised as distributions. Prerequisite packages are built into `.dist`, consumers install from that wheelhouse, and reinitialization explicitly upgrades or reinstalls changed distributions. Images include `.dist` in every stage that resolves internal packages.
+Internal Python boundaries are exercised as distributions. Prerequisite packages are built into `.dist`, consumers install from that wheelhouse, and every environment, image, and lock refreshes its internal packages explicitly. Images include `.dist` in the builder stages that resolve internal packages; runtime stages receive only the finished environment.
+
+The refreshed set is derived from each project's lock when the operation runs, never listed. Hand-maintained lists drifted in every place they were kept, and one Makefile silently dropped a package because a help comment continued with a backslash swallowed the flag. A rebuilt wheel keeps its version, so two refreshes are needed: reinstalling replaces installed code, and upgrading re-reads the wheel's metadata so the lock records dependencies the wheel gained. `uv sync --locked` succeeds without the latter and leaves a dependency missing, so project environments upgrade and may rewrite their lock, which is then committed.
+
+Images install that committed lock unchanged, with `--locked`, from a layout that mirrors the project's depth below the repository root; the same derivation reinstalls internal packages so a persistent build cache cannot reuse a same-version build. An image therefore contains what the project's tests ran against. Because `--locked` cannot see a same-version wheel's changed requirements either, the guarantee rests on the lock-currency check comparing each lock's records with the wheels' metadata, not on the build.
+
+One root `.python-version` fixes the interpreter: uv does not read it from a nested project, so every Makefile, CI job, and image reads it explicitly. The conventions and their checks are described in [`BUILD_AND_PACKAGING.md`](../../../docs/development/BUILD_AND_PACKAGING.md).
 
 The architectural purpose is reproducibility: package metadata and wheel contents, not checkout-relative imports, determine what a consumer receives. Pure-Python wheel checks prevent a host-built native artifact from being mistaken for a target-platform image dependency.
+
+## Configuration bootstrap boundary
+
+For compute provisioning and e2e, profile-based Dynaconf construction is a foundation concern where the mechanics are deterministic: trimming the ordered active-profile selector, resolving the base file before profile files, optionally filtering absent include paths, and creating the settings object from explicit options. `arkhai-kit-config` owns those shared mechanics for these two consumers. It deliberately does not read `CONFIG_DIRECTORY` or `ACTIVE_PROFILES`; each composition root remains responsible for process-environment lookup and passes the resulting values into the foundation layer.
+
+Settings and secret files, supported dotenv behavior, environment prefixes, missing-file tolerance, typed wrappers, validators, and exported accessors remain consumer policy. Compute provisioning therefore filters absent YAML includes before construction and uses normal Dynaconf `.env` discovery without adding `.env.local`, while e2e preserves every requested include path, adds its project `.secrets.toml`, and points dotenv loading at the project `.env`. Dotenv-sourced prefixed values participate in Dynaconf's environment layer, with already-set process variables taking precedence. Keeping those differences above the shared bootstrap prevents a code-deduplication change from becoming an implicit configuration migration. Unsupported constructor arguments that never affected runtime behavior are not promoted into the shared contract.
 
 ## Bare-metal seller artifact
 
@@ -62,11 +83,11 @@ Rollback is valid only before the identity schema cutover and before authenticat
 
 ## Settlement configuration cutover
 
-Role TOML, generated defaults and references, environment overlays, Helm values and templates, Compose, and automation all consume the same typed `[Settlement]` hierarchy. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Payment-provider, administrator, webhook, ledger database, and service-migration settings remain owned by the payments service and are not marketplace deployment inputs.
+Role TOML, generated defaults and references, environment overlays, Helm values, Compose, and automation all consume the same typed `[Settlement]` hierarchy; the VM storefront chart passes it through unchanged rather than rendering it key by key. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Payment-provider, administrator, webhook, ledger database, and service-migration settings remain owned by the payments service and are not marketplace deployment inputs.
 
 The settlement cutover deliberately rejects runtime aliases. Migration tooling is deployed first, then operators preview and back up every affected role file and overlay, quiesce publication and configuration automation, migrate and validate the complete population, and activate the matching image and configuration together. A schema/image mismatch fails before publication or settlement mutation. Rollback restores prior artifacts and backups only before the new configuration is activated; after new effects begin, recovery rolls forward from pinned plans and operation journals.
 
-Typed settlement metadata generates role-appropriate templates, edit validation, schema fragments, and reference output. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
+Typed settlement metadata generates role-appropriate templates, edit validation, environment schema fragments, and reference output. The VM storefront chart's values schema carries one generated definition that refuses secret-marked, role-inapplicable, and unknown typed fields under an agent's pass-through configuration, in any spelling, with no defaults and no required fields. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
 
 
 

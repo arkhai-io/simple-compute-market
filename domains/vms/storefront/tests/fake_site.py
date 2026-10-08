@@ -10,6 +10,7 @@ by that service's own integration tests. ``site_capacity`` injects the exact
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import itertools
 import json
 import time
@@ -43,6 +44,9 @@ TEST_SITE_AUTHORITY_SIGNER = create_signer("ed25519", b"\x42" * 32)
 TEST_SITE_AUTHORITIES = TrustedIdentitySet(
     identities=(TEST_SITE_AUTHORITY_SIGNER.identity,)
 )
+# Signs as an authority the storefront does not trust, for answers that must not
+# verify. A development key; never used on a public network.
+TEST_UNTRUSTED_SIGNER = create_signer("ed25519", b"\x43" * 32)
 
 
 class FakeSite:
@@ -55,6 +59,21 @@ class FakeSite:
         self.events: list[dict] = []
         self._versions = itertools.count(1)
         self._ids = itertools.count(1)
+        #: The live resource-pool projection the site serves. ``None`` projects
+        #: each resource as its own one-member pool; a test sets a list to serve
+        #: exactly that generation.
+        self.pool_projection: list[dict] | None = None
+        self.pool_projection_revision = 1
+        #: Off: every request fails to connect, as an unreachable site does.
+        self.reachable = True
+        #: Off: every answer is signed by an authority the storefront does not
+        #: trust, so it arrives but does not verify.
+        self.verifiable = True
+        #: ``(method, path)`` of every request that reached the site.
+        self.requests: list[tuple[str, str]] = []
+        #: Reservations fulfillment delivered against: the site's release
+        #: guard refuses to free them, as the provisioning service's does.
+        self.delivered: set[str] = set()
 
     def add_resource(
         self,
@@ -62,16 +81,24 @@ class FakeSite:
         total_units: int,
         *,
         attributes: dict | None = None,
+        capacity: dict | None = None,
     ) -> None:
+        """Declare one resource. ``capacity`` declares every dimension; without
+        it the resource declares its GPU count only."""
         self.resources[resource_id] = {
             "resource_id": resource_id,
             "total_units": int(total_units),
             "attributes": dict(attributes or {}),
+            "capacity": dict(capacity) if capacity is not None else None,
             "enabled": True,
         }
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
+
+    def emit(self, kind: str, resource_id: str | None = None) -> None:
+        """Append one capacity event to the feed, as the site would on a change."""
+        self._emit(kind, resource_id)
 
     def _emit(self, kind: str, resource_id: str | None) -> None:
         self.events.append(
@@ -83,16 +110,43 @@ class FakeSite:
             }
         )
 
+    def _capacity(self, rid: str) -> dict[str, int]:
+        row = self.resources[rid]
+        return dict(row.get("capacity") or {"gpu_count": row["total_units"]})
+
+    def available_dimensions(self, rid: str) -> dict[str, int]:
+        """Every declared dimension less what live reservations hold, as the
+        site ledger debits each requested dimension."""
+        available = self._capacity(rid)
+        for reservation in self.reservations.values():
+            if reservation["resource_id"] != rid or reservation["state"] not in (
+                "reserved", "provisioning", "leased", "releasing"
+            ):
+                continue
+            held = reservation.get("dimensions") or {"gpu_count": reservation["units"]}
+            for key, amount in held.items():
+                available[key] = available.get(key, 0) - int(amount)
+        return available
+
     def _available(self, rid: str) -> int:
-        held = sum(
-            a["units"]
-            for a in self.reservations.values()
-            if a["resource_id"] == rid
-            and a["state"] in ("reserved", "provisioning", "leased", "releasing")
-        )
-        return self.resources[rid]["total_units"] - held
+        return self.available_dimensions(rid).get("gpu_count", 0)
+
+    def served_pool_projection(self) -> list[dict]:
+        if self.pool_projection is not None:
+            return self.pool_projection
+        return _pool_projection_rows(self)
+
+    def _pool_projection_generation(self) -> dict[str, Any]:
+        pools = self.served_pool_projection()
+        digest = hashlib.sha256(
+            json.dumps(pools, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        return {"revision": self.pool_projection_revision, "digest": digest}
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
+        if not self.reachable:
+            raise httpx.ConnectError("fake site is unreachable", request=request)
+        self.requests.append((request.method, request.url.path))
         response = self._dispatch(request)
         request_body = json.loads(request.content) if request.content else {}
         response_body = response.json() if response.content else EMPTY_BODY
@@ -101,11 +155,12 @@ class FakeSite:
             request.url.path,
             request_body,
         )
+        signer = TEST_SITE_AUTHORITY_SIGNER if self.verifiable else TEST_UNTRUSTED_SIGNER
         signed = sign_response(
-            signer=TEST_SITE_AUTHORITY_SIGNER,
+            signer=signer,
             envelope=ResponseEnvelope(
                 role="service",
-                principal=TEST_SITE_AUTHORITY_SIGNER.identity,
+                principal=signer.identity,
                 method=request.method,
                 operation=operation,
                 resource=resource,
@@ -152,6 +207,21 @@ class FakeSite:
             self._emit("released", rid)
             return httpx.Response(200, json=self.resources[rid])
 
+        if request.method == "GET" and path == "/api/v1/capacity/site-resource-pools":
+            return httpx.Response(
+                200,
+                json={
+                    **self._pool_projection_generation(),
+                    "resource_pools": self.served_pool_projection(),
+                },
+            )
+
+        if (
+            request.method == "GET"
+            and path == "/api/v1/capacity/site-resource-pools/version"
+        ):
+            return httpx.Response(200, json=self._pool_projection_generation())
+
         if path == "/api/v1/capacity/snapshot":
             return httpx.Response(
                 200,
@@ -171,7 +241,7 @@ class FakeSite:
                             # available_units directly) sees every row as
                             # zero-capacity for ranking purposes, regardless of
                             # this fake's own separate reservation-matching logic.
-                            "available": {"gpu_count": self._available(rid)},
+                            "available": self.available_dimensions(rid),
                             "state": (
                                 "available" if self._available(rid) > 0 else "leased"
                             ),
@@ -196,6 +266,7 @@ class FakeSite:
                 "capacity_reservation_id": capacity_reservation_id,
                 "resource_id": match["resource_id"],
                 "units": match["allocated_gpu_count"],
+                "dimensions": dict(match["dimensions"]),
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
             }
@@ -216,6 +287,13 @@ class FakeSite:
             reservation = self.reservations.get(capacity_reservation_id)
             if reservation is None:
                 return httpx.Response(404, json={"detail": "not found"})
+            escrow_uid = dict(body.get("deal_ref") or {}).get("escrow_uid")
+            if escrow_uid and not reservation.get("escrow_uid"):
+                reservation["escrow_uid"] = escrow_uid
+            # A commit is write-once, as the site's: a repeat on a leased
+            # reservation answers with the window the first one recorded.
+            if reservation.get("state") == "leased":
+                return httpx.Response(200, json={"reservation": reservation})
             reservation["state"] = "leased"
             reservation["lease_start_utc"] = body.get("lease_start_utc")
             reservation["lease_end_utc"] = body.get("lease_end_utc")
@@ -238,6 +316,8 @@ class FakeSite:
                     None,
                 )
             if reservation is None or reservation["state"] == "released":
+                return httpx.Response(200, json={"reservation": None})
+            if reservation["capacity_reservation_id"] in self.delivered:
                 return httpx.Response(200, json={"reservation": None})
             reservation["state"] = "released"
             reservation["failure_reason"] = body.get("failure_reason")
@@ -305,10 +385,10 @@ class FakeSite:
 
     def _match(self, claim: dict) -> dict | None:
         claim = claim or {}
-        executor_kind = claim.get("executor_kind")
+        offering_mode = claim.get("offering_mode")
         if (
-            not isinstance(executor_kind, str)
-            or executor_kind not in self.deliverable_modes
+            not isinstance(offering_mode, str)
+            or offering_mode not in self.deliverable_modes
         ):
             return None
         # compute_capacity_claim_from_order now always routes gpu_count.
@@ -319,6 +399,9 @@ class FakeSite:
         # ledger's _resource_matches skips it.
         dimensions = claim.get("dimensions") or {}
         requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
+        requested_dimensions = {
+            str(key): int(value) for key, value in dimensions.items()
+        } or {"gpu_count": requested}
         # resource_type is a special top-level claim key (mirroring real
         # kit/site's _split_claim_requirement), not an arbitrary
         # attribute -- every resource this fake serves is "compute.gpu"
@@ -343,21 +426,28 @@ class FakeSite:
                     "gpu_count",
                     "dimensions",
                     "resource_type",
-                    "executor_kind",
+                    "offering_mode",
                 )
             )
             if mismatched:
                 continue
-            available = self._available(rid)
-            if available < requested:
+            available_dimensions = self.available_dimensions(rid)
+            # Every requested dimension must fit; one the resource does not
+            # declare has nothing available, as the ledger treats it.
+            if any(
+                available_dimensions.get(key, 0) < amount
+                for key, amount in requested_dimensions.items()
+            ):
                 continue
+            available = available_dimensions.get("gpu_count", 0)
             return {
                 "resource_id": rid,
                 "pool_id": None,
                 "member_id": None,
-                "vm_host": attrs.get("vm_host"),
+                "host_id": attrs.get("host_id"),
                 "allocated_gpu_count": requested,
                 "available_gpu_count": available,
+                "dimensions": requested_dimensions,
                 "attributes": attrs,
             }
         return None
@@ -415,6 +505,20 @@ def capacity_runtime_over(
     sqlite_client_factory: Any | None = None,
 ):
     """A kit-owned ``CapacityRuntime`` over the fake site's transport."""
+    return capacity_runtime_over_sites(
+        {site_name: fake}, sqlite_client_factory=sqlite_client_factory
+    )
+
+
+def capacity_runtime_over_sites(
+    fakes: dict[str, FakeSite],
+    *,
+    sqlite_client_factory: Any | None = None,
+):
+    """A kit-owned ``CapacityRuntime`` over several fake sites, one per name.
+
+    Sites are configured in the mapping's order, so its first is the home site.
+    """
     from core_storefront.aggregation import fill_first
     from market_capacity_publication import CapacityRuntime, CapacitySite
     from market_site_client import SiteCapacityClient
@@ -428,21 +532,18 @@ def capacity_runtime_over(
         reconcile = _capacity_reconciler(sqlite_client_factory)
 
     return CapacityRuntime(
-        sites=(
-            CapacitySite(
-                site_name,
-                "http://fake-site:8081",
-                TEST_SITE_AUTHORITIES,
-            ),
+        sites=tuple(
+            CapacitySite(name, "http://fake-site:8081", TEST_SITE_AUTHORITIES)
+            for name in fakes
         ),
         signer=TEST_MARKETPLACE_SIGNER,
         placement=fill_first,
         reconcile=reconcile,
-        site_client_factory=lambda _site, _signer: SiteCapacityClient(
+        site_client_factory=lambda site, _signer: SiteCapacityClient(
             "http://fake-site:8081",
             signer=TEST_MARKETPLACE_SIGNER,
             expected_authorities=TEST_SITE_AUTHORITIES,
-            transport=fake.transport(),
+            transport=fakes[site.site_id].transport(),
         ),
     )
 
@@ -451,7 +552,7 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     """Project each fake resource as its exact one-member VM pool."""
     return [
         {
-            "resource_pool_id": resource_id,
+            "pool_id": resource_id,
             "pool_metadata": {
                 "policy_tags": {
                     "deliverable_modes": sorted(fake.deliverable_modes),
@@ -459,9 +560,9 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
             },
             "resources": [
                 {
-                    "physical_resource_id": resource_id,
-                    "capacity": {"gpu_count": row["total_units"]},
-                    "available": {"gpu_count": fake._available(resource_id)},
+                    "physical_resource_id": resource_id, "resource_type": "compute.gpu",
+                    "capacity": fake._capacity(resource_id),
+                    "available": fake.available_dimensions(resource_id),
                     "attributes": dict(row["attributes"]),
                     "enabled": bool(row["enabled"]),
                 },

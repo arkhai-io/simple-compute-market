@@ -17,35 +17,35 @@ ENV UV_HTTP_RETRIES=10
 
 WORKDIR /app
 
-# Build context is the repo root (see Makefile): internal wheels
-# (arkhai-kit-identity) resolve from /.dist via --find-links, and
-# --no-sources ignores the pyproject's editable workspace paths, which
-# exist for local dev only and cannot resolve inside the image.
-COPY .dist/ /.dist/
 COPY core/registry/src ./src
 COPY core/registry/alembic ./alembic
 COPY core/registry/filter-spec.yaml ./
-COPY core/registry/pyproject.toml core/registry/uv.lock ./
-# Normalize the lock's find-links registry path to the in-image wheel dir
-# (uv records it relative to the repo, which cannot normalize from /app).
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock
-
+COPY domains/apicredits/registry/filter-spec.yaml ./filter-spec-apicredits.yaml
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY .dist/ /repo/.dist/
+COPY scripts/uv_project.py /repo/scripts/uv_project.py
+COPY core/registry/pyproject.toml core/registry/uv.lock /repo/core/registry/
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-        --refresh-package arkhai-core-registry-client \
-        --refresh-package arkhai-kit-identity
+    python3 /repo/scripts/uv_project.py image --project /repo/core/registry -- --no-dev --no-install-project
 
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
 
 WORKDIR /app
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
-    chown appuser:appuser /app
+    mkdir -p /app/data && \
+    chown appuser:appuser /app /app/data
 
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/src ./src
 COPY --from=builder --chown=appuser:appuser /app/alembic ./alembic
 COPY --from=builder --chown=appuser:appuser /app/filter-spec.yaml ./
+COPY --from=builder --chown=appuser:appuser /app/filter-spec-apicredits.yaml ./
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser
 
@@ -58,4 +58,4 @@ ENV ENABLE_HEALTH_CHECKS=false HEALTH_CHECK_INTERVAL=60 ENDPOINT_CHECK_TIMEOUT=1
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "core_registry.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8080"]

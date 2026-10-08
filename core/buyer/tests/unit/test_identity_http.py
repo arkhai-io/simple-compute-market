@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from core_buyer.negotiation_client import _authenticated_json
+from core_buyer.negotiation_client import AuthenticatedHTTPError, _authenticated_json
 from core_buyer.orchestration import submit_settlement_request
 from market_identity import (
     Ed25519Signer,
@@ -329,7 +329,7 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
         ),
     )
 
-    with pytest.raises(RuntimeError, match="authenticated HTTP 409"):
+    with pytest.raises(RuntimeError, match="authenticated HTTP 409") as raised:
         _authenticated_json(
             "http://seller/api/v1/negotiate/new",
             {},
@@ -342,6 +342,10 @@ def test_valid_signed_http_error_is_verified_before_status_propagation(
             timestamp=_NOW,
             expected_response_principals=_trust(seller),
         )
+    # Typed, carrying the verified status and body, and still a RuntimeError.
+    assert isinstance(raised.value, AuthenticatedHTTPError)
+    assert raised.value.status_code == 409
+    assert raised.value.body == payload
 
 
 @pytest.mark.parametrize(

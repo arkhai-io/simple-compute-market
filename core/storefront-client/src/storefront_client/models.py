@@ -169,14 +169,28 @@ class HealthResponse:
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
-    listing_mode_explanations: dict[str, Any] | None = None  # per-site/pool listing_mode fallback reasons; present on /api/v1/system/status
+    listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
+    publication_derivation: dict[str, Any] | None = None  # per-site held pools and publication notices; present on /api/v1/system/status
+    #: The storefront-to-provisioning contract major this storefront speaks,
+    #: from its own installed wheel. Not the peer's, and not the same axis as
+    #: a domain contribution's `contract_version`: this is the wire a cutover
+    #: has to find skew on before mutations resume.
+    provisioning_contract_version: str | None = None  # present on /api/v1/system/status
+    #: Storefront policies disclosed publicly, before a counterparty commits
+    #: data, keyed by policy: ``introduction_retention`` while contact exchange
+    #: is enabled. Empty when the storefront discloses none.
+    disclosures: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
             "status", "checks", "paused", "agent_id", "chain_id",
-            "resource_count", "site_projections", "listing_mode_explanations",
+            "resource_count", "site_projections",
+            "listing_cardinality_mode_explanations",
+            "publication_derivation",
+            "provisioning_contract_version",
+            "disclosures",
         }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
@@ -188,7 +202,12 @@ class HealthResponse:
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             site_projections=d.get("site_projections"),
-            listing_mode_explanations=d.get("listing_mode_explanations"),
+            listing_cardinality_mode_explanations=d.get(
+                "listing_cardinality_mode_explanations"
+            ),
+            publication_derivation=d.get("publication_derivation"),
+            provisioning_contract_version=d.get("provisioning_contract_version"),
+            disclosures=dict(d.get("disclosures") or {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -211,7 +230,7 @@ class ListingSummary:
     escrow_uid: str | None = None
     created_at: str = ""
     updated_at: str = ""
-    offer_resource: dict[str, Any] = field(default_factory=dict)
+    listing_resource: dict[str, Any] = field(default_factory=dict)
     demand_resource: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -232,7 +251,7 @@ class ListingSummary:
         known = {
             "listing_id", "status", "paused", "max_duration_seconds", "seller",
             "buyer", "escrow_uid", "created_at", "updated_at",
-            "offer_resource", "demand_resource",
+            "listing_resource", "demand_resource",
         }
         max_dur = d.get("max_duration_seconds")
         return cls(
@@ -245,7 +264,7 @@ class ListingSummary:
             escrow_uid=d.get("escrow_uid"),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
-            offer_resource=_parse_resource(d.get("offer_resource")),
+            listing_resource=_parse_resource(d.get("listing_resource")),
             demand_resource=_parse_resource(d.get("demand_resource")),
             extra={k: v for k, v in d.items() if k not in known},
         )
@@ -330,16 +349,26 @@ class StageEvent:
 
 @dataclass
 class StageEventListResponse:
-    """Response from GET /api/v1/system/events (non-streaming)."""
+    """Response from GET /api/v1/system/events (non-streaming).
+
+    `truncated` says whether more rows matched the query than `events`
+    carries. It is the server's answer, not a local comparison of `count`
+    against the requested limit -- the server applied the page cap and is the
+    only side that can tell a log ending on the boundary from one continuing
+    past it. A caller filtering `events` and concluding something about the
+    whole log should check it first.
+    """
 
     events: list[StageEvent] = field(default_factory=list)
     count: int = 0
+    truncated: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "StageEventListResponse":
         return cls(
             events=[StageEvent.from_dict(e) for e in d.get("events", [])],
             count=d.get("count", 0),
+            truncated=bool(d.get("truncated", False)),
         )
 
 
@@ -652,7 +681,14 @@ class ReserveCapacityResponse:
     capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str = ""
+    #: No physical resource identity. The capacity boundary strips
+    #: `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `host_id`
+    #: from every reservation response, because which physical resource backs a
+    #: reservation is the provisioning service's fact and not a commercial
+    #: one. This response carried a `resource_id` from before that strip, so it
+    #: was unsatisfiable for every reservation rather than only for pooled
+    #: ones -- a caller reading it got `""` and could not tell that apart from
+    #: an answer. `pool_id` and `member_id` are what the boundary does report.
     gpu_count: int = 0
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
@@ -664,7 +700,6 @@ class ReserveCapacityResponse:
             "capacity_reservation_id",
             "pool_id",
             "member_id",
-            "resource_id",
             "gpu_count",
             "resource_state",
             "closed_listing_ids",
@@ -673,7 +708,6 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            resource_id=str(d.get("resource_id") or ""),
             gpu_count=int(d.get("gpu_count") or 0),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),
@@ -683,18 +717,22 @@ class ReserveCapacityResponse:
 
 @dataclass
 class EvaluateNegotiateResponse:
-    """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+    """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
+
+    The amounts are ``None`` when the opening would be refused.
+    """
 
     listing_id: str = ""
-    our_reference_amount: int = 0
-    their_proposed_amount: int = 0
+    our_reference_amount: int | None = None
+    their_proposed_amount: int | None = None
     direction: str = ""
-    strategy: str = ""
+    strategy: str | None = None
     decision: str = ""
     decision_amount: int | None = None
     decision_proposal: dict[str, Any] | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
+    refused: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -702,19 +740,25 @@ class EvaluateNegotiateResponse:
         known = {
             "listing_id", "our_reference_amount", "their_proposed_amount",
             "direction", "strategy", "decision", "decision_amount",
-            "decision_proposal", "decision_reason", "would_negotiate",
+            "decision_proposal", "decision_reason", "would_negotiate", "refused",
         }
+
+        def _amount(key: str) -> int | None:
+            value = d.get(key)
+            return int(value) if value is not None else None
+
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_amount=int(d.get("our_reference_amount", 0)),
-            their_proposed_amount=int(d.get("their_proposed_amount", 0)),
+            our_reference_amount=_amount("our_reference_amount"),
+            their_proposed_amount=_amount("their_proposed_amount"),
             direction=d.get("direction", ""),
-            strategy=d.get("strategy", ""),
+            strategy=d.get("strategy"),
             decision=d.get("decision", ""),
-            decision_amount=int(d["decision_amount"]) if d.get("decision_amount") is not None else None,
+            decision_amount=_amount("decision_amount"),
             decision_proposal=d.get("decision_proposal"),
             decision_reason=d.get("decision_reason"),
             would_negotiate=bool(d.get("would_negotiate", False)),
+            refused=bool(d.get("refused", False)),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

@@ -54,7 +54,7 @@ Mechanism subcommands remain asymmetric. Arkhai payments has no marketplace paye
 
 ## Precedence and secret boundaries
 
-Resolution order is explicit CLI override, environment or Secret overlay, role/user TOML, then committed defaults. Lists replace lower-layer lists in full. Typed metadata drives role templates, dotted-path validation, environment and Helm schema fragments, and reference output so these surfaces drift together.
+Resolution order is explicit CLI override, environment or Secret overlay, role/user configuration files — for a storefront, `storefront.toml` then a chart-rendered `storefront.json` — then committed defaults. Lists replace lower-layer lists in full. Typed metadata drives role templates, dotted-path validation, environment schema fragments, the VM storefront chart's generated values-schema definition, and reference output so these surfaces drift together. That definition refuses secret-marked and role-inapplicable fields and closes typed sections; it carries no defaults, because a chart passes the configuration through and the storefront owns them.
 
 Public principals, payment receipt trust pins, fee/dispute policy, account references, assets, condition profiles, chain names, and deployed addresses may be ordinary configuration. Private identity, wallet, or request credentials cross only approved Secret or environment boundaries. Payment-provider, administrator, webhook, ledger database, and service-migration configuration belongs to the payments service and is rejected by marketplace schemas.
 

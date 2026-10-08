@@ -190,14 +190,14 @@ remove authority without assigning it to another principal.
   operation does not transfer that authority to another principal
 
 ### Requirement: Allocation-backed executor registration
-Market-managed VM and bare-metal leases MUST attach executor kind, target, and executor-specific reference data to an existing committed site allocation.
+Market-managed VM and bare-metal leases MUST attach the offering mode, target, and executor-specific reference data to an existing committed site allocation.
 
 #### Scenario: Bare-metal lease is registered
 - **WHEN** a caller registers a lease for a committed allocation and bare-metal machine
-- **THEN** the allocation records the `bare_metal` executor kind, machine target, and physical-host reference
+- **THEN** the allocation records the `bare_metal` offering mode, machine target, and physical-host reference
 
 ### Requirement: Executor-dispatched lifecycle
-Market-managed release MUST dispatch by executor kind; direct VM host administration endpoints MAY remain separate operator surfaces.
+Market-managed release MUST dispatch by offering mode; direct VM host administration endpoints MAY remain separate operator surfaces.
 
 #### Scenario: Bare-metal allocation is released
 - **WHEN** its lease lifecycle invokes release
@@ -232,7 +232,7 @@ Compute lease lifecycle MUST use an injected site-authority port and MUST NOT re
 - **WHEN** an authorized operator force-releases after an unrecoverable executor failure
 - **THEN** the audit state distinguishes the operator override from successful physical teardown
 
-Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by executor kind: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's executor kind the same way release submission already resolves an executor delegate by kind, so adding or changing one executor's completion semantics does not touch the generic watchdog or any other kind's path. VM's specific delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "VM release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`); this section states only the kind-routing rationale that applies to bare-metal too.
+Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by offering mode: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's offering mode the same way release submission already resolves an executor delegate by mode, so adding or changing one mode's completion semantics does not touch the generic watchdog or any other mode's path. VM's specific delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "VM release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`); this section states only the kind-routing rationale that applies to bare-metal too.
 
 #### Scenario: VM lease release begins durable fulfillment teardown
 
@@ -242,7 +242,7 @@ Release submission and release-completion reads are separate, independently kind
 #### Scenario: Executor release delegate has nothing to poll
 
 - **WHEN** an executor's release delegate reports no pollable job for a submitted release (e.g. no release mechanism configured for that kind)
-- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other executor kind has a release-job port configured
+- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other offering mode has a release-job port configured
 
 ### Requirement: Explicit early lease termination
 
@@ -285,7 +285,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 
 ### Requirement: Compute-owned caller contract
 
-Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain, while direct VM operator APIs MAY retain VM-owned host, VM action, Ansible job, credential, and lease models.
+Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain, while direct VM operator APIs MAY retain VM-owned host, VM action, Ansible job, credential, and lease models.
 
 #### Scenario: Bare-metal storefront installs the shared client
 
@@ -295,7 +295,7 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 #### Scenario: Provisioning service exposes resource-pool administration
 
 - **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
-- **THEN** that executor-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
+- **THEN** that offering-mode-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
 
 ### Requirement: Compute-owned provisioning service
 
@@ -313,11 +313,21 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
+Service composition MUST reject duplicate executor registrations, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. An executor adapter MUST be selected by the `offering_mode` it serves together with its action; no surface may name that selector `executor_kind`, `offering_type`, or `virtualization_type`. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor's offering mode. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
 
-#### Scenario: Two adapters claim one executor kind
+`executor` names this action-dispatch abstraction and nothing else when it is the head noun. It MUST NOT stand in for the offering mode, the machine, or the delivery handler: the mode is an offering mode, the machine is a host, and the handler is a provider. The abstraction keeps the name because it validates parameters, submits work, and validates results and credentials; only its selector moves.
 
-- **WHEN** composition registers duplicate ownership for an executor/action kind
+`executor_`-prefixed compounds naming the abstraction's own targets, references, or actions MUST retain the name, because `executor` carries its action-dispatch sense in them rather than standing in for another concept. `executor_ref` is the executor's reference, `executor_target` is the target of an executor action, and an executor action envelope carries an executor action; none of these is the mode, the machine, or the handler as a head noun. This requirement's prohibition therefore applies to the head noun and MUST NOT be read as a prohibition on the prefix.
+
+#### Scenario: An executor-prefixed compound names the abstraction's own target
+
+- **WHEN** a durable reservation or lease records the target or reference an executor action acts on
+- **THEN** those fields retain their `executor_`-prefixed names
+- **AND** the offering-mode selector on the same record does not, because its head noun is the mode
+
+#### Scenario: Two adapters claim one offering mode
+
+- **WHEN** composition registers duplicate ownership for an `offering_mode` and action pair
 - **THEN** startup fails with both registrations identified and no server begins serving
 
 #### Scenario: Two adapters claim one provider identity
@@ -332,11 +342,16 @@ Service composition MUST reject duplicate executor/action kinds, duplicate fulfi
 
 ### Requirement: Ansible fulfillment adapter
 
-The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `vm_host` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
 Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
-The fulfillment request MAY carry a `connectivity` field (FRP relay address, domain, and dashboard credential) which the adapter forwards to the Ansible job unchanged. This is opaque connectivity metadata the adapter never interprets or validates beyond passing it through; it is not a sizing/feasibility requirement.
+The fulfillment request's `connectivity` field MUST NOT carry relay configuration. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. Any remaining `connectivity` content is opaque metadata the adapter forwards unchanged and never interprets, and is not a sizing or feasibility requirement.
+
+#### Scenario: A request supplies relay configuration
+
+- **WHEN** a fulfillment request's `connectivity` field carries a relay address, domain, or dashboard credential
+- **THEN** the value does not select a relay, and the relay referenced by the pool is used instead
 
 #### Scenario: Pool configuration changes after create dispatch
 
@@ -351,7 +366,7 @@ The fulfillment request MAY carry a `connectivity` field (FRP relay address, dom
 #### Scenario: VM teardown is dispatched
 
 - **WHEN** teardown begins for an accepted VM fulfillment
-- **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
+- **THEN** the adapter targets the recorded `host_id` and `vm_target` from fulfillment metadata
 
 #### Scenario: A committed dimension is present
 
@@ -418,7 +433,13 @@ configuration rather than by constructing provider payload JSON independently.
 
 ### Requirement: VM release delegates to durable fulfillment teardown
 
-For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by `executor_kind`; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
+For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by the reservation's `offering_mode`, the same value the capacity claim carries and the Resource Pool declares; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
+
+#### Scenario: Release status is selected by the offering mode
+
+- **WHEN** lease lifecycle resolves a release-status lookup for a reservation
+- **THEN** the lookup is selected by the reservation's recorded `offering_mode`
+- **AND** a reservation carrying the retired selector key is treated as carrying no offering mode rather than defaulting to one
 
 #### Scenario: Unexpected teardown submission failure remains diagnosable
 
@@ -451,7 +472,8 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 The compute provisioner MUST import configured Resource Pool definitions before
 seeding inventory. A bare-metal inventory host MAY name its exact pool through
 `pool_id`; the seed MUST reject an unknown pool and MUST preserve that binding
-on create and update. The `bare_metal.ansible` provider accepts no pool-local
+on create and update. A capacity declaration's explicit `bare_metal_publication`
+view MUST carry the declaration's own pool. The `bare_metal.ansible` provider accepts no pool-local
 playbook, inventory-group, credential, or executor-target configuration:
 execution uses service-owned configuration and the scheduler-selected Physical
 Resource. The operator MUST register that Physical Resource and its explicit
@@ -463,10 +485,46 @@ surface before the host is publishable.
 - **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
 - **THEN** the durable host row retains the exact pool id and unknown pool ids fail instead of falling back to `default`
 
+#### Scenario: Publication retains the inventory pool binding
+
+- **GIVEN** a bare-metal inventory host is bound to a configured provider pool
+- **AND** the capacity declaration naming that host is in the same pool
+- **WHEN** the compute service projects its explicit `bare_metal_publication` view
+- **THEN** the view's `pool_id` is that pool, taken from the declaration
+
+#### Scenario: Publication carries the declaration's pool
+
+- **GIVEN** a capacity declaration with an enabled `bare_metal_publication` in a configured provider pool
+- **WHEN** the compute service projects its explicit `bare_metal_publication` view
+- **THEN** the view's `pool_id` is the declaration's pool
+
 #### Scenario: Pool-local executor configuration is supplied
 
 - **WHEN** a `bare_metal.ansible` pool contains a non-empty `provider_config`
 - **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
+
+### Requirement: A bare-metal publication view is built from its capacity declaration
+
+A capacity declaration's bare-metal publication view SHALL take its Physical
+Resource identity, pool, host, physical host identity, capacity, and availability
+from that declaration alone, and SHALL NOT read a host inventory record. A
+declaration whose publication is enabled but which names no host SHALL be
+projected without the view rather than failing the projection generation.
+
+#### Scenario: An enabled publication names no host
+
+- **GIVEN** a capacity declaration with an enabled bare-metal publication and no
+  host
+- **WHEN** the resource-pool projection is produced
+- **THEN** the declaration is projected without the bare-metal view and every
+  other entry in the generation is unaffected
+
+#### Scenario: The named host is not registered
+
+- **GIVEN** a capacity declaration with an enabled bare-metal publication naming
+  a host that has no registered record
+- **WHEN** the resource-pool projection is produced
+- **THEN** the view is produced and carries the declaration's host
 
 ### Requirement: Signed payment receipts gate selected-site execution
 
@@ -487,14 +545,595 @@ For `arkhai.payments.v1`, VM and bare-metal storefronts MUST load the accepted m
 - **WHEN** payment settlement succeeds for an accepted bare-metal Agreement
 - **THEN** reservation, fulfillment, result retrieval, and teardown continue against that Agreement's selected-site authority
 
+### Requirement: Host registry records the connection port
+
+The host registry MUST record the SSH port the provisioner connects to for each host, defaulting to 22. The registry is the authority for how a host is reached — address, user, key material, and port — and every execution path MUST derive its connection from a rendered inventory rather than constructing one, so that a host reached through a reverse tunnel, a NAT forward, or a bastion is reachable by every operation without any of them being changed individually.
+
+Rendered inventories MUST emit `ansible_port` for every host, including hosts on the default port, so that a rendered inventory states what the registry holds rather than leaving the default implied by an absent line.
+
+An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
+
+#### Scenario: A host is registered on a tunnel port
+
+- **WHEN** a host is registered with an SSH port other than 22
+- **THEN** the recorded port is returned by the host endpoints and appears as `ansible_port` in every rendered inventory for that host
+
+#### Scenario: A host is registered without a port
+
+- **WHEN** a host is registered with no SSH port supplied
+- **THEN** the registry records port 22 and rendered inventories state it explicitly
+
+#### Scenario: An inventory file supplies a port
+
+- **WHEN** an INI inventory carrying `ansible_port` is imported
+- **THEN** the port is stored against the host and survives to the rendered inventory the provisioner connects with
+
+#### Scenario: An inventory file supplies a malformed port
+
+- **WHEN** an INI inventory entry carries an `ansible_port` that is not a port number between 1 and 65535
+- **THEN** that entry is rejected with a warning naming the host, other entries in the same file are still imported, and no host is registered with a substituted port
+
+### Requirement: Relays are administered resources
+
+A relay is a durable resource, not pool configuration. The provisioning service MUST record each relay's rendezvous address, rendezvous port, VM port allocation window, and admission token as one row, and resource pools MUST reference a relay rather than restating its address, window, or token.
+
+A relay's rendezvous address and port taken together MUST be unique, so that one rendezvous cannot be recorded twice under different identities. Because a `tcp` proxy's remote port binds a listening socket on the relay itself, two pools referencing one relay draw from a single port namespace; recording the window on the relay is what prevents two pools from allocating within that namespace under different bounds.
+
+A relay MUST be creatable, readable, and updatable through the provisioning API without redeploying the service, so that adding a rendezvous is an operator action against a running system.
+
+#### Scenario: Two pools reference one relay
+
+- **WHEN** two resource pools reference the same relay
+- **THEN** both draw allocations from that relay's single recorded window, and neither pool can configure a different window for it
+
+#### Scenario: A duplicate rendezvous is recorded
+
+- **WHEN** a relay is created with an address and port already recorded by another relay
+- **THEN** the request is rejected rather than creating a second identity for one rendezvous
+
+#### Scenario: A relay moves to a new address
+
+- **WHEN** a relay's recorded address is updated
+- **THEN** every port lease held against that relay remains associated with it, rather than becoming unreferenced
+
+#### Scenario: A relay is added after deployment
+
+- **WHEN** an operator creates a relay through the API against a running service
+- **THEN** a pool may reference it and allocate against it without the service being redeployed
+
+### Requirement: Relay admission tokens are confidential at rest and on read paths
+
+A relay's admission token MUST be encrypted at rest using the deployment's configured encryption key, so that the stored value is not a usable credential without a key held outside the database.
+
+Configuration read paths MUST NOT return the token. This applies to every read surface, including pool and relay read endpoints, exported configuration documents, and the configuration comparison used to reconcile a definition document against stored state. A separate, explicitly named execution read path MAY return the decrypted token, and only fulfillment dispatch may use it.
+
+A write that omits the token MUST preserve the stored value. Only an explicit token value replaces one, so that an update changing an unrelated field cannot destroy the credential.
+
+#### Scenario: A relay is read through the API
+
+- **WHEN** a relay or a pool referencing it is retrieved or exported
+- **THEN** no admission token appears in the response, and the response indicates whether a token is configured
+
+#### Scenario: A fulfillment job is dispatched
+
+- **WHEN** the adapter builds job inputs for a VM creation against a relay-backed pool
+- **THEN** the token is obtained through the execution read path and reaches the job, and is not obtained from a read path serving API responses
+
+#### Scenario: An unrelated field is updated
+
+- **WHEN** a relay or pool is updated with a request that omits the token
+- **THEN** the stored token is unchanged
+
+#### Scenario: Stored state is inspected directly
+
+- **WHEN** a relay row is read from the database without the deployment's encryption key
+- **THEN** the recorded token is ciphertext and cannot be used to admit a client
+
+### Requirement: A relay binding is fixed for a VM's life
+
+A VM's relay MUST be recorded on its port lease at allocation, and that record — not the pool's current configuration — MUST be the authority for which relay that VM uses. Teardown and reclamation MUST read the lease. Resolving the relay from pool configuration at teardown would target the wrong relay after any rebinding, releasing a port that was never bound there and leaving bound the one that was.
+
+A pool's relay reference determines which relay a newly created VM receives. It MUST NOT change the relay of a VM that already exists.
+
+A host's pool assignment, a pool's relay reference, and a relay's address or port MUST NOT change while any affected host holds an active lease, unless the relay is the same on both sides of the change. The buyer holds a rendezvous address and a port; both are delivered, and a remote port is not portable between relays, so a rebinding that moved existing VMs would strand every buyer on the affected hosts and request ports the new relay may already have leased.
+
+Rebinding is therefore drain-then-change: disabling a pool already excludes it from new scheduling without invalidating active workloads, so an operator disables, waits for leases to clear, rebinds, and re-enables.
+
+#### Scenario: A pool's relay reference is changed while VMs are running
+
+- **WHEN** an operator changes a pool's relay reference and a host in that pool holds an active lease
+- **THEN** the change is rejected, naming the host and the lease it holds
+
+#### Scenario: A pool's relay reference is changed after draining
+
+- **WHEN** the same change is made once no host in the pool holds an active lease
+- **THEN** it is accepted, and subsequently created VMs are allocated on the new relay
+
+#### Scenario: A host moves between pools sharing one relay
+
+- **WHEN** a host is reassigned to a pool referencing the same relay as its current pool
+- **THEN** the move is accepted regardless of active leases, because no delivered connection string changes
+
+#### Scenario: A relay is repointed while it carries leases
+
+- **WHEN** a relay's address or port is updated and it holds an active lease
+- **THEN** the update is rejected
+
+#### Scenario: A VM is torn down after its pool was rebound
+
+- **WHEN** teardown runs for a VM whose pool now references a different relay
+- **THEN** the relay recorded on the VM's lease is used, and the port is released against it
+
+### Requirement: Relay admission tokens are resolved at execution
+
+A relay's admission token MUST NOT be written into an accepted operation's persisted parameter snapshot, and MUST NOT appear in any job status or job list response. Job parameters are persisted unencrypted and are returned by the job endpoints, so a token placed among them is neither protected at rest nor withheld from a read.
+
+An accepted operation MUST carry the relay reference and the leased remote port. The relay's address and admission token MUST be resolved immediately before the job's variables are written, so that a token rotated after acceptance takes effect on the next execution, including a retry of a job accepted before the rotation.
+
+A relay that is absent, disabled, or holds no token at execution MUST fail the job as a configuration error rather than a retryable one, because a retry against unchanged configuration fails identically.
+
+The rendered variables file holds the decrypted token and MUST have the same lifetime and access restrictions as other decrypted secret material on the execution path.
+
+#### Scenario: A job's status is retrieved
+
+- **WHEN** a job dispatched against a relay-backed pool is retrieved through the job endpoints
+- **THEN** no admission token appears in the returned parameters
+
+#### Scenario: Stored job parameters are inspected
+
+- **WHEN** the persisted parameters of an accepted operation are read directly from the database
+- **THEN** they carry the relay reference and remote port, and no token
+
+#### Scenario: A token is rotated between acceptance and execution
+
+- **WHEN** a relay's token is rotated after a job is accepted and before it executes
+- **THEN** the job executes with the rotated token
+
+#### Scenario: A relay becomes unusable between acceptance and execution
+
+- **WHEN** the referenced relay is disabled or its token cleared before the job executes
+- **THEN** the job fails as a configuration error and is not retried
+
+### Requirement: Relay port leases are unique per relay
+
+The provisioning service MUST allocate a VM's relay port from the referenced relay's window before dispatch, record the allocation against that relay and the VM, and pass the port to the job as an input. The playbook MUST apply the port it is given and MUST NOT select one.
+
+A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
+
+A lease MUST be released when the owning settlement record reaches a terminal state, in the same transaction that records that state. Attaching release to individual lifecycle paths instead leaves whichever path was not enumerated leaking silently; attaching it outside the terminal transaction reintroduces the same leak on any crash between the two. A periodic reconciliation MUST release leases whose owning job or fulfillment has been terminal beyond a grace period, as a backstop for paths that bypass the transition rather than as the primary mechanism.
+
+Allocation MUST be idempotent for one owner: allocating twice for the same fulfillment MUST return the lease already held rather than issuing a second port.
+
+A pool whose referenced relay has no usable allocation window MUST be rejected before dispatch rather than producing a VM with no external route.
+
+#### Scenario: Two hosts share a relay
+
+- **WHEN** a port is leased for a VM on one host and a VM on a second host requests an allocation from the same relay
+- **THEN** the second allocation selects a different port, rather than reissuing a port already bound on that relay
+
+#### Scenario: A VM creation fails before teardown would run
+
+- **WHEN** a VM's lifecycle reaches a terminal state without a teardown having run
+- **THEN** its port lease is released
+
+#### Scenario: A release path is missed
+
+- **WHEN** a lease's owning job has been terminal beyond the grace period and the lease is still held
+- **THEN** reconciliation releases it
+
+#### Scenario: An accepted fulfillment allocates twice
+
+- **WHEN** allocation runs a second time for a fulfillment that already holds an active lease
+- **THEN** the existing lease is returned and no second port is issued
+
+#### Scenario: Validation is requested
+
+- **WHEN** a fulfillment request is validated rather than accepted
+- **THEN** no port is leased and no durable state is written
+
+#### Scenario: A relay is configured with no usable window
+
+- **WHEN** a fulfillment is requested against a pool whose relay has no usable allocation window
+- **THEN** the request is rejected before dispatch rather than creating a VM with no route
+
+### Requirement: Relay definitions are imported from a mounted document
+
+The provisioning service MAY be configured with a path to a relay definition document. When present, the service MUST import it, creating and updating the relays it names.
+
+The document MUST NOT carry credentials. A relay entry MAY name which key of the deployment's secrets profile holds its admission token. That key MUST be read only when the relay is created, and MUST NOT be re-read on a later import, so that a token rotated through the API is never overwritten by a document that still names the key holding the old one.
+
+An import MUST fail, naming the key, when an entry names a profile key the profile does not carry, rather than creating a relay with an empty token.
+
+A relay MUST remain usable after the document that established it is removed or the path unset. Establishing a relay from a document and administering it through the API are the same relay, not two.
+
+#### Scenario: A deployment starts with no operator action
+
+- **WHEN** a deployment is applied carrying a relay definition document and a secrets profile holding the named token key
+- **THEN** the named relay and the pools referencing it are usable without any API call by an operator
+
+#### Scenario: A token is rotated and the document is later reconciled
+
+- **WHEN** a relay's token is rotated through the API and the definition document is subsequently edited and reconciled
+- **THEN** the rotated token is retained rather than reset to the value at the named profile key
+
+#### Scenario: A named profile key is missing
+
+- **WHEN** a definition document entry names a profile key the secrets profile does not carry
+- **THEN** the import fails naming that key, and no relay is created with an empty token
+
+#### Scenario: The document is unmounted
+
+- **WHEN** the relay definition document is removed and the service restarts
+- **THEN** relays established from it remain present and enabled, and pools referencing them continue to dispatch
+
+### Requirement: Passthrough binding cannot strand a host
+
+Host preparation MUST NOT render a machine unreachable. A device is assigned to guests by binding a PCI address, never a vendor/device identifier: an identifier matches every device presenting it anywhere in the machine, including devices in IOMMU groups no decision considered.
+
+Passthrough viability MUST be audited before any binding is configured, and the audit MUST be read-only so it is safe to run against a machine nothing else has touched. A GPU whose IOMMU group contains a network controller, a storage controller, the device carrying the host's default route, or the device carrying its root filesystem MUST be reported unavailable rather than bound, because assigning it would require assigning that device with it.
+
+An absent or disabled IOMMU MUST fail closed. "No groups because the IOMMU is disabled" and "groups assessed, no conflicts found" MUST be distinguishable outcomes, and only the second may result in a device being bound.
+
+Bindings MUST be applied while an operator or automation holds a live connection to the host, and MUST NOT be persisted across reboots until they have been applied and verified on that machine. A reboot may enable the IOMMU, which claims no device; it MUST NOT carry a device binding that has not been verified.
+
+Declared GPU capacity MUST count devices that can be assigned to a guest, not devices present, so a host does not publish capacity no fulfillment can satisfy.
+
+#### Scenario: A GPU shares its group with a host-critical device
+
+- **WHEN** the audit finds a GPU whose IOMMU group contains the device carrying the host's default route
+- **THEN** that GPU is reported unavailable with the blocking device named, no binding is configured for it, and any GPU in a clean group on the same host is still bindable
+
+#### Scenario: The IOMMU is not enabled
+
+- **WHEN** the audit runs on a host exposing no IOMMU groups
+- **THEN** it reports that viability cannot be assessed, distinctly from reporting no conflicts, and no device is bound
+
+#### Scenario: A binding is applied
+
+- **WHEN** audited bindings are applied
+- **THEN** they are applied with a live connection to the host, every audited address is confirmed bound, the device carrying the default route is confirmed to hold the driver it held beforehand, and only then is the binding made to persist across reboots
+
+#### Scenario: A binding fails
+
+- **WHEN** applying a binding fails
+- **THEN** the failure is reported, the host remains running and reachable, virtualization remains available, and the affected device is not counted as capacity
+
+### Requirement: A host has one identity name
+
+A host's identity MUST be named `host_id` on every interface that names it: the
+host registry, a capacity declaration's host link, reservation execution references,
+fulfillment metadata, job parameters, lease APIs, playbook variables, and published
+listings. No such interface MAY name that identity `name`, `vm_host`, `machine_id`, or
+any other domain-prefixed spelling. The address the provisioner connects to is the
+host's `ssh_host`. The stable identity of a physical machine across
+hosts is a distinct concept and MUST keep its own name.
+
+#### Scenario: A VM reservation binds to a host
+
+- **WHEN** a VM reservation is admitted against a declaration delivered through a host
+- **THEN** its execution reference names that host as `host_id`
+
+#### Scenario: A bare-metal listing is published
+
+- **WHEN** a bare-metal listing is published for a declaration delivered through a host
+- **THEN** the listing names that host as `host_id` under the listing kind that
+  carries it, and names the physical machine separately as `physical_host_id`
+
+#### Scenario: Two hosts share one physical machine
+
+- **WHEN** one physical machine is registered as a VM host and as a bare-metal node
+- **THEN** each has its own `host_id`, and both declarations carry the same
+  `physical_host_id` so cross-mode accounting sees one machine
+
+### Requirement: Existing host identities migrate without loss
+
+A compute provisioner MUST migrate every persisted host identity to `host_id` in one
+transaction before serving requests. It MUST read and validate every affected row
+before its first write, and the transaction MUST cover its schema changes as well as
+its data, so a failure leaves both unchanged. A declaration whose host spellings
+disagree, whose cross-mode accounting fields disagree between locations, or that
+names a host another declaration names, MUST abort the migration, naming the row.
+The migration MUST rewrite only the locations that carry a host identity; values an
+operator supplied, such as provider variables, MUST NOT be rewritten whatever their
+names.
+
+#### Scenario: A declaration carries both legacy spellings with one value
+
+- **WHEN** a declaration's `vm_host` and its publication `machine_id` name the same host
+- **THEN** the migration records that host as the declaration's `host_id` and removes
+  both legacy spellings
+
+#### Scenario: A declaration carries conflicting spellings
+
+- **WHEN** a declaration's `vm_host` and its publication `machine_id` name different hosts
+- **THEN** the migration aborts, names the declaration, and leaves the database's
+  schema and rows unchanged
+
+#### Scenario: An operator variable shares a retired key's name
+
+- **WHEN** a stored operation's provider variables include one named `machine_id`
+- **THEN** the migration rewrites the operation's host identity and leaves that
+  variable as it was
+
+### Requirement: A bare-metal storefront refuses state written under a retired listing kind
+
+A bare-metal storefront MUST refuse to start against a database whose persisted state
+was written under a listing kind it no longer decodes, and the refusal MUST name the
+operator procedure that resolves it. It MUST NOT start and then fail when a retired
+record is first decoded.
+
+#### Scenario: The storefront starts against a pre-rename database
+
+- **WHEN** a bare-metal storefront starts against a database written under
+  `bare_metal.v1`
+- **THEN** startup fails before serving requests, naming the reset procedure, and no
+  record is decoded or rewritten
+
+#### Scenario: The storefront starts against a fresh database
+
+- **WHEN** a bare-metal storefront starts against an empty database
+- **THEN** it creates its schema under the current listing kind and serves requests
+
+### Requirement: Host inventory is connection identity
+
+Host inventory records MUST describe how to reach and dispatch work to a machine —
+addressing, credentials, machine alias, pool membership, and enabled state — and
+MUST NOT be the authoritative source of a Physical Resource's sellable capacity.
+Capacity projection MUST NOT read host inventory records at all, and MUST NOT
+project a host that no capacity declaration names. A host record is joined to a
+capacity declaration only where its connection is used: at dispatch.
+
+#### Scenario: Host record carries a legacy capacity column
+
+- **WHEN** a host record still holds a capacity value from before capacity
+  declarations existed
+- **THEN** capacity projection does not read it and the projected capacity comes from
+  the declared capacity resource for that Physical Resource
+
+#### Scenario: Host inventory is inspected for capacity authority
+
+- **WHEN** the projection path is traced from host inventory to published capacity
+- **THEN** no host inventory record contributes to the projection
+
+#### Scenario: A host has no capacity declaration
+
+- **WHEN** no capacity declaration names a registered host
+- **THEN** the projection contains no entry for that host
+- **AND** no entry with empty or omitted capacity is published in its place
+
+### Requirement: Execution inventory comes only from the registered host record
+
+The inventory an execution path hands to its executor SHALL be rendered from the
+registered host record named by the selected settlement resource, and from no
+other source. A host name with no registered host record SHALL fail the operation
+before any playbook or executor command runs. A configured inventory file SHALL be
+used only as a startup seed input that populates host records; no execution path
+SHALL read it as an inventory, and no execution path SHALL target a host named only
+by a request or a capacity declaration.
+
+#### Scenario: Dispatch names an unregistered host
+
+- **WHEN** fulfillment dispatch reaches an execution path for a host name with no
+  registered host record
+- **THEN** the operation fails before any playbook runs, and no fallback inventory
+  is consulted
+
+#### Scenario: A static inventory file names the host
+
+- **GIVEN** a configured inventory file naming a host that has no registered host
+  record
+- **WHEN** an execution path runs for that host name
+- **THEN** it fails exactly as it would with no inventory file present
+
+#### Scenario: The inventory file seeds the host registry
+
+- **WHEN** the provisioning service starts with a configured inventory file
+- **THEN** the hosts it names are seeded into the host registry, and later
+  execution renders from those records
+
+### Requirement: The tenant-facing host address falls back to the connection address
+
+Where an execution path derives a tenant-facing address for a host, it SHALL use
+that host record's configured tenant-facing address when one is set, and otherwise
+the record's connection address. It SHALL NOT read the address from a configured
+inventory file.
+
+#### Scenario: A host has no tenant-facing address
+
+- **GIVEN** a registered host record with a connection address and no
+  tenant-facing address
+- **WHEN** a tenant's connection details are produced for that host
+- **THEN** they carry the connection address
+
+### Requirement: Legacy host capacity is derived into declarations
+
+A compute provisioner MUST create a capacity declaration for a host inventory record
+that carries a positive legacy GPU count and has no correlated declaration, at two
+points only: when host inventory is applied from an INI document — whether seeded at
+startup or submitted through the host import API — in the same transaction as the
+host upsert, and once, by ordered migration, for host records present at upgrade.
+Derivation MUST NOT run on a process start that applies no inventory, and MUST NOT
+run when a host is created or updated through the individual host API.
+
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
+Derivation MUST NOT overwrite or merge into an existing declaration, and an
+operator-supplied declaration MUST win over any derivable legacy value.
+
+#### Scenario: Deployment configured only through host inventory
+
+- **WHEN** a provisioner seeds host inventory carrying legacy GPU counts from an INI
+  document and no capacity declarations exist
+- **THEN** a declaration is derived for each such host in the same transaction as
+  its host record
+- **AND** published capacity is unchanged from before declarations existed
+
+#### Scenario: Existing hosts at upgrade
+
+- **WHEN** the ordered migration runs against a database holding hosts with legacy
+  GPU counts and no correlated declarations
+- **THEN** each such host receives a derived declaration before the service serves
+  requests
+
+#### Scenario: Operator declaration and legacy host value disagree
+
+- **WHEN** a host carries a legacy capacity value and an operator has declared
+  different capacity for the same Physical Resource
+- **THEN** the operator's declaration is retained unchanged and no derivation occurs
+  for that resource
+
+#### Scenario: A declaration's resource id differs from its host
+
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
+- **THEN** the host is treated as declared and no second declaration is derived for it
+
+#### Scenario: A host is created through the individual host API
+
+- **WHEN** an operator creates a host with a legacy GPU count through the individual
+  host API
+- **THEN** no declaration is derived, and the host's capacity is declared through the
+  capacity administration surface
+
+#### Scenario: A host has no GPUs
+
+- **WHEN** host inventory is applied for a host whose legacy GPU count is zero
+- **THEN** no declaration is derived for it
+
+### Requirement: Capacity definitions are imported from a mounted document
+
+A compute provisioner MUST reconcile a configured capacity-definitions document
+before serving requests, under the same digest contract as resource-pool
+definitions: the provisioner records the digest of the document it last reconciled
+at startup and applies a document only when the current one differs. The digest MUST
+be recorded in the same transaction as the apply. A process start MUST NOT be treated
+as a submission: reapplying an unchanged document would revert capacity administration
+performed through the API since the last import.
+
+An operator-submitted import through the capacity-definitions import API MUST
+reconcile regardless of the recorded digest and MUST NOT record a digest.
+
+Every import MUST upsert the declarations the document names and MUST leave every
+declaration the document does not name unchanged. A declaration naming a resource
+pool that does not exist MUST fail the whole import, naming the pool, with nothing
+applied. A configured document that cannot be read or applied MUST fail startup
+rather than be skipped silently, and the startup import MUST run after resource-pool
+definitions and host inventory seeding.
+
+A document entry MUST state a declaration with the registration contract's own fields
+and MUST replace the whole declaration it names, exactly as a registration request
+does. The document MUST NOT accept the legacy scalar unit total, MUST require each
+entry's resource type rather than defaulting it, and MUST reject unknown fields.
+Document validation MUST report every structural problem it finds, each with its
+location, rather than stopping at the first. A document with any structural problem
+MUST NOT be evaluated against stored state.
+
+An import MUST compare each entry with the stored declaration before writing, and an
+entry equal to the stored declaration MUST write nothing and emit no capacity event,
+so reconciling an unchanged or reformatted document does not advance the capacity
+version. A refusal only stored state can decide (an unknown pool, a host already
+named by an unnamed declaration, a pool move under a live obligation) MUST come from
+the same rules registration enforces. For a structurally valid document every such
+refusal MUST be reported, and any
+refusal MUST leave the whole import unapplied with no digest recorded. The import API
+MUST offer a validate-only mode that reports the problems and the planned changes
+without applying either.
+
+#### Scenario: Capacity definitions change between restarts
+
+- **WHEN** an operator edits the configured capacity-definitions document and
+  restarts the provisioner
+- **THEN** the edited declarations are applied, rather than being ignored because
+  declarations already existed
+
+#### Scenario: An unchanged document is present at restart
+
+- **GIVEN** capacity has been administered through the API since the last import
+- **WHEN** the provisioner restarts with the same capacity-definitions document
+- **THEN** no reconciliation occurs and the API administration survives
+
+#### Scenario: An operator explicitly imports an unchanged document
+
+- **WHEN** an operator submits through the import API a document whose digest matches
+  the recorded one
+- **THEN** the document is reconciled anyway, because the operator has asked
+- **AND** the recorded startup digest is unchanged
+
+#### Scenario: A document stops naming a declaration
+
+- **WHEN** a document is imported that omits a declaration an earlier document, the
+  API, or derivation created
+- **THEN** that declaration remains as it was, including its enabled state
+
+#### Scenario: A declaration names an unknown pool
+
+- **WHEN** a capacity-definitions document names a resource pool that does not exist
+- **THEN** the import fails naming the pool, no declaration from the document is
+  applied, and no digest is recorded
+
+#### Scenario: A document is reapplied unchanged
+
+- **WHEN** an import names declarations identical to the stored ones
+- **THEN** no declaration is written and no capacity event is emitted
+- **AND** the import reports them as unchanged
+
+#### Scenario: An entry omits an optional field
+
+- **WHEN** a document entry names an existing declaration but omits its host or
+  attributes
+- **THEN** the declaration is replaced as a registration request would replace it,
+  and the omitted fields are cleared rather than retained
+
+#### Scenario: A document has several problems
+
+- **WHEN** a document carries an unknown field, a missing resource type, and two
+  entries naming the same host
+- **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: A document has structural and stored-state problems
+
+- **WHEN** a document has an unknown field in one entry and names an unknown pool in
+  another
+- **THEN** the unknown field is reported and the unknown pool is not, because stored
+  state is not consulted for a structurally invalid document
+- **AND** nothing is applied
+
+#### Scenario: A later entry is refused by stored state
+
+- **WHEN** an import's earlier entries are acceptable and a later entry would move a
+  resource that holds a live obligation to another pool
+- **THEN** the refusal is reported, no entry from the document is applied, and no
+  digest is recorded
+
+#### Scenario: An operator validates a document
+
+- **WHEN** an operator submits a document to the import API in validate-only mode
+- **THEN** the response reports the problems and the planned creations, updates, and
+  unchanged entries
+- **AND** nothing is applied
+
+#### Scenario: Configured document is missing
+
+- **WHEN** a capacity-definitions path is configured but no document exists there
+- **THEN** startup fails rather than proceeding with stale or absent declarations
+
+#### Scenario: No capacity definitions are configured
+
+- **WHEN** no capacity-definitions path is configured
+- **THEN** startup proceeds and declarations come only from derivation and the
+  administration surface
+
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
-- Multidimensional scheduling eligibility, including secondary-dimension rejection and GPU-only requests: `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py`.
+- Multidimensional scheduling eligibility, including secondary-dimension rejection and GPU-only requests: `provisioning/compute/service/tests/integration/test_scheduling_composition.py`.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
-- VM sizing precedence (committed reservation, pool default, unset), connectivity forwarding, and result credential/connection-metadata fields: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py` (`TestSizingPrecedence`, `TestConnectivity`), plus end-to-end HTTP coverage in `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
+- VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
+- Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_relays_api.py` through the canonical client, plus `tests/unit/services/test_definition_document_restart_safety.py`.
+- Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
 
 `PhysicalSettlementScheduler` and fulfillment-provider coordination are durable, not process-local: scheduling, acceptance, and dispatch state live in the fulfillment aggregate (see `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`), and a dedicated periodic worker recovers in-flight provider operations after a crash or restart (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` and `docs/development/ARCHITECTURE.md#recovery-workers`). This is a database-wide SQLite writer guarantee, not a distributed multi-replica protocol.
 

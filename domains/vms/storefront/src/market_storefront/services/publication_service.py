@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.models import Listing
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.models import Listing
+from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
-    mark_derived_listings_closed,
-    mark_derived_listings_open,
     stale_open_listing_ids,
 )
 from market_capacity_publication import (
     BoundListing,
-    CapacityBinding,
     CapacityBindingError,
+    PublicationBinding,
     PublicationCandidate,
     PublicationRuntime,
     ReconciliationPlan,
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
@@ -36,14 +35,16 @@ class VmPublicationHooks:
     def validate_candidate(
         self, candidate: PublicationCandidate[Listing]
     ) -> None:
-        mode = candidate.payload.offer_resource.virtualization_type
+        mode = candidate.payload.listing_resource.offering_mode
         offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
         if offering_mode != candidate.binding.offering_mode:
             raise CapacityBindingError(
-                "VM offer virtualization_type does not match its capacity binding"
+                "VM listing_resource offering_mode does not match its capacity binding"
             )
 
-    async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
+    async def binding_for_listing(
+        self, listing_id: str
+    ) -> PublicationBinding | None:
         try:
             return await capacity_binding_for_listing(self._db, listing_id)
         except RuntimeError:
@@ -92,6 +93,10 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
         value.model_dump(mode="python") if isinstance(value, Listing) else value
     )
     binding = await capacity_binding_for_listing(sqlite_client, listing.listing_id)
+    # The published backing is always the binding's, on every path that
+    # publishes, so a listing never discloses a category its binding does not
+    # record and no stored payload can be republished without one.
+    listing.listing_resource.capacity_backing = binding.capacity_backing
     return PublicationCandidate(listing.listing_id, binding, listing)
 
 
@@ -107,6 +112,18 @@ async def publish_order_to_registry(
     ).publish(await _candidate(sqlite_client, order))
 
 
+async def reopen_order(
+    order: Listing | dict,
+    *,
+    sqlite_client: Any,
+) -> dict[str, Any]:
+    """Reopen a seller's own close locally and at every registry, clearing it."""
+    return await build_publication_runtime(
+        sqlite_client,
+        registry_client_factory=_make_registry_client,
+    ).reopen(await _candidate(sqlite_client, order), reopened_by="seller")
+
+
 async def close_order(
     parameters: dict[str, Any] | None = None,
     *,
@@ -120,7 +137,7 @@ async def close_order(
     return await build_publication_runtime(
         sqlite_client,
         registry_client_factory=_make_registry_client,
-    ).close(BoundListing(listing_id, binding))
+    ).close(BoundListing(listing_id, binding), closed_by="seller")
 
 
 async def close_stale_compute_listings_after_capacity_change(
@@ -128,19 +145,24 @@ async def close_stale_compute_listings_after_capacity_change(
     *,
     sqlite_client: Any,
     home_site: str,
-    configured_site_count: int,
+    configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
-    """Let VM semantics choose stale candidates; kit executes each close."""
+    """Let VM semantics choose stale candidates; kit executes each close.
+
+    Availability reconciliation: only capacity-backed listings are considered.
+    """
     ids = stale_open_listing_ids(
         db_path,
         home_site=home_site,
-        configured_site_count=configured_site_count,
+        configured_sites=configured_sites,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        backed_only=True,
+        shape_feasible=vm_shape_feasibility(),
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:
@@ -155,14 +177,7 @@ async def close_stale_compute_listings_after_capacity_change(
         sqlite_client,
         registry_client_factory=_make_registry_client,
     ).reconcile(ReconciliationPlan(close=bound))
-    closed = list(result["closed"])
-    mark_derived_listings_closed(
-        db_path,
-        closed,
-        home_site=home_site,
-        configured_site_count=configured_site_count,
-    )
-    return closed
+    return list(result["closed"])
 
 
 async def reopen_available_compute_listings_after_capacity_change(
@@ -170,6 +185,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     *,
     sqlite_client: Any,
     home_site: str,
+    configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
@@ -183,6 +199,8 @@ async def reopen_available_compute_listings_after_capacity_change(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        shape_feasible=vm_shape_feasibility(),
+        configured_sites=configured_sites,
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:
@@ -194,9 +212,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         sqlite_client,
         registry_client_factory=_make_registry_client,
     ).reconcile(ReconciliationPlan(reopen=tuple(candidates)))
-    reopened = list(result["reopened"])
-    mark_derived_listings_open(db_path, reopened)
-    return reopened
+    return list(result["reopened"])
 
 
 def _record_listing_published_stage_event(
@@ -204,7 +220,7 @@ def _record_listing_published_stage_event(
     listing_id: str,
     storefront_url: str,
     seller_principal: dict[str, Any],
-    offer_resource: dict[str, Any],
+    listing_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     settlement_options: list[dict[str, Any]],
     demands: list[dict[str, Any]],
@@ -216,7 +232,7 @@ def _record_listing_published_stage_event(
         order_id=listing_id,
         agent_url=storefront_url,
         seller_principal=seller_principal,
-        offer=offer_resource,
+        listing_resource=listing_resource,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options,
         demands=demands,

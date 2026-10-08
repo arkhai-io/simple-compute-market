@@ -6,11 +6,25 @@
   `dict_resource_satisfies_claim`, `_find_candidate`) answers whether a *specific
   resource* satisfies a claim right now. It does not answer whether a shape is one the
   seller would entertain.
-- `kit/resource-pools/hints.py` already carries domain-neutral pool policy through
+- `kit/resource-pools/hints.py` carries domain-neutral pool policy through
   `policy_tags`, with typed readers per tag and validation limited to what has a
   universal meaning. Bounds fit this mechanism exactly.
-- `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` is the only
-  seller-side shape check today and is categorical-only.
+- `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` rechecks every
+  published source-derived field, categorical and quantitative, against the listing's
+  own source, and checks availability only for capacity-backed listings. It answers
+  "is this listing still what it says"; admissibility answers "would the seller
+  consider this shape". A pool's `listing_shapes` hint enumerates the shapes it
+  advertises; it does not bound what a buyer may propose.
+- Listing shapes and pool overrides are expressed in the family-grouped capability
+  shape `kit/capability-shape` defines and flattened by its schema-driven utility, with
+  the VM vocabulary in `arkhai_vms.compute_requirements.VM_CAPABILITY_SCHEMA`.
+  Publication refuses a listing shape no member can hold.
+- Negotiation is `kit/negotiation-runtime`'s lifecycle with domain hooks injected. A
+  round cannot yet carry a shape; `negotiation-driven-capacity-resize` adds that and
+  fixes the seller's evaluation order (admissibility, authoritative feasibility,
+  commercial feasibility, pricing).
+- The storefront-side override above the pool hint is `kit/pool-overrides`' site-scoped
+  store, whose VM terms contract is where a storefront could narrow a pool's bounds.
 - The roadmap records that reservable capacity per dimension is expected to become a
   function of current occupancy rather than a constant.
 
@@ -106,3 +120,18 @@ revert; declared tags on unmigrated pools are ignored by the restored reader.
 - **Should the range query report a reason when a dimension has no admissible range at
   all?** Useful for counter-offer messages, but the vocabulary for such reasons is a
   negotiation concern. Deferrable until a caller needs it.
+
+## Callers
+
+- **Publication.** Once bounds exist, publication asks the admissibility predicate
+  whether the pool admits each stated listing shape and treats an inadmissible shape
+  as it treats one no member can hold: no listing, reported. This is the predicate's
+  first production caller and is enough to land the change independently.
+- **Negotiation.** The predicate is the first step of the VM `evaluate_round`
+  composition for a round that carries a shape, in the order
+  `negotiation-driven-capacity-resize` fixes, with a distinct refusal reason.
+- **Bounds share the shape vocabulary.** Bounds are declared in the same family-grouped
+  form, through the same flattening utility, so a listing shape and the bounds it must
+  fall within cannot name one dimension two ways.
+- **Narrowing per storefront** is not in scope; if a seller ever wants to sell less
+  than the site admits, the site-scoped override store is the tier for it.

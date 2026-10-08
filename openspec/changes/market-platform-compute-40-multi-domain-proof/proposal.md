@@ -99,13 +99,19 @@ None.
 
 ## Dependencies and Related Changes
 
-- Depends on `multi-domain-storefront-composition` for the storefront under test, and on
-  `market-platform-bare-metal-10-storefront-composition` and `bare-metal-buyer-domain`
-  for a complete bare-metal deal path.
-- Depends on `pools-7-storefront-fulfillment-cutover` for durable selected-site
-  scheduling, fulfillment status and result, restart recovery, and teardown.
-- Depends on `pool-declared-offering-modes` for explicit executor identity and the legacy
-  -row policy this change no longer owns.
+- Depends on `multi-domain-storefront-composition` for the storefront under test; its
+  shell is implemented and promoted, and validation and closeout remain.
+- Depends on `bare-metal-and-credits-domain-stacks` for bare metal composed onto the
+  kit negotiation runtime and for the generalized fixtures. Until then the bare-metal
+  contribution runs a domain-local negotiation service beside the shared shell, which
+  is not the one-process composition this change proves.
+- Depends on `bare-metal-mock-provisioned-deal` for the bare-metal adapter's own mock
+  and the storefront's pause/step controls, without which a deterministic two-authority
+  bare-metal lifecycle cannot run in the pipeline.
+- `pools-7-storefront-fulfillment-cutover` and `pool-declared-offering-modes`
+  (archived) delivered durable selected-site scheduling, fulfillment status and
+  result, restart recovery, teardown, and explicit executor identity; both implicit
+  `"vm"` fallbacks are gone.
 - Complements `bare-metal-and-credits-domain-stacks`, which proves a complete deal per
   domain at one authority. This change adds the multi-authority dimension and should
   reuse its fixtures rather than build a parallel harness.

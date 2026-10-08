@@ -33,10 +33,10 @@ from smoke_common import (
     crash,
 )
 
-from domains.apicredits.listings.models import coerce_resource_dict
-from domains.apicredits.settlement.credits_client import CreditsServiceClient
-from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
-from domains.apicredits.settlement.payments import validate_payment_publication_clause
+from arkhai_apicredits.listings.models import coerce_resource_dict
+from arkhai_apicredits.settlement.credits_client import CreditsServiceClient
+from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 
 
 async def check_configuration():

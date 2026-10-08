@@ -6,9 +6,10 @@ from datetime import datetime
 from typing import Literal
 
 from arkhai_bare_metal import (
-    BareMetalAccessResult,
+    BareMetalResult,
     BareMetalReceipt,
 )
+from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,6 +59,15 @@ class BareMetalHealthResponse(BaseModel):
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
     resource_count: int | None = None
+    # Reported per site and outside ``checks``: one site's projection being
+    # unavailable is not a storefront-wide degradation.
+    site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
+    # Each stored pool override's address and state; administrator status only.
+    pool_overrides: list[dict[str, str]] | None = None
+    # Storefront policies disclosed to anyone before they commit data, keyed by
+    # policy. ``introduction_retention`` is present only while contact exchange
+    # is enabled.
+    disclosures: dict[str, dict[str, object]] = Field(default_factory=dict)
 
 
 class BareMetalFulfillRequest(BaseModel):
@@ -82,7 +92,7 @@ class BareMetalFulfillmentResponse(BaseModel):
 class BareMetalFulfillmentResultResponse(BaseModel):
     negotiation_id: str
     receipt: BareMetalReceipt
-    result: BareMetalAccessResult
+    result: BareMetalResult
 
 
 class BareMetalAccessDeliveryResponse(BaseModel):

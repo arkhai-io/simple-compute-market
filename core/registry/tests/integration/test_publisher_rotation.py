@@ -11,7 +11,7 @@ import pytest
 from market_identity import RequestEnvelope, TrustedIdentitySet, canonical_body_hash, sign_request
 from registry_client import RegistryClient, RegistryClientError
 from registry_client.models import ListingRequest, UpdateListingRequest
-from src.main import app
+from core_registry.main import app
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,7 +51,7 @@ def _listing(listing_id: str) -> ListingRequest:
     return ListingRequest(
         listing_id=listing_id,
         storefront_url="http://seller.example/",
-        offer={"gpu_model": "A100", "region": "us"},
+        listing_resource={"gpu_model": "A100", "region": "us"},
         accepted_escrows=[],
     )
 

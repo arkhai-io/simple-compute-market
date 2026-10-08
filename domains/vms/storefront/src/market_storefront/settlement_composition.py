@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from types import MappingProxyType
 from typing import Any
 
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
@@ -27,6 +28,10 @@ from market_arkhai_payments import (
     create_arkhai_payments_registration,
     servicing_stage,
 )
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_contact_exchange import create_contact_exchange_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
@@ -69,6 +74,72 @@ class VmProjectionContext:
     obligation_index: int
 
 
+# Whether settling through each mechanism this storefront composes delivers
+# through VM capacity-backed fulfillment (``fulfill_vm_settlement``). Every
+# composed mechanism has an explicit entry: an unbacked listing may publish only
+# options whose mechanism does not, because a deal that reached VM fulfillment
+# against a listing with no admission authority could only be refused after it
+# was funded.
+VM_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
+    {
+        "alkahest.v1": True,
+        # A payment deal provisions its VM through capacity, like Alkahest.
+        "arkhai.payments.v1": True,
+        # An introduction settles by revealing contacts; nothing is admitted
+        # against capacity, so an unbacked listing may offer it.
+        CONTACT_MECHANISM: False,
+    }
+)
+
+
+class UndeclaredMechanismFulfillmentError(RuntimeError):
+    """A composed mechanism has no declaration of how it is fulfilled."""
+
+
+def mechanism_fulfills_through_capacity(
+    mechanism: str,
+    declarations: Mapping[str, bool],
+) -> bool:
+    """Look up a mechanism's declaration, refusing one the composition lacks."""
+    try:
+        return bool(declarations[mechanism])
+    except KeyError as exc:
+        raise UndeclaredMechanismFulfillmentError(
+            f"settlement mechanism {mechanism!r} has no declaration of whether it "
+            "is fulfilled through VM capacity"
+        ) from exc
+
+
+def admissible_settlement_clauses(
+    clauses: Sequence[Any],
+    *,
+    capacity_backing: str,
+    declarations: Mapping[str, bool],
+) -> tuple[list[Any], list[str]]:
+    """Split a candidate's clauses into those it may publish and dropped mechanisms.
+
+    A capacity-backed candidate keeps every clause. An unbacked one keeps only
+    clauses whose mechanism is not fulfilled through capacity. Each clause names
+    its mechanism under ``mechanism``, whether it is a compiled clause or its
+    serialized form.
+    """
+    kept: list[Any] = []
+    dropped: list[str] = []
+    for clause in clauses:
+        mechanism = (
+            clause.get("mechanism")
+            if isinstance(clause, Mapping)
+            else getattr(clause, "mechanism", None)
+        )
+        if capacity_backing != "unbacked" or not mechanism_fulfills_through_capacity(
+            str(mechanism), declarations
+        ):
+            kept.append(clause)
+        elif str(mechanism) not in dropped:
+            dropped.append(str(mechanism))
+    return kept, dropped
+
+
 @dataclass(frozen=True)
 class VmSettlementComposition:
     domain: MarketDomainContract
@@ -84,6 +155,9 @@ class VmSettlementComposition:
     mechanism_resources: Mapping[str, Any]
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
+    # Injected rather than read from the module constant so a composition that
+    # adds a mechanism states how that mechanism is fulfilled where it adds it.
+    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -224,9 +298,13 @@ class VmSettlementComposition:
 
 
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    return SettlementConfigurationRegistry((
-        create_alkahest_registration(), create_arkhai_payments_registration(),
-    ))
+    return SettlementConfigurationRegistry(
+        (
+            create_alkahest_registration(),
+            create_arkhai_payments_registration(),
+            create_contact_exchange_registration(),
+        )
+    )
 
 
 def build_storefront_publication_clause_compiler() -> Callable[
@@ -316,13 +394,17 @@ async def prepare_vm_settlement(
         raise ValueError(
             f"chain {accepted_chain!r} is not configured on this storefront"
         )
+    # Escrow verification reads the attestation off the chain through the
+    # alkahest client's escrow codecs, so it takes the chain client the
+    # mechanism adapter resolves rather than the adapter itself — the same
+    # object the admin dry-run and the resume sweep pass.
     obligation_index = await escrow_verification.verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=storefront_config.get_evm_wallet_address(),
         agreed_price=int(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=order,
-        alkahest_client=mechanism_client,
+        alkahest_client=mechanism_client.chain_client(accepted_chain),
         chain_name=accepted_chain,
         alkahest_address_config_path=chain.alkahest_address_config_path,
         escrow_proposal=proposal,
@@ -438,7 +520,13 @@ async def fulfill_vm_settlement(
     if not isinstance(listing_id, str) or not isinstance(order, dict):
         raise TypeError("VM settlement listing input is missing")
     selected_obligation = prepared.obligations[prepared.selected_obligation_index]
-    delivery_client = mechanism_client
+    # Peer settlement publishes its fulfillment evidence as a string
+    # obligation through the alkahest client's own codecs, so it takes the
+    # chain client the mechanism adapter resolves rather than the adapter --
+    # the same distinction escrow verification needs. Handing over the
+    # adapter failed with "no attribute 'string_obligation'" after the VM
+    # was already provisioned, which is the most expensive place to find out.
+    delivery_client = mechanism_client.chain_client(prepared.projection_context.chain_name)
     delivery_anchor = prepared.mechanism_ref
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
@@ -468,6 +556,13 @@ async def fulfill_vm_settlement(
         if isinstance(lifecycle.domain_result, Mapping)
         else {}
     )
+    if lifecycle.state == "deferred":
+        return FulfillmentOutcome(
+            status="deferred",
+            public_result={"status": "provisioning", "message": result.get("message")},
+            private_result=result,
+            reason=result.get("message") or "fulfillment deferred after provisioning",
+        )
     if lifecycle.state != "fulfilled":
         return FulfillmentOutcome(
             status="failed",
@@ -544,6 +639,15 @@ async def persist_vm_settlement_outcome(
         )
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", context.escrow_uid)
         return
+    if outcome.status == "deferred":
+        # The VM exists and a step after it is pending: the escrow stays open
+        # for the fulfillment resume pass, which owns finishing it.
+        logger.info(
+            "[SETTLE_JOB] Escrow %s left open for the fulfillment resume pass: %s",
+            context.escrow_uid,
+            outcome.reason,
+        )
+        return
     reason = outcome.reason or private.get("message") or "provisioning failed"
     await context.sqlite_client.update_escrow(
         escrow_uid=context.escrow_uid,
@@ -602,7 +706,15 @@ def _terminal_requires_lease_truncation(record: Any, outcome: str) -> bool:
 async def truncate_lease_for_terminal_settlement(
     *, agreement_ref: str | None, reason: str | None = None, sqlite_client: Any
 ) -> dict[str, Any] | None:
-    """End capacity service through the agreement's durable reservation binding."""
+    """End capacity service through the agreement's durable reservation binding.
+
+    Asks the site to release the reservation first: an uncommitted hold, or a
+    lease nothing was delivered against, is released at once. The site's
+    release guard refuses a lease fulfillment delivered, which is then
+    truncated to now so its lifecycle tears it down at expiry. A reservation
+    neither releasable nor leased (already releasing, say) is left to the
+    lifecycle that holds it.
+    """
     if not agreement_ref:
         return None
 
@@ -627,6 +739,21 @@ async def truncate_lease_for_terminal_settlement(
             raise RuntimeError("terminal settlement has no durable listing binding")
         binding = await capacity_binding_for_listing(sqlite_client, listing_id)
         capacity = build_capacity_runtime(lambda: sqlite_client)
+        released = await capacity.release(
+            binding,
+            capacity_reservation_id=reservation_id,
+            failure_reason=reason or "settlement_terminal",
+        )
+        if released is not None:
+            stage_event(
+                "claims",
+                "capacity_released_after_abandonment",
+                agreement_ref=agreement_ref,
+                capacity_reservation_id=reservation_id,
+                reason=reason,
+                site=released.get("site"),
+            )
+            return released
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
             binding,
@@ -653,7 +780,7 @@ async def truncate_lease_for_terminal_settlement(
         return truncated
     except Exception:
         logger.exception(
-            "[SETTLEMENT] Could not truncate lease for agreement %s",
+            "[SETTLEMENT] Could not end capacity service for agreement %s",
             agreement_ref,
         )
         raise
@@ -696,6 +823,7 @@ def build_vm_settlement_composition(
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
+    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY,
 ) -> VmSettlementComposition:
     """Construct the VM runtime from explicit settlement mechanisms."""
     registry_owner = getattr(sqlite_client, "domain_registry", None)
@@ -857,5 +985,6 @@ def build_vm_settlement_composition(
         arkhai_payments_stage=payments_stage,
         payments_coordinator=VmPaymentsCoordinator(domain=domain, db=sqlite_client, stage=payments_stage)
         if payments_stage is not None else None,
+        mechanism_fulfillment=mechanism_fulfillment,
     )
     return composition

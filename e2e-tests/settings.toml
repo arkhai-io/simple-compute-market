@@ -19,6 +19,17 @@ retry_backoff_seconds = 2
 # ---------------------------------------------------------------------------
 [default.registry]
 api_url            = ""
+authority_id       = ""   # REGISTRY_AUTHORITY_ID the service publishes under
+identifier         = ""   # the registry's own signing principal
+# Bearer token for a read/write gated private registry. The stack seeds one
+# write-scoped key at startup; this must be the key it seeded.
+bootstrap_api_key  = ""
+
+# Second, access-gated registry in the multi-registry scenario.
+[default.registry_b]
+api_url            = ""
+authority_id       = ""
+identifier         = ""
 
 # ---------------------------------------------------------------------------
 # Buyer wallet
@@ -36,10 +47,29 @@ chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to r
 # ---------------------------------------------------------------------------
 [default.seller]
 api_url           = ""
+# Home site the storefront publishes capacity against; matches
+# [capacity.sites] in the storefront config.
+site_id           = "default"
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
-admin_api_key     = ""        # X-Admin-Key for /admin/* and the provisioning service
+# The storefront administrator is a separate principal from the seller: the
+# seller publishes listings, the administrator performs the system controls
+# that are not part of a normal deal. Both are pinned in the storefront
+# config, so a credential for the wrong one authenticates as the wrong caller.
+admin_scheme      = "eip191"
+admin_credential  = ""
+
+# ---------------------------------------------------------------------------
+# Second storefront (multi-registry scenario)
+# ---------------------------------------------------------------------------
+[default.alice]
+api_url           = ""
+site_id           = "default"
+private_key       = ""
+wallet_address    = ""
+admin_scheme      = "eip191"
+admin_credential  = ""
 
 # ---------------------------------------------------------------------------
 # Test behaviour
@@ -59,6 +89,21 @@ e2e_poll_interval_s = 3
 # ---------------------------------------------------------------------------
 [default.provisioning]
 api_url = ""
+# Credential for the principal pinned as the provisioning service's admin
+# identity. The operator client asserts the `admin` role on every request and
+# the service resolves the trust set from that role, so a credential for any
+# other principal authenticates as the wrong caller.
+admin_scheme     = "eip191"
+admin_credential = ""
+# The provisioning service's own signing principal, pinned so the client
+# verifies responses. Distinct from both caller principals above.
+authority_scheme     = "eip191"
+authority_identifier = ""
+# The provisioning service's own signing credential. Distinct from the admin
+# credential above: the storefront trusts this principal as its service peer,
+# which is the caller fulfillment callbacks must come from.
+service_scheme       = "eip191"
+service_credential   = ""
 
 # ---------------------------------------------------------------------------
 # API-credits topology (item 6)

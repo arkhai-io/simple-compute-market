@@ -93,6 +93,7 @@ class SettlementRecord(Base):
     pool_id = Column(String, nullable=True)
     provider = Column(String, nullable=True)
     resource_attributes = Column(JSON, nullable=True)
+    resource_host_id = Column(String, nullable=True)
 
     fulfillment_request = Column(JSON, nullable=True)
 

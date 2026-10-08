@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from .contracts import LifecycleEvent
+from compute_provisioning_contracts import LifecycleEvent
 
 
 class LifecycleEventSink(Protocol):

@@ -7,6 +7,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
+from market_core.schemas import json_safe_wire_value
 from market_identity import Identity, Signer
 
 
@@ -53,6 +54,11 @@ def _public_value(value: Any) -> Any:
         return {key: _public_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_public_value(item) for item in value]
+    if isinstance(value, int) and not isinstance(value, bool):
+        # Same rule the wire contract uses everywhere else: an integer with
+        # no canonical JSON number form travels as a decimal string. The
+        # events route serves these payloads in a signed response.
+        return json_safe_wire_value(value)
     return value
 
 

@@ -142,14 +142,21 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool):
     raw = agreement.model_dump_json(exclude_none=True).encode()
     data = stage.settlement_data(json.loads(raw))
     binding = prepare_vm_listing_binding(
-        listing_id=LISTING, candidate={"site_id": "site-test", "pool_id": "pool-test"}
+        listing_id=LISTING,
+        candidate={
+            "capacity_backing": "backed",
+            "site_id": "site-test",
+            "pool_id": "pool-test",
+            "resource_id": "resource-test",
+            "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
+        },
     )
     await db.upsert_listing_with_binding(
         binding=binding,
         status="open",
         created_at=now,
         updated_at=now,
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "virtualization_type": "vm"},
+        listing_resource={"gpu_model": "H200", "gpu_count": 1, "offering_mode": "vm"},
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="http://test",

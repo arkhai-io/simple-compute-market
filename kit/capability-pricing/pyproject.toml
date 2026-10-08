@@ -1,0 +1,25 @@
+[project]
+name = "arkhai-kit-capability-pricing"
+version = "0.1.0"
+description = "Pricing a family-grouped capability shape from per-family rates, exactly, behind a replaceable aggregator"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+# The shape vocabulary and the standard library only: storefronts, buyers, and
+# hold billing all price shapes, so this must pull nothing else in with it.
+dependencies = [
+    "arkhai-kit-capability-shape>=0.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_capability_pricing"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.4,<9.0.0"]

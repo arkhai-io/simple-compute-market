@@ -49,12 +49,13 @@ from apicredits_storefront.services.fulfillment_service import (
 )
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.system_service import SystemService
+from apicredits_storefront.lifecycle_steps import register_api_credit_lifecycle_steps
+from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
     build_api_credit_settlement_composition,
     build_storefront_settlement_registry,
 )
-from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.utils.config import (
     AGENT_ID,
     BASE_URL_OVERRIDE,
@@ -66,20 +67,11 @@ from apicredits_storefront.utils.config import (
     settlement_config_mapping,
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront_kit import (
+    StorefrontLoopController,
+)
 
 logger = logging.getLogger(__name__)
-
-_GLOBALLY_PAUSED: bool = False
-
-
-def is_globally_paused() -> bool:
-    return _GLOBALLY_PAUSED
-
-
-def _set_globally_paused(value: bool) -> None:
-    global _GLOBALLY_PAUSED
-    _GLOBALLY_PAUSED = value
-
 
 def run_serve(host: str = "0.0.0.0", port: int | None = None) -> None:
     """Launch uvicorn. Called by ``apicredits-storefront serve``."""
@@ -251,6 +243,9 @@ async def _start_api_credit_services(
     _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service
+    loops = StorefrontLoopController(logger=logger)
+    register_api_credit_lifecycle_steps(loops)
+    _container.resolved_loop_controller = loops
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks(domain=services.domain)
     logger.info("[STARTUP] Background tasks started")
@@ -264,6 +259,9 @@ async def _stop_api_credit_services(
     logger.info("[SHUTDOWN] API-credits storefront shutting down")
 
 
+from apicredits_storefront.controllers.lifecycle_controller import (  # noqa: E402
+    router as lifecycle_router,
+)
 from apicredits_storefront.controllers.listings_controller import (  # noqa: E402
     router as listings_router,
 )
@@ -284,6 +282,9 @@ from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
 )
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
+)
+from apicredits_storefront.controllers.trading_pause_controller import (  # noqa: E402
+    router as trading_pause_router,
 )
 
 
@@ -351,6 +352,8 @@ def build_api_credits_storefront_app(
                     settle_router,
                     settlements_router,
                     admin_settle_router,
+                    lifecycle_router,
+                    trading_pause_router,
                 ),
                 middleware=(authenticate_response,),
             ),

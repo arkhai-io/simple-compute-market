@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment.db import Base, SettlementRecordState
-from market_fulfillment.envelopes import envelope
+from market_core import envelope
 from market_fulfillment.provider import FulfillmentConflictError
 from market_fulfillment.settlement_repository import SettlementRepository
 from market_fulfillment.settlement_types import (
@@ -38,7 +38,7 @@ def repo():
 
 def _requirement(**dimensions):
     return SettlementRequirement(
-        executor_kind="vm",
+        offering_mode="vm",
         resource_kind="compute.gpu", dimensions=dimensions or {"gpu_count": 1}
     )
 
@@ -47,7 +47,7 @@ def _resource(settlement_resource_id="host-a"):
     return SettlementResource(
         settlement_resource_id=settlement_resource_id,
         pool_id="pool-1",
-        executor_kind="vm",
+        offering_mode="vm",
         resource_kind="compute.gpu",
         provider="ansible",
     )
@@ -982,12 +982,12 @@ def test_transition_rejects_non_lifecycle_fields_before_state_mutation(
 
 def test_canonical_models_normalize_explicit_defaults_and_nested_payload(session_factory, repo):
     implicit = SettlementRequirement(
-        executor_kind="vm",
+        offering_mode="vm",
         resource_kind="compute.gpu",
         dimensions={"gpu_count": 1},
     )
     explicit = SettlementRequirement(
-        executor_kind="vm",
+        offering_mode="vm",
         resource_kind="compute.gpu", dimensions={"gpu_count": 1}, attributes={}
     )
     nested = envelope(
@@ -1054,7 +1054,7 @@ def test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity(tmp_path,
 
 
 # ----------------------------------------------------------------------
-# capacity-reclamation abandonment hook
+# abandonment: a compare-and-set the site's release guard relies on
 # ----------------------------------------------------------------------
 
 def test_abandon_if_assigned_transitions_only_assigned_rows(session_factory, repo):
@@ -1063,10 +1063,10 @@ def test_abandon_if_assigned_transitions_only_assigned_rows(session_factory, rep
                       scheduling_requirements=_requirement(), resource=_resource())
         db.commit()
     with session_factory() as db:
-        repo.abandon_if_assigned(db, "missing")
-        repo.abandon_if_assigned(db, "cr-abandon")
+        assert repo.abandon_if_assigned(db, "missing") is False
+        assert repo.abandon_if_assigned(db, "cr-abandon") is True
         assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
-        repo.abandon_if_assigned(db, "cr-abandon")
+        assert repo.abandon_if_assigned(db, "cr-abandon") is False
         db.commit()
     with session_factory() as db:
         assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
@@ -1093,5 +1093,5 @@ def test_abandon_if_assigned_preserves_post_assignment_state(session_factory, re
         record.state = SettlementRecordState.dispatch_pending.value
         db.commit()
     with session_factory() as db:
-        repo.abandon_if_assigned(db, "cr-dispatch")
+        assert repo.abandon_if_assigned(db, "cr-dispatch") is False
         assert repo.get(db, "cr-dispatch").state == SettlementRecordState.dispatch_pending.value

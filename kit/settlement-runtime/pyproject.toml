@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.2"
+version = "0.4.0"
 license = "MIT"
 description = "Mechanism-neutral commercial settlement lifecycle, durable servicing, and SQLite repository."
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "arkhai-core==0.2.0",
-    "arkhai-kit-identity==0.3.0",
+    "arkhai-core==0.4.1",
+    "arkhai-kit-identity==0.4.0",
     "pydantic>=2.7",
 ]
 
@@ -19,7 +19,7 @@ packages = ["src/market_settlement_runtime"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]

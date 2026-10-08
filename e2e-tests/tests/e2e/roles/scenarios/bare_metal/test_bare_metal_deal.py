@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from market_identity import Identity, IdentityScheme
 
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import (
     DealStage,

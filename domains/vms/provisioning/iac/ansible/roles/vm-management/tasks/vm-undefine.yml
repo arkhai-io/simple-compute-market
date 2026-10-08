@@ -66,20 +66,27 @@
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
 
-- name: Remove FRP proxy configuration for VM
+- name: Remove this VM's proxy from the VM tunnel client configuration
   blockinfile:
-    path: /etc/frp/frpc.toml
+    path: /etc/frp/frpc-vms.toml
     marker: "# {mark} ANSIBLE MANAGED BLOCK FOR VM {{ vm_name }}"
     state: absent
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
   ignore_errors: yes
-  notify: restart frpc
 
-- name: Restart FRP client after removing proxy configuration
-  systemd:
-    name: frpc
-    state: restarted
+- name: Apply the removal by reloading the VM tunnel client
+  # Reload, not restart. A restart closes the control connection and the relay
+  # tears down every proxy this client registered, so tearing down one buyer's
+  # VM would end the established SSH sessions of every other buyer on this
+  # host. A reload applies the diff and leaves unchanged proxies alone.
+  #
+  # The port this proxy held is reclaimed by the provisioning service, which
+  # allocated it. Nothing here needs to know which port it was.
+  uri:
+    url: "http://127.0.0.1:{{ frp_admin_port | default(7400) }}/api/reload"
+    method: GET
+    status_code: 200
   when: vm_action == "undefine"
   delegate_to: "{{ target_host }}"
   ignore_errors: yes

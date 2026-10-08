@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Role-owned executable composition
-The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. Storefront executables MUST assemble the shared storefront role from explicitly registered domain contracts and infrastructure adapters. A compute-family storefront MAY register several domains in one process; a one-domain storefront MUST be the same composition with one explicit registration, not a singleton or alternate role implementation.
+The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. Storefront executables MUST assemble the shared storefront role from explicitly registered domain contracts and infrastructure adapters. A compute-family storefront MAY register several domains in one process; a one-domain storefront MUST be the same composition with one explicit registration, not a singleton or alternate role implementation. Each storefront contribution MUST provide one validated `MarketDomainContract` plus its domain-owned runtime builder without importing another domain implementation.
 
 #### Scenario: A buyer domain plugin is installed
 - **WHEN** the core `market` executable starts
@@ -18,6 +18,14 @@ The buyer executable MUST be core-owned and load domain plugins, and registry be
 #### Scenario: A one-domain storefront starts
 - **WHEN** an operator configures exactly one supported registration
 - **THEN** the same registry, persistence, and selector are used without installing a default-domain or singleton compatibility path
+
+#### Scenario: Seller starts a domain storefront
+- **WHEN** a VM, bare-metal, or API-credit storefront is launched
+- **THEN** the domain-owned composition root assembles the shared storefront role with that domain's runtime and infrastructure adapters
+
+#### Scenario: Seller loads the bare-metal contribution in a shared shell
+- **WHEN** a composition shell discovers the bare-metal storefront entry point
+- **THEN** it receives the validated bare-metal contract and runtime builder without importing VM services or duplicating registry selection
 
 ## ADDED Requirements
 

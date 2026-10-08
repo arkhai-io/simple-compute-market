@@ -5,7 +5,7 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from core_buyer.plugins import discover_domains
-from domains.apicredits.buyer.cli import app, domain
+from arkhai_apicredits_buyer.cli import app, domain
 from market_core import DomainCapability, MarketDomainContract
 
 runner = CliRunner()

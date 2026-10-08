@@ -8,8 +8,8 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from src.db.models import Base
-from src.config import settings
+from core_registry.db.models import Base
+from core_registry.config import settings
 
 # this is the Alembic Config object
 config = context.config

@@ -10,6 +10,21 @@ What is absent is everything after the park:
 - Nothing states the delivery consequence. `vms` truncates the lease for a pre-collection loss (`mechanism_status` `failed` → `_cleanup` → `on_terminal` → `truncate_lease_for_terminal_settlement`) and deliberately does not for a post-collection one (`_terminal_requires_lease_truncation` requires `collection_state != "succeeded"`). Both are correct; neither is visible.
 - `bare_metal` is broken here. Its `on_terminal` requests `callbacks.cleanup` for every non-`collected` state, `cleanup` raises `collection cannot be excluded; physical cleanup is frozen` for a `collected` lifecycle, and `SettlementServicingWorker._terminal` catches every terminal-callback exception into a log line. A post-collection loss therefore ends as a swallowed error.
 
+*Changed since this was written (2026-10-05, `bare-metal-mock-provisioned-deal` slice B):*
+
+- `vms`'s pre-collection consequence is no longer a plain truncation.
+  `truncate_lease_for_terminal_settlement` (`domains/vms/storefront/src/market_storefront/settlement_composition.py`)
+  first asks the site to release the reservation. An uncommitted hold, or a lease the
+  site's release guard proves nothing was delivered against, is freed at once. A
+  delivered lease, which the guard refuses to free, is truncated to now so the lease
+  lifecycle tears it down. State the delivery consequence in those terms. The
+  post-collection behaviour is unchanged.
+- `bare_metal`'s hosted teardown (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/hosted_lifecycle.py`)
+  now treats a release the site refuses as not released and raises, rather than
+  recording teardown done, when no fulfillment was recorded. The post-collection path
+  described above is unchanged, but an exception from that branch reaches the same
+  catch-all.
+
 Producer-side there is nothing to wait for. Signed `v0.4.2` carries `normalized-funding-reversal.v1`, `payer-return-instructions.v1`, and `operator-recovery-redaction.v1`; `EscrowResult.incident` is a `FundingIncidentProjection` with `incident_ref`, `kind`, `state`, and `evidence_digest`; and `FundingIncidentKind` includes `ACH_RETURN`, `CARD_DISPUTE`, `POST_COLLECTION_LOSS`, `TRANSFER_REVERSAL`, and `REFUND`. The client exposes no method for `/api/v1/operator/incidents`, and it does not need to: the marketplace's route to a loss is the escrow response it already polls.
 
 ## Goals / Non-Goals

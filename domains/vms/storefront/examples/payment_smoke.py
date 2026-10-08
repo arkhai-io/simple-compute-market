@@ -125,17 +125,23 @@ async def main():
         db = SQLiteClient(str(Path(directory) / "storefront.db"), registry=registry)
         binding = prepare_vm_listing_binding(
             listing_id="vm-demo",
-            candidate={"site_id": "site-demo", "pool_id": "pool-demo"},
+            candidate={
+                "capacity_backing": "backed",
+                "site_id": "site-demo",
+                "pool_id": "pool-demo",
+                "resource_id": "resource-demo",
+                "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
+            },
         )
         await db.upsert_listing_with_binding(
             binding=binding,
             status="open",
             created_at=now,
             updated_at=now,
-            offer_resource={
+            listing_resource={
                 "gpu_model": "H200",
                 "gpu_count": 1,
-                "virtualization_type": "vm",
+                "offering_mode": "vm",
             },
             fulfillment_resource=None,
             max_duration_seconds=3600,

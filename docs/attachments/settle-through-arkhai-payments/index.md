@@ -92,11 +92,11 @@ After `make dist`, run bare metal from SCM root (preserve the same state between
 ```sh
 state=$(mktemp -d)
 uv run --project domains/bare_metal/storefront --find-links .dist \
-  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.1.5-py3-none-any.whl" \
+  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.5.0-py3-none-any.whl" \
   python docs/attachments/settle-through-arkhai-payments/bare_metal_smoke.py "$state" crash
 # Expected exit 75.
 uv run --project domains/bare_metal/storefront --find-links .dist \
-  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.1.5-py3-none-any.whl" \
+  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.5.0-py3-none-any.whl" \
   python docs/attachments/settle-through-arkhai-payments/bare_metal_smoke.py "$state" resume
 rm -r "$state"
 ```
@@ -122,9 +122,9 @@ done
 rm -r "$state"
 ```
 
-The VM replay remains `vm_smoke.py` with the analogous crash/resume phases, `--project domains/vms/storefront --find-links .dist --with "$PWD/.dist/arkhai_vms_buyer-0.3.5-py3-none-any.whl"`. Diagnostic entries were opened/run here; state and generated credentials are reproducible, not inherited setup requirements.
+The VM replay remains `vm_smoke.py` with the analogous crash/resume phases, `--project domains/vms/storefront --find-links .dist --with "$PWD/.dist/arkhai_vms_buyer-0.7.0-py3-none-any.whl"`. Diagnostic entries were opened/run here; state and generated credentials are reproducible, not inherited setup requirements.
 
-Cleanup: stop both foreground services; `cd ~/dev/arkhai/arkhai-payments && FORMANCE_PORT=3168 scripts/ledger-local.sh down` stops only this checkout's containers and retains its named volume. The verification's services/containers and scratch baseline worktree are removed before handoff.
+Cleanup: stop both foreground services; `cd ~/dev/arkhai/arkhai-payments && FORMANCE_PORT=3168 ./scripts/ledger-local.sh down` stops only this checkout's containers and retains its named volume. The verification's services/containers and scratch baseline worktree are removed before handoff.
 
 ## Friction and failed attempts
 

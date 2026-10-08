@@ -1,18 +1,20 @@
 [project]
 name = "arkhai-bare-metal-provisioning-adapter"
-version = "0.1.0"
+version = "0.9.2"
 license = "MIT"
 description = "Bare-metal adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-bare-metal>=0.2.0",
-    "arkhai-compute-provisioning>=0.6.0",
-    "arkhai-compute-provisioning-service>=0.1.0",
-    "arkhai-kit-fulfillment>=0.2.0",
-    "arkhai-kit-resource-pools>=0.2.0",
-    "arkhai-vms-provisioning-operator-client>=0.3.0",
-    "arkhai-vms-provisioning-adapter>=0.2.0",
+    "arkhai-compute-provisioning-contracts>=0.9.0",
+    "arkhai-core>=0.4.0",
+    "arkhai-bare-metal>=0.10.0",
+    "arkhai-compute-provisioning>=0.19.0",
+    "arkhai-compute-provisioning-ansible>=0.4.0",
+    "arkhai-kit-fulfillment>=0.5.0",
+    "arkhai-kit-resource-pools>=0.3.0",
     "pydantic>=2.7",
+    # The routes this adapter binds.
+    "fastapi>=0.115.0",
 ]
 
 [build-system]
@@ -25,11 +27,3 @@ packages = ["src/bare_metal_provisioning_adapter"]
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-asyncio>=0.23"]
 
-[tool.uv.sources]
-arkhai-bare-metal = { path = "../..", editable = true }
-arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
-arkhai-kit-fulfillment = { path = "../../../../kit/fulfillment", editable = true }
-arkhai-kit-resource-pools = { path = "../../../../kit/resource-pools", editable = true }
-arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../../../vms/provisioning/client", editable = true }
-arkhai-vms-provisioning-adapter = { path = "../../../vms/provisioning/adapter", editable = true }

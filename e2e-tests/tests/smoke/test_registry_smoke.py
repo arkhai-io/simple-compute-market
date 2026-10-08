@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from market_identity import Identity, TrustedIdentitySet, create_signer
 
 from registry_client import SyncRegistryClient as RegistryClient
 from registry_client import RegistryClientError
@@ -37,9 +38,24 @@ def registry_api_url(registry_settings) -> str:
 
 
 @pytest.fixture(scope="module")
-def registry_client(registry_api_url: str) -> RegistryClient:  # type: ignore[return]
+def registry_client(
+    registry_api_url: str, registry_settings: dict, buyer_settings: dict
+) -> RegistryClient:  # type: ignore[return]
     """One RegistryClient instance shared across all tests in this module."""
-    client = RegistryClient(base_url=registry_api_url)
+    credential = buyer_settings.get("marketplace_credential")
+    authority = registry_settings.get("authority_id")
+    identifier = registry_settings.get("identifier")
+    if not credential or not authority or not identifier:
+        pytest.fail("registry smoke requires buyer signer and registry authority trust")
+    client = RegistryClient(
+        base_url=registry_api_url,
+        signer=create_signer("eip191", credential),
+        caller_role="buyer",
+        expected_registries=TrustedIdentitySet(
+            identities=(Identity(scheme="eip191", identifier=identifier),)
+        ),
+        registry_authority=authority,
+    )
     yield client
     client.close()
 
@@ -112,5 +128,4 @@ class TestRegistryPublishers:
         )
 
         log.info("GET /publishers responded (publishers_in_page=%d)", len(result.publishers))
-
 

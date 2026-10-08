@@ -1,0 +1,36 @@
+[project]
+name = "arkhai-vms-listings"
+version = "0.4.2"
+license = "MIT"
+description = "VM listing derivation, pricing resolution, and reconciliation, shared by the VM storefront and buyer."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    # The VM vocabulary: dimension names, the capability-shape schema, and the
+    # shape and identifier operations this package may use.
+    "arkhai-vms>=0.6.0",
+    "pydantic>=2",
+    "arkhai-kit-alkahest",
+    "arkhai-kit-identity==0.4.0",
+    "arkhai-kit-settlement-runtime>=0.4.0",
+]
+
+[project.optional-dependencies]
+# Reading a site's projected pools — their declarations and hints — needs the
+# resource-pool kit and its contracts. Only the storefront derives listings from projections; the
+# buyer uses the listing models and helpers alone, and imports none of it.
+pools = [
+    "arkhai-kit-resource-pools>=0.6.0",
+    "arkhai-kit-resource-pools-contracts>=0.1.0",
+]
+# Deriving listings also reads the storefront's own pool overrides, through the
+# pool-override kit's reader. Only the storefront derives listings.
+overrides = [
+    "arkhai-kit-pool-overrides>=0.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_vms_listings"]

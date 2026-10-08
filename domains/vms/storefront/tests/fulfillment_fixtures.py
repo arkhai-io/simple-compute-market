@@ -13,9 +13,9 @@ from market_capacity_publication import CapacityBinding
 from market_fulfillment import (
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
-    VersionedEnvelope,
     build_fulfillment_result_envelope,
 )
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 from market_storefront.domain_runtime import (
@@ -80,19 +80,20 @@ async def make_vm_lifecycle_fixture(
             },
         },
         last_reconciled_at="2026-01-01T00:00:00Z",
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,
         status="open",
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
-        offer_resource={
+        listing_resource={
             "pool_id": pool_id,
             "gpu_model": "A100",
             "gpu_count": 1,
             "sla": 99.0,
             "region": "test-region",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
             "interruptible": interruptible,
         },
         fulfillment_resource=None,
@@ -163,23 +164,24 @@ def vm_fulfillment_result(
     fulfillment_id: str = "fulfillment-1",
     capacity_reservation_id: str = "reservation-1",
     provisioned_resource_id: str = "resource-1",
-    connection_info: Mapping[str, Any] | None = None,
+    endpoint: Mapping[str, Any] | None = None,
     credentials: tuple[Mapping[str, Any], ...] = (),
+    ready_at: str = "2030-01-01T00:00:01+00:00",
 ) -> VersionedEnvelope[Any]:
-    """Build the authoritative generic result with a VM-domain envelope."""
+    """Build the authoritative generic result carrying the family's access delivery."""
 
     domain_result = VersionedEnvelope(
-        kind="vm.fulfillment.result.v1",
+        kind="compute.access-delivery",
         schema_version=1,
         payload={
-            "connection_info": dict(connection_info or {}),
-            "credentials": [dict(credential) for credential in credentials],
-            "provisioned_resources": [
-                {
-                    "provisioned_resource_id": provisioned_resource_id,
-                    "status": "active",
-                }
+            "endpoints": [
+                dict(
+                    endpoint
+                    or {"protocol": "ssh", "host": "203.0.113.10", "port": 2222, "user": "tenant1"}
+                )
             ],
+            "credentials": [dict(credential) for credential in credentials],
+            "ready_at": ready_at,
         },
     )
     return build_fulfillment_result_envelope(

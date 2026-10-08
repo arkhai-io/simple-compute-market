@@ -16,15 +16,15 @@ from core_storefront import (
     StorefrontSettlementBuildContext,
     build_domain_settlement_artifacts,
 )
-from domains.vms.listings import (
+from arkhai_vms_listings import (
     determine_strategy_from_order,
     extract_compute_from_order,
 )
-from domains.vms.listings.models import Listing
-from domains.vms.negotiation import storefront_round as vm_storefront_round
-from domains.vms.negotiation.policies import _amount_from_proposal
-from domains.vms.negotiation.storefront_round import SellerRoundHook, SellerRoundResult
-from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from arkhai_vms_listings.models import Listing
+from arkhai_vms_negotiation import storefront_round as vm_storefront_round
+from arkhai_vms_negotiation.policies import _amount_from_proposal
+from arkhai_vms_negotiation.storefront_round import SellerRoundHook
+from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, PaymentSellerStage
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
@@ -39,6 +39,7 @@ from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
     AgreementTerms,
+    ListingSourceCheckHook,
     NegotiationDomainHooks,
     NegotiationRuntime,
     NegotiationStateError,
@@ -49,8 +50,14 @@ from market_negotiation_runtime import (
     RoundEvaluation,
     RoundRequest,
 )
-from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
-
+from market_policy.negotiation_middleware import NegotiationDecision
+from market_policy.listing_source import ListingSourceVerdict
+from market_storefront.lifecycle import trading_pause
+from market_storefront.services.listing_source_check import check_listing_source
+from market_capacity_publication import (
+    PublicationBinding,
+    UnbackedBinding,
+)
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
@@ -95,25 +102,30 @@ def load_storefront_chain() -> Any:
 def seller_reference_amount(
     listing: Any,
     duration_seconds: int | None,
+    proposal: Mapping[str, Any] | None = None,
 ) -> int:
+    """The seller's reference amount from the option ``proposal`` selects."""
     return vm_storefront_round._seller_reference_amount(
         listing,
         duration_seconds,
         default_min_price=_default_min_price(),
+        proposal=proposal,
     )
 
 
-def _default_seller_round_hook(
-    domain: MarketDomainContract,
-    capacity_runtime: CapacityRuntime,
-) -> SellerRoundHook:
+def _default_seller_round_hook(domain: MarketDomainContract) -> SellerRoundHook:
+    """Build the default seller policy for a round.
+
+    Built for each round so it reads the current negotiation settings. The
+    listing's check against its own source is the negotiation runtime's, and
+    reaches the policy with each round.
+    """
     policy = domain.storefront
     if policy is None:
         raise RuntimeError(
             f"domain {domain.identity!s} has no storefront negotiation capability"
         )
     return policy.run_negotiation_policy(
-        capacity_runtime.client(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         extra_policy_paths=_extra_policy_paths(),
@@ -280,7 +292,7 @@ def build_vm_accepted_artifacts(
 def _build_accepted_escrow_artifacts(
     *,
     domain: MarketDomainContract,
-    capacity_binding: CapacityBinding,
+    capacity_binding: PublicationBinding,
     negotiation_id: str,
     listing_id: str,
     proposal: Mapping[str, Any] | None,
@@ -334,15 +346,17 @@ def _accepted_vm_service_terms(
     if not isinstance(listing_id, str) or not listing_id:
         raise OfferUnfulfillableError("selected_listing_identity_unavailable")
     order = dict(listing)
-    offer_resource = order.get("offer_resource")
-    if isinstance(offer_resource, str):
+    listing_resource = order.get("listing_resource")
+    if isinstance(listing_resource, str):
         try:
-            offer_resource = json.loads(offer_resource)
+            listing_resource = json.loads(listing_resource)
         except json.JSONDecodeError as exc:
-            raise OfferUnfulfillableError() from exc
-        order["offer_resource"] = offer_resource
-    if not isinstance(offer_resource, dict):
-        raise OfferUnfulfillableError("selected_offer_resource_unavailable")
+            raise OfferUnfulfillableError(
+                "selected_listing_resource_unavailable"
+            ) from exc
+        order["listing_resource"] = listing_resource
+    if not isinstance(listing_resource, dict):
+        raise OfferUnfulfillableError("selected_listing_resource_unavailable")
     return {
         "vm.v1": {
             "listing_id": listing_id,
@@ -446,7 +460,7 @@ def _accepted_settlement_artifacts(
     dispatch: AcceptedObligationDispatch,
     *,
     domain: MarketDomainContract,
-    capacity_binding: CapacityBinding,
+    capacity_binding: PublicationBinding,
     negotiation_id: str,
     listing_id: str,
     proposal: Mapping[str, Any] | None,
@@ -576,8 +590,10 @@ def _build_response_artifacts(
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
 ) -> Mapping[str, Any]:
-    if not isinstance(acceptance.binding, CapacityBinding):
-        raise RuntimeError("VM negotiation has no frozen capacity binding")
+    # Settlement artifacts carry the listing's site, mode, and source for both
+    # backed and unbacked listings; only capacity effects need the backed form.
+    if not isinstance(acceptance.binding, (CapacityBinding, UnbackedBinding)):
+        raise RuntimeError("VM negotiation has no frozen listing binding")
     if accepted:
         artifacts = _with_agreement(
             acceptance,
@@ -671,7 +687,7 @@ def lookup_pool_policy_tags(
     if not listing_id:
         return {}
     try:
-        from domains.vms.listings.reconciler import (
+        from arkhai_vms_listings.reconciler import (
             pool_id_for_listing,
             site_id_for_listing,
         )
@@ -689,7 +705,7 @@ def lookup_pool_policy_tags(
             return {}
         pools = caches.resource_pools.view().value or []
         for pool in pools:
-            if str(pool.get("resource_pool_id") or "") == pool_id:
+            if str(pool.get("pool_id") or "") == pool_id:
                 metadata = pool.get("pool_metadata") or {}
                 return dict(metadata.get("policy_tags") or {})
     except Exception:
@@ -712,8 +728,7 @@ async def _place_capacity_hold(
     """
 
     from core_storefront.stage_log import stage_event
-    from market_resource_pools.hints import capped_hold_seconds
-
+    from market_resource_pools_contracts.hints import capped_hold_seconds
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -722,6 +737,17 @@ async def _place_capacity_hold(
         getattr(getattr(settings, "capacity", None), "hold_ttl_seconds", 0) or 0
     )
     if ttl <= 0:
+        return
+    if isinstance(acceptance.binding, UnbackedBinding):
+        # Nothing can be reserved against a listing with no admission authority,
+        # so there is no hold to place and nothing has failed.
+        stage_event(
+            "negotiation",
+            "capacity_hold_not_applicable",
+            negotiation_id=acceptance.negotiation_id,
+            listing_id=acceptance.listing_id,
+            capacity_backing=acceptance.binding.capacity_backing,
+        )
         return
     try:
         if not isinstance(acceptance.binding, CapacityBinding):
@@ -786,8 +812,13 @@ def build_vm_negotiation_runtime(
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
+    listing_source_check: ListingSourceCheckHook | None = None,
 ) -> NegotiationRuntime:
-    """Compose the shared lifecycle with the exact registered VM contract."""
+    """Compose the shared lifecycle with the exact registered VM contract.
+
+    ``listing_source_check`` replaces the check of each listing against its own
+    source; by default it reads the site projections this storefront holds.
+    """
 
     dispatch = (
         accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
@@ -830,17 +861,18 @@ def build_vm_negotiation_runtime(
                 "durable negotiation binding does not select the configured VM contract"
             )
 
-    def require_capacity_binding(
-        capacity_binding: CapacityBinding,
+    def require_binding_identity(
+        listing_binding: PublicationBinding,
         *,
         site_id: str,
     ) -> None:
+        # An identity check: backed and unbacked listings both negotiate.
         if (
-            capacity_binding.site_id != site_id
-            or capacity_binding.offering_mode != binding.offering_mode
+            listing_binding.site_id != site_id
+            or listing_binding.offering_mode != binding.offering_mode
         ):
             raise NegotiationStateError(
-                "capacity binding does not match the durable VM site and mode"
+                "listing binding does not match the durable VM site and mode"
             )
 
     async def resolve_opening(
@@ -860,7 +892,7 @@ def build_vm_negotiation_runtime(
                 f"Order {listing_id} not found locally; seller has no matching listing"
             )
         capacity_binding = await capacity_binding_for_listing(repository, listing_id)
-        require_capacity_binding(
+        require_binding_identity(
             capacity_binding,
             site_id=listing_binding.site_id,
         )
@@ -906,7 +938,7 @@ def build_vm_negotiation_runtime(
                 f"Seller's order {listing_id} is gone from local DB"
             )
         capacity_binding = await capacity_binding_for_listing(repository, listing_id)
-        require_capacity_binding(
+        require_binding_identity(
             capacity_binding,
             site_id=thread_binding.site_id,
         )
@@ -919,14 +951,12 @@ def build_vm_negotiation_runtime(
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        policy = seller_round_hook or _default_seller_round_hook(
-            domain,
-            capacity_runtime,
-        )
+        policy = seller_round_hook or _default_seller_round_hook(domain)
         result = await policy(
             listing=request.listing,
             history=list(request.history),
             requested_duration_seconds=request.terms.requested_duration_seconds,
+            listing_source=request.listing_source,
             **(
                 {"strategy_label": request.strategy_label}
                 if request.strategy_label is not None
@@ -970,19 +1000,27 @@ def build_vm_negotiation_runtime(
             listing_id=opening.listing_id,
         )
         require_domain_binding(copied.binding)
-        if not isinstance(opening.binding, CapacityBinding):
+        if not isinstance(opening.binding, (CapacityBinding, UnbackedBinding)):
             raise NegotiationStateError(
-                "VM negotiation opening has no capacity binding"
+                "VM negotiation opening has no listing binding"
             )
-        require_capacity_binding(
+        require_binding_identity(
             opening.binding,
             site_id=copied.site_id,
         )
 
     def storefront_is_paused() -> bool:
-        from market_storefront.server import is_globally_paused
+        return trading_pause().paused
 
-        return bool(is_globally_paused())
+    async def check_source(
+        repository: Any, resolved: ResolvedNegotiation
+    ) -> ListingSourceVerdict:
+        return await check_listing_source(
+            repository=repository,
+            listing_record=resolved.listing_record,
+            binding=resolved.binding,
+            capacity_runtime=capacity_runtime,
+        )
 
     async def place_hold(
         repository: Any,
@@ -1004,8 +1042,8 @@ def build_vm_negotiation_runtime(
         determine_strategy=lambda listing, _record: determine_strategy_from_order(
             listing
         ),
-        reference_amount=lambda _listing, record, terms, scalar: (
-            seller_reference_amount(record, terms.requested_duration_seconds)
+        reference_amount=lambda _listing, record, terms, scalar, pinned: (
+            seller_reference_amount(record, terms.requested_duration_seconds, pinned)
             if scalar
             else 0
         ),
@@ -1029,70 +1067,9 @@ def build_vm_negotiation_runtime(
         place_hold=place_hold,
         persist_artifacts=_persist_artifacts,
         persist_opening=persist_opening,
+        check_listing_source=listing_source_check or check_source,
     )
     return NegotiationRuntime(
         resolve_opening=resolve_opening,
         resolve_continuation=resolve_continuation,
-    )
-
-
-async def compute_round_zero_decision(
-    *,
-    repository: Any,
-    registry: StorefrontDomainRegistry,
-    binding: StorefrontDomainBinding,
-    domain: MarketDomainContract,
-    capacity_runtime: CapacityRuntime,
-    listing: Any,
-    proposal: Mapping[str, Any] | None,
-    requested_duration_seconds: int | None = None,
-) -> tuple[int, str, str, str, NegotiationDecision]:
-    """Run the VM policy adapter against the exact durable capacity binding."""
-
-    repository_registry: StorefrontDomainRegistry = getattr(repository, "domain_registry", None)
-    if repository_registry is not registry:
-        raise RuntimeError(
-            "round-zero evaluation and repository must share the exact registry"
-        )
-    if registry.resolve(binding) is not domain:
-        raise RuntimeError(
-            "round-zero evaluation requires the exact registry-owned VM contract"
-        )
-    if not isinstance(capacity_runtime, CapacityRuntime):
-        raise TypeError("capacity_runtime must be a CapacityRuntime")
-    listing_id = str(getattr(listing, "listing_id", "") or "")
-    listing_binding = await repository.load_listing_binding(listing_id=listing_id)
-    if listing_binding is None or listing_binding.binding != binding:
-        raise NegotiationStateError(
-            "round-zero evaluation requires the selected durable VM binding"
-        )
-    capacity_binding = await capacity_binding_for_listing(repository, listing_id)
-    if (
-        capacity_binding.site_id != listing_binding.site_id
-        or capacity_binding.offering_mode != binding.offering_mode
-    ):
-        raise NegotiationStateError(
-            "round-zero capacity binding does not match the durable VM site and mode"
-        )
-    result: SellerRoundResult = await _default_seller_round_hook(
-        domain,
-        capacity_runtime,
-    )(
-        listing=listing,
-        history=[
-            NegotiationRound(
-                round_number=0,
-                sender="them",
-                action="initial",
-                proposal=dict(proposal) if proposal is not None else None,
-            )
-        ],
-        requested_duration_seconds=requested_duration_seconds,
-    )
-    return (
-        result.our_amount,
-        result.strategy_label,
-        result.direction,
-        result.chain_label,
-        result.decision,
     )

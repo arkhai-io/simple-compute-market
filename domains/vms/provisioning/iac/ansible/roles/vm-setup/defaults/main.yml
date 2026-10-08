@@ -21,3 +21,43 @@ vm_ssh_authorized_keys: []
 # The user account whose authorized_keys file will be updated.
 # Defaults to the connection user (ansible_user).
 vm_ssh_key_user: "{{ ansible_user }}"
+
+# ============================================
+# GPU passthrough
+# ============================================
+
+# Where vfio-bind.service reads its list of PCI addresses. The list is data the
+# unit reads rather than code it embeds, so a topology change rewrites a file
+# instead of a script.
+vfio_bind_state_path: /etc/vfio-bind/devices
+
+vfio_bind_script_path: /usr/local/sbin/vfio-bind
+
+# Kernel command-line token carried only by the rescue boot entry. The bind
+# script treats its presence as an instruction to bind nothing, which is the
+# entire mechanism by which that entry is inert -- same kernel, same initramfs,
+# no device claimed.
+rescue_cmdline_token: novfiobind
+
+rescue_boot_entry_title: "Ubuntu (no vfio binding)"
+
+# ============================================
+# VM tunnel client
+# ============================================
+
+# Client version. A variable rather than a set_fact buried in the install task,
+# because frps and frpc negotiate a protocol version: which client version a
+# host runs is a property of the relay the fleet talks to, so it must be
+# settable without editing a task.
+frp_version: "0.61.1"
+
+# Rendezvous port. The address and the admission token have no defaults and are
+# supplied per run — see the assertions in tasks/frp-client.yml for why a
+# default for either is worse than a failure.
+frp_server_port: 7000
+
+# Loopback admin API. Supplies the reload that applies a proxy diff and the
+# status check that confirms a proxy came up, replacing both uses of a relay's
+# management dashboard with questions asked of the local client about its own
+# state.
+frp_admin_port: 7400

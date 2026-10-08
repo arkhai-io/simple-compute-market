@@ -28,10 +28,16 @@ Admin evaluation (X-Admin-Key, no side effects):
 from __future__ import annotations
 
 import logging
+import sqlite3
+
+from market_storefront.services.listing_service import (
+    ListingSourceAlreadyBound,
+)
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import NegotiationControlRouteService
 from pydantic import ValidationError
 
 import market_storefront.container as _container
@@ -153,7 +159,7 @@ class ListingsController:
                 status_code=404, detail=f"Listing {listing_id} not found"
             )
 
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         try:
             listing = Listing.model_validate(row)
@@ -172,15 +178,36 @@ class ListingsController:
                 },
             ) from exc
 
-        await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from market_storefront.services.publication_service import (
             publish_order_to_registry,
+            reopen_order,
         )
 
-        publish_result = await publish_order_to_registry(
-            listing,
-            sqlite_client=self._db,
-        )
+        if row.get("status") == "closed":
+            # Only a listing its seller withdrew is the seller's to re-list. One
+            # reconciliation closed has no source supporting it right now, and
+            # the publication loop reopens it when its source does.
+            closed_by = row.get("closed_by")
+            if closed_by != "seller":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "listing_closed_by_reconciliation",
+                        "closed_by": closed_by,
+                        "hint": (
+                            "Its source does not currently support this "
+                            "listing; it reopens when the source does."
+                        ),
+                    },
+                )
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await reopen_order(listing, sqlite_client=self._db)
+        else:
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await publish_order_to_registry(
+                listing,
+                sqlite_client=self._db,
+            )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,
@@ -199,6 +226,11 @@ class ListingsController:
             result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except ListingSourceAlreadyBound as exc:
+            # A conflicting request, not a server fault: the caller asked to
+            # publish a source another of its listings already holds. Reported
+            # as such so the answer names what to change.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             logger.error("[LISTINGS] create unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
@@ -214,6 +246,17 @@ class ListingsController:
             result = await self._listing_svc.close_listing(listing_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except sqlite3.OperationalError as exc:
+            # The close did not reach local state, so no registry was told
+            # either; the seller can simply retry.
+            logger.warning("[LISTINGS] close of %s did not complete: %s", listing_id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_close_incomplete",
+                    "hint": "The listing is unchanged; retry the close.",
+                },
+            ) from exc
         except Exception as exc:
             logger.error("[LISTINGS] close unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
@@ -299,26 +342,26 @@ class AdminListingsController:
     @admin_router.post(
         "/{listing_id}/evaluate-negotiate",
         response_model=EvaluateNegotiateResponse,
-        summary="What would the negotiation strategy decide for this buyer offer? (no side effects)",
+        summary="What would the negotiation strategy decide for this buyer listing_resource? (no side effects)",
     )
     async def evaluate_negotiate(
         self, listing_id: str, body: EvaluateNegotiateRequest
     ) -> EvaluateNegotiateResponse:
-        """Dry-run the seller's round-0 negotiation decision without creating a thread.
+        """Preview the opening ``negotiate/new`` would receive, writing nothing.
 
-        Delegates to ``ListingService.evaluate_negotiate`` and the same
-        domain policy adapter used by round zero of the shared runtime.
-
-        Returns HTTP 404 if the listing doesn't exist or has no usable strategy.
+        Runs the negotiation runtime's opening pipeline — decode, opening
+        validation, pause and liveness checks, and round-zero policy — and
+        reports a refusal rather than raising it.
         """
-        try:
-            return await self._listing_svc.evaluate_negotiate(
-                listing_id,
-                body.proposal,
-                requested_duration_seconds=body.requested_duration_seconds,
+        signer = _container.resolved_marketplace_signer
+        runtime = _container.resolved_negotiation_runtime
+        if signer is None or runtime is None:
+            raise HTTPException(
+                status_code=503, detail="storefront negotiation is unavailable"
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Exception as exc:
-            logger.error("[ADMIN] evaluate-negotiate: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+        controls = NegotiationControlRouteService(
+            runtime=runtime,
+            repository=_container.resolved_sqlite_client,
+            seller_principal=lambda: signer.identity,
+        )
+        return await controls.evaluate_negotiate(listing_id, body)

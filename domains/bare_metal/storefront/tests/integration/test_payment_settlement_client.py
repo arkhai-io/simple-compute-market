@@ -1,24 +1,29 @@
 """Bare-metal agreement settlement and refunds through the canonical typed client.
 
-The storefront app, its lifespan and authentication, and SQLite persistence are
-real. Site capacity and provisioning are in-memory authorities, and the payments
-service is the kit's fake injected at ``PaymentsClient`` through the settlement
-composition. Settlement must start fulfillment itself once the receipt verifies.
+The storefront app, its lifespan and authentication, its negotiation runtime, and
+SQLite persistence are real; each deal is opened through ``negotiate_new`` with a
+payment selection, exactly as a buyer opens one. Site capacity and provisioning
+are in-memory authorities, and the payments service is the kit's fake injected at
+``PaymentsClient`` through the settlement composition. Settlement must start
+fulfillment itself once the receipt verifies.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from arkhai_bare_metal import BareMetalListing, BareMetalMessage, BareMetalTerms
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
-from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from source_sites import listing_source_projection
 from storefront_client import StorefrontClient, StorefrontClientError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
@@ -40,12 +45,16 @@ IMPOSTOR = Ed25519Signer(b"\x08" * 32)
 BUYER = Ed25519Signer(b"\x31" * 32)
 SELLER = Ed25519Signer(b"\x32" * 32)
 ADMIN = Ed25519Signer(b"\x33" * 32)
-NEGOTIATION = "bm-payment-1"
 LISTING = "bm-payment-listing"
-SITE = "site-pay"
+# The source-sites fixture's identities, so the listing source check matches.
+SITE, POOL, RESOURCE = "site-a", "pool-a", "resource-1"
+HOST, PHYSICAL_HOST = "machine-1", "physical-host-1"
+SSH_KEY = "ssh-ed25519 buyer"
 
 
 class Capacity:
+    """The selected site: it answers the listing source check and reservations."""
+
     def __init__(self) -> None:
         self.reservation_sites: dict[str, str] = {}
 
@@ -53,12 +62,29 @@ class Capacity:
         assert site_id == SITE
         return self
 
+    async def resource_pool_projection(self):
+        return listing_source_projection()
+
     async def list_reservations(self):
         return []
 
     async def reserve(self, **request):
         self.reservation_sites["reservation-pay"] = request["site"]
         return {"capacity_reservation_id": "reservation-pay", "site": request["site"]}
+
+    async def commit(self, **request):
+        """Write-once, as the site's: the first commit's lease window is kept."""
+        self.window = getattr(self, "window", None) or (
+            request["lease_start_utc"],
+            request["lease_end_utc"],
+        )
+        return {
+            "capacity_reservation_id": request["capacity_reservation_id"],
+            "state": "leased",
+            "lease_start_utc": self.window[0],
+            "lease_end_utc": self.window[1],
+            "site": request["site_id"],
+        }
 
 
 class Provisioning:
@@ -70,15 +96,15 @@ class Provisioning:
 
     async def schedule_resource(self, request):
         return SimpleNamespace(
-            settlement_resource_id="resource-pay",
-            pool_id="pool-pay",
+            settlement_resource_id=RESOURCE,
+            pool_id=POOL,
             resource_kind="compute.bare-metal",
             provider="bare_metal.ansible",
             attributes={
                 "bare_metal_publication": {
                     "enabled": True,
-                    "machine_id": "machine-pay",
-                    "physical_host_id": "host-pay",
+                    "host_id": HOST,
+                    "physical_host_id": PHYSICAL_HOST,
                 }
             },
         )
@@ -97,8 +123,16 @@ class Provisioning:
 
 def _option() -> SettlementOption:
     params = {"payee_account": PAYEE, "asset": "USD/2", "window": "P7D", "deposit_agreement": False}
-    body = {"mechanism": "arkhai.payments.v1", "asset": "USD/2", "rates": [], "params": params}
-    return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+    rates = [RateValue(field="amount", per="hour", value=100)]
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
 
 
 def _composition(
@@ -106,6 +140,8 @@ def _composition(
 ) -> BareMetalStorefrontSettlementComposition:
     return BareMetalStorefrontSettlementComposition.from_raw_config(
         {
+            # Disabled means no longer published for new deals; the servicing
+            # fields stay, so accepted deals keep settling and refunding.
             "priority": ["arkhai.payments.v1"] if enabled else [],
             "arkhai_payments": {
                 "enabled": enabled,
@@ -120,70 +156,53 @@ def _composition(
     )
 
 
-async def _seed(runtime: BareMetalStorefrontRuntime):
-    stage = runtime.settlement_composition.arkhai_payments_stage()
-    terms = BareMetalTerms(
-        machine_id="machine-pay",
-        physical_host_id="host-pay",
-        duration_seconds=3600,
-        ssh_public_key="ssh-ed25519 pay",
-        listing_ref=LISTING,
-    )
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    agreement = Agreement(
-        negotiation_id=NEGOTIATION,
-        listing_id=LISTING,
-        listing_hash="0" * 64,
-        buyer=BUYER.identity.model_dump(mode="json"),
-        seller=SELLER.identity.model_dump(mode="json"),
-        settlement=_option(),
-        settlement_params={"payer_account": PAYER},
-        amount=100,
-        asset="USD/2",
-        duration_seconds=3600,
-        start_utc=now,
-        accepted_at=now,
-        provision_terms=terms.model_dump(mode="json"),
-    )
-    raw = agreement.model_dump_json(exclude_none=True).encode()
-    data = stage.settlement_data(json.loads(raw))
+async def _publish(runtime: BareMetalStorefrontRuntime) -> None:
     await runtime.db.upsert_bare_metal_listing(
         listing_id=LISTING,
         status="open",
-        created_at=now,
-        updated_at=now,
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
         seller_principal=SELLER.identity,
         storefront_url="http://test",
-        listing=BareMetalListing(
-            machine_id="machine-pay", physical_host_id="host-pay", capabilities={"gpu_model": "H200"}
-        ),
-        accepted_escrows=[],
-        settlement_options=[agreement.settlement.model_dump(mode="json")],
         site_id=SITE,
-        pool_id="pool-pay",
-        physical_resource_id="physical-pay",
+        pool_id=POOL,
+        physical_resource_id=RESOURCE,
+        listing={
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": HOST,
+            "physical_host_id": PHYSICAL_HOST,
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[],
+        settlement_options=[_option().model_dump(mode="json")],
     )
-    await runtime.db.persist_bare_metal_opening(
-        negotiation_id=NEGOTIATION,
+
+
+async def _open(buyer: StorefrontClient) -> dict:
+    """Open the deal as a buyer does: an exact payment selection, accepted at round zero."""
+    option = _option()
+    return await buyer.negotiate_new(
         listing_id=LISTING,
-        seller_principal=SELLER.identity,
-        buyer_agent_id="buyer",
-        buyer_principal=BUYER.identity,
-        seller_reference_amount=100,
-        strategy="test",
-        message=BareMetalMessage(duration_seconds=3600, ssh_public_key="ssh-ed25519 pay"),
-        proposal={},
-        buyer_amount=100,
-        seller_action="accept",
-        seller_amount=100,
-        terms=terms,
-        agreed_amount=100,
-        agreement_bytes=raw,
-        accepted_at=now,
-        settlement_data=data.to_wire(),
-        settlement_mechanism="arkhai.payments.v1",
+        initial_amount=None,
+        provision_terms={
+            "kind": "bare_metal.v2",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 3600,
+                "access_method": "ssh",
+                "ssh_public_key": SSH_KEY,
+            },
+        },
+        settlement_selection={
+            "mechanism": option.mechanism,
+            "option_id": option.option_id,
+            "expiration_unix": 1_900_000_000,
+            "params": {"payer_account": PAYER},
+        },
+        selection_only=True,
     )
-    return data
 
 
 class Harness(SimpleNamespace):
@@ -191,10 +210,10 @@ class Harness(SimpleNamespace):
         self.payments.serve(build_signed_receipt(signer=signer, mandate=self.data.mandate))
 
     async def settle(self):
-        return await self.buyer.settle_agreement(NEGOTIATION)
+        return await self.buyer.settle_agreement(self.negotiation_id)
 
     async def refund(self):
-        return await self.seller.refund_settlement(NEGOTIATION)
+        return await self.seller.refund_settlement(self.negotiation_id)
 
 
 @pytest.fixture
@@ -214,11 +233,11 @@ async def harness(tmp_path, enabled):
         admin_principals=TrustedIdentitySet(identities=(ADMIN.identity,)),
         storefront_url="http://test",
         marketplace_signer=SELLER,
-        settlement_composition=_composition(payments, enabled=enabled),
+        settlement_composition=_composition(payments),
         capacity_client=Capacity(),
         fulfillment_client=provisioning,
     )
-    data = await _seed(runtime)
+    await _publish(runtime)
     app = build_bare_metal_storefront_app(
         registry=build_bare_metal_storefront_registry(domain=domain), runtime=runtime
     )
@@ -235,14 +254,41 @@ async def harness(tmp_path, enabled):
                 expected_publishers=publishers, transport=transport,
             ) as seller,
         ):
+            opened = await _open(buyer)
+            if not enabled:
+                # Payments stops being offered for new deals; this one stays serviced.
+                disabled = _composition(payments, enabled=False)
+                object.__setattr__(runtime, "settlement_composition", disabled)
             yield Harness(
                 runtime=runtime,
                 payments=payments,
                 provisioning=provisioning,
-                data=data,
+                opened=opened,
+                negotiation_id=opened["negotiation_id"],
+                data=PaymentSettlementData.parse(opened["settlement_data"]),
                 buyer=buyer,
                 seller=seller,
             )
+
+
+@pytest.mark.asyncio
+async def test_a_negotiated_payment_deal_records_what_settlement_needs(harness):
+    opened = harness.opened
+    assert opened["action"] == "accept"
+    agreement_bytes = base64.b64decode(opened["agreement_bytes"])
+    agreement = json.loads(agreement_bytes)
+    assert agreement["settlement_params"] == {"payer_account": PAYER}
+    assert agreement["amount"] == "100"
+    db = harness.runtime.db
+    terms = await db.load_bare_metal_terms(negotiation_id=harness.negotiation_id)
+    assert (terms.host_id, terms.physical_host_id, terms.ssh_public_key) == (
+        HOST,
+        PHYSICAL_HOST,
+        SSH_KEY,
+    )
+    record = await db.load_bare_metal_settlement_record(negotiation_id=harness.negotiation_id)
+    assert record["agreement_sha256"] == hashlib.sha256(agreement_bytes).hexdigest()
+    assert record["status"] == "accepted"
 
 
 async def _status_code(call) -> int:
@@ -261,7 +307,7 @@ async def test_a_verified_receipt_starts_fulfillment_once(harness):
     started = await harness.settle()
     assert not started.pending
     assert started.settlement_ref == harness.data.transaction_id
-    assert started.escrow_uid == NEGOTIATION
+    assert started.escrow_uid == harness.negotiation_id
     await harness.settle()
     assert len(harness.provisioning.begin_calls) == 1
 
@@ -272,7 +318,7 @@ async def test_an_impostor_receipt_is_refused_without_fulfillment(harness):
     assert await _status_code(harness.settle) == 409
     assert harness.provisioning.begin_calls == []
     record = await harness.runtime.db.load_bare_metal_settlement_record(
-        negotiation_id=NEGOTIATION
+        negotiation_id=harness.negotiation_id
     )
     assert record["status"] == "accepted"
 
@@ -315,7 +361,7 @@ async def test_a_refund_recorded_before_delivery_start_stops_delivery(harness):
     with pytest.raises(StorefrontClientError):
         await settling
     assert harness.provisioning.begin_calls == []
-    assert await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=NEGOTIATION) is None
+    assert await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=harness.negotiation_id) is None
 
 
 @pytest.mark.asyncio
@@ -330,8 +376,8 @@ async def test_a_refund_after_delivery_start_records_both(harness):
     await settling
     db = harness.runtime.db
     assert len(harness.provisioning.begin_calls) == 1
-    assert await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=NEGOTIATION) is not None
-    record = await db.load_bare_metal_settlement_record(negotiation_id=NEGOTIATION)
+    assert await db.load_bare_metal_fulfillment_lifecycle(negotiation_id=harness.negotiation_id) is not None
+    record = await db.load_bare_metal_settlement_record(negotiation_id=harness.negotiation_id)
     assert record["status"] == "refunded"
 
 
@@ -339,7 +385,7 @@ async def test_a_refund_after_delivery_start_records_both(harness):
 async def test_an_interrupted_refund_completes_on_the_next_call(harness):
     harness.serve()
     await harness.settle()
-    await harness.runtime.db.record_bare_metal_refund_intent(negotiation_id=NEGOTIATION)
+    await harness.runtime.db.record_bare_metal_refund_intent(negotiation_id=harness.negotiation_id)
     harness.payments.reversed = True
     harness.payments.reverse_error = "hold_not_reversible"
     assert (await harness.refund()).status == "refunded"

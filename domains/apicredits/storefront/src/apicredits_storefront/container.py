@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from market_storefront_kit import TradingPause
+
 if TYPE_CHECKING:
     from market_core import MarketDomainContract
     from core_storefront.services.negotiation_service import NegotiationService
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
         ApiCreditsSettlementComposition,
     )
     from market_identity import Signer
+    from market_storefront_kit import StorefrontLoopController
 
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.services.system_service import SystemService
@@ -50,6 +53,11 @@ resolved_negotiation_service: "NegotiationService | None" = None
 resolved_negotiation_runtime: "NegotiationRuntime | None" = None
 resolved_system_service: "SystemService | None" = None
 resolved_marketplace_signer: "Signer | None" = None
+resolved_loop_controller: "StorefrontLoopController | None" = None
+
+#: Whether this process opens new negotiations. Process-local and kept across
+#: lifespans: a restarted process trades again, and a lifespan does not reset it.
+trading_pause = TradingPause()
 
 
 def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
@@ -70,6 +78,7 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     global resolved_negotiation_service
     global resolved_system_service
     global resolved_marketplace_signer
+    global resolved_loop_controller
 
     if resolved_market_domain is not None and resolved_market_domain is not domain:
         raise RuntimeError(
@@ -91,6 +100,9 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     resolved_negotiation_service = None
     resolved_system_service = None
     resolved_marketplace_signer = None
+    if resolved_loop_controller is not None:
+        resolved_loop_controller.clear_loops()
+    resolved_loop_controller = None
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

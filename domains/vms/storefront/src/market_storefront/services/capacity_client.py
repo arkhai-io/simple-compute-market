@@ -24,9 +24,11 @@ import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
+)
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -39,12 +41,14 @@ from core_storefront.aggregation import (
     most_available,
 )
 from market_capacity_publication import (
-    CapacityBinding,
+    run_capacity_event_pollers,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite,
+    PublicationBinding,
+    publication_binding,
 )
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
@@ -59,6 +63,12 @@ VM_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units", "gpu_count")
 provisioning service is domain-neutral and cannot import this value from
 a VM-domain package, so it is necessarily duplicated at this composition
 site.
+"""
+
+VM_MIRROR_DIMENSION = "gpu_count"
+"""Must match the VM capacity authority's mirror dimension, for the same
+reason as ``VM_UNIT_CLAIM_KEYS``: a legacy single-quantity claim is
+translated into this dimension on both sides of the boundary.
 """
 
 SQLiteClientFactory = Callable[[], Any]
@@ -105,17 +115,7 @@ def _capacity_reconciler(
 
         home_site = context.projections[0].site_id
         db = sqlite_client_factory()
-        projection = (
-            site_pool_projection()
-            if bool(
-                getattr(
-                    getattr(settings, "capacity", None),
-                    "use_site_projection_for_listings",
-                    False,
-                )
-            )
-            else None
-        )
+        projection = listing_source_projection()
         buckets = site_capacity_buckets() if projection is not None else None
         delta = context.delta
         close = (
@@ -133,7 +133,7 @@ def _capacity_reconciler(
                 db.db_path,
                 sqlite_client=db,
                 home_site=home_site,
-                configured_site_count=len(context.projections),
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -152,6 +152,7 @@ def _capacity_reconciler(
                 db.db_path,
                 sqlite_client=db,
                 home_site=home_site,
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -195,6 +196,7 @@ def build_capacity_runtime_for(
             claim_matcher=functools.partial(
                 dict_resource_satisfies_claim,
                 unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+                mirror_dimension=VM_MIRROR_DIMENSION,
             ),
         )
     db_path = str(getattr(sqlite_client_factory(), "db_path", ""))
@@ -245,9 +247,14 @@ def build_capacity_client(
 async def capacity_binding_for_listing(
     sqlite_client: Any,
     listing_id: str,
-) -> CapacityBinding:
-    """Resolve the VM candidate's exact durable site, mode, and source."""
-    from domains.vms.listings.models import Listing
+) -> PublicationBinding:
+    """Resolve the VM listing's exact durable site, mode, source, and backing.
+
+    The result is a ``CapacityBinding`` only when the durable binding records
+    the listing as capacity-backed; callers that reserve, commit, or release
+    require that class and refuse an ``UnbackedBinding``.
+    """
+    from arkhai_vms_listings.models import Listing
 
     durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
     row = await sqlite_client.load_listing(listing_id=listing_id)
@@ -261,13 +268,18 @@ async def capacity_binding_for_listing(
             f"listing {listing_id!r} has no complete durable capacity binding"
         )
     listing = Listing.model_validate(row)
-    mode = listing.offer_resource.virtualization_type
+    mode = listing.listing_resource.offering_mode
     offering_mode = mode.value if hasattr(mode, "value") else str(mode or "")
     if offering_mode != durable.binding.offering_mode:
         raise RuntimeError(
             f"listing {listing_id!r} offering mode disagrees with its durable binding"
         )
-    return CapacityBinding(durable.site_id, offering_mode, source_id)
+    return publication_binding(
+        capacity_backing=durable.capacity_backing,
+        site_id=durable.site_id,
+        offering_mode=offering_mode,
+        source_id=source_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +291,7 @@ async def capacity_binding_for_listing(
 # while schedule/begin/status/result live on the compute-provisioning
 # service's ``/fulfillment`` surface, reached through
 # ``ComputeProvisioningClient`` — a different wire contract
-# (``compute_provisioning.contracts``), already used for that service's
+# (``compute_provisioning_contracts``), already used for that service's
 # other domain-neutral surfaces (jobs, leases).
 # ---------------------------------------------------------------------------
 
@@ -495,22 +507,35 @@ def build_fulfillment_client(
 
 
 
+def listing_source_projection() -> dict[str, list[dict[str, Any]]] | None:
+    """The projection listings derive from, or ``None`` on the local-table path.
+
+    Publication, capacity reconciliation, and the inventory guard all select
+    their source through this, so they never disagree about which one applies.
+    """
+    if not bool(
+        getattr(
+            getattr(settings, "capacity", None),
+            "use_site_projection_for_listings",
+            False,
+        )
+    ):
+        return None
+    return site_pool_projection()
+
+
 def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     """Resource-pool projection rows per site, from the storefront's own
     background poller cache (``site_projection_cache``).
 
-    Only sites whose projection has ever loaded contribute -- ``None``
-    (never loaded, or currently unavailable/invalid) is excluded, but a
-    successfully loaded site is included *even when its own rows list is
-    empty* -- an authoritative "this site currently has zero pools"
-    answer, distinct from "this site's answer isn't known yet". Losing
-    that distinction (checking the rows list's truthiness instead of
-    whether it is ``None``) would make a site's genuine zero-pools state
-    indistinguishable from a site that hasn't loaded at all, and
-    `reconciler`'s projection-sourced path would then fall back to
-    stale local tables instead of correctly registering zero capacity --
-    the empty *result* mapping is meaningful too, and is what actually
-    signals "fall back to local data" one level up.
+    Only sites whose cache holds a value contribute, loaded or stale; a site
+    that has never loaded, or whose load failed with no earlier value, is
+    absent. A loaded site is included *even when its rows list is empty*:
+    that is an authoritative "this site has zero pools" answer, distinct from
+    "this site's answer is not known". Derivation holds the listings of every
+    configured site absent here rather than reading it as empty, and an empty
+    mapping derives nothing: it never selects the local tables, which only
+    configuration does.
     """
     from market_storefront.services.site_projection_cache import projection_caches
 
@@ -542,8 +567,20 @@ def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
 
 
 async def capacity_events_poller_loop(sqlite_client: Any) -> None:
-    """Delegate multi-site event delivery and reconciliation to the kit."""
+    """Delegate multi-site event delivery and reconciliation to the kit.
+
+    The aggregate name is what the admin advance route addresses and what a
+    storefront with no site configured still reports; the per-site gates are
+    what actually hold the pollers, since the kit owns their fan-out.
+    """
     from market_storefront.utils import config
+    from market_storefront.lifecycle import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_loop_name,
+        declare_and_gate,
+        gate,
+        idle,
+    )
 
     interval = float(
         getattr(
@@ -553,6 +590,10 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
         )
         or 5
     )
-    await build_capacity_runtime(lambda: sqlite_client).poll_events(
-        interval_seconds=interval
+    runtime = build_capacity_runtime(lambda: sqlite_client)
+    await run_capacity_event_pollers(
+        functools.partial(runtime.poll_events, interval_seconds=interval),
+        gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
+        site_gate=lambda site: declare_and_gate(capacity_site_loop_name(site)),
+        wait=idle,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from market_core.schemas import Uint256Amount
 from market_identity import Identity
 
 
@@ -101,7 +102,7 @@ class VerifyEscrowRequest(BaseModel):
     seller_wallet: str = Field(
         description="Expected seller wallet address (recipient on-chain)"
     )
-    agreed_price: int = Field(
+    agreed_price: Uint256Amount = Field(
         description=(
             "Expected absolute payment amount in base units of the payment "
             "token (the field name is retained from before the per-hour → "
@@ -149,6 +150,13 @@ class EvaluateSettleRequest(BaseModel):
         default="", description="SSH public key to inject into the VM"
     )
     duration_seconds: int = Field(default=3600, description="Lease duration in seconds")
+    negotiation_id: str | None = Field(
+        default=None,
+        description=(
+            "The negotiation settle will name. When its acceptance holds "
+            "capacity, settle commits that hold, so the preview reports it."
+        ),
+    )
 
 
 class EvaluateSettleResponse(BaseModel):
@@ -156,9 +164,9 @@ class EvaluateSettleResponse(BaseModel):
 
     would_submit: bool
     escrow_uid: str
-    vm_host: str | None = None
-    vm_target: str | None = None
+    host_id: str | None = None
     required_attributes: dict[str, Any] = Field(default_factory=dict)
+    capacity_reservation_id: str | None = None
     reason: str | None = None
 
 

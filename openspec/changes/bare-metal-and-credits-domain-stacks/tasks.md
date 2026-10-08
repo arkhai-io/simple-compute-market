@@ -11,10 +11,8 @@
 
 ## 2. Recompose API credits
 
-Implementation dependency: tasks 2.1-2.2 wait for the final committed interfaces
-from `kit-storefront-composition-seam`, `kit-owned-negotiation-runtime`, and
-`kit-owned-capacity-and-publication`. This change will consume those modules and
-remove the API-credit copies; it will not recreate an absent extraction locally.
+The three extraction changes record the API-credit copies they removed; 2.1 and 2.2
+confirm nothing remains rather than repeat that work.
 
 
 - [ ] 2.1 Remove every remaining local implementation of a concern the kit extractions
@@ -28,11 +26,20 @@ remove the API-credit copies; it will not recreate an absent extraction locally.
 
 ## 3. Bare-metal deployable stack
 
-- [ ] 3.1 Add the stack definition, following the topology conventions
+- [x] 3.1 Add the stack definition, following the topology conventions
       `domains/vms/compose.yml` and `domains/apicredits/compose.yml` already use.
+      Delivered: `domains/bare_metal/compose.yml`, `compose.bare-metal.yml`, and
+      `compose.bare-metal-local.yml` with `dev-env/bare-metal/`, standing up the
+      bare-metal end-to-end lane.
 - [ ] 3.2 Write it so the deployment shape can change — standalone service or a second
       contract inside a shared storefront process — without rewriting the scenarios.
 - [ ] 3.3 Update `docs/bare-metal-seller-quickstart.md` with standing the stack up.
+- [ ] 3.4 Confirm the Helm render tests (`helm/charts/bare-metal-storefront/tests/`)
+      prove VM-only, bare-metal-only, and combined seller profiles contain no waits or
+      references to disabled storefront roles, and add the missing profile if one is.
+- [ ] 3.5 Add operator configuration examples exposing separately composed VM and
+      bare-metal roles through explicit URLs or gateway paths without sharing writable
+      state.
 
 ## 4. Bare-metal deal path
 
@@ -40,6 +47,12 @@ The static task 4.1 scenario consumes only the accepted `market bare-metal`
 public command contract. Its live execution remains blocked on the installed
 buyer contribution, sibling storefront's authenticated result/access/teardown
 endpoints, selected-site authority, credentials, and real access target.
+
+The end-to-end pipeline runs only in GitHub Actions, with no live host inventory, so
+the 4.1 scenario cannot run there. The bare-metal deal path that runs on every pipeline
+run — mock-provisioned, on the bare-metal lane — is owned by
+`bare-metal-mock-provisioned-deal`; 4.1 remains the real-host evidence the protected
+lane needs.
 
 
 - [x] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
@@ -49,6 +62,103 @@ endpoints, selected-site authority, credentials, and real access target.
 - [x] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
       whole-machine release is not VM destruction.
 
+## 4a. Bare metal on the kit
+
+`design.md`'s Context names the files that reimplement what the kit owns.
+
+Composing bare metal onto the kit negotiation runtime moved to
+`bare-metal-mock-provisioned-deal` on 2026-10-01, because its pipeline deal needs
+multi-round negotiation and force-accept for parity with VM's. What remains here is
+moving the bare-metal routes onto the shell.
+
+- [x] 4a.1 **Migrated** to `bare-metal-mock-provisioned-deal`. Re-verify that `negotiation_service.py`, `negotiation.py`, the
+      `/api/v1/negotiate/*` and listing routes in `api.py`, and their thread
+      persistence in `sqlite_client.py` are still domain-local copies, and that no
+      module in `domains/bare_metal` imports `market_negotiation_runtime`.
+- [x] 4a.2 **Migrated** to `bare-metal-mock-provisioned-deal`. Implement bare metal's `NegotiationDomainHooks` for the kit runtime:
+      `validate_opening` decoding the closed `bare_metal.v1` demand (positive
+      duration, one listed access method, one `ssh-ed25519` public key; refuse
+      `access_ref`, private material, and any seller-owned routing or resource field),
+      physical selection and exact settlement-option validation as `evaluate_round`
+      inputs, `agreement_terms` binding the trusted listing's immutable resource and
+      commercial values to the original demand, `build_artifacts` producing the
+      accepted obligation the settlement runtime already consumes, and `place_hold`
+      as today's hold placement.
+- [ ] 4a.3 Route bare-metal negotiation through the shared shell's negotiate routes
+      with the contribution registered, and delete the bare-metal negotiate routes in
+      `api.py`. No compatibility endpoint may select by URL, payload kind, app
+      instance, or module getter. Amended 2026-10-01: serving the existing routes over
+      the kit runtime and deleting the parallel service, hook class, and thread
+      persistence moved to `bare-metal-mock-provisioned-deal`; this task is the move
+      onto the shell's routes.
+- [ ] 4a.4 Serve bare-metal listings through the shared shell's listing routes from
+      the common binding, and delete the domain-local listing routes.
+- [ ] 4a.5 Reduce what remains of `runtime.py` and `server.py` to contribution
+      adapters over `StorefrontAppConfig`; record in `design.md` anything that cannot
+      reduce and why.
+- [ ] 4a.6 Focused tests: the bare-metal e2e lane's negotiation stages pass unchanged
+      through the shared routes. Amended 2026-10-01: the conformance matrix under the
+      bare-metal contract, opening refusal for each forbidden demand field, and terms
+      mismatch refusal moved with 4a.2 to `bare-metal-mock-provisioned-deal`.
+
+## 4b. Bare-metal buyer requirements (verification)
+
+Each task verifies one requirement against the delivered packages and has a delta
+in `specs/`; `design.md`'s "Requirement ownership" says why these are here.
+
+- [ ] 4b.1 **Opening carries only buyer-owned demand.** Verified by the refusal
+      tests migrated with 4a.2 to `bare-metal-mock-provisioned-deal` and one e2e stage proposing an `access_ref`; both parties derive identical
+      terms for a valid SSH demand. (`negotiation-protocol` delta.)
+- [ ] 4b.2 **Resume is transcript-exact.** A buyer run interrupted after the seller's
+      round resumes against the recorded thread when the registry listing has changed,
+      and does not adopt the changed listing. (`negotiation-protocol` delta.)
+- [ ] 4b.3 **Clean wheel.** Install the staged core buyer, bare-metal domain, kit, and
+      bare-metal buyer wheels into a clean environment: entry-point discovery registers
+      `bare_metal.v1`, the namespace imports, and no undeclared source-checkout
+      dependency exists; uninstall the buyer wheel and confirm the namespace disappears
+      while other domains start. (`deployment-state` delta.)
+- [ ] 4b.4 **No invented seller topology.** The installed buyer configured with remote
+      registry/storefront authorities and trust pins completes discovery, negotiation,
+      settlement, status, access, and teardown through public authenticated APIs, with
+      no compose-only hostname, co-located database, provisioning socket, or bypass
+      profile in reach. (`deployment-state` delta.)
+- [ ] 4b.5 **Package boundary.** Runtime and type-only import analysis of the built
+      buyer wheel reaches no seller, site, fulfillment/provisioning implementation,
+      sibling buyer, provider SDK, e2e helper, or test package; a missing accepted
+      client surface fails with a prerequisite-version error rather than a local
+      transport. (`test-compatibility` delta.)
+
+Tasks 4b.6–4b.9 were migrated on 2026-10-01 from `bare-metal-mock-provisioned-deal`
+(its former 3.1–3.4), with their `buyer-orchestration` delta: they are properties of the
+`market bare-metal` command, which that change's typed-client scenario cannot observe.
+Its scenario proves the storefront half of 4b.9.
+
+- [ ] 4b.6 **Demand is exact and buyer-bounded.** `market bare-metal buy` with a
+      private key, an `access_ref`, or any site/pool/resource/host/executor/price/
+      deadline override fails before negotiation and records no run event; a valid
+      demand emits the canonical `bare_metal.v1` envelope with no seller-owned field.
+      The real-host scenario's forbidden-flag list is the starting point.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.7 **A provisioning route offered to the buyer is refused.** A listing,
+      response, configuration value, or argument attempting to make a provisioning
+      URL, site credential, provider identifier, or direct executor operation
+      authoritative is rejected; the buyer uses only the recorded storefront authority.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.8 **Result and evidence decode strictly.** Public result/evidence carrying a
+      password, bearer token, private key, connection endpoint, raw executor result,
+      provider field, or unrecognized property is rejected and never displayed,
+      persisted, or captured in a diagnostic; access data returned without a valid
+      response proof from the recorded storefront is rejected and not cached.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.9 **Teardown is authenticated and idempotent.** Repeating `teardown --from`
+      after a lost response resumes or returns the same operation with no second
+      physical teardown; status distinguishes requested, running, complete,
+      failed/operator-action, and lease-already-expired; a run principal that does not
+      authorize the agreement's teardown is refused and not retried elsewhere. The
+      command's current options and subcommands differ from the real-host scenario's
+      invocations (`--from`, `teardown request`/`status`); reconcile the two first.
+      (`buyer-orchestration` delta.)
+
 ## 5. Validation
 
 External gate: tasks 5.1-5.2 require running API-credit and bare-metal seller
@@ -57,13 +167,19 @@ real whole-host access target. Static scenario/configuration work is not live-de
 evidence. Task 5.3 is intentionally unrun in this delegated lane.
 
 
-- [ ] 5.1 Run both new end-to-end paths against a live service stack. This repository has
+- [ ] 5.1 Run both new end-to-end paths against a live service stack. For bare metal,
+      the mock-provisioned deal from `bare-metal-mock-provisioned-deal` is the path that
+      runs in the pipeline; real access and revocation remain the protected lane's.
+      This repository has
       previously recorded e2e work validated only statically because no stack was
       available; treat a live run as an explicit gate, not a formality.
 - [ ] 5.2 Confirm the goal's completion test: each domain runs a full deal through a
       composed storefront with no domain-local copy of an extracted concern.
 - [ ] 5.3 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 5.4 Run the bare-metal domain, publication, storefront unit/integration, shared
+      core storefront, compute contract, and site capacity suites, and rebuild the
+      affected wheels/images with packaging, import-boundary, and migration checks.
 
 ## 6. Closeout
 
@@ -80,7 +196,34 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `docs/development/ROADMAP.md`. If every gap is closed, remove the goal — its
       durable result belongs in the specs and `ARCHITECTURE.md`.
 - [ ] 6.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 6.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
+- [ ] 6.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=bare-metal-and-credits-domain-stacks` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 6.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 6.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -89,3 +232,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Every domain intended for deployment has a stack definition | `openspec/specs/deployment-state/spec.md` — "Deployable stack per market domain" |
 | What an end-to-end deal path proves | `docs/development/TESTING.md` |
 | Why API credits is recomposed rather than merely made to pass, and why fixtures generalize instead of scenarios copying | This change's `design.md` |
+| A bare-metal opening carries only buyer-owned demand; resume is transcript-exact | `openspec/specs/negotiation-protocol/spec.md` — "Bare-metal negotiation preserves demand and authority ownership" |
+| The bare-metal buyer ships as a clean wheel and addresses independently configured authorities | `openspec/specs/deployment-state/spec.md` — "Bare-metal buyer ships as a clean wheel contribution" |
+| The bare-metal buyer wheel's dependencies point downward and across public clients only | `openspec/specs/test-compatibility/spec.md` — "Bare-metal buyer dependencies point downward" |
+| Composing bare metal onto the kit is composition, not extraction; how bare-metal requirements are split with the mock-provisioned deal | This change's `design.md` |

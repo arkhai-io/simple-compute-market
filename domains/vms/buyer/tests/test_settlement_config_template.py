@@ -1,7 +1,9 @@
+from arkhai_vms_buyer import config_cli
+from arkhai_vms_buyer.cli import app
 from typer.testing import CliRunner
 
-from domains.vms.buyer import config_cli
-from domains.vms.buyer.cli import app
+from arkhai_vms_buyer import config_cli
+from arkhai_vms_buyer.cli import app
 
 
 def test_evm_resources_are_opt_in_for_buyer_template(monkeypatch, tmp_path):

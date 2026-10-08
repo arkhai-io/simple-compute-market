@@ -11,12 +11,20 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from core_storefront.aggregation import AggregateCapacityClient, PlacementPolicy
 from core_storefront.capacity import CapacityDelta
-from core_storefront.capacity_remote import site_events_poller
 from market_site_client import SiteCapacityClient
+
+from .capacity_remote import (
+    SiteEventCycle,
+    SiteEventPreview,
+    drain_site_events_once,
+    preview_site_events,
+    site_event_cursor,
+    site_events_poller,
+)
 
 
 class CapacityConfigurationError(ValueError):
@@ -49,13 +57,15 @@ class CapacitySite:
 
 
 @dataclass(frozen=True, slots=True)
-class CapacityBinding:
-    """Exact publication/effect authority selected by domain composition.
+class _ListingIdentity:
+    """A listing's common identity: origin site, offering mode, and source.
 
-    ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
+    ``site_id`` is the site the listing originates from, which every listing
+    has. ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
     resource ID, Physical Resource ID, or another stable candidate identity).
-    ``offering_mode`` is the exact pool-declared mode advertised by the
-    candidate and later passed to reservation/fulfillment policy.
+    ``offering_mode`` is the exact mode the listing advertises. Whether the
+    origin site admits reservations is carried by the concrete class, never by
+    a field a reader could leave unset.
     """
 
     site_id: str
@@ -68,6 +78,60 @@ class CapacityBinding:
             if not isinstance(value, str) or not value.strip():
                 raise CapacityBindingError(f"{field_name} must be non-empty")
             object.__setattr__(self, field_name, value.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityBinding(_ListingIdentity):
+    """A listing whose origin site is an admission authority.
+
+    Reservation, commit, release, scheduling, and dispatch accept only this
+    class. ``UnbackedBinding`` is a sibling rather than a subclass, so an
+    ``isinstance`` check against this class is exactly the backed-only check.
+    """
+
+    capacity_backing: ClassVar[Literal["backed"]] = "backed"
+
+
+@dataclass(frozen=True, slots=True)
+class UnbackedBinding(_ListingIdentity):
+    """A listing with no admission authority behind it.
+
+    It has an origin site and a source like any other listing, and nothing can
+    be reserved against it. Dataclass equality compares classes, so it never
+    equals a ``CapacityBinding`` over the same fields: a durable comparison
+    catches a changed backing without a separate check.
+    """
+
+    capacity_backing: ClassVar[Literal["unbacked"]] = "unbacked"
+
+
+PublicationBinding = CapacityBinding | UnbackedBinding
+
+_BINDING_BY_BACKING: Mapping[str, type[CapacityBinding] | type[UnbackedBinding]] = {
+    CapacityBinding.capacity_backing: CapacityBinding,
+    UnbackedBinding.capacity_backing: UnbackedBinding,
+}
+
+
+def publication_binding(
+    *,
+    capacity_backing: str,
+    site_id: str,
+    offering_mode: str,
+    source_id: str,
+) -> PublicationBinding:
+    """Load a binding from its durable backing value, refusing any other value.
+
+    There is no default: a value this kit does not recognize is a durable-state
+    error, not a listing to classify.
+    """
+    binding_type = _BINDING_BY_BACKING.get(capacity_backing)
+    if binding_type is None:
+        raise CapacityBindingError(
+            f"unknown capacity_backing {capacity_backing!r}; expected one of "
+            f"{sorted(_BINDING_BY_BACKING)}"
+        )
+    return binding_type(site_id, offering_mode, source_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +247,13 @@ class CapacityRuntime:
         return self.client().site(site_id)
 
     def require_binding(self, binding: CapacityBinding) -> CapacityBinding:
+        # Every capacity effect passes through here. An unbacked listing has no
+        # admission authority, so a reservation against it would be a record
+        # with nothing behind it; refuse before any site call.
+        if not isinstance(binding, CapacityBinding):
+            raise CapacityBindingError(
+                "capacity operations require a capacity-backed listing binding"
+            )
         if binding.site_id not in self._sites:
             raise CapacityBindingError(
                 f"capacity binding references unconfigured site {binding.site_id!r}"
@@ -249,16 +320,28 @@ class CapacityRuntime:
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
-    ) -> None:
-        """Commit directly at the recorded site, including after restart."""
+        deal_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Commit directly at the recorded site, including after restart.
+
+        Returns the reservation as the site recorded it; a repeat commit
+        returns the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal.
+        """
         binding = self.require_binding(binding)
-        await self.site_client(binding.site_id).commit(
+        committed = await self.site_client(binding.site_id).commit(
             resource_id=resource_id,
             capacity_reservation_id=capacity_reservation_id,
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=idempotency_ref,
+            deal_ref=deal_ref,
         )
+        if committed is None:
+            return None
+        out = dict(committed)
+        out["site"] = binding.site_id
+        return out
 
     async def release(
         self,
@@ -327,8 +410,52 @@ class CapacityRuntime:
             )
         )
 
-    async def poll_events(self, *, interval_seconds: float) -> None:
-        """Tail every configured authority and reconcile at feed boundaries."""
+    async def preview_events_once(self, site_id: str) -> SiteEventPreview:
+        """Report what one site's next event cycle would do, changing nothing.
+
+        The read half of stepping a held loop: a caller can see the pending
+        events and the feed head before deciding to apply them, the same way
+        the evaluate routes dry-run a negotiation or a settlement.
+        """
+        return await preview_site_events(
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+        )
+
+    async def drain_events_once(self, site_id: str) -> SiteEventCycle:
+        """Run exactly one event cycle for one site and report what it did.
+
+        Addresses the same cursor the running poller holds, because a second
+        position would replay or skip. Intended to be called while the loop is
+        held: the pause guarantees a cycle either runs completely or never
+        starts, so an advance has the feed to itself.
+        """
+        # `site_client` already fails closed on an unconfigured site, so
+        # there is no second guard here saying the same thing differently.
+        return await drain_site_events_once(
+            self.client(),
+            self.site_client(site_id),
+            site_event_cursor(site_id),
+            full_reconcile=self.reconcile_now,
+        )
+
+    async def poll_events(
+        self,
+        *,
+        interval_seconds: float,
+        paused: Callable[[str], Callable[[], bool]] | None = None,
+        wait: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
+        """Tail every configured authority and reconcile at feed boundaries.
+
+        ``paused`` is a factory, not a predicate: it receives a site id and
+        returns that site's gate. The pollers run concurrently and each holds
+        its own feed position, so one site being held must not hold the others
+        -- a single shared predicate could only stop all of them together.
+        Supplying the gate per site keeps the naming with the caller, which is
+        the only party that knows what each loop is registered as. ``wait`` is
+        the interruptible wait each site poller uses between cycles.
+        """
         if interval_seconds <= 0:
             raise CapacityConfigurationError("poll interval must be positive")
         aggregate = self.client()
@@ -340,7 +467,52 @@ class CapacityRuntime:
                     self.site_client(site_id),
                     interval_seconds,
                     full_reconcile=self.reconcile_now,
+                    paused=paused(site_id) if paused is not None else None,
+                    wait=wait,
                 )
                 for site_id in self.site_ids
             )
         )
+
+
+#: How often the aggregate capacity-event loop returns to its gate. It performs
+#: no work -- the site pollers do the polling -- so this is purely how often it
+#: checks on the fan-out; a pause reaches it at once through the injected wait.
+AGGREGATE_GATE_SECONDS = 0.5
+
+_AGGREGATE_HELD_POLL_SECONDS = 0.05
+
+
+async def run_capacity_event_pollers(
+    poll_events: Callable[..., Awaitable[None]],
+    *,
+    gate: Callable[[], bool],
+    site_gate: Callable[[str], Callable[[], bool]],
+    wait: Callable[[float], Awaitable[None]],
+    gate_seconds: float = AGGREGATE_GATE_SECONDS,
+) -> None:
+    """Run the per-site capacity-event pollers under one gated aggregate loop.
+
+    ``poll_events`` is a runtime's ``poll_events`` with its interval bound; it
+    receives ``site_gate`` as its per-site gate factory and ``wait`` as the
+    interruptible wait each site poller uses between cycles. It gathers the site
+    pollers and never returns while a site is configured, so awaiting it from a
+    gated loop would let that loop gate exactly once and then sit inside the
+    call forever -- reaching its gate once is enough to be acknowledged and not
+    enough to ever observe a pause. It therefore runs as its own task, and this
+    loop gates and waits beside it, which also keeps a storefront with no site
+    configured reporting a capacity loop at all. A fan-out that fails is
+    surfaced here rather than idled over, so the aggregate loop ends with it.
+    """
+
+    pollers = asyncio.create_task(poll_events(paused=site_gate, wait=wait))
+    try:
+        while True:
+            if gate():
+                await asyncio.sleep(_AGGREGATE_HELD_POLL_SECONDS)
+                continue
+            if pollers.done():
+                await pollers
+            await wait(gate_seconds)
+    finally:
+        pollers.cancel()

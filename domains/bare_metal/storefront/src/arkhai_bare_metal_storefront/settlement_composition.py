@@ -9,6 +9,7 @@ from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import create_contact_exchange_registration
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
@@ -28,6 +29,34 @@ from market_arkhai_payments import (
 )
 
 ALKAHEST_MECHANISM = "alkahest.v1"
+
+# Whether each mechanism's deal is fulfilled through site capacity, that is,
+# provisions the listed machine. The same declaration the VM storefront makes.
+BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
+    {
+        ALKAHEST_MECHANISM: True,
+        ARKHAI_PAYMENTS_MECHANISM: True,
+        # An introduction settles by revealing contacts; no machine is provisioned.
+        CONTACT_MECHANISM: False,
+    }
+)
+
+
+class UndeclaredMechanismFulfillmentError(ValueError):
+    """A composed mechanism has no declaration of how it is fulfilled."""
+
+
+def mechanism_fulfills_through_capacity(
+    mechanism: str, declarations: Mapping[str, bool]
+) -> bool:
+    """Look up a mechanism's declaration, refusing one the composition lacks."""
+    try:
+        return bool(declarations[mechanism])
+    except KeyError as exc:
+        raise UndeclaredMechanismFulfillmentError(
+            f"settlement mechanism {mechanism!r} has no declaration of whether it "
+            "is fulfilled through bare-metal capacity"
+        ) from exc
 
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
@@ -138,6 +167,10 @@ class BareMetalStorefrontSettlementComposition:
                     **self.resources,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
+                    # The site the listing binding records, so a mechanism
+                    # resolving anything per origin sees the value its
+                    # negotiation will later inherit.
+                    "origin": str(candidate["site_id"]),
                 },
             )
             if not isinstance(artifacts, Mapping):

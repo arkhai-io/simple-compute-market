@@ -9,46 +9,69 @@ import os
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
+from core_storefront.models.system_models import ProjectionFamilyStatus
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_contact_exchange import (
+    ContactExchangeComposition,
+    ContactSettlementConfig,
+    IntroductionRetentionService,
+    SQLiteIntroductionStore,
+)
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
+from market_negotiation_runtime import NegotiationRuntime
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
+    StorefrontLoopController,
+    TradingPause,
     build_alkahest_clients,
 )
 
-from .delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    storefront_delivery_section,
-)
 from .domain_runtime import get_market_domain_contract
-from .fulfillment_service import BareMetalFulfillmentService
 from .negotiation import default_seller_round_hook
-from .negotiation_service import BareMetalNegotiationService
+from .listing_source_check import build_listing_source_check
+from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .settlement import build_bare_metal_settlement_plan
-from .settlement_composition import (
-    ALKAHEST_MECHANISM,
-    BareMetalStorefrontSettlementComposition,
-)
 from .settlement_service import BareMetalSettlementService
+from .fulfillment_service import BareMetalFulfillmentService
+from .lifecycle_steps import register_bare_metal_lifecycle_steps
+from .delivery import storefront_introduction_delivery
+from .pool_overrides import (
+    BareMetalPoolOverrideContribution,
+    accepted_site_projection,
+    compile_publication_clauses,
+    configured_max_duration_seconds,
+)
+from .sqlite_client import SQLiteClient
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
     parse_site_bindings,
 )
-from .sqlite_client import SQLiteClient
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    BareMetalStorefrontSettlementComposition,
+)
+
 
 logger = logging.getLogger(__name__)
+
+# The family name VM's health reports a site's resource-pool projection under.
+RESOURCE_POOL_PROJECTION_FAMILY = "resource_pool"
 
 
 @dataclass(frozen=True)
@@ -80,9 +103,34 @@ class BareMetalStorefrontRuntime:
     escrow_verifier: Callable[..., Awaitable[int]] = field(
         default_factory=lambda: create_alkahest_registration().settlement_verifier
     )
+    # The seller chain after the required guards, in any form the policy kit
+    # normalizes; None selects the default (``negotiation.DEFAULT_SELLER_POLICIES``).
+    negotiation_policies: Any = None
+    # Composes one publication cycle for the administrator's publication step;
+    # None composes it from the process environment as the command does.
+    publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
+        field(default=None, repr=False)
+    )
+    # One publication pass at a time within this process. A pass racing the
+    # command in another process is refused by the durable binding's unique
+    # derivation key instead.
+    publication_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
+    # The process's one loop controller: it holds this storefront's timer loops
+    # under one pause and steps each loop's cycle on request.
+    loops: StorefrontLoopController = field(
+        default_factory=StorefrontLoopController, init=False, repr=False, compare=False
+    )
+    # Whether this process opens new negotiations; separate from the loops' pause.
+    trading_pause: TradingPause = field(
+        default_factory=TradingPause, init=False, repr=False, compare=False
+    )
+    negotiation_runtime: NegotiationRuntime = field(init=False, repr=False)
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
+    contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         repository = SettlementSQLiteRepository(
@@ -101,29 +149,64 @@ class BareMetalStorefrontRuntime:
             "settlement_runtime",
             SettlementRuntime(repository, clients),
         )
-
-    def negotiation_service(self) -> BareMetalNegotiationService:
-        """Build the request-scoped bare-metal negotiation orchestrator."""
-        return BareMetalNegotiationService(
-            db=self.db,
-            domain=self.domain,
-            seller_principal=self.seller_principal,
-            round_hook=default_seller_round_hook(),
-            build_plan=self.plan_builder,
-            accepted_obligation_dispatch=(
-                self.settlement_composition.accepted_obligation_dispatch()
-                if self.settlement_composition is not None
-                else {}
-            ),
-            settlement_data_dispatch=(
-                self.settlement_composition.settlement_data_dispatch()
-                if self.settlement_composition is not None
-                else {}
+        object.__setattr__(
+            self,
+            "contact_exchange",
+            ContactExchangeComposition(
+                config=self.contact_settlement_config,
+                store=SQLiteIntroductionStore(self.db.db_path),
+                load_thread=self.db.load_negotiation_thread_row,
+                load_obligation=repository.load_settlement_obligation,
+                load_origin=self._negotiation_origin,
+                settlement_runtime=self.settlement_runtime,
+                known_origins=[binding.site_id for binding in self.site_bindings],
+                deliver=self._deliver_introduction,
             ),
         )
+        object.__setattr__(
+            self,
+            "negotiation_runtime",
+            build_bare_metal_negotiation_runtime(
+                domain=self.domain,
+                seller_principal=self.seller_principal,
+                round_hook=default_seller_round_hook(self.negotiation_policies),
+                listing_source_check=build_listing_source_check(
+                    self.db,
+                    self.capacity_client.site if self.capacity_client is not None else None,
+                ),
+                trading_pause=self.trading_pause,
+                plan_builder=self.plan_builder,
+                accepted_obligation_dispatch=(
+                    self.settlement_composition.accepted_obligation_dispatch()
+                    if self.settlement_composition is not None
+                    else {}
+                ),
+                seller_wallet_address=self.seller_evm_address,
+                chain_config_paths=self.chain_config_paths,
+                settlement_data_dispatch=(
+                    self.settlement_composition.settlement_data_dispatch()
+                    if self.settlement_composition is not None
+                    else {}
+                ),
+            ),
+        )
+        register_bare_metal_lifecycle_steps(self)
+
+    def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
+        """Hand a fresh reveal to the configured seller-side dispatch, if any."""
+        if self.introduction_delivery is not None:
+            self.introduction_delivery(projection, agreement)
+
+    async def _negotiation_origin(self, negotiation_id: str) -> str | None:
+        """The site recorded on the negotiation's binding, or None if unbound."""
+        try:
+            binding = await self.db.load_thread_binding(negotiation_id=negotiation_id)
+        except (KeyError, ValueError):
+            return None
+        return binding.site_id
 
     def settlement_service(self) -> BareMetalSettlementService:
-        """Build commercial verification from explicitly configured chains."""
+        """Build settlement for the mechanisms this storefront composes."""
         alkahest_enabled = (
             self.settlement_composition is None
             or ALKAHEST_MECHANISM in self.settlement_composition.enabled_mechanisms
@@ -146,6 +229,7 @@ class BareMetalStorefrontRuntime:
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
             arkhai_payments_stage=arkhai_payments_stage,
+            # Payment settlement starts fulfillment itself once the receipt verifies.
             begin_fulfillment=(
                 self.fulfillment_service().begin
                 if self.capacity_client is not None and self.fulfillment_client is not None
@@ -163,8 +247,57 @@ class BareMetalStorefrontRuntime:
             fulfillment_client=self.fulfillment_client,
         )
 
+    def contact_settlement_config(self) -> ContactSettlementConfig | None:
+        """The contact-exchange section when the mechanism is enabled, else None."""
+        composition = self.settlement_composition
+        if composition is None or CONTACT_MECHANISM not in composition.enabled_mechanisms:
+            return None
+        section = composition.config.mechanism_config("contact")
+        return section if isinstance(section, ContactSettlementConfig) else None
+
+    def introduction_retention(self) -> IntroductionRetentionService | None:
+        """Introduction retention under the running configuration, or None."""
+        return self.contact_exchange.retention()
+
+    def pool_override_service(self) -> PoolOverrideService | None:
+        """The storefront's pool-override service, or ``None`` without sites.
+
+        Neither after-write effect applies: this storefront caches no site
+        projection and publishes only when a run is invoked, so a write takes
+        effect at the next run. Status is judged against the generations
+        publication runs durably recorded.
+        """
+        if self.capacity_client is None:
+            return None
+        db_path = self.db.db_path
+        return PoolOverrideService(
+            store=SQLitePoolOverrideStore(db_path),
+            site_ids=lambda: [binding.site_id for binding in self.site_bindings],
+            site_client=self.capacity_client.site,
+            contributions={
+                BareMetalPoolOverrideContribution.offering_mode: (
+                    BareMetalPoolOverrideContribution(
+                        configured_max_duration_seconds=lambda: (
+                            configured_max_duration_seconds(os.environ)
+                        )
+                    )
+                )
+            },
+            compile_clauses=compile_publication_clauses,
+            projection_source=lambda: accepted_site_projection(db_path),
+            refresh_site=None,
+            wake_publication=None,
+        )
+
     async def health(self) -> dict[str, object]:
-        """Report composed authorities without implying fulfillment readiness."""
+        """Report composed authorities without implying fulfillment readiness.
+
+        Each trusted site's resource-pool projection is reported per site in
+        ``site_projections`` and enters no gated check: one site being down
+        must not present as the whole storefront being degraded. See
+        openspec/specs/site-capacity/spec.md, "Per-site projection load-state
+        visibility".
+        """
 
         def _check_database() -> None:
             conn = sqlite3.connect(self.db.db_path)
@@ -181,38 +314,68 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None or self.chain_clients
                 else "unavailable"
             ),
-            "site_projection": "unavailable",
-            "fulfillment": "unavailable",
+            "fulfillment": (
+                "ok" if self.fulfillment_client is not None else "unavailable"
+            ),
         }
         try:
             await asyncio.to_thread(_check_database)
-            paused = await self.db.is_global_paused()
             resource_count = await self.db.count_open_bare_metal_resources()
         except Exception:
             checks["database"] = "error"
-            paused = None
             resource_count = None
-        if self.capacity_client is not None:
-            try:
-                await self.capacity_client.snapshot()
-            except Exception:
-                checks["site_projection"] = "error"
-                checks["fulfillment"] = "error"
-            else:
-                checks["site_projection"] = "ok"
-                checks["fulfillment"] = (
-                    "ok" if self.fulfillment_client is not None else "unavailable"
-                )
         return {
             "status": (
                 "ok" if all(value == "ok" for value in checks.values()) else "degraded"
             ),
             "checks": checks,
-            "paused": paused,
+            "paused": self.trading_pause.paused,
             "principal": self.seller_principal.model_dump(mode="json"),
             "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
+            "site_projections": await self._site_projections(),
+            "disclosures": self._disclosures(),
         }
+
+    def _disclosures(self) -> dict[str, dict[str, object]]:
+        """Storefront policies a counterparty may read before committing data."""
+        return self.contact_exchange.disclosures()
+
+    async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
+        """Each trusted site's resource-pool projection as fetched just now.
+
+        Only the version is fetched: the health route is also the image's
+        health probe, and the version carries exactly the revision and digest
+        reported. Nothing is cached between calls, so a site is either
+        ``loaded`` or ``unavailable``.
+        """
+        if self.capacity_client is None:
+            return {}
+
+        async def _one(site_id: str) -> tuple[str, dict[str, object]]:
+            try:
+                version = await self.capacity_client.site(
+                    site_id
+                ).resource_pool_projection_version()
+            except Exception as exc:
+                status = ProjectionFamilyStatus(
+                    state="unavailable", last_error=str(exc)
+                )
+            else:
+                status = ProjectionFamilyStatus(
+                    state="loaded",
+                    revision=version.get("revision"),
+                    digest=version.get("digest"),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                )
+            return site_id, {
+                RESOURCE_POOL_PROJECTION_FAMILY: status.model_dump(mode="json")
+            }
+
+        results = await asyncio.gather(
+            *(_one(binding.site_id) for binding in self.site_bindings)
+        )
+        return dict(results)
 
 
 def _build_chain_clients_from_environment() -> tuple[
@@ -257,6 +420,21 @@ def _build_chain_clients_from_environment() -> tuple[
     return clients, {chain.name: chain.address_config_path for chain in chains}
 
 
+def storefront_signer_from_environment(environ: Mapping[str, str]) -> Signer:
+    """The storefront's own marketplace signer, from its public identity and
+    credential inputs. The server and the operator commands both sign with it,
+    so a command can act only as an identity the server would also be.
+
+    Raises ``KeyError`` or ``ValueError`` when an input is missing or does not
+    match.
+    """
+    identity_config = IdentityConfig(
+        scheme=IdentityScheme(environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", "")),
+        identifier=environ.get("BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER", ""),
+    )
+    return resolve_storefront_signer(identity_config, environ["ARKHAI_IDENTITY_CREDENTIAL"])
+
+
 def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
@@ -266,15 +444,10 @@ def build_runtime_from_environment(
         domain or get_market_domain_contract(),
     )
     try:
-        identity_config = IdentityConfig(
-            scheme=IdentityScheme(
-                os.environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", ""),
-            ),
-            identifier=os.environ.get(
-                "BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER",
-                "",
-            ),
-        )
+        signer = storefront_signer_from_environment(os.environ)
+        # The signer resolves only when it owns the configured principal, so its
+        # identity is the storefront's public principal.
+        principal = signer.identity
         raw_admin_identities = json.loads(
             os.environ["BARE_METAL_STOREFRONT_ADMIN_IDENTITIES"],
         )
@@ -284,10 +457,6 @@ def build_runtime_from_environment(
             identities=tuple(
                 Identity.model_validate(value) for value in raw_admin_identities
             ),
-        )
-        signer = resolve_storefront_signer(
-            identity_config,
-            os.environ["ARKHAI_IDENTITY_CREDENTIAL"],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError(
@@ -316,7 +485,7 @@ def build_runtime_from_environment(
                     settlement_config,
                     resources={
                         "marketplace_signer": signer,
-                        "claimant_principal": identity_config.principal,
+                        "claimant_principal": principal,
                     },
                 )
             )
@@ -347,7 +516,7 @@ def build_runtime_from_environment(
                 settlement_config,
                 resources={
                     "marketplace_signer": signer,
-                    "claimant_principal": identity_config.principal,
+                    "claimant_principal": principal,
                     "wallet": seller_evm_address or None,
                     "wallet_ready": bool(seller_evm_address),
                     "clients": chain_clients,
@@ -373,7 +542,7 @@ def build_runtime_from_environment(
             "bare-metal-storefront.db",
         ),
         domain=selected_domain,
-        local_listing_principal=identity_config.principal,
+        local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
     )
     try:
@@ -388,16 +557,28 @@ def build_runtime_from_environment(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
     try:
-        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+        introduction_delivery = storefront_introduction_delivery(
+            known_origins=[binding.site_id for binding in site_bindings],
+            signer=signer,
+        )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
         ) from exc
+    try:
+        negotiation_policies = json.loads(
+            os.environ.get("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", "null")
+        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES must be a JSON list of policy names"
+        ) from exc
     runtime = BareMetalStorefrontRuntime(
-        introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
+        negotiation_policies=negotiation_policies,
+        introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,
-        seller_principal=identity_config.principal,
+        seller_principal=principal,
         storefront_url=storefront_url,
         admin_principals=admin_principals,
         marketplace_signer=signer,

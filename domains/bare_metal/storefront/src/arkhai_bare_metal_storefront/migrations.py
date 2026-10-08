@@ -39,7 +39,7 @@ def _add_derived_publication_tracking(conn: sqlite3.Connection) -> None:
               listing_id TEXT PRIMARY KEY,
               site_id TEXT NOT NULL,
               physical_resource_id TEXT NOT NULL,
-              machine_id TEXT NOT NULL,
+              host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,
@@ -178,21 +178,21 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
         SELECT d.listing_id, d.site_id, d.physical_resource_id,
-               d.machine_id, d.physical_host_id, d.derivation_key,
-               d.last_reconciled_at, l.offer_resource
+               d.host_id, d.physical_host_id, d.derivation_key,
+               d.last_reconciled_at, l.listing_resource
         FROM derived_bare_metal_listings d
         JOIN listings l ON l.listing_id=d.listing_id
         WHERE d.site_id IS NOT NULL AND d.physical_resource_id IS NOT NULL
         """
     ).fetchall()
     for row in rows:
-        offer_resource = json.loads(str(row[7]))
-        offer_resource["virtualization_type"] = "bare_metal"
+        listing_resource = json.loads(str(row[7]))
+        listing_resource["offering_mode"] = "bare_metal"
         conn.execute(
-            "UPDATE listings SET offer_resource=? WHERE listing_id=?",
+            "UPDATE listings SET listing_resource=? WHERE listing_id=?",
             (
                 json.dumps(
-                    offer_resource,
+                    listing_resource,
                     sort_keys=True,
                     separators=(",", ":"),
                 ),
@@ -202,7 +202,7 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
         source_envelope = json.dumps(
             {
                 "kind": "bare_metal.resource-projection.v1",
-                "machine_id": row[3],
+                "host_id": row[3],
                 "physical_host_id": row[4],
                 "physical_resource_id": row[2],
                 "schema_version": 1,
@@ -217,9 +217,9 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
               listing_id, site_id, pool_id, physical_resource_id,
               offering_mode, domain_identity, contract_major,
               contract_minor, derivation_key, source_envelope_json,
-              last_reconciled_at
+              last_reconciled_at, capacity_backing
             ) VALUES (?, ?, NULL, ?, 'bare_metal', 'bare_metal.v1',
-                      1, 0, ?, ?, ?)
+                      1, 0, ?, ?, ?, 'backed')
             """,
             (
                 row[0],
@@ -330,7 +330,95 @@ def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
     )
 
 
+def _drop_derived_publication_tracking(conn: sqlite3.Connection) -> None:
+    """Retire the domain table that tracked each listing under a second key.
+
+    A bare-metal listing is tracked only by its common binding's derivation
+    key, which includes its pool, so a Physical Resource moved to another pool
+    is an identity change rather than a refresh under a stale binding.
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_site_resource")
+    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_status")
+    conn.execute("DROP TABLE IF EXISTS derived_bare_metal_listings")
+
+
+class RetiredListingKindError(RuntimeError):
+    """The database holds state this storefront can no longer decode."""
+
+
+def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
+    """Refuse a database written before listings named their host ``host_id``.
+
+    Accepted bare-metal state is signed or digest-pinned, so it cannot be
+    rewritten in place, and no decoder for the earlier listing kind is kept.
+    Starting against such a database would fail only later, on the first
+    decode of a retired record; refusing here names the remedy instead. The
+    retired schema is recognized by structure rather than by decoding, since
+    decoding is exactly what is no longer possible.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(derived_bare_metal_listings)")
+    }
+    if "machine_id" in columns:
+        raise RetiredListingKindError(
+            "this bare-metal storefront database was written under a retired "
+            "listing kind and cannot be decoded; reset it as described in "
+            "docs/bare-metal-seller-quickstart.md, "
+            "\"Resetting the storefront database\""
+        )
+
+
+#: Each site's latest projection generation a publication run accepted. Override
+#: status reads it: publication may run in another process, or before a restart,
+#: so no in-memory record could answer for it.
+ACCEPTED_GENERATIONS_TABLE = "bare_metal_accepted_site_generations"
+
+
+def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {ACCEPTED_GENERATIONS_TABLE} (
+          site_id TEXT PRIMARY KEY,
+          revision INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          pool_ids TEXT NOT NULL,
+          accepted_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+
+
+def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
+    """Abandon threads opened before negotiation moved to the kit runtime, and drop
+    the durable trading pause.
+
+    Those threads were never resumable: continuing one was always refused, and
+    their transcripts use actions the runtime does not read. They are abandoned
+    as the negotiation watchdog abandons a stale thread, which starts no
+    settlement or release, since nothing was reserved or held during
+    negotiation. Terminal threads keep their outcome. The trading pause is now
+    process-local, so its table goes.
+    """
+    conn.execute(
+        """
+        UPDATE negotiation_threads
+        SET terminal_state = 'abandoned', status = 'terminated',
+            updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE terminal_state IS NULL
+        """
+    )
+    conn.execute("DROP TABLE IF EXISTS bare_metal_operator_state")
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
+    # First, so a database written under the retired listing kind is refused
+    # before any other pending migration touches a renamed column. On a fresh
+    # database it finds no table and records itself.
+    Migration(
+        id="bare-metal-storefront-0009-refuse-retired-listing-kind",
+        apply=_refuse_retired_listing_kind,
+    ),
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
         apply=_add_agreement_payloads,
@@ -362,5 +450,17 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0008-settlement-records",
         apply=_add_bare_metal_settlement_records,
+    ),
+    Migration(
+        id="bare-metal-storefront-0010-drop-derived-publications",
+        apply=_drop_derived_publication_tracking,
+    ),
+    Migration(
+        id="bare-metal-storefront-0011-accepted-site-generations",
+        apply=_add_accepted_site_generations,
+    ),
+    Migration(
+        id="bare-metal-storefront-0012-retire-storefront-negotiation",
+        apply=_retire_storefront_negotiation,
     ),
 )

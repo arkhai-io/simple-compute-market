@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from market_fulfillment.ids import derive_provisioned_resource_id
@@ -15,10 +16,22 @@ from market_fulfillment import (
     ProviderOperationState,
     SettlementRecordState,
     SettlementResource,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
+from market_fulfillment.db import SettlementRecord
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_site.db import CapacityReservation, ReservationState
+from market_site.ledger import CapacityConflictError
+
+from compute_provisioning.job_fulfillment import fulfillment_executor_target
+
+# Reservations a lease target is never recorded on: their lease is over.
+_TERMINAL_RESERVATION_STATES = (
+    ReservationState.released.value,
+    ReservationState.force_released.value,
+    ReservationState.provisioning_failed.value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +49,12 @@ class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
     def __init__(self, *, session_factory, repository, provider_registry, settings,
-                 worker_id: str | None = None) -> None:
+                 worker_id: str | None = None, capacity_ledger=None) -> None:
         self._session_factory = session_factory
         self._repository = repository
+        # The site ledger the lease's target is recorded on when a fulfillment
+        # becomes active; ``None`` where no site is composed, which records none.
+        self._capacity_ledger = capacity_ledger
         self._providers = provider_registry
         self._settings = settings
         self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
@@ -57,6 +73,65 @@ class FulfillmentConvergenceWatchdog:
                 getattr(settings, "fulfillment_convergence_backoff_jitter_fraction", 0.1)
             ),
         )
+        # Timer gate, mirroring `LeaseLifecycleService`. Without one this
+        # watchdog was the only lifecycle loop a caller could not stop, so a
+        # test driving convergence explicitly still had a 30s timer claiming
+        # the same rows underneath it.
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()
+
+    def pause(self) -> None:
+        """Stop timer-driven cycles; explicit cycles still run."""
+        self._resume_event.clear()
+        logger.info(
+            "[FULFILLMENT_CONVERGENCE] Watchdog paused — timer cycles will block"
+        )
+
+    def resume(self) -> None:
+        self._resume_event.set()
+        logger.info("[FULFILLMENT_CONVERGENCE] Watchdog resumed")
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._resume_event.is_set()
+
+    async def advance_cycle(self) -> dict[str, object]:
+        """Run one cycle guaranteed to reach this worker's own claimed rows.
+
+        `run_cycle` alone is an advance *attempt*, not an advance. A row this
+        worker claimed and left claimed -- which is what the `pending`
+        branches deliberately do, so that the claim lease acts as the
+        inter-poll backoff -- is invisible to `claim_pending` until that lease
+        lapses. The first lease is
+        `fulfillment_convergence_backoff_initial_seconds` (5s) and doubles per
+        claim, so a caller asking for "one more cycle" straight after a
+        pending poll got a cycle that could not touch the row at all.
+
+        Releasing this worker's own claims first makes the cycle deterministic
+        for a caller that has already stopped the timer. Refused while the
+        timer is live: the lease also keeps a second cycle off a row whose
+        provider call is still in flight, and this worker's own timer loop
+        shares its `worker_id`, so bypassing it unpaused could dispatch one
+        operation twice.
+        """
+        if not self.is_paused:
+            raise RuntimeError(
+                "advance_cycle requires the convergence watchdog to be paused: "
+                "releasing claim leases while timer cycles are live risks "
+                "acting twice on one in-flight operation"
+            )
+        with self._session_factory() as db:
+            released = self._repository.release_worker_claims(
+                db, worker_id=self._worker_id
+            )
+            db.commit()
+        if released:
+            logger.info(
+                "[FULFILLMENT_CONVERGENCE] Released %d own claim(s) for an "
+                "explicit advance",
+                released,
+            )
+        return await self.run_cycle()
 
     async def run(self) -> None:
         interval = float(
@@ -69,6 +144,11 @@ class FulfillmentConvergenceWatchdog:
         logger.info("[FULFILLMENT_CONVERGENCE] Started (interval=%ss)", interval)
         while True:
             try:
+                if not self._resume_event.is_set():
+                    logger.debug(
+                        "[FULFILLMENT_CONVERGENCE] Cycle blocked — watchdog is paused"
+                    )
+                    await self._resume_event.wait()
                 await self.run_cycle()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
@@ -92,8 +172,9 @@ class FulfillmentConvergenceWatchdog:
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
+        lease_targets = self._reconcile_lease_targets_logged()
         after = self.diagnostics_snapshot()
-        self._log_diagnostics(after)
+        self._log_diagnostics(after, lease_targets=lease_targets)
         return {"before": before, "after": after}
 
     def diagnostics_snapshot(self) -> dict[str, object]:
@@ -122,16 +203,97 @@ class FulfillmentConvergenceWatchdog:
                 SettlementRecordState.teardown_dispatch_pending.value,
             )
 
-    def _log_diagnostics(self, diagnostics: dict[str, object] | None = None) -> None:
+    def reconcile_lease_targets(self) -> dict[str, object] | None:
+        """Record the target of every active fulfillment whose lease lacks one.
+
+        Activation records a lease's target in its own transaction, and a
+        target its data prevents recording does not fail the activation. This
+        sweep keeps trying: for each active fulfillment on a reservation whose
+        lease is not over, a missing target is recorded wherever the write now
+        succeeds, for instance after the reservation's data was corrected.
+        What it cannot record, and each reservation that records a different
+        target, is counted for the cycle's diagnostics; a recorded target is
+        never replaced. Nothing acts on the site's recorded target, since
+        teardown reads the fulfillment's own metadata, so these are reporting
+        gaps rather than lifecycle faults.
+
+        Returns the counts, or ``None`` where no site ledger is composed.
+        """
+        if self._capacity_ledger is None:
+            return None
+        repaired = 0
+        different = 0
+        unrecordable = {"metadata": 0, "reservation_refused": 0, "no_reservation": 0}
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            rows = db.execute(
+                select(
+                    SettlementRecord.capacity_reservation_id,
+                    SettlementRecord.provider_metadata,
+                    CapacityReservation.executor_target,
+                    CapacityReservation.state,
+                )
+                .outerjoin(
+                    CapacityReservation,
+                    CapacityReservation.capacity_reservation_id
+                    == SettlementRecord.capacity_reservation_id,
+                )
+                .where(SettlementRecord.state == SettlementRecordState.active.value)
+            ).all()
+            for reservation_id, metadata, recorded, reservation_state in rows:
+                if reservation_state is None:
+                    unrecordable["no_reservation"] += 1
+                    continue
+                if reservation_state in _TERMINAL_RESERVATION_STATES:
+                    continue
+                try:
+                    target = fulfillment_executor_target(dict(metadata or {}))
+                except ProviderConfigInvalidError:
+                    unrecordable["metadata"] += 1
+                    continue
+                if recorded is not None:
+                    if recorded != target:
+                        different += 1
+                    continue
+                try:
+                    self._capacity_ledger.record_executor_target_in_session(
+                        db, reservation_id, target
+                    )
+                except CapacityConflictError:
+                    unrecordable["reservation_refused"] += 1
+                    continue
+                repaired += 1
+            db.commit()
+        return {
+            "repaired": repaired,
+            "unrecordable": unrecordable,
+            "different_target_recorded": different,
+        }
+
+    def _reconcile_lease_targets_logged(self) -> dict[str, object] | None:
+        try:
+            return self.reconcile_lease_targets()
+        except Exception:  # noqa: BLE001
+            # A reporting pass must not make lifecycle progress appear to
+            # fail; the next cycle sweeps again.
+            logger.exception("[FULFILLMENT_CONVERGENCE] lease target sweep failed")
+            return None
+
+    def _log_diagnostics(
+        self,
+        diagnostics: dict[str, object] | None = None,
+        *,
+        lease_targets: dict[str, object] | None = None,
+    ) -> None:
         try:
             diagnostics = diagnostics or self.diagnostics_snapshot()
-            logger.info(
-                "[FULFILLMENT_CONVERGENCE] recovery diagnostics",
-                extra={
-                    "event": "fulfillment_recovery_diagnostics",
-                    "recovery_diagnostics": diagnostics,
-                },
-            )
+            extra: dict[str, object] = {
+                "event": "fulfillment_recovery_diagnostics",
+                "recovery_diagnostics": diagnostics,
+            }
+            if lease_targets is not None:
+                extra["lease_targets"] = lease_targets
+            logger.info("[FULFILLMENT_CONVERGENCE] recovery diagnostics", extra=extra)
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed
@@ -296,18 +458,19 @@ class FulfillmentConvergenceWatchdog:
     @staticmethod
     def _settlement_resource(record) -> SettlementResource:
         requirements = dict(record.scheduling_requirements or {})
-        executor_kind = requirements.get("executor_kind")
-        if not executor_kind:
+        offering_mode = requirements.get("offering_mode")
+        if not offering_mode:
             raise ValueError(
-                "scheduled settlement has no explicit executor_kind"
+                "scheduled settlement has no explicit offering_mode"
             )
         return SettlementResource(
             settlement_resource_id=record.settlement_resource_id,
             pool_id=record.pool_id,
-            executor_kind=str(executor_kind),
+            offering_mode=str(offering_mode),
             resource_kind=str(requirements.get("resource_kind") or "compute"),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),
+            host_id=record.resource_host_id,
         )
 
     def _apply_provider_failure(
@@ -332,13 +495,10 @@ class FulfillmentConvergenceWatchdog:
         target_state: str,
         **updates: Any,
     ) -> None:
-        self._with_owned_record(
-            reservation_id,
-            expected_state,
-            lambda db: self._repository.transition(
-                db, reservation_id, target_state, **updates
-            ),
-        )
+        def apply(db) -> None:
+            self._repository.transition(db, reservation_id, target_state, **updates)
+
+        self._with_owned_record(reservation_id, expected_state, apply)
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
@@ -358,12 +518,53 @@ class FulfillmentConvergenceWatchdog:
             self._repository.transition(
                 db, reservation_id, SettlementRecordState.active.value
             )
+            self._record_executor_target(db, reservation_id, record.provider_metadata)
 
         self._with_owned_record(
             reservation_id,
             SettlementRecordState.dispatching.value,
             apply,
         )
+
+    def _record_executor_target(
+        self, db, reservation_id: str, provider_metadata: dict[str, Any] | None
+    ) -> None:
+        """Record on the lease what the fulfillment that just became active acts on.
+
+        Written in the activation's own transaction and session: that
+        transaction holds SQLite's single writer slot, so a second session
+        would wait out the busy timeout instead.
+
+        A target the data prevents recording (metadata naming no job-backed
+        target, or a reservation the site refuses) keeps the activation: the
+        workload exists, teardown addresses the target in the fulfillment's
+        own metadata, and ``reconcile_lease_targets`` keeps trying and reports
+        it. Any other failure escapes, so the activation rolls back and the
+        record stays ``dispatching`` for the next cycle to activate. Neither
+        the decoding nor the ledger raises after a write.
+        """
+        if self._capacity_ledger is None:
+            return
+        try:
+            target = fulfillment_executor_target(dict(provider_metadata or {}))
+            recorded = self._capacity_ledger.record_executor_target_in_session(
+                db, reservation_id, target
+            )
+        except (ProviderConfigInvalidError, CapacityConflictError):
+            logger.exception(
+                "[FULFILLMENT] Could not record the executor target of reservation %s; "
+                "convergence keeps trying",
+                reservation_id,
+            )
+            return
+        if recorded is not None and recorded.get("executor_target") != target:
+            logger.warning(
+                "[FULFILLMENT] Reservation %s already records executor target %r; "
+                "its fulfillment acts on %r, which is left unrecorded",
+                reservation_id,
+                recorded.get("executor_target"),
+                target,
+            )
 
     def _apply_teardown_success(self, reservation_id: str) -> None:
         def apply(db) -> None:
