@@ -35,6 +35,12 @@ DOMAINS = (
         ROLES / "scenarios" / "vms" / "conftest.py",
         "DealState",
     ),
+    Domain(
+        "bare_metal",
+        ROLES / "scenarios" / "bare_metal" / "test_bare_metal_mock_deal.py",
+        ROLES / "scenarios" / "bare_metal" / "conftest.py",
+        "BareMetalDealState",
+    ),
 )
 
 

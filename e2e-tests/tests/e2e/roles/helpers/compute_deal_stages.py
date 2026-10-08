@@ -15,8 +15,8 @@ not named ``Test*``, so pytest collects them only through those subclasses.
 
 What differs between domains reaches a stage two ways. Fixtures supply who is
 calling, under one set of names every compute domain's conftest provides:
-``storefront_client`` (buyer), ``storefront_admin_client``,
-``storefront_service_client``, ``registry_client`` (buyer),
+``storefront_client`` (buyer), ``storefront_admin_client``, ``registry_client``
+(buyer),
 ``provisioning_client``, ``provisioning_test_client``, ``buyer_config``,
 ``seller_wallet``, ``buyer_principal``, ``deal_state``, and ``deal_driver``. The
 ``deal_driver`` fixture supplies what is the domain's own, through
@@ -37,7 +37,6 @@ from typing import Any, Optional, Protocol
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
-    advance_storefront,
     pause_storefront,
     wait_for_stage_event,
 )
@@ -216,8 +215,6 @@ class ComputeDealDriver(Protocol):
     teardown_rule_id: str
     #: The resource the deal holds, as the storefront's capacity reads name it.
     reserved_resource_id: str
-    #: The site the capacity-released callback names.
-    site_id: str
 
     def seed_supply(self) -> None:
         """Declare the deal's supply at the site and load the storefront's projection."""
@@ -227,6 +224,9 @@ class ComputeDealDriver(Protocol):
 
     def arm_create_gate(self) -> None:
         """Arm `create_rule_id` so the create job pauses before its result."""
+
+    def release_create_gate(self) -> None:
+        """Release the create job `arm_create_gate` held."""
 
     def evaluate_create_job(self, host_id: str) -> dict[str, Any]:
         """The provisioning job evaluation: `params_valid`, `host_exists`,
@@ -238,8 +238,13 @@ class ComputeDealDriver(Protocol):
     def check_evaluate_settle(self, result: dict[str, Any]) -> str:
         """Assert the domain's preview expectations; return the host it placed."""
 
-    def assert_delivery(self, settle_status: Any) -> None:
-        """Assert the ready settlement's result and access."""
+    def settle_dispatched(self, settle_response: Any, deal_state: ComputeDealState) -> str:
+        """Assert the domain's settle response and return the fulfillment it
+        dispatched, read where the domain reports it."""
+
+    def assert_delivery(self, deal_state: ComputeDealState) -> None:
+        """Assert the ready settlement's result and access, where the domain
+        delivers them."""
 
     def lease_view(self, escrow_uid: str) -> LeaseView:
         """The deal's lease."""
@@ -247,11 +252,18 @@ class ComputeDealDriver(Protocol):
     def arm_teardown_gate(self) -> None:
         """Arm `teardown_rule_id` so provider teardown pauses before its result."""
 
+    def release_teardown_gate(self) -> None:
+        """Release the provider teardown `arm_teardown_gate` held."""
+
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
     ) -> Any:
         """Re-reserve the released supply through the deal's listing, asserting
         the domain's reservation, and return it."""
+
+    def release_reserved(self, reservation: Any) -> None:
+        """Release a reservation `reserve_released_capacity` made, as the site
+        would, so no hold outlives the scenario."""
 
 
 # ===========================================================================
@@ -990,14 +1002,14 @@ class Stage08c_EvaluateProvisioningJob:
 
 class Stage08b_SettlementSubmittedAndJobQueued:
     def test_08b_settlement_submitted_and_provisioning_job_queued(
-        self, storefront_client, storefront_admin_client, provisioning_client,
-        buyer_config, deal_state: ComputeDealState
+        self, storefront_client, provisioning_client, buyer_config,
+        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
-        """Settlement submitted + fulfillment dispatched — advance + async observe.
+        """Settlement submitted + fulfillment dispatched — advance + observe.
 
-        Advance: POST /api/v1/settle/{uid} → status=provisioning.
-        Observe (event-driven): wait_for_stage_event(provision, job_submitted)
-          then single GET /settle/{uid}/status → fulfillment_id.
+        Advance: POST /api/v1/settle/{uid}.
+        Observe: the domain's driver asserts what settle answered and reads the
+          dispatched fulfillment where the domain reports it.
         Confirms: fulfillment visible in provisioning API, gated in
           "dispatching" state by the paused mock rule armed in stage 07.
         """
@@ -1008,31 +1020,11 @@ class Stage08b_SettlementSubmittedAndJobQueued:
             negotiation_id=deal_state.negotiation_id,
             buyer_evm_address=buyer_config["wallet_address"],
         )
-        assert settle_resp.status == "provisioning", (
-            f"Expected status=provisioning, got: {settle_resp.status!r}. "
-            f"Full response: {settle_resp}"
-        )
-
-        # job_submitted fires after the DB row is updated; resource_reserved
-        # would race because it fires before the job_id exists.
-        wait_for_stage_event(
-            storefront_admin_client,
-            "provision", "job_submitted",
-            listing_id=deal_state.seller_listing_id,
-            timeout=15.0,
-        )
-
-        status_resp = storefront_client.get_settle_status(
-            deal_state.real_escrow_uid,
-        )
-        # provisioning_job_id is always None for a fulfillment on the
-        # durable path (no raw executor job id crosses the buyer-facing
-        # boundary); fulfillment_id is that path's durable identity. See
-        # core_storefront.models.settle_models.SettleStatusResponse.
-        fulfillment_id = status_resp.fulfillment_id
+        # What settle answers and where the dispatched fulfillment is read are
+        # the domain's; that a fulfillment was dispatched, and is held, is not.
+        fulfillment_id = deal_driver.settle_dispatched(settle_resp, deal_state)
         assert fulfillment_id, (
-            f"fulfillment_id absent from settle status after job_submitted event: "
-            f"{status_resp}"
+            f"no fulfillment was dispatched after settlement: {settle_resp}"
         )
 
         status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
@@ -1084,7 +1076,7 @@ class Stage09a_ProvisioningCompletes:
         """
         require_state(deal_state, "fulfillment_id")
 
-        provisioning_test_client.resume_rule(deal_driver.create_rule_id)
+        deal_driver.release_create_gate()
         provisioning_test_client.drain(timeout=30)
         provisioning_client.advance_fulfillment_convergence_cycle()
 
@@ -1100,20 +1092,21 @@ class Stage09a_ProvisioningCompletes:
 
 class Stage09b_SettlementReadyAndCredentials:
     def test_09b_settlement_ready_credentials_and_listing_closed(
-        self, storefront_client, storefront_admin_client,
-        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
+        self, storefront_admin_client, deal_driver: ComputeDealDriver,
+        deal_state: ComputeDealState,
     ):
-        """Settlement status=ready, the domain's delivery present, listing closed.
+        """Settlement ready, the domain's delivery present, listing closed.
 
         The listing closes because its capacity is held by this deal; the
         domain's own reconciliation stage before this one is what asked for
         the close.
 
         Combined observation of all post-provisioning state:
-          1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
-          2. GET /settle/{uid}/status → status=ready + the domain's delivery
+          1. wait_for_settlement — server-side long-poll until the settlement is
+             ready (no client polling)
+          2. the domain's delivery, read where the domain delivers it, through
+             its driver
           3. GET /api/v1/listings/{id} → status=closed
-          4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
                       "seller_listing_id", "negotiation_id",
@@ -1131,107 +1124,16 @@ class Stage09b_SettlementReadyAndCredentials:
             f"Settlement reached terminal state but status is not 'ready': {wait_result.status!r}"
         )
 
-        status_resp = storefront_client.get_settle_status(
-            deal_state.real_escrow_uid,
-        )
-        assert status_resp.status == "ready", (
-            f"Settlement not 'ready' after provision fulfilled event. "
-            f"Got: {status_resp.status!r}"
-        )
-        deal_driver.assert_delivery(status_resp)
+        deal_driver.assert_delivery(deal_state)
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing status=closed while capacity is held, got {listing.status!r}"
         )
 
-        # The per-negotiation endpoint is the canonical home for per-deal
-        # attestation data. After settlement the primary escrow must surface
-        # status=ready + a fulfillment_uid.
-        detail = storefront_admin_client.get_negotiation(
-            deal_state.seller_listing_id, deal_state.negotiation_id,
-        )
-        assert detail.escrows, (
-            f"Expected escrows[] non-empty after settlement, got {detail.escrows!r}"
-        )
-        primary = next((e for e in detail.escrows if e["is_primary"]), None)
-        assert primary is not None, (
-            f"Expected a primary escrow on the negotiation, got {detail.escrows!r}"
-        )
-        assert primary["escrow_uid"] == deal_state.real_escrow_uid, (
-            f"Primary escrow_uid mismatch — endpoint={primary['escrow_uid']!r} "
-            f"deal_state={deal_state.real_escrow_uid!r}"
-        )
-        assert primary["status"] == "ready", (
-            f"Expected primary escrow status=ready, got {primary['status']!r}"
-        )
-        assert primary["fulfillment_uid"], (
-            f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
-        )
-
-        deal_state.settlement_status = status_resp.status
-        log.info("[09b] Settlement ready; delivery present; listing status=%s; "
-                 "primary escrow fulfillment_uid=%s",
-                 listing.status, primary["fulfillment_uid"])
-
-
-class Stage09bb_ClaimSubmittedForTheFulfilledEscrow:
-    def test_09bb_claims_cycle_registers_the_seller_claim(
-        self, storefront_admin_client, deal_state: ComputeDealState
-    ):
-        """Drive one claims sweep and assert the seller's claim exists.
-
-        The sweep is requested and its effect asserted, rather than left to the
-        servicing loop's timer: with the loops held, coverage that depended on
-        when the timer fired would depend on when a scenario happened to resume.
-
-        Asserts submission, not collection. A claim becomes collectable when its
-        on-chain obligation window opens, which this scenario does not control;
-        asserting collection would put a chain condition behind a test assertion
-        and reintroduce exactly the timing dependence the lifecycle controls
-        removed. Submission is entirely the storefront's own act.
-        """
-        require_state(deal_state, "real_escrow_uid", "settlement_status")
-
-        result = advance_storefront(storefront_admin_client, "settlement-servicing")
-        assert result.get("loop") == "settlement_servicing", result
-        assert "processed" in result, (
-            f"claims advance returned no sweep count: {result}"
-        )
-
-        # Read the whole claims log, not only what this sweep added. Submission is
-        # the fulfillment path's act and may already have happened; the sweep
-        # services what is due. The assertion that matters either way is that a
-        # fulfilled escrow has a registered seller claim — an empty log here means
-        # a settled deal nobody will ever get paid for.
-        events = storefront_admin_client.get_events(
-            since_id=0, limit=500, stage="claims",
-        )
-        # 500 is the server's page cap; asking for more is rejected outright.
-        # Asserting the flag is what makes "the whole claims log" a checked claim
-        # rather than an assumed one — the filter below proves nothing about a
-        # log it only saw part of.
-        assert not events.truncated, (
-            f"the claims log did not fit in one page ({events.count} rows "
-            "returned); this assertion reads the whole log and would otherwise "
-            "be searching part of it"
-        )
-        # Matched on the indexed `escrow_uid` column rather than on the event
-        # payload. The claims engine is mechanism-neutral and names the escrow
-        # `claim_ref`; the storefront's own claims runtime translates that into
-        # this domain's settlement identity as it records the event, which is
-        # what populates the column. Reading the column here is what proves that
-        # translation happened rather than assuming it.
-        submitted = [
-            e for e in events.events
-            if e.event == "claim_submitted"
-            and e.escrow_uid == deal_state.real_escrow_uid
-        ]
-        assert submitted, (
-            "no claim_submitted event for this fulfilled escrow "
-            f"({deal_state.real_escrow_uid}); claims seen: "
-            f"{[(e.event, e.escrow_uid) for e in events.events]}"
-        )
+        deal_state.settlement_status = wait_result.status
+        log.info("[09b] Settlement ready; delivery present; listing status=%s",
+                 listing.status)
 
 
 class Stage09c_LeaseRecorded:
@@ -1380,8 +1282,8 @@ class Stage11a_TeardownDispatch:
 class Stage11b_TeardownCompletion:
     def test_11b_provider_completion_releases_lease_and_capacity(
         self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, storefront_service_client,
-        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
+        storefront_admin_client, deal_driver: ComputeDealDriver,
+        deal_state: ComputeDealState,
     ):
         require_state(deal_state, "teardown_fulfillment_id", "lease_id",
                       "reserved_resource_id")
@@ -1389,7 +1291,7 @@ class Stage11b_TeardownCompletion:
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
 
-        provisioning_test_client.resume_rule(deal_driver.teardown_rule_id)
+        deal_driver.release_teardown_gate()
         provisioning_test_client.drain(timeout=30)
         # Convergence-driven, not one-shot: `drain` returns when the provider
         # job is no longer gated, which is not the same instant its outcome is
@@ -1428,11 +1330,8 @@ class Stage11b_TeardownCompletion:
             "re-reserving the released resource returned no reservation, so "
             "the capacity did not become available again"
         )
-        # Released per reservation through the peer callback, which is how
-        # provisioning releases one in production. `admin_release_reservations`
-        # is fleet-wide and would clear other scenarios' holds.
-        storefront_service_client.notify_capacity_released(
-            reserved_again.capacity_reservation_id,
-            site_id=deal_driver.site_id,
-        )
+        # Released per reservation, as the site releases one in production.
+        # `admin_release_reservations` is fleet-wide and would clear other
+        # scenarios' holds.
+        deal_driver.release_reserved(reserved_again)
         provisioning_client.resume_lease_watchdog()

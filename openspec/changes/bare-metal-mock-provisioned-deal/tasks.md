@@ -113,7 +113,7 @@ Former tasks 3.5–3.6 are storefront behaviour proven at integration level.
       authenticated and idempotent at the buyer). The storefront half — a repeated
       teardown returns the same operation and capacity is released once — is proven by
       this change's second deal and the `physical-provisioning` delta.
-- [ ] 3.5 **Restart recovery.** (Closed by 9.0c.) Bare-metal storefront integration tests rebuild the
+- [x] 3.5 **Restart recovery.** (Closed by 9.0c.) Bare-metal storefront integration tests rebuild the
       application over the same database file and a fake site after settlement commit
       and after teardown acceptance; the buyer retrieves the same operation with no
       second obligation, mechanism selection, or teardown, and duplicate polling and
@@ -4504,7 +4504,7 @@ lane (9.1–9.5).
       deal on the shared stages": the bare-metal storefront reports what the shared
       readiness stages read (decision 1); four shared stages gain driver hooks
       (decision 2); 09bb is each domain's own (decision 3).
-- [ ] 9.0a Bare-metal storefront (`domains/bare_metal/storefront`, 0.14.2 → 0.15.0;
+- [x] 9.0a Bare-metal storefront (`domains/bare_metal/storefront`, 0.14.2 → 0.15.0;
       decision 1):
       - `runtime.py`: an administrator status adding `registry` (reachability through
         the publication registry client), `negotiation_strategy` (the seller chain
@@ -4524,6 +4524,19 @@ lane (9.1–9.5).
       - Versions and locks: the bump, VM storefront's exact pin cascaded
         (`domains/vms/storefront/pyproject.toml`, 0.16.0 → 0.16.1); both storefronts
         hand-locked; `e2e-tests` relocked.
+    - Done: the readiness checks are `BareMetalStorefrontRuntime.status()`, over a
+      `registry_configuration` composed from the environment when a registry URL is
+      set; `seller_chain_check` in `negotiation.py` and the registry's `reachability`
+      in `publication_service.py`. The route admits a `service` caller only when it is
+      a bound site's authority principal. Tests: five in `test_http_system.py`, one
+      each in `test_deal_controls.py` and `test_runtime_environment.py`.
+    - Found: an unsigned registry reply reads as `http_502`, since the client verifies
+      a reply before reporting its status; the test pins that value.
+    - Added (decision 3): the buyer's fulfillment status names the published evidence
+      digest (`evidence_digest`, read from the fulfillment's
+      `lease_ready_evidence_digest`), which 09bb resolves; proven in
+      `test_alkahest_lifecycle.py`, and the delta's "Evidence is resolved" scenario
+      states it.
 - [ ] 9.0b Shared stage hooks (e2e-tests; decisions 2 and 3):
       - `helpers/compute_deal_stages.py`: `ComputeDealDriver` gains
         `release_create_gate()`, `release_teardown_gate()`,
@@ -4543,13 +4556,23 @@ lane (9.1–9.5).
       - Gate: the e2e unit suite, identical node IDs for both lanes' selections,
         pyflakes, an AST comparison showing every VM assertion still in a shared stage,
         VM's own stage, or VM's driver, and VM's lane.
-- [ ] 9.0c Restart recovery (task 3.5; decision 6): `tests/test_restart_recovery.py`
+    - Done but VM's lane, which 9.6 runs: the e2e unit suite passes; both lanes'
+      selections keep their node IDs (the 165 before are the same after, beside bare
+      metal's new module); the AST comparison finds every VM assertion in a shared
+      stage, VM's own stage, or VM's driver.
+- [x] 9.0c Restart recovery (task 3.5; decision 6): `tests/test_restart_recovery.py`
       gains a restart while the lease is active (status and result read twice, access
       and settle status read, each identical to before the restart; one begin, one
       reservation), and its teardown restart asserts the retried teardown returns the
       first response (`terminating`, the same reservation and fulfillment). Then close
       3.5 against both test files.
-- [ ] 9.1 Add `scenarios/bare_metal/compute_deal_driver.py`: backed pool, host record,
+    - Done: `test_a_restart_while_the_lease_is_active_reads_the_same_delivery`, and
+      the teardown restart compares the negotiation, state, reservation, and
+      fulfillment. 3.5 is closed.
+    - Found: a restarted process whose site reports a different delivery fails the
+      status read as an unhandled 500 (the write-once result conflicts), fail-closed
+      as decision 6 records; the untyped error is recorded for 2.6.
+- [x] 9.1 Add `scenarios/bare_metal/compute_deal_driver.py`: backed pool, host record,
       and whole-host capacity declaration; bare-metal provision terms; the bare-metal
       mock rules on `/test/bare-metal/mock-rules` and their release, and
       `evaluate_bare_metal_job`; evaluate-settle expectations; `settle_dispatched`
@@ -4557,7 +4580,16 @@ lane (9.1–9.5).
       the result and access carrying host, port, and user, through
       `BareMetalFulfillmentTransport`; the shared `DealLease` over the lane's site; the
       re-reservation and its release at the site.
-- [ ] 9.2 Extend `scenarios/bare_metal/conftest.py` with the fixtures the shared stages
+    - Done, with `BareMetalDealLease`, which reads a whole machine's hold from its
+      declaration's `units`, and `SiteCapacity.release` in `helpers/compute_deal.py`,
+      the site release the driver's `release_reserved` needs. Each run's pool, host,
+      resource, and rules carry a run suffix, and the rules match on the deal's host.
+    - Found: the storefront's begin checks the scheduled resource's
+      `bare_metal_publication.host_id` and `physical_host_id`, while the site treats a
+      nested `physical_host_id` as legacy; the driver declares it nested and top-level.
+      Whether the site keeps the nested field is first seen in 9.6's run; recorded for
+      2.6.
+- [x] 9.2 Extend `scenarios/bare_metal/conftest.py` with the fixtures the shared stages
       request under the names decision 3 of the Section 8 design lists
       (`storefront_client`, `storefront_admin_client`, `storefront_service_client`,
       `registry_client`, `provisioning_client`, `provisioning_test_client`,
@@ -4567,7 +4599,11 @@ lane (9.1–9.5).
       bare-metal `ComputeDealState` subclass only if bare metal's own stages need fields
       of their own. The existing publication and introduction scenarios keep their own
       fixtures.
-- [ ] 9.3 Add `scenarios/bare_metal/test_bare_metal_mock_deal.py`
+    - Done: `BareMetalDealState` adds the fields bare metal's own stages need (the
+      preview, the reopened listing, and the second deal's). `storefront_service_client`
+      is not added: no bare-metal stage or hook uses it, so the shared stages no
+      longer name it.
+- [x] 9.3 Add `scenarios/bare_metal/test_bare_metal_mock_deal.py`
       (`pytestmark = pytest.mark.e2e_bare_metal_mock_deal`, taking
       `convergence_advanced_explicitly`): the shared stages in order, with bare
       metal's own (decision 4) — `TestStage03a_PublicationDryRun` and
@@ -4578,12 +4614,15 @@ lane (9.1–9.5).
       stages from 12 after 11b (publication reopens the listing, a second deal,
       teardown sent twice returning the same operation, capacity released once). Add
       the module to `unit/test_compute_deal_stages.py`'s domain table.
-- [ ] 9.4 Register `e2e_bare_metal_mock_deal` in `e2e-tests/pyproject.toml` and add it to
+    - Done: 35 stages collect; the structural test passes over both domains' rows;
+      `pytest --setup-plan` resolves every fixture. Bare metal's 09bb resolves the
+      evidence as the buyer through `SyncBareMetalEvidenceClient`.
+- [x] 9.4 Register `e2e_bare_metal_mock_deal` in `e2e-tests/pyproject.toml` and add it to
       `E2E_BARE_METAL_MODULE` in `e2e-tests/Makefile`; `e2e_bare_metal_deal` stays in no
       lane. Add `arkhai-bare-metal-buyer` to `e2e-tests/pyproject.toml`, raise
       `arkhai-bare-metal` to 0.11.0 (the evidence route's clients), bump
       `arkhai-e2e-tests`, and relock.
-- [ ] 9.5 Lane configuration (decision 5): `e2e-tests/config/config-docker.yml`'s
+- [x] 9.5 Lane configuration (decision 5): `e2e-tests/config/config-docker.yml`'s
       `bare_metal_lane` gains the buyer's wallet key, address, and RPC URL, the seller's
       wallet address, and the service-role credential, each a well-known development
       value; the root `Makefile`'s `e2e-bare-metal-dev-env` lists the publication
@@ -4595,6 +4634,12 @@ lane (9.1–9.5).
       storefront already trusts the site's authority through
       `BARE_METAL_STOREFRONT_SITES`; confirm the status admission and the callback both
       use it, and add nothing if they do.
+    - Done: the buyer's wallet is its signer's development account; the lane's overlay
+      (`compose.bare-metal-local.yml`) sets the seller chain on the storefront, and
+      `scripts/tests/test_bare_metal_compose.py` asserts it is set with the overlay and
+      absent without it. The status admission and the callback both use the site
+      bindings, so no service-role credential is added (design, "Section 9 design",
+      implementation findings).
 - [ ] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
       and the mock deal, and the VM lane with 9.0b's hooks. Also: the bare-metal
       storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
@@ -4822,6 +4867,14 @@ service code.
       the pool-metadata provider gate should cite
       `provisioning/compute/service/tests/unit/services/test_vm_inventory_views.py`,
       where that test now lives, at promotion.
+      Found in Section 9 (`design.md`, "Section 9 design", implementation findings):
+      the bare-metal Compose wrapper and Helm chart forward no seller chain
+      (`BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES`), so only the lane's overlay sets
+      one; a restarted bare-metal storefront whose site reports a different delivery
+      for an active lease answers the buyer's status read with an unhandled 500 rather
+      than a typed refusal; and the storefront's begin reads a scheduled resource's
+      nested `bare_metal_publication.physical_host_id`, a shape the site treats as
+      legacy, so the two should agree on one place for it.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

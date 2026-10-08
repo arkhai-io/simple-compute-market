@@ -2934,6 +2934,18 @@ change's delta, promoted at 11.4; the shared stages, their hooks, and the per-do
 `test-compatibility` delta's "Bare-metal storefront restart recovery is proven at
 integration level".
 
+Implementation findings (2026-10-08), each checked against the code:
+
+| Finding | Resolution |
+|---|---|
+| Decision 3's evidence check needs the published digest, and the buyer's fulfillment status carried none: the digest is recorded on the fulfillment as `lease_ready_evidence_digest` | `BareMetalFulfillmentResponse` gains `evidence_digest`, read from either name, so 09bb resolves exactly the digest the storefront published |
+| Decision 2's release at the site had no shared client operation | `SiteCapacity.release`, beside its reads and truncation, as the site's admin |
+| Decision 5's service-role credential has no consumer: the site's link check signs as the site authority, which `BARE_METAL_STOREFRONT_SITES` already trusts, and bare metal releases its re-reservation at the site, not through the callback | Not added to `bare_metal_lane` |
+| The Compose wrapper forwards no seller chain | The lane's overlay, `compose.bare-metal-local.yml`, sets it on the storefront; an operator's stack keeps the default chain, and the wrapper's forwarding stays with closeout task 2.6 |
+| An unsigned registry reply reads as `http_502` in the `registry` check, not as the registry's own status: the client verifies a reply before reporting its status | The check's values are `ok`, `http_<status>`, and `error: <type>`, as the client reports them |
+| The storefront's begin checks a scheduled resource's `bare_metal_publication.host_id` and `physical_host_id`, while the site treats a nested `physical_host_id` as a legacy shape and keeps a top-level one | The driver declares both; whether the site's declaration validation keeps the nested field is first observed in 9.6's run, recorded for 2.6 |
+| A restarted storefront whose site reports a different delivery for an active lease fails the status read as an unhandled 500, since the result and receipt are write-once | Fail-closed, as decision 6 records; the unhandled error rather than a typed refusal is recorded for 2.6 |
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,

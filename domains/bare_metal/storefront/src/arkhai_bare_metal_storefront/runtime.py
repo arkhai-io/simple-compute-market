@@ -25,6 +25,7 @@ from market_contact_exchange import (
     IntroductionRetentionService,
     SQLiteIntroductionStore,
 )
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_core import MarketDomainContract, validate_domain_contract
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_negotiation_runtime import NegotiationRuntime
@@ -48,7 +49,7 @@ from .domain_runtime import get_market_domain_contract
 from .fulfillment_service import BareMetalFulfillmentService
 from .lifecycle_steps import register_bare_metal_lifecycle_steps
 from .listing_source_check import build_listing_source_check
-from .negotiation import default_seller_round_hook
+from .negotiation import default_seller_round_hook, seller_chain_check
 from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
@@ -56,6 +57,7 @@ from .pool_overrides import (
     compile_publication_clauses,
     configured_max_duration_seconds,
 )
+from .publication_service import BareMetalRegistryConfiguration
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
     ALKAHEST_MECHANISM,
@@ -70,6 +72,22 @@ from .site_clients import (
 from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
+
+def _status_check_healthy(name: str, value: str) -> bool:
+    """Whether one status check's value is healthy.
+
+    ``negotiation_strategy`` reports the chain it probed and ``alkahest`` the
+    chain names it serves, so neither is ``ok`` when healthy; the probe
+    failing, or an unknown or failing chain, is a degradation.
+    """
+    if value in ("ok", "unconfigured"):
+        return True
+    if name == "negotiation_strategy":
+        return "exit_on_probe" not in value and not value.startswith(("unknown:", "error:"))
+    if name == "alkahest":
+        return bool(value) and not value.startswith(("unknown:", "error:"))
+    return False
+
 
 # The family name VM's health reports a site's resource-pool projection under.
 RESOURCE_POOL_PROJECTION_FAMILY = "resource_pool"
@@ -110,6 +128,8 @@ class BareMetalStorefrontRuntime:
     # The seller chain after the required guards, in any form the policy kit
     # normalizes; None selects the default (``negotiation.DEFAULT_SELLER_POLICIES``).
     negotiation_policies: Any = None
+    #: The registry publication writes to; its reachability is a status check.
+    registry_configuration: BareMetalRegistryConfiguration | None = None
     # Composes one publication cycle for the administrator's publication step;
     # None composes it from the process environment as the command does.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
@@ -424,6 +444,36 @@ class BareMetalStorefrontRuntime:
             "disclosures": self._disclosures(),
         }
 
+    async def status(self) -> dict[str, object]:
+        """The administrator's status: health, plus what reading it costs.
+
+        Adds the checks a deal's readiness depends on and the health probe
+        cannot afford — the registry's reachability is a network call — and
+        the provisioning contract version this storefront speaks, from its own
+        installed contract wheel. Each check is judged by its own rule, as
+        every storefront's status judges it: a strategy or chain list is a
+        value, not ``ok``.
+        """
+        report = await self.health()
+        checks = dict(report["checks"])  # type: ignore[arg-type]
+        checks["registry"] = (
+            await self.registry_configuration.reachability(self.marketplace_signer)
+            if self.registry_configuration is not None
+            else "unconfigured"
+        )
+        checks["negotiation_strategy"] = seller_chain_check(self.negotiation_policies)
+        checks["alkahest"] = (
+            ",".join(sorted(self.chain_clients)) if self.chain_clients else "unconfigured"
+        )
+        report["checks"] = checks
+        report["status"] = (
+            "ok"
+            if all(_status_check_healthy(name, value) for name, value in checks.items())
+            else "degraded"
+        )
+        report["provisioning_contract_version"] = COMPUTE_PROVISIONING_CONTRACT_VERSION
+        return report
+
     def _disclosures(self) -> dict[str, dict[str, object]]:
         """Storefront policies a counterparty may read before committing data."""
         return self.contact_exchange.disclosures()
@@ -668,8 +718,14 @@ def build_runtime_from_environment(
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES must be a JSON list of policy names"
         ) from exc
+    registry_configuration = (
+        BareMetalRegistryConfiguration.from_environment(os.environ)
+        if os.environ.get("BARE_METAL_STOREFRONT_REGISTRY_URL")
+        else None
+    )
     runtime = BareMetalStorefrontRuntime(
         negotiation_policies=negotiation_policies,
+        registry_configuration=registry_configuration,
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,

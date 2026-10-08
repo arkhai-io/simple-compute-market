@@ -379,7 +379,7 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@# the timer out of the way of the steps the scenario takes itself.
 	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1","contact-exchange.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]},"contact":{"enabled":true,"contact_payload":{"email":"seller@bare-metal-e2e.invalid"},"profiles":{"default":{"channel":"email","terms":"Development introduction; no commercial terms."}},"retention_seconds":5,"retention_sweep_interval_seconds":86400}}'
 	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
-	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"100","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
+	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"10","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
 	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
 	@echo "BARE_METAL_OPTION_EXPIRES_AT=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 	@echo "BARE_METAL_FULFILLMENT_DEADLINE=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

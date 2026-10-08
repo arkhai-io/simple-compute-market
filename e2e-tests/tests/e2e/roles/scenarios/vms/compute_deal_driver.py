@@ -3,9 +3,11 @@
 The shared stages in ``helpers/compute_deal_stages.py`` hold the deal's control
 flow and every assertion that is not VM's. This driver holds VM's: the executor
 host and capacity it declares, the ``compute.v1`` provision terms, the VM
-playbook's create and removal mock rules, the settlement preview's arguments
-and expectations, the tenant credentials a ready VM delivers, the lease view
-over VM's site, and the claim that re-reserves the released resource.
+playbook's create and removal mock rules and their release, the settlement
+preview's arguments and expectations, what settle answers and where the
+dispatched fulfillment is read, the tenant credentials and escrow claim a ready
+VM delivers, the lease view over VM's site, and the claim that re-reserves the
+released resource and its release.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     SiteCapacity,
     delete_mock_rules_if_present,
+    wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 from tests.e2e.roles.scenarios.vms.host_registry import (
@@ -56,10 +59,13 @@ class VmComputeDealDriver:
 
     provisioning_client: Any
     provisioning_test_client: Any
+    storefront_client: Any
     storefront_admin_client: Any
+    storefront_service_client: Any
     site_capacity_admin_client: Any
     site_capacity: SiteCapacity
     buyer_config: dict[str, str]
+    #: The site VM's capacity-released callback names.
     site_id: str
     create_rule_id: str = PROV_RULE_ID
     teardown_rule_id: str = REMOVE_RULE_ID
@@ -118,6 +124,9 @@ class VmComputeDealDriver:
             fail_with=None,
         )
 
+    def release_create_gate(self) -> None:
+        self.provisioning_test_client.resume_rule(PROV_RULE_ID)
+
     def evaluate_create_job(self, host_id: str) -> dict[str, Any]:
         return self.provisioning_test_client.evaluate_job(host_id, vm_action="create")
 
@@ -133,9 +142,62 @@ class VmComputeDealDriver:
         assert "vm_target" not in result, result
         return result.get("host_id")
 
-    def assert_delivery(self, settle_status: Any) -> None:
-        assert settle_status.tenant_credentials, (
-            f"tenant_credentials missing from settlement status: {settle_status}"
+    def settle_dispatched(self, settle_response: Any, deal_state: Any) -> str:
+        assert settle_response.status == "provisioning", (
+            f"Expected status=provisioning, got: {settle_response.status!r}. "
+            f"Full response: {settle_response}"
+        )
+        # job_submitted fires after the DB row is updated; resource_reserved
+        # would race because it fires before the job_id exists.
+        wait_for_stage_event(
+            self.storefront_admin_client,
+            "provision", "job_submitted",
+            listing_id=deal_state.seller_listing_id,
+            timeout=15.0,
+        )
+        status = self.storefront_client.get_settle_status(deal_state.real_escrow_uid)
+        # provisioning_job_id is always None for a fulfillment on the durable
+        # path (no raw executor job id crosses the buyer-facing boundary);
+        # fulfillment_id is that path's durable identity. See
+        # core_storefront.models.settle_models.SettleStatusResponse.
+        assert status.fulfillment_id, (
+            f"fulfillment_id absent from settle status after job_submitted event: "
+            f"{status}"
+        )
+        return status.fulfillment_id
+
+    def assert_delivery(self, deal_state: Any) -> None:
+        """VM delivers through settle status, and records the claim on the escrow."""
+        status = self.storefront_client.get_settle_status(deal_state.real_escrow_uid)
+        assert status.status == "ready", (
+            f"Settlement not 'ready' after provision fulfilled event. "
+            f"Got: {status.status!r}"
+        )
+        assert status.tenant_credentials, (
+            f"tenant_credentials missing from settlement status: {status}"
+        )
+        # The per-negotiation endpoint is the canonical home for per-deal
+        # attestation data. After settlement the primary escrow must surface
+        # status=ready + a fulfillment_uid.
+        detail = self.storefront_admin_client.get_negotiation(
+            deal_state.seller_listing_id, deal_state.negotiation_id,
+        )
+        assert detail.escrows, (
+            f"Expected escrows[] non-empty after settlement, got {detail.escrows!r}"
+        )
+        primary = next((e for e in detail.escrows if e["is_primary"]), None)
+        assert primary is not None, (
+            f"Expected a primary escrow on the negotiation, got {detail.escrows!r}"
+        )
+        assert primary["escrow_uid"] == deal_state.real_escrow_uid, (
+            f"Primary escrow_uid mismatch — endpoint={primary['escrow_uid']!r} "
+            f"deal_state={deal_state.real_escrow_uid!r}"
+        )
+        assert primary["status"] == "ready", (
+            f"Expected primary escrow status=ready, got {primary['status']!r}"
+        )
+        assert primary["fulfillment_uid"], (
+            f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
         )
 
     def lease_view(self, escrow_uid: str) -> DealLease:
@@ -150,6 +212,9 @@ class VmComputeDealDriver:
             pause_before_result=True,
         )
 
+    def release_teardown_gate(self) -> None:
+        self.provisioning_test_client.resume_rule(REMOVE_RULE_ID)
+
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str
     ) -> Any:
@@ -163,3 +228,11 @@ class VmComputeDealDriver:
         if reserved.capacity_reservation_id:
             assert reserved.gpu_count == 1, reserved
         return reserved
+
+    def release_reserved(self, reservation: Any) -> None:
+        # Through the peer callback, which is how provisioning releases a VM
+        # reservation in production.
+        self.storefront_service_client.notify_capacity_released(
+            reservation.capacity_reservation_id,
+            site_id=self.site_id,
+        )

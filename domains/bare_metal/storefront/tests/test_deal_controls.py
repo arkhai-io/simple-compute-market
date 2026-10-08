@@ -185,3 +185,27 @@ async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> 
     assert forged.value.status_code == 403
     assert unknown.value.status_code == 404
     assert other_site.value.status_code == 403
+
+
+async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(
+    tmp_path,
+) -> None:
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path)
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_SIGNER, "service") as site:
+            with pytest.raises(StorefrontClientError):
+                await site.notify_capacity_released("reservation-x", site_id="site-a")
+            await site.notify_capacity_released("reservation-a", site_id="site-a")
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            events = await admin.get_events(stage="fulfillment")
+
+    released = [event for event in events.events if event.event == "capacity_released"]
+    assert len(released) == 1, events.events
+    assert released[0].data["capacity_reservation_id"] == "reservation-a"
+    assert released[0].data["negotiation_id"] == negotiation_id
+    assert released[0].data["site_id"] == "site-a"

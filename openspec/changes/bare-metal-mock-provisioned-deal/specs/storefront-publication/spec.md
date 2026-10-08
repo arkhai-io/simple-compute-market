@@ -41,6 +41,7 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Evidence is resolved
 - **WHEN** a caller requests lease-ready evidence by its digest
 - **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
+- **AND** the buyer's fulfillment status names the digest the storefront published, once it has published one
 
 #### Scenario: A settlement ends uncollected after delivery started
 - **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started

@@ -25,6 +25,7 @@ from settlement_compositions import (
     StringObligations,
     alkahest_composition,
 )
+from loopback import serving
 from storefront_client import StorefrontClient
 from arkhai_bare_metal.evidence_routes import BareMetalEvidenceClient, evidence_path
 from storefront_client.client import StorefrontClientError
@@ -38,6 +39,7 @@ from test_http_settlement import (
     _app,
     _buyer,
     _CapacityClient,
+    _fulfillment_client,
     _ProvisioningClient,
 )
 
@@ -392,3 +394,22 @@ async def test_alkahest_evidence_is_served_only_to_the_deals_parties(tmp_path) -
     assert refused == {"stranger": 403}
     assert missing.value.status_code == 404
     assert unsigned.status_code == 401
+
+
+async def test_the_buyers_fulfillment_status_names_the_published_evidence(
+    tmp_path,
+) -> None:
+    chain = ChainClient(StringObligations(uid=ATTESTATION_UID))
+    runtime, _app_, obligation_ref = await _settled(
+        tmp_path, site=_Site("provisioning", "active"), chain=chain, escrow=EscrowOnChain()
+    )
+    with serving(_app(runtime)) as base_url:
+        before = _fulfillment_client(base_url).status("neg-accepted")
+    for _ in range(3):
+        await runtime.settlement_worker.service_obligation(obligation_ref)
+    with serving(_app(runtime)) as base_url:
+        after = _fulfillment_client(base_url).status("neg-accepted")
+
+    [(published, _ref_uid)] = chain.string_obligation.submitted
+    assert before["evidence_digest"] is None
+    assert after["evidence_digest"] == published

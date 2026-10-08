@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService
 from market_settlement_runtime import SettlementAdminRouteService
 
@@ -162,6 +163,16 @@ def capacity_admin_routes(
         )
         if runtime.capacity_client is not None:
             runtime.capacity_client.reservation_sites.pop(reservation_id, None)
+        # The release is observable in the stage-event log, as every storefront
+        # records it, so a caller watching a lease sees it end the same way.
+        stage_event(
+            "fulfillment",
+            "capacity_released",
+            negotiation_id=str(lifecycle["negotiation_id"]),
+            escrow_uid=lifecycle.get("escrow_uid"),
+            capacity_reservation_id=reservation_id,
+            site_id=lifecycle["site_id"],
+        )
         return {"capacity_reservation_id": reservation_id, "state": recorded["state"]}
 
     return CapacityAdminRouteService(reserve=reserve, released=released)

@@ -2,9 +2,9 @@
 
 VM's run of the compute family's canonical deal. The stages VM shares with
 bare metal are defined once in ``helpers/compute_deal_stages.py`` and declared
-here, in order, by subclassing; VM's own stages (00f, 02b, 03a, 03b, 09a2) are
-inserted in place, and ``VmComputeDealDriver`` supplies VM's part of the shared
-ones.
+here, in order, by subclassing; VM's own stages (00f, 02b, 03a, 03b, 09a2, 09bb)
+are inserted in place, and ``VmComputeDealDriver`` supplies VM's part of the
+shared ones.
 
 Stage map
 ---------
@@ -125,7 +125,6 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage08c_EvaluateProvisioningJob,
     Stage09a_ProvisioningCompletes,
     Stage09b_SettlementReadyAndCredentials,
-    Stage09bb_ClaimSubmittedForTheFulfilledEscrow,
     Stage09c_LeaseRecorded,
     Stage10a_LeaseExpirySetup,
     Stage10b_LeaseCycleBeginsTeardown,
@@ -544,8 +543,72 @@ class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCred
     pass
 
 
-class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow(Stage09bb_ClaimSubmittedForTheFulfilledEscrow):
-    pass
+class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
+    def test_09bb_claims_cycle_registers_the_seller_claim(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Drive one claims sweep and assert the seller's claim exists.
+
+        VM's own stage: VM records a seller claim as a stage event, where bare
+        metal's servicing step publishes its evidence instead.
+
+        This path used to be covered by accident: the claims engine's timer fired
+        somewhere during the scenario and swept whatever was due, and no stage
+        asserted on any of it. Holding the loops idle made that coverage
+        conditional on when a scenario happened to resume, which is a worse
+        position than either having the coverage or not — so the sweep is now
+        requested and its effect asserted.
+
+        Asserts submission, not collection. A claim becomes collectable when its
+        on-chain obligation window opens, which this scenario does not control;
+        asserting collection would put a chain condition behind a test assertion
+        and reintroduce exactly the timing dependence the lifecycle controls
+        removed. Submission is entirely the storefront's own act.
+        """
+        require_state(deal_state, "real_escrow_uid", "settlement_status")
+
+        # The claims engine became settlement servicing when settlement
+        # mechanisms were made neutral. Same periodic sweep, new name -- the
+        # loop, its advance route, and this assertion all use it.
+        result = advance_storefront(storefront_admin_client, "settlement-servicing")
+        assert result.get("loop") == "settlement_servicing", result
+        assert "processed" in result, (
+            f"claims advance returned no sweep count: {result}"
+        )
+
+        # Read the whole claims log, not only what this sweep added. Submission is
+        # the fulfillment path's act and may already have happened; the sweep
+        # services what is due. The assertion that matters either way is that a
+        # fulfilled escrow has a registered seller claim — an empty log here means
+        # a settled deal nobody will ever get paid for.
+        events = storefront_admin_client.get_events(
+            since_id=0, limit=500, stage="claims",
+        )
+        # 500 is the server's page cap; asking for more is rejected outright.
+        # Asserting the flag is what makes "the whole claims log" a checked claim
+        # rather than an assumed one — the filter below proves nothing about a
+        # log it only saw part of.
+        assert not events.truncated, (
+            f"the claims log did not fit in one page ({events.count} rows "
+            "returned); this assertion reads the whole log and would otherwise "
+            "be searching part of it"
+        )
+        # Matched on the indexed `escrow_uid` column rather than on the event
+        # payload. The claims engine is mechanism-neutral and names the escrow
+        # `claim_ref`; the storefront's own claims runtime translates that into
+        # this domain's settlement identity as it records the event, which is
+        # what populates the column. Reading the column here is what proves that
+        # translation happened rather than assuming it.
+        submitted = [
+            e for e in events.events
+            if e.event == "claim_submitted"
+            and e.escrow_uid == deal_state.real_escrow_uid
+        ]
+        assert submitted, (
+            "no claim_submitted event for this fulfilled escrow "
+            f"({deal_state.real_escrow_uid}); claims seen: "
+            f"{[(e.event, e.escrow_uid) for e in events.events]}"
+        )
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):

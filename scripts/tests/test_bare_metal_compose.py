@@ -77,5 +77,11 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
     # own inputs, with or without the development overlay.
     assert json.loads(storefront["BARE_METAL_STOREFRONT_CHAINS"])["anvil"]
     assert storefront["BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY"].startswith("0x")
+    # The seller chain that counters is the lane's own; the wrapper sets none,
+    # so an operator's storefront runs the default chain.
+    policies = storefront.get("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES")
     if development:
         assert services["bare-metal-storefront"]["depends_on"]["anvil"]["condition"] == "service_healthy"
+        assert json.loads(policies) == ["escrow_shape_guard", "bisection"]
+    else:
+        assert policies is None

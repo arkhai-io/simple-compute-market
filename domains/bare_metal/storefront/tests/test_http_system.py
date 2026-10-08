@@ -5,15 +5,21 @@ import dataclasses
 
 import httpx
 import pytest
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
-from market_identity import Eip191Signer, TrustedIdentitySet
+from market_identity import Eip191Signer, Identity, TrustedIdentitySet
 
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
+from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
+from arkhai_bare_metal_storefront.runtime import (
+    BareMetalStorefrontRuntime,
+    _status_check_healthy,
+)
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
@@ -509,3 +515,129 @@ async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_
             with pytest.raises(StorefrontClientError) as refused:
                 await admin.admin_run_lifecycle_cycle("settlement-servicing")
     assert refused.value.status_code == 404
+
+
+SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
+
+
+def _status_runtime(path: str, **changes) -> BareMetalStorefrontRuntime:
+    return dataclasses.replace(
+        _runtime(path),
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                # A development identity; never used on any public network.
+                authority_principal=SITE_SIGNER.identity,
+                authority_url="http://site-a:8000",
+            ),
+        ),
+        **changes,
+    )
+
+
+def _status_client(app, signer, role: str) -> StorefrontClient:
+    return StorefrontClient(
+        "http://seller",
+        signer=signer,
+        caller_role=role,
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+async def test_status_reports_what_a_deal_depends_on_and_health_does_not(
+    tmp_path,
+) -> None:
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"),
+        chain_clients={"anvil": object()},
+        negotiation_policies=["escrow_shape_guard", "bisection"],
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _status_client(app, ADMIN_SIGNER, "admin") as admin:
+            status = await admin.get_system_status()
+        async with StorefrontClient(
+            "http://seller", transport=httpx.ASGITransport(app=app)
+        ) as public:
+            health = await public.get_health()
+
+    assert status.checks["registry"] == "unconfigured"
+    assert status.checks["negotiation_strategy"] == "chain[3] (count=3)"
+    assert status.checks["alkahest"] == "anvil"
+    assert status.provisioning_contract_version == COMPUTE_PROVISIONING_CONTRACT_VERSION
+    for name in ("registry", "negotiation_strategy", "alkahest"):
+        assert name not in health.checks
+    assert health.provisioning_contract_version is None
+
+
+async def test_an_unreachable_registry_degrades_status(tmp_path) -> None:
+    unreachable = BareMetalRegistryConfiguration(
+        # Nothing listens on the discard port, so the connection is refused.
+        url="http://127.0.0.1:9",
+        trust=RegistryAuthorityTrust(
+            authority="registry",
+            principals=TrustedIdentitySet(
+                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
+            ),
+        ),
+    )
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"), registry_configuration=unreachable
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _status_client(app, ADMIN_SIGNER, "admin") as admin:
+            status = await admin.get_system_status()
+
+    assert status.checks["registry"].startswith("error: ")
+    assert status.status == "degraded"
+
+
+def test_each_status_check_is_judged_by_its_own_rule() -> None:
+    assert _status_check_healthy("registry", "ok")
+    assert _status_check_healthy("registry", "unconfigured")
+    assert not _status_check_healthy("registry", "http_503")
+    assert _status_check_healthy("negotiation_strategy", "chain[3] (count=3)")
+    assert not _status_check_healthy(
+        "negotiation_strategy", "chain[3] (exit_on_probe: guard)"
+    )
+    assert not _status_check_healthy("negotiation_strategy", "unknown: 'nope'")
+    assert _status_check_healthy("alkahest", "anvil,base_sepolia")
+    assert not _status_check_healthy("alkahest", "error: no client")
+
+
+def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable() -> None:
+    """The registry client verifies every reply, so an unsigned one reads as
+    the client's own 502 rather than as whatever status it carried."""
+    configuration = BareMetalRegistryConfiguration(
+        url="http://registry",
+        trust=RegistryAuthorityTrust(
+            authority="registry",
+            principals=TrustedIdentitySet(
+                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
+            ),
+        ),
+    )
+    transport = httpx.MockTransport(lambda _request: httpx.Response(503, text="down"))
+
+    result = asyncio.run(configuration.reachability(SELLER_SIGNER, transport=transport))
+
+    assert result == "http_502"
+
+
+async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(
+    tmp_path,
+) -> None:
+    impostor = Eip191Signer(bytes.fromhex("55" * 32))
+    runtime = _status_runtime(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _status_client(app, SITE_SIGNER, "service") as site:
+            status = await site.get_system_status()
+        async with _status_client(app, impostor, "service") as other:
+            with pytest.raises(StorefrontClientError) as refused:
+                await other.get_system_status()
+
+    assert status.checks["database"] == "ok"
+    assert refused.value.status_code in (401, 403)

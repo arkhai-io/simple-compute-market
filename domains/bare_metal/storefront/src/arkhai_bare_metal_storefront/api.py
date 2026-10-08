@@ -1011,14 +1011,32 @@ async def health(request: Request) -> BareMetalHealthResponse:
 
 @router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
 async def system_status(request: Request) -> BareMetalHealthResponse:
+    """The administrator's status, which a configured site may also read.
+
+    A site's authority reads it under the ``service`` role to check that it can
+    reach and authenticate to this storefront, the same trust its
+    capacity-released callback is authenticated against.
+    """
     runtime = _runtime(request)
-    await _admin(
-        request=request,
-        runtime=runtime,
-        operation="admin_system_status",
-        resource="system/status",
-    )
-    status = await runtime.health()
+    if request.headers.get("x-market-role") == "service":
+        await _principal(
+            request=request,
+            runtime=runtime,
+            operation="admin_system_status",
+            resource="system/status",
+            expected_role="service",
+            allowed_principals=tuple(
+                binding.authority_principal for binding in runtime.site_bindings
+            ),
+        )
+    else:
+        await _admin(
+            request=request,
+            runtime=runtime,
+            operation="admin_system_status",
+            resource="system/status",
+        )
+    status = await runtime.status()
     overrides = runtime.pool_override_service()
     if overrides is not None:
         status["pool_overrides"] = await overrides.statuses()

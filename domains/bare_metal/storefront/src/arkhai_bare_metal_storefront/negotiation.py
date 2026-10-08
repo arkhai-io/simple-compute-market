@@ -54,6 +54,51 @@ def seller_policy_names(configured: Any = None) -> list[str]:
     ]
 
 
+def seller_chain_check(configured: Any = None) -> str:
+    """Whether the configured seller chain decides a round, as status reports it.
+
+    Runs the chain against a synthetic round-zero proposal with no listing and
+    a matching listing-source verdict, so only the chain itself is judged. A
+    chain that exits or rejects here would refuse every buyer. The values are
+    the ones every storefront's status reports for this check:
+
+    - ``chain[N] (count=N)``: the chain decided without exiting;
+    - ``chain[N] (exit_on_probe: <reason>)``: it exited or rejected;
+    - ``unknown: <name>`` or ``error: <message>``: it could not be loaded or run.
+    """
+    try:
+        chain = load_negotiation_chain(seller_policy_names(configured))
+        label = f"chain[{len(chain)}]"
+        history = [
+            NegotiationRound(
+                round_number=0,
+                sender="them",
+                action="initial",
+                # The zero escrow address keeps the shape guard's carve-out
+                # applicable, so the probe needs no listing's accepted escrows.
+                proposal={
+                    "chain_name": "probe",
+                    "escrow_address": "0x" + "00" * 20,
+                    "fields": {"amount": 10_000},
+                    "expiration_unix": 4_102_444_800,
+                },
+            )
+        ]
+        context = NegotiationContext(
+            direction="maximize",
+            our_reference_amount=10_000,
+            listing_source=ListingSourceVerdict("matches"),
+        )
+        decision, _context = run_negotiation_chain_with_context(chain, history, context)
+    except KeyError as exc:
+        return f"unknown: {exc}"
+    except Exception as exc:
+        return f"error: {exc}"
+    if decision.action in ("exit", "reject"):
+        return f"{label} (exit_on_probe: {decision.reason})"
+    return f"{label} (count={len(chain)})"
+
+
 class BareMetalSellerRoundHook(Protocol):
     """Policy hook called with validated physical and commercial inputs."""
 

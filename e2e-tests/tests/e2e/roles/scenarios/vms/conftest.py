@@ -608,7 +608,9 @@ def buyer_principal():
 def deal_driver(
     provisioning_client,
     provisioning_test_client,
+    storefront_client,
     storefront_admin_client,
+    storefront_service_client,
     site_capacity_admin_client,
     site_capacity,
     buyer_config,
@@ -617,7 +619,9 @@ def deal_driver(
     return VmComputeDealDriver(
         provisioning_client=provisioning_client,
         provisioning_test_client=provisioning_test_client,
+        storefront_client=storefront_client,
         storefront_admin_client=storefront_admin_client,
+        storefront_service_client=storefront_service_client,
         site_capacity_admin_client=site_capacity_admin_client,
         site_capacity=site_capacity,
         buyer_config=buyer_config,

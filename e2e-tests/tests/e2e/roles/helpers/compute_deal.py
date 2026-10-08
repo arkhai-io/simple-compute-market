@@ -274,6 +274,12 @@ class SiteCapacity:
     def reserve(self, *, claim: dict, deal_ref: dict) -> dict | None:
         return asyncio.run(self._client().reserve(claim=claim, deal_ref=deal_ref))
 
+    def release(self, capacity_reservation_id: str) -> dict | None:
+        """Release one reservation at the site, as its own lifecycle would."""
+        return asyncio.run(
+            self._client().release(capacity_reservation_id=capacity_reservation_id)
+        )
+
     def truncate_lease(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
         """End a leased reservation's lease early; ``None`` if the site refuses."""
         return asyncio.run(
