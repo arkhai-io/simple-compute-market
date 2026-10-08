@@ -161,6 +161,7 @@ class FulfillmentOrchestrator:
             resource=self._resource(record),
             pool_config=dict(pool.provider_config or {}),
             allocate=acquire,
+            db=tx.db,
         )
         return PreparedFulfillment(record=record, provider=provider, prepared=prepared)
 

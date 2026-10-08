@@ -22,6 +22,7 @@ from typing import Any
 from compute_provisioning.job_fulfillment import PreparedJob
 from market_core import VersionedEnvelope
 from market_fulfillment import ProviderConfigInvalidError, SettlementResource
+from sqlalchemy.orm import Session
 
 from vm_provisioning_adapter.guest_names import fulfillment_guest_name
 from vm_provisioning_adapter.models.fulfillment_model import (
@@ -115,6 +116,7 @@ class VmFulfillmentPlan:
     def _lease_remote_port(
         self,
         *,
+        db: Session | None,
         config: AnsiblePoolConfig,
         capacity_reservation_id: str,
         host_id: str,
@@ -132,8 +134,13 @@ class VmFulfillmentPlan:
                 f"pool references relay {config.relay_id!r} but this provider was "
                 "built without a port allocator, so no remote port can be leased"
             )
+        if db is None:
+            raise ProviderConfigInvalidError(
+                "relay port allocation requires the fulfillment acceptance session"
+            )
         try:
-            lease = self._port_allocator.allocate(
+            lease = self._port_allocator.allocate_in_session(
+                db,
                 relay_id=config.relay_id,
                 owner_kind="fulfillment",
                 owner_id=capacity_reservation_id,
@@ -191,6 +198,7 @@ class VmFulfillmentPlan:
         resource: SettlementResource,
         pool_config: dict[str, Any],
         allocate: bool,
+        db: Session | None = None,
     ) -> PreparedJob:
         """The create job for a settled VM resource.
 
@@ -222,11 +230,12 @@ class VmFulfillmentPlan:
         # validation-only call consume a durable port — and repeated validation
         # exhaust a finite window without a single accepted fulfillment.
         #
-        # Still allocated before dispatch, just after acceptance rather than
-        # before it: a crash between allocation and dispatch must not leave a
-        # port bound on the relay that no record claims.
+        # The lease and accepted operation share a transaction: a later
+        # preparation rejection must not leave a port behind, and a second
+        # writing connection would wait on SQLite's acceptance writer lock.
         remote_port = (
             self._lease_remote_port(
+                db=db,
                 config=config,
                 capacity_reservation_id=capacity_reservation_id,
                 host_id=host_id,

@@ -70,7 +70,7 @@ class _Allocator:
             SimpleNamespace(id="lease-1", relay_id=relay_id, remote_port=port) if leased else None
         )
 
-    def allocate(self, **kwargs):
+    def allocate_in_session(self, db, **kwargs):
         self.allocated.append(kwargs)
         return SimpleNamespace(id="lease-1", relay_id=kwargs["relay_id"], remote_port=6100)
 
@@ -85,10 +85,12 @@ def _plan(allocator=None) -> VmFulfillmentPlan:
 
 
 GUEST = fulfillment_guest_name("alloc-1")
+_ACCEPTANCE_SESSION = object()
 
 
 def _create(
-    plan, *, resource=None, pool_config=None, request=None, allocate=True, reservation="alloc-1"
+    plan, *, resource=None, pool_config=None, request=None, allocate=True,
+    reservation="alloc-1", db=_ACCEPTANCE_SESSION,
 ):
     return plan.prepare_create(
         capacity_reservation_id=reservation,
@@ -96,6 +98,7 @@ def _create(
         resource=resource or _resource(),
         pool_config=pool_config if pool_config is not None else _pool_config(),
         allocate=allocate,
+        db=db,
     )
 
 
@@ -196,6 +199,12 @@ class TestRelayAccessPath:
     def test_a_relay_backed_pool_without_an_allocator_is_refused(self):
         with pytest.raises(ProviderConfigInvalidError, match="without a port allocator"):
             _create(_plan(None), pool_config=_relay_pool_config())
+
+    def test_relay_allocation_requires_the_acceptance_session(self):
+        allocator = _Allocator()
+        with pytest.raises(ProviderConfigInvalidError, match="acceptance session"):
+            _create(_plan(allocator), pool_config=_relay_pool_config(), db=None)
+        assert allocator.allocated == []
 
     def test_a_request_cannot_select_a_relay(self):
         prepared = _create(

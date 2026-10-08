@@ -702,7 +702,17 @@ The rendered variables file holds the decrypted token and MUST have the same lif
 
 The provisioning service MUST allocate a VM's relay port from the referenced relay's window before dispatch, record the allocation against that relay and the VM, and pass the port to the job as an input. The playbook MUST apply the port it is given and MUST NOT select one.
 
+Fulfillment preparation MUST allocate through the acceptance transaction's
+session. The port lease, accepted fulfillment, and prepared operation MUST commit
+or roll back together. It MUST NOT allocate through an independent write
+transaction while acceptance is open. Standalone allocation remains available to
+callers that own no acceptance transaction.
+
 A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
+
+Only released lease rows may be reused. A stale free-port observation MUST NOT
+reassign an active lease; allocation MUST retry a conflicting claim without
+rolling back other writes in the caller's transaction.
 
 A lease MUST be released when the owning settlement record reaches a terminal state, in the same transaction that records that state. Attaching release to individual lifecycle paths instead leaves whichever path was not enumerated leaking silently; attaching it outside the terminal transaction reintroduces the same leak on any crash between the two. A periodic reconciliation MUST release leases whose owning job or fulfillment has been terminal beyond a grace period, as a backstop for paths that bypass the transition rather than as the primary mechanism.
 
@@ -734,6 +744,18 @@ A pool whose referenced relay has no usable allocation window MUST be rejected b
 
 - **WHEN** a fulfillment request is validated rather than accepted
 - **THEN** no port is leased and no durable state is written
+
+#### Scenario: Preparation rejects after leasing a port
+
+- **WHEN** fulfillment preparation leases a relay port and a later check rejects the request
+- **THEN** no port lease, accepted fulfillment, or prepared operation is committed
+- **AND** a corrected request may be accepted without an orphaned port
+
+#### Scenario: A stale scan names an occupied port
+
+- **WHEN** allocation attempts to claim a port another owner already holds
+- **THEN** that owner's lease remains intact and allocation selects another free port
+- **AND** the caller's other pending writes remain committable
 
 #### Scenario: A relay is configured with no usable window
 

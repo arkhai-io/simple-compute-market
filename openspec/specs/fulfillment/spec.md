@@ -293,9 +293,9 @@ it. Dispatch remains the final check that an assignment's host is registered.
 
 ### Requirement: Provider contract
 
-A `FulfillmentProvider` separates pure synchronous preparation from asynchronous side effects:
+A `FulfillmentProvider` separates synchronous preparation within acceptance from asynchronous external side effects:
 
-- `prepare_create(capacity_reservation_id, request, resource, pool_config) -> VersionedEnvelope`;
+- `prepare_create(capacity_reservation_id, request, resource, pool_config, allocate=True, db=None) -> VersionedEnvelope`;
 - `dispatch_create(prepared) -> FulfillmentResult`;
 - `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
 - `dispatch_teardown(prepared) -> FulfillmentResult`;
@@ -305,11 +305,31 @@ A `FulfillmentProvider` separates pure synchronous preparation from asynchronous
 
 Preparation receives the durable `capacity_reservation_id` explicitly plus caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently or derive the reservation identity from the storefront payload. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
 
+Create preparation receives the caller's database session as `db`. Any local
+resource acquisition MUST use that session without committing it or opening an
+independent write transaction, so resource claims, acceptance, and the prepared
+operation commit or roll back together. Preparation MUST NOT perform external
+provider I/O. With `allocate=False`, preparation MUST perform the same validation
+without acquiring resources or writing durable state. A provider that acquires
+nothing may ignore the session and allocation flag; a provider requiring local
+resource acquisition MUST reject a missing session before acquiring anything.
+
 `fetch_credentials` is async, since it performs provider I/O, unlike the pure and synchronous `resolve_provisioned_resources`. It is called only by `get_fulfillment_result` (see "Fulfillment status and result queries"), only when the aggregate is `active`, and carries no claim, lease, or generation bookkeeping of its own — it is a stateless read, not a coordinated mutation. Concrete adapters decode whatever provider-owned metadata they persisted at dispatch acknowledgement time to locate the credential source; shared orchestration does not interpret that metadata. Shared orchestration wraps the call: an adapter's own `CredentialFetchFailedError` propagates unchanged, but any other exception is caught, logged with safe structured diagnostics only (`fulfillment_id`, provider identity, stable error category — never raw provider metadata or credential material), and re-raised as `CredentialFetchFailedError` so an unexpected adapter bug surfaces to the caller as the same retryable category rather than leaking an adapter-internal exception type.
 
 Prepared operations are immutable and persisted before dispatch. Dispatch commands use deterministic reservation-scoped idempotency keys. Provider metadata is normalized and validated by the concrete adapter before it crosses the shared persistence boundary. Credentials and sensitive access material use a dedicated secure channel rather than generic metadata.
 
 `ProviderRegistry` maps a provider identity to exactly one provider instance. Duplicate provider identities fail composition. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
+
+#### Scenario: Preparation fails after acquiring a local resource
+
+- **WHEN** create preparation acquires a local resource and then rejects the request
+- **THEN** acceptance, the prepared operation, and that resource claim all roll back
+- **AND** no external provider dispatch occurs
+
+#### Scenario: Validation previews local resource acquisition
+
+- **WHEN** a request requiring a local resource is validated with `allocate=False`
+- **THEN** preparation validates the request without acquiring that resource or persisting acceptance
 
 #### Scenario: Unknown provider
 
@@ -532,4 +552,3 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
 - Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
-

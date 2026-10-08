@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from compute_provisioning import reservation_is_released
+from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 from vm_provisioning_adapter.db import Relay, RelayPortLease
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,32 @@ class RelayPortAllocator:
         host_id: str | None = None,
         pool_id: str | None = None,
     ) -> PortLease:
+        """Lease a port in a standalone transaction owned by the allocator."""
+        with self._session_factory() as db:
+            # Start the outer write transaction before using savepoints, and
+            # serialize SQLite allocations before reading mutable lease state.
+            begin_sqlite_write_transaction(db)
+            lease = self.allocate_in_session(
+                db,
+                relay_id=relay_id,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                host_id=host_id,
+                pool_id=pool_id,
+            )
+            db.commit()
+            return lease
+
+    def allocate_in_session(
+        self,
+        db: Session,
+        *,
+        relay_id: str,
+        owner_kind: str,
+        owner_id: str,
+        host_id: str | None = None,
+        pool_id: str | None = None,
+    ) -> PortLease:
         """Lease the lowest free port in the relay's window.
 
         Lowest-free rather than next-after-last so that a released port is
@@ -66,58 +93,56 @@ class RelayPortAllocator:
 
         The unique constraint is the arbiter, not the read that precedes it.
         Two allocations racing on one relay both see the same free port; the
-        second commit fails and retries against a set that now excludes it,
-        which is correct without a lock held across the whole window scan.
+        second flush fails and retries against a set that now excludes it.
+        Savepoints contain a uniqueness conflict without rolling back the
+        caller's other writes. The caller owns the outer write transaction and
+        its commit; fulfillment acceptance reserves SQLite's writer slot before
+        calling this method.
         """
-        with self._session_factory() as db:
-            # Idempotent for one owner. A crash between allocation and dispatch
-            # is retried, and without this the retry takes a second port and
-            # orphans the first — recovered only after reconciliation's grace
-            # period, during which the window is smaller than it looks.
-            existing = (
-                db.query(RelayPortLease)
-                .filter(
-                    RelayPortLease.owner_kind == owner_kind,
-                    RelayPortLease.owner_id == owner_id,
-                    RelayPortLease.released_at.is_(None),
-                )
-                .one_or_none()
+        # Idempotent for one owner: retrying dispatch must not orphan a port.
+        existing = (
+            db.query(RelayPortLease)
+            .filter(
+                RelayPortLease.owner_kind == owner_kind,
+                RelayPortLease.owner_id == owner_id,
+                RelayPortLease.released_at.is_(None),
             )
-            if existing is not None:
-                return PortLease(
-                    id=existing.id,
-                    relay_id=existing.relay_id,
-                    remote_port=existing.remote_port,
-                )
-            relay = db.get(Relay, relay_id)
-            if relay is None:
-                raise RelayWindowExhaustedError(
-                    f"relay '{relay_id}' does not exist, so no port can be leased on it"
-                )
-            window = range(
-                relay.vm_port_range_start,
-                relay.vm_port_range_start + relay.vm_port_range_count,
+            .one_or_none()
+        )
+        if existing is not None:
+            return PortLease(
+                id=existing.id,
+                relay_id=existing.relay_id,
+                remote_port=existing.remote_port,
             )
-            # Bounded by the window size: a full window fails after trying every
-            # port once rather than spinning.
-            for _ in range(relay.vm_port_range_count):
-                port = self._lowest_free(db, relay_id, window)
-                lease = self._claim(
-                    db,
-                    relay_id=relay_id,
-                    port=port,
-                    owner_kind=owner_kind,
-                    owner_id=owner_id,
-                    host_id=host_id,
-                    pool_id=pool_id,
-                )
-                try:
-                    db.commit()
-                except IntegrityError:
-                    db.rollback()
-                    continue
-                return PortLease(id=lease.id, relay_id=relay_id, remote_port=port)
-            raise self._exhausted(relay)
+        relay = db.get(Relay, relay_id)
+        if relay is None:
+            raise RelayWindowExhaustedError(
+                f"relay '{relay_id}' does not exist, so no port can be leased on it"
+            )
+        window = range(
+            relay.vm_port_range_start,
+            relay.vm_port_range_start + relay.vm_port_range_count,
+        )
+        # Bounded by the window size so a full window cannot spin forever.
+        for _ in range(relay.vm_port_range_count):
+            try:
+                with db.begin_nested():
+                    port = self._lowest_free(db, relay_id, window)
+                    lease = self._claim(
+                        db,
+                        relay_id=relay_id,
+                        port=port,
+                        owner_kind=owner_kind,
+                        owner_id=owner_id,
+                        host_id=host_id,
+                        pool_id=pool_id,
+                    )
+                    db.flush()
+            except IntegrityError:
+                continue
+            return PortLease(id=lease.id, relay_id=relay_id, remote_port=port)
+        raise self._exhausted(relay)
 
     @staticmethod
     def _claim(
@@ -152,7 +177,7 @@ class RelayPortAllocator:
             )
             .one_or_none()
         )
-        if existing is not None:
+        if existing is not None and existing.released_at is not None:
             existing.owner_kind = owner_kind
             existing.owner_id = owner_id
             existing.host_id = host_id

@@ -47,6 +47,11 @@ about it makes them new implementations.
   the configured default admits. Override writes and pool writes are checked, and both
   refuse a list that states one base shape with different constraints.
 
+- Pilot merge reconciliation also corrects the provisioning integration harness
+  to use independent database connections and makes relay-port allocation share
+  fulfillment acceptance's transaction. A rejected preparation rolls back both
+  its lease and its acceptance; validation acquires nothing.
+
 ## Capabilities
 
 ### New Capabilities
@@ -62,6 +67,11 @@ Confirmed in planning (`tasks.md`, 7.10).
   refusing a base shape stated twice with different constraints.
 - `storefront-publication`: listing shapes carrying constraints, per-listing resolution,
   publication and generator behavior, the override write check, and the reports.
+
+- `fulfillment` and `physical-provisioning`: merge reconciliation fixes database
+  isolation in the provisioning integration harness and makes relay allocation
+  participate in fulfillment acceptance, so the port lease and prepared input
+  commit or roll back together without nested write transactions.
 
 ## Non-Goals
 
@@ -91,9 +101,13 @@ Confirmed in planning (`tasks.md`, 7.10).
   kit, per-listing resolution, publication, identity over the base shape, and the
   derivation report; the VM storefront — the configured default, the override
   contribution's write check, and system status.
-- Not affected: bare metal, `kit/pool-overrides` (an override's shapes are stored as
-  today), site admission and the ledger, scheduling, fulfillment, pricing, the registry,
-  negotiation.
+- Shape-admissibility behavior is unchanged in bare metal, `kit/pool-overrides`
+  (an override's shapes are stored as today), site admission and the ledger,
+  scheduling, fulfillment, pricing, the registry, and negotiation.
+- Pilot merge corrections affect `kit/fulfillment`, `provisioning/compute`, both
+  compute provisioning adapters, and the service integration fixtures. Bare
+  metal accepts the shared session argument without acquiring any resource;
+  its delivery semantics remain unchanged.
 - Tests: kit unit tests against a synthetic schema and an import-boundary test; hint
   validation; per-listing resolution; VM publication and the generator; the override
   write check; one end-to-end run publishing from a pool whose stated shape carries
@@ -104,9 +118,11 @@ Confirmed in planning (`tasks.md`, 7.10).
 - [x] `docs/development/ARCHITECTURE.md` — the foundation kit list; the
       test for whether a storefront holds or closes a listing it cannot fully derive,
       as a framework with brief examples; "Omission states no commitment"
-      extended to an offer without a range; the VM listing shapes authority row.
+      extended to an offer without a range; the VM listing shapes authority row;
+      the durable fulfillment acceptance boundary for local resource claims.
 - [x] Existing subsystem specification — provisional: `market-composition`,
-      `resource-pool-management`, `storefront-publication`.
+      `resource-pool-management`, `storefront-publication`; the pilot merge
+      corrections also affect `fulfillment` and `physical-provisioning`.
 - [ ] New subsystem specification — none.
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the inline constraint form and the
       configured default, `[admissibility.defaults.vm]`.
@@ -145,6 +161,15 @@ Confirmed in planning; `tasks.md` 7.10 names each file and heading.
 - The inline form and the configured default — `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - The negotiation invariant and the omitted-dimension policy —
   `negotiation-driven-capacity-resize`'s own deltas; not promoted by this change.
+
+- Pilot merge corrections, already promoted: local resource claims share the
+  acceptance session and roll back with rejected preparation —
+  `openspec/specs/fulfillment/spec.md`,
+  `openspec/specs/fulfillment/architecture.md`, and
+  `docs/development/ARCHITECTURE.md`; relay allocation joins that transaction
+  and never reassigns an active lease after a stale scan —
+  `openspec/specs/physical-provisioning/spec.md`. Section 6A in `tasks.md` records
+  the completed corrections and remaining validation.
 
 ## Dependencies and Related Changes
 

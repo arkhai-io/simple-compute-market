@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar, TYPE_CHECKING
+from sqlalchemy.orm import Session
 from market_core import VersionedEnvelope
 if TYPE_CHECKING:
     from .settlement_types import SettlementResource
@@ -65,6 +66,7 @@ class FulfillmentProvider(ABC):
         resource: "SettlementResource",
         pool_config: dict[str, Any],
         allocate: bool = True,
+        db: Session | None = None,
     ) -> VersionedEnvelope[Any]:
         """Resolve a request into a provider operation, rejecting what it must.
 
@@ -74,8 +76,13 @@ class FulfillmentProvider(ABC):
         lets a caller who only ever asks consume what it never receives — a
         finite port window drained by repeated validation, for instance.
 
-        A provider that acquires nothing may ignore the flag. One that does
-        acquire MUST honour it, and MUST still perform every rejection it
+        Acceptance supplies its session as ``db``. Local resource writes MUST
+        use that session without committing it or opening another write
+        transaction, so they roll back with a rejected acceptance. External
+        provider I/O belongs in dispatch, after acceptance commits.
+
+        A provider that acquires nothing may ignore the session and flag. One
+        that acquires MUST honour the flag and perform every rejection it
         performs when accepting: purity is about acquiring, not about
         checking, and validation that skips a check stops answering the
         question it exists for.

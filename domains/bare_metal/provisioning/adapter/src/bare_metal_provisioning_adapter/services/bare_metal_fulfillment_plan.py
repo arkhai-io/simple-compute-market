@@ -107,10 +107,11 @@ class BareMetalFulfillmentPlan:
         resource: SettlementResource,
         pool_config: dict[str, Any],
         allocate: bool,
+        db: Any | None = None,
     ) -> PreparedJob:
         # Nothing is acquired while preparing, so validation and acceptance do
         # the same work.
-        del allocate
+        del allocate, db
         _validate_pool_config(pool_config)
         _require_bare_metal(resource)
         try:

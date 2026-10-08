@@ -80,7 +80,8 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "results.py": {"market_core", "pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_resource_pools_contracts", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
-        "provider.py": {"market_core"},
+        # Preparation receives the acceptance session for local resource claims.
+        "provider.py": {"market_core", "sqlalchemy"},
         "fulfillment.py": {"market_core", "market_resource_pools", "market_resource_pools_contracts"},
         "fulfillment_persistence.py": {"market_core", "market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),

@@ -395,6 +395,63 @@ checks owed unless the lane's configuration changes.
 - [ ] 6.2 Verify: run the VM lane with `make run-e2e` and
       `make fetch-e2e-logs E2E_RUN_ID=<run>`; the evidence is recorded in 7.9.
 
+## 6A. Pilot merge reconciliation
+
+Corrects provisioning transaction boundaries exposed by this pilot's development
+merge. This completed corrective work is independent of the remaining
+shape-admissibility implementation sequence. The owner-approved boundary and
+alternatives are recorded in `design.md`, "Pilot merge reconciliation".
+
+- [x] 6A.1 Fix the provisioning integration fixture's shared-connection race in
+      `provisioning/compute/service/tests/integration/conftest.py`: each test uses
+      a temporary file-backed database through the production engine factory,
+      with independent connections for request and worker sessions. Add
+      `tests/integration/test_database_session_isolation.py` to deterministically
+      prove that closing a reading session cannot erase another session's replay
+      reservation. Run that regression, the bare-metal mock-profile suite, the
+      full provisioning-service suite, and required packaging/comment checks.
+      The permanent rationale already lives in `ARCHITECTURE.md`'s deterministic
+      database-concurrency guidance and `db/database.py`'s file-backed engine rule.
+      Local evidence (2026-10-08): the controlled regression failed against the
+      shared connection with a missing committed replay reservation, then passed
+      with independent connections. It and all five bare-metal mock tests pass;
+      the full service suite passes after the allocation fix below.
+
+- [x] 6A.2 Make preparation join the acceptance transaction: extend
+      `kit/fulfillment`'s provider contract and orchestrator, forward its session
+      through `provisioning/compute`'s job provider/plan contract and the VM and
+      bare-metal plans, and add VM's session-scoped relay allocation with bounded
+      savepoint retries. Update the provider import-boundary test for its session
+      port, and test allocation rollback/commit and stale-port conflict retries
+      in `test_relay_port_allocator.py`. Reuse only released lease rows and begin
+      the standalone SQLite writer transaction before scanning mutable leases.
+      Refuse relay allocation without the acceptance session.
+      Extend the real fulfillment API tests to prove rollback leaves no port or
+      acceptance snapshot, and adapt affected unit collaborators. Run fulfillment,
+      compute-family, both adapter, and full provisioning-service suites. Promote
+      the accepted boundary into the fulfillment spec/architecture, physical
+      provisioning spec, and repository architecture named in `design.md`.
+      Validation: 50 focused replay/relay/fulfillment tests, 172 fulfillment-kit
+      tests, 222 compute-family tests, 29 VM-adapter/inventory tests, 40 bare-metal
+      adapter tests, and the full service's 677 unit and 462 integration tests
+      pass. The design-promotion record names all permanent destinations.
+
+- [ ] 6A.3 Closeout the fixture and allocation fixes: comment hygiene, import placement,
+      current-state documentation ownership, concise handoff, unchanged roadmap/campaign status,
+      documentation citations, and `make check-packaging`. Record local evidence
+      and citation results; keep end-to-end/promotion gates open.
+      Final `make check-packaging`, strict OpenSpec validation, comment hygiene,
+      and diff whitespace checks pass; added imports are at module
+      level, and permanent documents describe the current acceptance boundary.
+      All citations in the four touched permanent documents resolve. Roadmap and
+      campaign status remain unchanged, with that disposition and promotion
+      destinations recorded below. After the ownership correction, this pilot's
+      documentation citation check and both changes' strict OpenSpec validation
+      pass. Workflow-only planned-document references remain with that change.
+      This closeout remains open for end-to-end/remote pipeline evidence; root
+      aggregate tests and typing were not rerun for this fix. Relevant suites
+      are recorded above.
+
 ## 7. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`. Promotion (7.10) follows the
@@ -478,3 +535,11 @@ pre-closeout review, as `AGENTS.md` asks.
 
 | Accepted decision | Permanent location |
 |---|---|
+| Independent request/worker database transactions | `docs/development/ARCHITECTURE.md#deterministic-database-concurrency-tests` (existing guidance) |
+| Local resource claims commit or roll back with acceptance | `openspec/specs/fulfillment/spec.md#requirement-provider-contract`, `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement`, and `docs/development/ARCHITECTURE.md#durable-fulfillment-acceptance` |
+| Session-scoped relay allocation and safe lease reuse | `openspec/specs/physical-provisioning/spec.md#requirement-relay-port-leases-are-unique-per-relay` |
+
+The rows above record the pilot merge corrections only; Section 7.10 still owes
+the shape-admissibility promotions. These corrections need no roadmap or campaign
+index change: the pilot remains in implementation with its existing dependencies
+and unfinished feature gates.

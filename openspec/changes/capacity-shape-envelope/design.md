@@ -502,6 +502,58 @@ removing constraint mappings from pool hints and stored overrides; a constraint 
 place makes the reverted storefront hold the pool, and the reverted provisioning service
 refuse writes that keep it.
 
+## Pilot merge reconciliation (2026-10-08)
+
+This pilot owns the provisioning corrections exposed while merging development
+into its implementation branch. The workflow change owns the implementation
+process; these runtime corrections and their validation belong to this change.
+They preserve the shape-admissibility design and do not extend it to bare metal
+or alter site admission.
+
+Provisioning integration validation exposed the fixture's shared
+in-memory SQLite connection: request and background-job sessions can interleave
+transactions, so closing one session may erase another session's reservation or
+job state. The integration fixture must use the production file-backed engine
+factory with a fresh temporary database per test. Independent connections follow
+the existing deterministic database-concurrency architecture; weakening replay
+verification or serializing unrelated application work would hide the fixture
+error. A controlled overlapping-session regression proves the lost-reservation
+failure without sleeps or repeated races.
+
+The file-backed fixture also exposes a production relay-allocation deadlock:
+fulfillment acceptance owns SQLite's writer slot while VM preparation allocates
+through another session. The two relay acceptance/retry integration tests wait
+out the busy timeout and return `provider_config_invalid`. The permanent provider
+contract described pure preparation, while the implementation permitted allocation.
+The owner accepted passing the acceptance session explicitly through provider and
+plan preparation so the port lease and prepared operation commit or
+roll back together. Preparation may acquire local database resources only through
+that session; validation still acquires nothing, and external provider I/O stays
+after commit. VM preparation refuses relay allocation without the caller's
+session. The standalone allocator retains its self-committing entry point for
+callers that own no outer transaction; acceptance uses `allocate_in_session`,
+whose uniqueness retries use savepoints without rolling back acceptance.
+The provider contract may name SQLAlchemy's session, already a fulfillment-kit
+dependency; its module import-boundary check is updated for this explicit port.
+Standalone SQLite allocation starts its outer write transaction before the
+savepoint scan. A stale free-port observation must hit the uniqueness constraint
+and retry rather than reassign an active lease; only released rows are reusable.
+
+A separate allocation phase was rejected because it adds lifecycle/recovery
+state for partial acceptance. Weakening the fixture would conceal the defect.
+Integration coverage must prove successful acceptance, equivalent retry, and
+rollback after a port has been allocated but later preparation rejects the
+request. Permanent destinations are the provider contract and acceptance model
+in `openspec/specs/fulfillment/spec.md` and
+`openspec/specs/fulfillment/architecture.md`, the relay lease rule in
+`openspec/specs/physical-provisioning/spec.md`, and the repository acceptance
+boundary in `docs/development/ARCHITECTURE.md`.
+
+The promotion record and local validation evidence are in `tasks.md`, Section 6A.
+These corrections do not complete the remaining shape-admissibility sections or
+the pilot's end-to-end and closeout gates. Roadmap and campaign status remain
+unchanged.
+
 ## Open Questions
 
 - **Upgrade ordering when site and storefront operators differ.** A newer constraint key
