@@ -112,6 +112,8 @@ The routes are still referenced in several other places:
     describes the row by comparison with the storefront's
     `compute_allocations` and a former `PATCH` of the storefront's resource
     table.
+  - The `storefront` comment in `helm/charts/provisioning/values.yaml` says
+    the lease watchdog patches the storefront resource back to available.
 
 **`release_reservations` has a legacy half.** Beside the authoritative
 `_release_site_ledger_holds`, a loop normalizes local `resources` rows that
@@ -198,6 +200,11 @@ The freeze has these parts:
   - Every other migration ID is unchanged, and a removed ID is never reused.
   - Keeping the entries as functions that do nothing was rejected: it adds
     code that records a decision without performing one.
+  - The rule outlives this change. `pools-9-retire-local-physical-authority`
+    freezes four more tables and faces the same choice. It is therefore
+    promoted to `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at
+    startup": a migration whose only effect is on a frozen table leaves the
+    chain, its recorded ID stays inert, and the ID is never reused.
 - `20260604_002_compute_inventory_pools` stops creating its two allocation
   indexes, and `_backfill_compute_pools` stops updating allocation rows.
 - The release-`UPDATE` and its attribute-path special case leave
@@ -283,9 +290,9 @@ Re-grounded on 2026-10-08. The review accepted three things:
   than becoming functions that do nothing;
 - the `kit/site` docstring is corrected here.
 
-`tasks.md` still reflects the earlier tree: its task 3.5 function list, its
-rebase note, and its test-ownership notes. Planning amends it to match this
-document.
+Planning amended `tasks.md` to match this document. It also added the
+migration-retirement rule's promotion and the Helm values comment, which
+planning found.
 
 This change's task 3.8 and `pools-9-retire-local-physical-authority`'s task
 3.8 are different tasks that share a number. `pools-9` claims only tasks 3.1,

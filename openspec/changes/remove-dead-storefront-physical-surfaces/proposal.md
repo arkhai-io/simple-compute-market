@@ -69,7 +69,8 @@ deletion leaves unused. It stops at code that still has a live caller.
   - both VM full-deal scenarios' stage `00h` docstrings, including their
     administrator-key troubleshooting text;
   - a stale `vm_host` comment in the reservation boundary test;
-  - `kit/site`'s `CapacityReservation` docstring.
+  - `kit/site`'s `CapacityReservation` docstring;
+  - the provisioning chart's `storefront` values comment.
 
 ## Capabilities
 
@@ -118,7 +119,9 @@ helpers. The existing operator-visible acceptance requirement and its
     `services/fulfillment_service.py`, `utils/sqlite_client.py`, and
     `utils/migrations.py`.
   - `core/storefront-client/src/storefront_client/client.py`.
-  - The `kit/site/src/market_site/db.py` docstring, which is prose only.
+  - The `kit/site/src/market_site/db.py` docstring and the
+    `helm/charts/provisioning/values.yaml` `storefront` comment, which are
+    prose only.
 - **Tests:**
   - Storefront unit tests: `test_compute_allocations.py`, `test_hosts.py`,
     `test_identity_dispatch.py`, and `test_fulfillment_provisioning.py`.
@@ -135,13 +138,18 @@ helpers. The existing operator-visible acceptance requirement and its
 - [ ] Existing subsystem specification — the terminal requirement is
       `pools-9-retire-local-physical-authority`'s.
 - [ ] New subsystem specification
-- [x] No permanent documentation change beyond `docs/development/ROADMAP.md`'s
-      Goal 1 currency at closeout.
+- [ ] No permanent documentation change.
+
+`docs/development/DEPLOYMENT_AND_CONFIG.md` gains one paragraph, and
+`docs/development/ROADMAP.md`'s Goal 1 is brought current at closeout.
 
 ### Knowledge to promote
 
-- None. Why each surface is dead is recorded in this change's `design.md` and
-  needs no permanent home once the surfaces are gone.
+- A migration whose only effect is on a frozen table leaves the chain. Its
+  recorded ID stays inert and is never reused. Destination:
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup".
+- Why each surface is dead is recorded in this change's `design.md` and needs
+  no permanent home once the surfaces are gone.
 
 ## Dependencies and Related Changes
 
