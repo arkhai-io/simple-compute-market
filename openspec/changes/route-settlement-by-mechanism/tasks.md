@@ -137,12 +137,12 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   and a missing servicing before effects, and no longer compare mechanism IDs
   or build an Alkahest lifecycle themselves. Focused routing tests with a fake
   table; existing restart-recovery and Alkahest lifecycle integration suites.
-- [ ] 10.2 Standalone credits negotiation integration (B1). Add the API-credit
+- [x] 10.2 Standalone credits negotiation integration (B1). Add the API-credit
   buyer to the API-credit storefront's development dependencies (lock refreshed
   through `scripts/uv_project.py`) and an integration test that runs the real
   `market credits negotiate` command against the served storefront for a
   payment-only, wallet-free negotiation and its accepted state.
-- [ ] 10.3 Accepted contact reveal after disablement through the production
+- [x] 10.3 Accepted contact reveal after disablement through the production
   clients (B2). Rewrite the successful negotiation, reveal and read in
   `test_accepted_introduction_survives_contact_disable` onto `StorefrontClient`
   and `IntroductionTransport` against a served app; keep the disabled-restart

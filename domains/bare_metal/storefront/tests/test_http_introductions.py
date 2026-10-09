@@ -220,8 +220,8 @@ def _introductions(base_url: str, signer=BUYER_SIGNER) -> IntroductionTransport:
     )
 
 
-async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict]:
-    """Accept the contact listing and reveal, through the buyer's typed clients."""
+async def _negotiate_contact(base_url: str, option: dict) -> dict:
+    """Open a negotiation for the contact listing through the buyer's typed client."""
     opening = _opening(option)
     async with StorefrontClient(
         base_url,
@@ -229,7 +229,7 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
         caller_role="buyer",
         expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
     ) as storefront:
-        payload = await storefront.negotiate_new(
+        return await storefront.negotiate_new(
             listing_id=opening["listing_id"],
             initial_amount=None,
             provision_terms=opening["provision_terms"],
@@ -238,53 +238,29 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
             selection_only=True,
             buyer_agent_url=opening["buyer_agent_url"],
         )
+
+
+async def _accept_typed(base_url: str, option: dict) -> tuple[str, str]:
+    """Accept the contact listing through the buyer's typed client."""
+    payload = await _negotiate_contact(base_url, option)
     assert payload["action"] == "accept"
     negotiation_id = payload["negotiation_id"]
     plan = payload["settlement_plan"]
     obligation_ref = derive_obligation_ref(
         negotiation_id, 0, plan["obligations"][0]
     )
+    return negotiation_id, obligation_ref
+
+
+async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict]:
+    """Accept the contact listing and reveal, through the buyer's typed clients."""
+    negotiation_id, obligation_ref = await _accept_typed(base_url, option)
     started = _introductions(base_url).start(
         negotiation_id=negotiation_id,
         obligation_ref=obligation_ref,
         contact_payload=dict(_BUYER_CONTACT),
     )
     return negotiation_id, obligation_ref, started
-
-
-def _accept(client: TestClient, option: dict) -> tuple[str, str]:
-    opening = _opening(option)
-    response = client.post(
-        "/api/v1/negotiate/new",
-        json=opening,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "negotiate_new", "intro-listing", opening
-        ),
-    )
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["action"] == "accept"
-    negotiation_id = payload["negotiation_id"]
-    plan = payload["settlement_plan"]
-    obligation_ref = derive_obligation_ref(negotiation_id, 0, plan["obligations"][0])
-    return negotiation_id, obligation_ref
-
-
-def _start(client: TestClient, negotiation_id: str, obligation_ref: str) -> dict:
-    start_body = {
-        "negotiation_id": negotiation_id,
-        "obligation_ref": obligation_ref,
-        "contact_payload": dict(_BUYER_CONTACT),
-    }
-    started = client.post(
-        "/api/v1/introductions",
-        json=start_body,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "introduction_start", obligation_ref, start_body
-        ),
-    )
-    assert started.status_code == 200, started.text
-    return started.json()
 
 
 async def test_contact_options_publish_through_the_composition() -> None:
@@ -388,10 +364,14 @@ async def test_accepted_introduction_survives_contact_disable(
     path = str(tmp_path / "storefront.db")
     runtime = _runtime(path)
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref = _accept(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref = await _accept_typed(base_url, option)
         if revealed_before_disable:
-            _start(client, negotiation_id, obligation_ref)
+            _introductions(base_url).start(
+                negotiation_id=negotiation_id,
+                obligation_ref=obligation_ref,
+                contact_payload=dict(_BUYER_CONTACT),
+            )
 
     restarted = _runtime(path, contact_enabled=False)
     publication = await restarted.settlement_composition.publication_payload(
@@ -405,25 +385,37 @@ async def test_accepted_introduction_survives_contact_disable(
         ],
     )
     assert publication.settlement_options == ()
-    with TestClient(_app(restarted)) as client:
+    app = _app(restarted)
+    with serving(app) as base_url:
+        buyer = _introductions(base_url)
         if revealed_before_disable:
-            read = client.get(
-                f"/api/v1/introductions/{obligation_ref}",
-                headers=_headers(
-                    BUYER_SIGNER,
-                    "buyer",
-                    "introduction_read",
-                    obligation_ref,
-                    EMPTY_BODY,
-                    method="GET",
-                ),
-            )
-            assert read.status_code == 200, read.text
-            assert read.json()["counterparty_contact"] == _SELLER_CONTACT
+            read = buyer.read(obligation_ref=obligation_ref)
+            assert read["counterparty_contact"] == _SELLER_CONTACT
 
-        revealed = _start(client, negotiation_id, obligation_ref)
+        revealed = buyer.start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=dict(_BUYER_CONTACT),
+        )
         assert revealed["counterparty_contact"] == _SELLER_CONTACT
-        assert _start(client, negotiation_id, obligation_ref) == revealed
+        assert (
+            buyer.start(
+                negotiation_id=negotiation_id,
+                obligation_ref=obligation_ref,
+                contact_payload=dict(_BUYER_CONTACT),
+            )
+            == revealed
+        )
+        assert buyer.read(obligation_ref=obligation_ref) == revealed
+
+        # Fresh contact work stays refused while the mechanism is disabled.
+        with pytest.raises(StorefrontClientError) as refused:
+            await _negotiate_contact(base_url, option)
+        assert refused.value.status_code == 400
+
+    # Deferred debt, not an exemption: no typed client reads an introduction as
+    # the seller, so the seller's read is hand-built until one exists.
+    with TestClient(app) as client:
         seller_read = client.get(
             f"/api/v1/introductions/{obligation_ref}",
             headers=_headers(
@@ -435,18 +427,8 @@ async def test_accepted_introduction_survives_contact_disable(
                 method="GET",
             ),
         )
-        assert seller_read.status_code == 200, seller_read.text
-        assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
-
-        opening = _opening(option)
-        fresh = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers(
-                BUYER_SIGNER, "buyer", "negotiate_new", "intro-listing", opening
-            ),
-        )
-        assert fresh.status_code == 400
+    assert seller_read.status_code == 200, seller_read.text
+    assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
 
     status = await restarted.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
