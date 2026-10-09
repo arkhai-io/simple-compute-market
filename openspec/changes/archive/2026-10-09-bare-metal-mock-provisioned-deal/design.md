@@ -2312,6 +2312,47 @@ Found while planning:
   contract (`domains/bare_metal/tests/test_domain_runtime.py`); it covers contract
   capabilities, not negotiation, so nothing is added there.
 
+Implementation findings (6A and 6B), settled while building:
+
+- VM's seller hook is still built for each round, so it reads the current negotiation
+  settings; only the per-round binding it no longer needs is gone (the plan said "once").
+  `build_vm_negotiation_runtime` takes an injected `listing_source_check`, the real check
+  by default.
+- VM's source check reports an unreadable capacity snapshot as unverifiable, where the
+  failure used to escape the round as an exception. The system status's strategy probe
+  hands the guard a matching verdict, since it exercises the strategy and checks no
+  listing.
+- Two planned VM integration cases are proven below the route: a listing without a
+  `gpu_model` is rechecked (the policy kit's guard has no such condition, and the
+  runtime's enforcement tests are domain-free), and an availability refusal at a buyer's
+  accept (the fixture reads availability from the fake site's snapshot, so the accept test
+  changes the declaration instead).
+- API credits' system controller no longer imports the server module, so the
+  import-order workaround in `test_force_accept_api.py` is gone.
+- Bare metal's taken-machine recheck reads the resource-pool projection the recheck
+  already fetches, not a capacity snapshot: a Physical Resource's view already reports
+  whether the whole machine is available. The source check moved from `opening_guard.py`
+  to `listing_source_check.py`, since it now runs before every seller decision and
+  acceptance, and answers with the policy kit's verdict instead of raising.
+- An exact-option opening is validated, and its plan built, inside the round evaluation,
+  because the runtime's artifact builder is synchronous and the physical-fact checks read
+  the repository. The request-carrier checks (a selection both beside and inside the
+  proposal, or beside an escrow proposal) stay in the route: the runtime sees only the
+  merged proposal.
+- The terms a bare-metal thread records, and the response returns, are the envelope the
+  buyer sent (`kind`, `version`, `payload`), which continuation decodes again.
+- Bare metal's refusals use the shared reasons: a source mismatch answers 409
+  `no_matching_declaration`, a taken machine 409 `no_matching_inventory`, and an
+  unreadable site or a missing site authority 503 `listing_source_unverifiable`, naming no
+  site (the seller's log carries the detail). An opening below the listed rate under the
+  default chain is recorded and answered as `exit` (200), where it used to be refused with
+  409 and nothing recorded.
+- With the real builder, a proposal carrying no demands cannot be materialized without the
+  seller wallet, so the retired opening's wallet-less plan could never have matched what
+  verification builds (the table above). The equality test runs the real builder against
+  the development chain's address book and finds the response's plan, the committed plan,
+  and verification's rebuild equal.
+
 What this changes beyond Section 6:
 
 - **Section 7.** 7.2's commit half is done (the Alkahest path commits before fulfillment)
