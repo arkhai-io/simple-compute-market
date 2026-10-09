@@ -1147,6 +1147,27 @@ class TestShapeAdmissibility:
             "shaped"
         ]
 
+    @pytest.mark.parametrize(
+        ("tag", "unreadable"),
+        [
+            ("asking_rates", {"vm": [{"shape": _A100_PLAIN, "amount": "2", "asset": "usd", "period": "month"}]}),
+            ("pricing", {"cpu": {"rates": "not-a-list"}}),
+        ],
+    )
+    def test_an_excluded_listing_closes_though_an_unreadable_rate_holds_its_pool(
+        self, db_path, tag, unreadable
+    ):
+        _seed_listing(db_path, listing_id="kept", pool_id="gpu", gpu_count=1, gpu_model="A100", site_id="site-a")
+        _seed_listing(db_path, listing_id="excluded", pool_id="gpu", gpu_count=2, site_id="site-a")
+        pool = self._pool(_A100_PLAIN, {"gpu": {"model": "H100", "count": 2}})
+        pool["pool_metadata"]["policy_tags"][tag] = unreadable
+
+        assert stale_open_listing_ids(
+            db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            site_pool_projection={"site-a": [pool]},
+            admissibility_default=_admissibility_default({"gpu": {"count": {"max": 1}}}),
+        ) == ["excluded"]
+
     def test_a_listing_the_default_excludes_is_not_reopened(self, db_path):
         _seed_listing(
             db_path, listing_id="shaped", status="closed", pool_id="gpu", gpu_count=2, site_id="site-a",

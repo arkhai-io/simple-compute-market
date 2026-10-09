@@ -81,6 +81,11 @@ new package and `kit/Makefile`. No Helm checks owed.
       valid; a dimension that is not a schema quantity, or a malformed partial shape,
       raises the request error. (D3, D4)
       Done. Both evaluations are methods on `ResolvedPolicy`.
+      Amended after implementation review 07 F2: `at_most` and `at_least` take any finite
+      real threshold, flooring or ceiling it, so every answer is a member of the set;
+      a boolean, a non-number, or a non-finite threshold raises (`TypeError`,
+      `ValueError`). Unit tests assert membership of every accessor answer across
+      integral and non-integral thresholds; the kit's suite: 109 passed.
 - [x] 1.9 Unit tests in `tests/unit/` against a synthetic schema with no compute
       vocabulary, covering every scenario of both `market-composition` delta
       requirements, plus a property test of the one-dimension-at-a-time guarantee (fixing
@@ -278,6 +283,13 @@ passing `None` until 5.1 supplies the parsed default.
       Done in `_admissible_shapes`, which runs right after the unreadable-list hold; every
       later step (rates, terms, feasibility, `listing_shapes`, infeasibility reports) reads
       the admitted shapes only. See the amendment above for the key readers.
+      Amended after implementation review 07 F1: an unreadable asking or family rate,
+      checked after admissibility, held the whole pool, and stale reconciliation skipped
+      every held listing, so an excluded listing stayed open. Derivation now records each
+      excluded listing as `(site, pool, shape digest)` through `available_compute_slices`'
+      `excluded` collector, and `stale_open_listing_ids` closes a held listing it names,
+      while the pool's other listings stay held. `TestShapeAdmissibility` covers both
+      rate holds.
 - [x] 4.3 `_SiteDerivationReport` gains `inadmissible_listing_shapes` (tier, shape,
       problems) and `unusable_shape_constraints` (tier, path, problem, each tier's
       conflicting value, or each conflicting entry), logged once per change through
@@ -308,6 +320,11 @@ passing `None` until 5.1 supplies the parsed default.
       projection case binding a constrained candidate through
       `prepare_vm_listing_binding`. The test helpers' `_keyed` wrapper supplies
       `admissibility_default=None` unless a case states one.
+      These cases call the reconciler's derivation and key readers against a real SQLite
+      database with no application running, so under `docs/development/TESTING.md` they
+      are derivation-level evidence: "closes" means reconciliation selects the listing as
+      stale. That a publication cycle closes it is application evidence, owed by 5.3
+      (implementation review 08 F1).
 - [x] 4.7 Verify: the VM storefront unit and integration suites.
       Done. VM storefront `tests/unit` + `tests/integration`: 1491 passed, 1 skipped.
       `make check-packaging`, `make check-comment-hygiene`, and
@@ -376,6 +393,10 @@ changes the storefront's configuration surface.
       and the stored override is unchanged; `tests/integration/test_publication_loop.py`
       covers a configured default reaching a publication cycle and the new report keys in
       system status.
+      Amended after implementation review 08 F1: `test_publication_loop.py` also covers a
+      pool hint's constraint closing a listing — publish a constrained stated shape,
+      tighten the hint so its offer becomes inadmissible, run another cycle through the
+      typed client, and assert the stored listing is reconciliation-closed.
 - [ ] 5.4 Helm: run `make helm-values-schema` and confirm the generated schema is
       unchanged (`[admissibility]` is an untyped section, as `[pricing]` is), or run the
       chart render tests if it changed.
@@ -482,6 +503,10 @@ pre-closeout review, as `AGENTS.md` asks.
       update the Goal 2 dependency graph. Check each item under design.md's "Findings
       outside this change" against `openspec/changes/` and list the unowned ones in the
       index's unowned-work table for this goal.
+      Also settle with the owner (implementation review 08 F3) whether the
+      `arkhai_vms_listings` behaviour tests now in `domains/vms/storefront/tests` move to a
+      suite of `domains/vms/listings`'s own: open a follow-up change, or record the
+      deferral here.
 - [ ] 7.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=capacity-shape-envelope` and resolve every match.
 - [ ] 7.8 **Packaging.** Run `make check-packaging` and resolve every failure.

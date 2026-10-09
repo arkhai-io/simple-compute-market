@@ -32,9 +32,11 @@ openspec/specs/market-composition/spec.md.
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from numbers import Real
 from typing import Any
 
 from market_capability_shape import (
@@ -174,17 +176,25 @@ class AdmissibleValues:
             return False
         return value >= self._low and (self._high is None or value <= self._high)
 
-    def at_most(self, value: int) -> int | None:
-        """The greatest admissible value not above ``value``."""
-        if self._low is None or value < self._low:
-            return None
-        return value if self._high is None else min(value, self._high)
+    def at_most(self, value: float) -> int | None:
+        """The greatest admissible value not above ``value``.
 
-    def at_least(self, value: int) -> int | None:
-        """The least admissible value not below ``value``."""
+        ``value`` may be any finite real number; the answer is always a member.
+        """
+        bound = math.floor(_threshold(value))
+        if self._low is None or bound < self._low:
+            return None
+        return bound if self._high is None else min(bound, self._high)
+
+    def at_least(self, value: float) -> int | None:
+        """The least admissible value not below ``value``.
+
+        ``value`` may be any finite real number; the answer is always a member.
+        """
+        bound = math.ceil(_threshold(value))
         if self._low is None:
             return None
-        candidate = max(value, self._low)
+        candidate = max(bound, self._low)
         if self._high is not None and candidate > self._high:
             return None
         return candidate
@@ -739,6 +749,16 @@ def _without_field(partial_shape: Any, path: _Path) -> Any:
     if remaining:
         rest[family] = remaining
     return rest
+
+
+def _threshold(value: Any) -> float:
+    # A boolean is an int to Python but never a quantity, and an infinite or
+    # NaN threshold has no integer floor or ceiling to answer with.
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"an admissible-value threshold must be a real number, not {value!r}")
+    if not math.isfinite(value):
+        raise ValueError(f"an admissible-value threshold must be finite, not {value!r}")
+    return value
 
 
 def _is_positive_int(value: Any) -> bool:

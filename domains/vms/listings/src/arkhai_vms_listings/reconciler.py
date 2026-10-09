@@ -963,6 +963,7 @@ def _projected_pool_rows(
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
     declared_only: bool = False,
     override: Mapping[str, Any] | None = None,
+    excluded: set[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
 
@@ -1086,6 +1087,15 @@ def _projected_pool_rows(
     # it instead would keep advertising what the storefront's policy may
     # exclude. See openspec/specs/storefront-publication/spec.md#requirement-a-vm-listing-whose-admissibility-cannot-be-computed-closes.
     shapes = _admissible_shapes(resolution, pool_id=pool_id, report=report)
+    # Recorded apart from the pool's listings because a later hold on the whole
+    # pool, for an unreadable rate, must not keep an excluded listing open.
+    if excluded is not None:
+        admitted = {shape.digest for shape in shapes}
+        excluded.update(
+            (site_id, pool_id, listing.shape.digest)
+            for listing in resolution.listings
+            if listing.shape.digest not in admitted
+        )
 
     # Asking rates hold the pool on the same terms as shapes: a rate the seller
     # believes they published is not silently dropped to a lower tier.
@@ -1472,6 +1482,7 @@ def _pool_rows_from_projection(
     declared_only: bool = False,
     overrides: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
     record_reports: bool = True,
+    excluded: set[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
@@ -1543,6 +1554,7 @@ def _pool_rows_from_projection(
                     shape_feasible=shape_feasible,
                     declared_only=declared_only,
                     override=site_overrides.get((site_id, pool_id)),
+                    excluded=excluded,
                 )
             )
         if record_reports:
@@ -1671,6 +1683,7 @@ def available_compute_slices(
     declared_range: bool = False,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    excluded: set[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -1742,6 +1755,11 @@ def available_compute_slices(
     be neither closed nor refreshed, so callers that reconcile keep them out of
     both.
 
+    ``excluded`` collects ``(site, pool_id, shape_digest)`` for each listing
+    whose policy cannot be computed or excludes its offer. Such a listing
+    closes even when its pool is held, so callers that reconcile close it
+    despite ``holds``.
+
     ``hint_resolution`` controls how much a pool's own projected
     ``region``/``sla`` hints are trusted relative to the storefront's
     override tiers and configured defaults -- see
@@ -1768,6 +1786,7 @@ def available_compute_slices(
                 holds=held,
                 shape_feasible=shape_feasible,
                 declared_only=declared_range,
+                excluded=excluded,
             )
         else:
             pool_rows = _pool_rows_from_local_tables(
@@ -1870,6 +1889,7 @@ def current_available_resource_keys(
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
     admissibility_default: Declaration | None,
+    excluded: set[tuple[str, str, str]] | None = None,
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1896,6 +1916,7 @@ def current_available_resource_keys(
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
+        excluded=excluded,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1918,6 +1939,32 @@ def _source_envelope(raw: Any) -> Mapping[str, Any] | None:
             return None
         return parsed if isinstance(parsed, Mapping) else None
     return None
+
+
+def _stored_shape_source(
+    source_envelope: Any, site_id: str
+) -> tuple[str, str, str] | None:
+    """A stored listing's ``(site, pool_id, shape_digest)``, or ``None``.
+
+    ``None`` for a listing bound before shapes, one naming no pool, or one
+    whose envelope cannot be read.
+    """
+    envelope = _source_envelope(source_envelope)
+    if (
+        envelope is None
+        or envelope.get("kind") != LISTING_SOURCE_KIND
+        or envelope.get("schema_version") != LISTING_SOURCE_SCHEMA_VERSION
+    ):
+        return None
+    payload = envelope.get("payload") or {}
+    pool_id = payload.get("pool_id")
+    if not pool_id:
+        return None
+    try:
+        digest = resolve_shape(payload.get("listing_shape")).digest
+    except ValueError:
+        return None
+    return (str(site_id), str(pool_id), digest)
 
 
 def stored_listing_key(
@@ -2089,7 +2136,9 @@ def stale_open_listing_ids(
     """Return bound VM listings whose exact site-scoped slice is gone.
 
     A listing whose source cannot currently be read is held, not stale, and so
-    is every listing of a configured site whose projection is unknown.
+    is every listing of a configured site whose projection is unknown. A
+    listing whose admissibility policy cannot be computed or excludes its offer
+    is stale even when a later check holds the rest of its pool.
     ``backed_only`` has no default because the two reconciliations differ:
     source reconciliation (the publication loop) closes any listing whose
     source is gone, while availability reconciliation (capacity events, a
@@ -2100,6 +2149,7 @@ def stale_open_listing_ids(
     """
 
     holds: set[tuple[str, str, str]] = set()
+    excluded: set[tuple[str, str, str]] = set()
     available_keys = current_available_resource_keys(
         db_path,
         home_site=home_site,
@@ -2110,12 +2160,19 @@ def stale_open_listing_ids(
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
         admissibility_default=admissibility_default,
+        excluded=excluded,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(
         db_path, open_listings=True, backed_only=backed_only
     ):
-        if _is_held(listing.listing_resource, listing.site_id, holds):
+        # Admissibility excluded the listing before a later rate check held
+        # its pool, so it closes even though the rest of its pool is held.
+        if (
+            _is_held(listing.listing_resource, listing.site_id, holds)
+            and _stored_shape_source(listing.source_envelope, listing.site_id)
+            not in excluded
+        ):
             continue
         key = listing.key
         if key is not None and key not in available_keys:

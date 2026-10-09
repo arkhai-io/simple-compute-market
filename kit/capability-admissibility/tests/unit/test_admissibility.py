@@ -7,7 +7,9 @@ behaving as it does for any domain's schema.
 from __future__ import annotations
 
 import itertools
+import math
 import random
+from fractions import Fraction
 
 import pytest
 from market_capability_admissibility import (
@@ -141,6 +143,37 @@ def test_admissible_values_for_one_dimension_are_its_resolved_range():
     assert values.at_most(1) is None
     assert values.at_least(1) == 2
     assert values.at_least(7) is None
+
+
+@pytest.mark.parametrize(
+    "threshold",
+    [-3, 0, 1, 1.5, 2, 3.5, Fraction(7, 2), 4, 4.0001, 6, 6.5, 7, 10**9 + 0.5],
+)
+def test_every_accessor_answer_is_a_member_of_the_set(threshold):
+    values = _policy({"widget": {"count": {"min": 2, "max": 6}}}).admissible_values("widget.count", {})
+
+    for answer in (values.at_most(threshold), values.at_least(threshold)):
+        assert answer is None or (type(answer) is int and values.contains(answer))
+
+
+def test_a_non_integral_threshold_answers_the_nearest_member_on_its_side():
+    values = _policy({"widget": {"count": {"min": 2, "max": 6}}}).admissible_values("widget.count", {})
+
+    assert values.at_most(3.5) == 3
+    assert values.at_least(3.5) == 4
+
+
+@pytest.mark.parametrize(
+    ("threshold", "error"),
+    [(True, TypeError), ("3", TypeError), (None, TypeError), (math.inf, ValueError), (math.nan, ValueError)],
+)
+def test_an_accessor_refuses_a_threshold_that_is_not_a_finite_real_number(threshold, error):
+    values = _policy({"widget": {"count": {"max": 6}}}).admissible_values("widget.count", {})
+
+    with pytest.raises(error):
+        values.at_most(threshold)
+    with pytest.raises(error):
+        values.at_least(threshold)
 
 
 def test_admissible_values_ignore_a_value_stated_for_the_dimension_itself():
