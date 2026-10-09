@@ -31,6 +31,8 @@ GPU_MODEL = "L40S"
 #: One whole machine: the unit a bare-metal claim reserves, and the hardware it
 #: contains, which its listing publishes.
 WHOLE_HOST_CAPACITY = {"units": 1, "gpu_count": 4, "ram_gb": 512}
+#: The resource kind a bare-metal declaration is, and fulfillment schedules.
+BARE_METAL_RESOURCE_KIND = "compute.bare-metal"
 #: Where the mock grant tells the buyer to connect: a documentation address
 #: (TEST-NET-2), never dialled, since the mock profile runs no playbook.
 MACHINE_ADDRESS = "198.51.100.7"
@@ -82,10 +84,10 @@ class BareMetalComputeDealDriver:
         """A backed pool advertising bare metal, its host, and one whole machine.
 
         The host record is what dispatch renders the job's inventory from; the
-        declaration is what admission, publication, and the seller's inventory
-        guard read. The machine's publication view names its host and physical
-        machine, as the storefront checks a scheduled resource against the
-        accepted terms.
+        declaration, a bare-metal resource, is what admission, publication,
+        scheduling, and the seller's inventory guard read. The machine's
+        publication view names its host and physical machine, as the storefront
+        checks a scheduled resource against the accepted terms.
         """
         self.site_operator.create_pool(
             PoolCreate(
@@ -123,6 +125,9 @@ class BareMetalComputeDealDriver:
                 self.reserved_resource_id,
                 pool_id=self.pool_id,
                 host_id=self.host_id,
+                # Settlement schedules the deal's machine among resources of
+                # this kind only.
+                resource_type=BARE_METAL_RESOURCE_KIND,
                 capacity=dict(WHOLE_HOST_CAPACITY),
                 attributes={
                     "gpu_model": GPU_MODEL,

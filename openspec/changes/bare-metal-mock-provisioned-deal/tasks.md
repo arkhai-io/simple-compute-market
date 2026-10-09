@@ -4657,6 +4657,15 @@ lane (9.1–9.5).
       the default chain and is countered under `bisection`, its preview reporting the
       same; a pinned unlisted contract is refused in both), each of the first two
       failing without the fix. Bare metal's lane is to run again.
+    - Run 37853584444: VM's lane passed (135); bare metal's passed through 08c and
+      failed at 08b, where no fulfillment had begun: the site refused the storefront's
+      schedule (422 `no_eligible_resource`) because the driver declared the machine
+      as `compute.gpu`, the site's default, and bare-metal scheduling places only
+      `compute.bare-metal`. The driver now declares that type. A site integration
+      probe over the driver's declaration and the storefront's claim reproduced the
+      refusal with the default type, and with the bare-metal type scheduled the
+      machine, its nested publication view intact, and began the grant. Bare metal's
+      lane is to run again.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
@@ -4889,7 +4898,9 @@ service code.
       legacy, so the two should agree on one place for it. An escrow proposal naming
       no contract is priced, in every compute domain, from the listing's first accepted
       escrow; which escrow prices it, or whether it is refused, is an open gap with no
-      owning change.
+      owning change. The bare-metal storefront's settlement servicing worker is
+      composed with no event callback, so a servicing step that fails (a refused
+      schedule, say) is retried with no stage event or log line at the storefront.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
