@@ -49,6 +49,14 @@ def buyer_stage(mechanism: str):
         ) from exc
 
 
+def advertised_plan_validator(match: Mapping[str, Any]):
+    """The selected entry's check of a plan it materializes, for one match."""
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return None
+    return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
+
+
 def validate_buyer_acceptance(outcome) -> None:
     if outcome.agreement is None or outcome.agreement.settlement is None:
         raise RuntimeError("accepted work has no Agreement settlement option")

@@ -1177,6 +1177,9 @@ def negotiate_with_seller(
         # both of those, against a reply not shaped to carry them, so
         # `market negotiate` refused a deal `market buy` completes against
         # the same seller in the same round.
+        # A selection names an option rather than carrying a shape, so the
+        # opening policy reads whether it bargains an amount from the option
+        # the buyer selected, as the seller's policies read it from its listing.
         opening = run_negotiation_chain(
             chain,
             [],
@@ -1184,6 +1187,11 @@ def negotiate_with_seller(
                 direction="minimize",
                 our_reference_amount=ceiling_amount,
                 our_opening_amount=initial_amount,
+                listing=(
+                    {"settlement_options": [advertised_option.model_dump(mode="json")]}
+                    if advertised_option is not None
+                    else {}
+                ),
                 our_escrow_proposal=base_proposal,
                 max_rounds=max_rounds,
                 intermediate=negotiation_policy_params,

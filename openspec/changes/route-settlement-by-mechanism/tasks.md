@@ -147,6 +147,16 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   `test_accepted_introduction_survives_contact_disable` onto `StorefrontClient`
   and `IntroductionTransport` against a served app; keep the disabled-restart
   persistence assertions.
+- [ ] 10.8 Fresh selections carry their bargained amount. Files:
+  `core/buyer/src/core_buyer/negotiation_client.py` (opening context carries
+  the advertised option), `kit/policy/src/market_policy/scalar_policies.py`
+  (opening is scalar when the selected option bargains an amount),
+  `domains/apicredits/buyer/src/arkhai_apicredits_buyer/settlement_stages.py`
+  and `negotiate_cli.py` (remove per-entry rate injection),
+  `e2e-tests/.../vms/test_full_deal.py` (force-accept opens with a selection).
+  Kit policy unit tests for scalar and unpriced selections; a VM storefront
+  integration test running the real VM buyer client with an Alkahest
+  selection against the served storefront to acceptance.
 - [ ] 10.4 Public-repository discipline. Remove private repository names,
   commits, planning-document paths and private test-target names from this
   change, its attachments, the payments kit (`schema/SOURCE.md`, generator and

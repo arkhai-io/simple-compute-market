@@ -51,20 +51,6 @@ class PaymentBuyerStage:
     def proposal(self, listing: Any, selected: Any) -> Any:
         return selected.selection
 
-    def prepare_chain(self, chain: Any, selected: Any) -> Any:
-        # Scalar policies recognize their opening shape from rates; the opaque
-        # selection carrier alone contains no price-field declaration.
-        rates = [rate.model_dump(mode="json") for rate in selected.option.rates]
-
-        def opening_shape(history: Any, context: Any) -> Any:
-            if not history:
-                context.our_escrow_proposal = {
-                    **context.our_escrow_proposal, "rates": rates,
-                }
-            return None, context
-
-        return [opening_shape, *chain]
-
     def validate_acceptance(self, outcome: Any) -> None:
         if not outcome.agreement or not outcome.agreement_bytes:
             raise ValueError("payment acceptance requires the exact Agreement")
@@ -177,9 +163,6 @@ class AlkahestBuyerStage:
             if max_explicit and max_price is not None:
                 max_price = display_to_base_units(max_price, decimals, field="--max-price")
         return initial_price, max_price
-
-    def prepare_chain(self, chain: Any, selected: Any) -> Any:
-        return chain
 
     def proposal(self, listing: Any, selected: Any) -> Any:
         return escrow_proposal_from_accepted_entry(

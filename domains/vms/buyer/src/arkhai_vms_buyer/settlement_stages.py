@@ -18,6 +18,7 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import escrow_terms_from_settlement_plan
+from market_alkahest.proposals import validate_selected_escrow_plan
 from market_alkahest.schemas import (
     EscrowProposal,
     EscrowTerms,
@@ -97,6 +98,22 @@ class AlkahestBuyerStage:
 
     def prepare_selection(self, selected):
         return selected
+
+    def plan_validator(self, listing, selected):
+        """Check the seller's plan funds the escrow the selection names.
+
+        The seller materializes the selected entry into a concrete escrow
+        obligation, so its parameters are the escrow's, not the option's.
+        """
+        entry = self.accepted_entry(selected)
+
+        def validate(plan):
+            try:
+                validate_selected_escrow_plan(plan, listing=dict(listing), entry=entry)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+
+        return validate
 
     def accepted_entry(self, selected):
         value = selected.option.params.get("accepted_escrow")
@@ -223,6 +240,10 @@ class PaymentsBuyerStage:
 
     def negotiation_prices(self, selected, *, initial_price, max_price, **_):
         return initial_price, max_price
+
+    def plan_validator(self, listing, selected):
+        # A payment selection's accepted state is its Agreement, not a plan.
+        return None
 
     def proposal(self, match, selected):
         return selected.selection

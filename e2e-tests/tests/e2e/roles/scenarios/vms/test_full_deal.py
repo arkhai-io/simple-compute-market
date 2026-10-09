@@ -872,7 +872,12 @@ class TestStage05a_EvaluateNegotiate:
 
 class TestStage05b_NegotiationStartsAndVisible:
     def test_05b_buyer_starts_negotiation_and_thread_confirmed(
-        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
+        self,
+        storefront_client,
+        storefront_admin_client,
+        registry_client,
+        buyer_config,
+        deal_state: DealState,
     ):
         """Negotiation starts + visible + round-0 confirmed in event stream.
 
@@ -888,6 +893,16 @@ class TestStage05b_NegotiationStartsAndVisible:
         # "now + an hour" at a different moment and settlement verification
         # refuses the attestation over a one-second difference.
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+
+        # A fresh negotiation names its settlement option explicitly; the
+        # seller accepts nothing it would have to infer from an escrow's shape.
+        (alkahest_option,) = [
+            dict(option)
+            for option in registry_client.get_listing(
+                deal_state.seller_listing_id
+            ).settlement_options
+            if dict(option)["mechanism"] == "alkahest.v1"
+        ]
 
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
@@ -906,6 +921,11 @@ class TestStage05b_NegotiationStartsAndVisible:
                 },
             },
             token=DEMAND_RESOURCE["token"]["contract_address"],
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": alkahest_option["option_id"],
+                "expiration_unix": deal_state._escrow_expiration_unix,
+            },
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
         assert neg_id, (

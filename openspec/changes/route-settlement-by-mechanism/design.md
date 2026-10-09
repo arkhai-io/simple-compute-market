@@ -128,6 +128,19 @@ repository's current closeout rules.
   name or commit in the kit, its generated models, permanent documents or
   change documents. Live payment qualification is described by its owner role
   (the payments service's own end-to-end tests).
+- **Fresh selections carry their bargained amount.** The first end-to-end run
+  on the merged tree showed that VM buyer openings selecting a rated Alkahest
+  option carried no `fields.amount`, and that the force-accept scenario still
+  opened with a legacy escrow proposal; the VM seller, which requires an
+  explicit selection, refused both. Explicit selection stays the rule. The
+  buyer's opening now decides scalar bargaining from the selected option, as
+  the seller's policies do: core places the advertised option the buyer
+  selected in the opening's policy context, and the kit's opening policy
+  injects the amount when that option bargains one. This replaces the
+  API-credit buyer's per-entry rate injection. The force-accept scenario opens
+  with a selection. Rejected: accepting legacy escrow-shaped openings on VM by
+  mapping them to Alkahest, which would infer the mechanism from an escrow
+  proposal's presence.
 - **Closeout follows the current checklist:** documentation citations,
   `make check-packaging`, and the end-to-end pipeline with its run recorded.
   Goal 6's gap table drops the contact-exchange and delivery rows that the

@@ -27,7 +27,7 @@ from typing import Any, TypeVar
 
 from market_core import SettlementStageTable
 
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
 
 from core_buyer.orchestrator import (
@@ -66,6 +66,13 @@ BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
 RevalidateSettlementFn = Callable[
     [dict[str, Any], SettlementOption],
     Awaitable[None],
+]
+# Per candidate listing: the selected mechanism's check of a seller plan that
+# it materializes from the selection rather than mirroring the option, or None
+# when the option's own parameters are the plan's.
+AdvertisedPlanValidatorFn = Callable[
+    [dict[str, Any]],
+    Callable[[SettlementPlan], None] | None,
 ]
 
 
@@ -384,6 +391,7 @@ def make_negotiate_hook(
     chain: list[Any] | None,
     revalidate_settlement: RevalidateSettlementFn | None = None,
     validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -414,6 +422,7 @@ def make_negotiate_hook(
             chain=chain,
             revalidate_settlement=revalidate_settlement,
             validate_acceptance=validate_acceptance,
+            advertised_plan_validator=advertised_plan_validator,
             on_event=on_event,
         )
 
@@ -438,6 +447,7 @@ def _negotiate_matches(
     revalidate_settlement: RevalidateSettlementFn | None,
     validate_acceptance: Callable[[NegotiationOutcome], None] | None,
     on_event: Callable[[str, dict], None],
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
 
@@ -613,6 +623,11 @@ def _negotiate_matches(
                 chain=chain,
                 policy_params=negotiation_policy_params,
                 validate_acceptance=validate_acceptance,
+                validate_advertised_plan=(
+                    advertised_plan_validator(match)
+                    if advertised_plan_validator is not None
+                    else None
+                ),
                 resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:

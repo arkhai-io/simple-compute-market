@@ -564,6 +564,11 @@ def register(app: typer.Typer) -> None:
                 chain=chain,
                 resolve_seller_principals=resolve_seller_principals,
                 policy_params=negotiation_policy_params,
+                validate_advertised_plan=(
+                    selected_stage.plan_validator(listing_dict or {}, selected_settlement)
+                    if selected_stage is not None and selected_settlement is not None
+                    else None
+                ),
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

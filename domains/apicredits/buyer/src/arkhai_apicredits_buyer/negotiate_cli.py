@@ -533,9 +533,6 @@ def register(credits_app: typer.Typer) -> None:
             default_guards=buyer_policies.APICREDITS_BUYER_GUARDS,
         )
 
-        if selected_stage is not None:
-            chain = selected_stage.prepare_chain(chain, selected_settlement)
-
         negotiation_policy_params = dict(policy_params_all)
         if selected_settlement is not None:
             negotiation_policy_params["_selected_settlement_option"] = (

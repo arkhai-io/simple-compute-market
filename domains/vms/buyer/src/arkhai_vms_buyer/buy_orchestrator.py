@@ -47,6 +47,7 @@ from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn, encode_escrow_pro
 from .settlement_composition import (
     buyer_settlement_stages,
     resolve_buyer_settlement_policy,
+    advertised_plan_validator,
     validate_buyer_acceptance,
 )
 from .settlement_stages import BuyerStageContext
@@ -79,6 +80,7 @@ def make_legacy_negotiate_hook(
         chain=chain,
         revalidate_settlement=revalidate_settlement,
         validate_acceptance=validate_buyer_acceptance,
+        advertised_plan_validator=advertised_plan_validator,
     )
 
 
