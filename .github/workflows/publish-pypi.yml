@@ -104,6 +104,7 @@ jobs:
             compute: ['domains/compute/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
+            bare-metal-buyer: ['domains/bare_metal/buyer/**', '.github/workflows/publish-pypi.yml']
             bare-metal-provisioning-adapter: ['domains/bare_metal/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             vms: ['domains/vms/domain/**', '.github/workflows/publish-pypi.yml']
             vms-listings: ['domains/vms/listings/**', '.github/workflows/publish-pypi.yml']
@@ -164,6 +165,7 @@ jobs:
             {"key": "compute",                "path": "domains/compute",                  "dist": "arkhai-compute"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
+            {"key": "bare-metal-buyer",      "path": "domains/bare_metal/buyer",        "dist": "arkhai-bare-metal-buyer"},
             {"key": "bare-metal-provisioning-adapter", "path": "domains/bare_metal/provisioning/adapter", "dist": "arkhai-bare-metal-provisioning-adapter"},
             {"key": "vms",                   "path": "domains/vms/domain",              "dist": "arkhai-vms"},
             {"key": "vms-listings", "path": "domains/vms/listings", "dist": "arkhai-vms-listings"},
