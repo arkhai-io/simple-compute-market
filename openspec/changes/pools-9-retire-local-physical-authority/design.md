@@ -87,9 +87,10 @@ Confirmed unchanged: the legacy-resources fallback is unreachable, because
 migration `20260604_002` creates both `compute_capacity_pools` and
 `compute_pool_members` on every database. The legacy tier (`_tier()`, the region
 fallback, `legacy_overrides_in_effect`) is as described above. The projection
-count semantics hold against `kit/site/src/market_site/projections.py`:
-capacity groups count enabled declarations, including exhausted ones, and
-resource-pool members include disabled declarations.
+count semantics the earlier count design relied on hold against
+`kit/site/src/market_site/projections.py` (capacity groups count enabled
+declarations, including exhausted ones; resource-pool members include disabled
+declarations), though status no longer reports a count.
 
 Drift from the earlier plan:
 
@@ -120,7 +121,8 @@ Drift from the earlier plan:
   its own top-level `resource_count` (open, unpaused bare-metal listings) and
   builds the shared `ProjectionFamilyStatus` from a version-only fetch that
   holds no generation. Its tests read `resource_count` through the shared
-  `core/storefront-client` `HealthResponse` (open decision D4).
+  `core/storefront-client` `HealthResponse` (decided: "Status reports no
+  resource count").
 - **`remove-dead-storefront-physical-surfaces` is coupled, not independent.**
   Its resource routes, host helpers, and the `compute_allocations` indexes in
   migration `20260604_002` read or build on the tables this change stops
@@ -162,7 +164,8 @@ operator can roll back from by reverting code.
 
 **Non-Goals:** a per-pool commercial write path (exists); carrying legacy
 values forward; dropping schema; the zero-caller surfaces and the provider
-rule (own changes); bare metal.
+rule (own changes); bare-metal publication (only bare metal's status count
+retires here).
 
 ## Decisions
 
@@ -400,66 +403,62 @@ required by a current permanent scenario and read by running e2e checks,
 and removing the local cleanup loop while local derivation remains available
 would discard an existing recovery operation before its inventory retires.
 
-### Operator counts belong to each site's projection generation
+### Status reports no resource count
 
-Replace the storefront-local top-level `resource_count` with
-`site_projections[site_id][family].resource_count`, alongside that family's
-existing state, revision, digest, last error, and confirmation timestamp.
-Counts remain separate for every site and projection family; a storefront-wide
-total cannot replace them.
+No storefront's system status reports a `resource_count`, and none is added
+beneath `site_projections`. The VM storefront's top-level field, the core
+`HealthResponse` field, bare metal's top-level field, and the shared typed
+client's field all retire. Each question the field was used to answer already
+has a better signal:
 
-The current site projections already contain the necessary information:
+- **Can the storefront see inventory at a site?** Per-site, per-family
+  projection state and identity on the status surface and the administrator
+  projection refresh route, required by `site-capacity`'s "Per-site projection
+  load-state visibility". The VM e2e host-registry helper already asserts on
+  those states. What a loaded generation contains is read from the site's own
+  projection or provisioning's inventory administration surfaces.
+- **Is the storefront selling anything?** The storefront's listings and the
+  per-site `publication_derivation` report, which explains why a pool
+  publishes nothing.
+- **Did an inventory import fail?** Provisioning, which owns import, reports
+  it through its import API and status. A storefront cannot tell an
+  intentionally empty site from a failed import.
 
-- `resource_pool`: count the projected members across pools. This counts
-  capacity declarations, including disabled declarations, not distinct hosts
-  or physical machines.
-- `capacity_bucket`: sum the groups' existing `resource_count` values. The
-  producer groups enabled declarations only, including exhausted ones;
-  `available` describes each member's remaining quantities, not a group total.
-  Neither the number of groups nor the sum of dimension quantities is a
-  resource count. Pool enablement and offering-mode authorization are not
-  additional filters for this count.
-
-Compute each summary from the same cached family view whose identity and state
-are reported. Do not fetch a new generation just for status or consult local
-inventory. A held empty generation reports zero; a family with no generation
-held reports `null`; a retained stale generation reports its count with state
-`stale`. The two families can differ because their inclusion rules differ and
-their generations are independently versioned.
-
-Physical-resource projections also support pools that do not use capacity
-buckets; their eventual listing consumers must not make capacity buckets a
-universal inventory requirement. Count the current resource-pool projection's
-members independently of the capacity-bucket family. The per-site, per-family
-structure also accommodates any further physical-resource projection under
-its own count semantics when exposed through status. Defining a new projection
-protocol or changing which projection creates a listing is outside this
-diagnostic decision.
-
-A positive count proves projected inventory exists, not that its pool is
-enabled, its shapes are feasible, its provider can execute, or its commercial
-terms produce a listing. Publication diagnostics and catalogue checks remain
-the evidence for sellable supply. A known-empty generation cannot establish
-whether an operator intended it to be empty or an inventory import failed;
-import failures are diagnosed at provisioning, which owns the import.
+Provenance. The VM field was added in May 2026 to catch one failure: the CSV
+importer writing to a different SQLite file than the server read, which left
+the storefront answering every negotiation with `no_matching_inventory`. It
+counts local `resources` rows. Since projection-backed derivation became the
+default, neither publication nor the round-zero inventory guard reads those
+rows, so the field no longer tracks whether a storefront can sell; in the e2e
+stack it reads 1 only because both storefronts still mount the bundled CSV.
+Its failure mode retires with the importer. Bare metal's field was added in
+July 2026 for status-shape parity but counts open, unpaused bare-metal
+listings, a publication outcome under the same name. The permanent scenario
+that requires the field was written in July 2026 to record existing
+behaviour, not to choose it. No production code reads either field; its
+readers are the smoke test, the two full-deal scenarios' stage 00f, one
+bare-metal HTTP test, the validation runbook, and the seller quickstart.
 
 Alternatives:
 
-- *A projection-derived top-level total.* Rejected: the counts per site must
-  remain visible, and summing known sites would hide unavailable ones.
-- *Adding counts to the site projection protocol.* Unnecessary for the current
-  families: grouped capacity already carries multiplicity, and the
-  resource-pool projection already enumerates every member.
-- *Publication candidate counts as the inventory diagnostic.* Rejected as the
-  replacement: a populated projection may yield no candidate for several
-  independent reasons. Candidate or listing counts can be separate diagnostics.
+- *Per-site, per-family projection counts* (the earlier decision in this
+  change). Rejected: the e2e readiness checks it would serve already assert
+  on projection state, and the projection's content is readable at its
+  source. A count would add a second status contract whose zero, null, and
+  stale semantics need their own specification and tests, and bare metal,
+  which fetches only projection versions from its health probe, could not
+  fill it.
+- *Unify by meaning:* per-family inventory counts plus a shared open-listing
+  count. Rejected: the listings API already answers the publication question,
+  and a status counter would duplicate it.
+- *Keep the field for bare metal only.* Rejected: one typed client field
+  would carry two meanings, and its only reader is a test.
 
-This replaces the current operator acceptance requirement's local-row scenario
-and its consumers. The response change removes the top-level field and adds
-counts beneath the existing projection status; it does not change liveness
-health or global negotiation-pause behavior. Permanent homes are
-`openspec/specs/storefront-publication/spec.md` for the observable status
-contract and its `architecture.md` companion for the interpretation of counts.
+Bare metal is touched only to delete its status field and the listing count
+behind it; its publication is unchanged. Liveness health and global
+negotiation-pause behavior are unchanged. The permanent home is
+`openspec/specs/storefront-publication/spec.md`'s replacement for
+"Operator-visible acceptance state".
 
 ## Risks / Trade-offs
 
@@ -503,9 +502,8 @@ with current site state before trading resumes; no `DROP` has happened.
 
 ## Open Questions
 
-The resource-count diagnostic decision is resolved above. Further use of
-physical-resource projections for listing creation does not gate these
-summaries of existing projections.
+The resource-count diagnostic decision is resolved above: status reports no
+resource count.
 
 The repository work order is decided: the separate multi-storefront repair
 (done), then `remove-dead-storefront-physical-surfaces`, then the coordinated
@@ -513,14 +511,10 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-Open decisions raised by the 2026-10-08 re-grounding (D1–D3 are decided
+Open decisions raised by the 2026-10-08 re-grounding (D1–D4 are decided
 above). Each gates the tasks named; no task prescribes an answer until the
 decision is recorded above.
 
-- **D4 — status scope.** How the top-level `resource_count` removal and the
-  per-family count apply to the shared core status model, the shared typed
-  client, and bare metal's own status. Gates tasks 3.4 and 3.8 and the delta's
-  "Operator-visible acceptance and projection state".
 - **D5 — freeze mechanics.** How fresh databases skip the retired tables'
   migrations and bootstrap, and what an upgraded database with a pending
   legacy migration does. Gates tasks 4.4 and 6.1–6.2 and the delta's upgrade

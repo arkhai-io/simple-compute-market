@@ -65,13 +65,9 @@ a storefront inventory read path or overwrite live site state automatically.
 
 ### Requirement: Operator-visible acceptance state
 
-**Reason**: Its inventory scenario requires a storefront-local resource-row
-count, which retires with local inventory and CSV import.
+**Reason**: Its inventory scenario requires a `resource_count` of storefront-local resource rows, which retire with local inventory and CSV import. The count no longer tracked whether a storefront can sell once listings derived from site projections, and its only readers were tests and operator documents.
 
-**Migration**: Replaced by "Operator-visible acceptance and projection state"
-below. Global negotiation-pause behavior is preserved. Operator checks use
-counts under each site's projection-family status instead of the removed
-top-level `resource_count`; provisioning owns inventory-import diagnostics.
+**Migration**: Replaced by "Operator-visible acceptance and projection state" below. Global negotiation-pause behavior is preserved. Status reports no resource count: inventory readiness is read from per-site projection-family state, sellable supply from listings and publication diagnostics, and inventory-import outcomes from provisioning.
 
 ### Requirement: Storefronts cache independent site projections
 
@@ -84,34 +80,17 @@ top-level `resource_count`; provisioning owns inventory-import diagnostics.
 ### Requirement: Operator-visible acceptance and projection state
 
 The storefront MUST expose enough operator state to distinguish global
-negotiation pause from listing state, and a known-empty site projection from
-one whose generation is not held.
+negotiation pause from listing state, and a site projection the storefront holds
+from one it does not hold, per site and projection family as "Per-site projection
+load-state visibility" in the site-capacity specification requires.
 
-System status MUST report `resource_count` separately under each site's
-projection-family status, alongside that family's load state, revision,
-digest, last error, and confirmation timestamp. The count MUST describe the
-same cached generation as that state and identity. Status MUST NOT obtain a
-separate generation just to compute a count, consult storefront-local physical
-inventory, or replace per-site counts with a storefront-wide total. The
-top-level storefront-local `resource_count` field MUST be removed.
-
-For `resource_pool`, the count MUST be the number of projected members across
-pools, including disabled declarations. For `capacity_bucket`, it MUST be the
-sum of the projected groups' `resource_count` values, counting enabled
-declarations including exhausted ones. These are declaration counts, not
-counts of distinct physical machines, groups, dimension quantities, feasible
-listing shapes, or published listings. Both counts MUST NOT be filtered
-further by pool enablement or offering-mode authorization.
-
-A held empty generation MUST report zero. A family with no generation held
-MUST report null, not zero. A retained stale generation MUST retain its count
-and be reported as stale. Each site and projection family MUST be reported
-independently; a loaded family MUST NOT supply a count for an unknown one.
-
-Inventory counts MUST NOT assert publication readiness or diagnose an import
-failure from emptiness alone. Publication diagnostics and catalogue state
-describe sellable listings; provisioning owns its inventory-import outcomes.
-Liveness health MUST remain independent of these operator inventory counts.
+System status MUST NOT report a storefront-wide count, such as `resource_count`,
+in place of per-site projection state or publication outcome. Whether a site
+declares inventory is observed through that site's projection and provisioning's
+inventory administration; whether that inventory became sellable is observed
+through the storefront's listings and publication diagnostics; an
+inventory-import failure is reported by provisioning, which owns the import.
+Liveness health MUST remain independent of per-site projection state.
 
 #### Scenario: Storefront is globally paused
 
@@ -119,46 +98,18 @@ Liveness health MUST remain independent of these operator inventory counts.
 - **THEN** the storefront rejects it with HTTP 503 and a global-pause reason
   until an authenticated operator resumes the process
 
-#### Scenario: A site has a known-empty projection
+#### Scenario: A site's projection has not loaded
 
-- **WHEN** a cached site projection family holds an empty generation
-- **THEN** system status reports zero resources for that site and family,
-  with the held generation's identity and state
+- **WHEN** a configured site's projection family holds no generation, even if
+  another family or site has loaded
+- **THEN** system status reports that family's own load state for that site,
+  without treating the site as empty
 
-#### Scenario: A projection family has not loaded
+#### Scenario: An operator checks inventory readiness
 
-- **WHEN** a site projection family has no generation held, even if another
-  family or site has loaded
-- **THEN** its count is null and its own load state is reported, without
-  borrowing another family's count or treating the site as empty
-
-#### Scenario: Refresh fails after inventory has loaded
-
-- **WHEN** refreshing a family fails after a complete generation was held
-- **THEN** its count and identity describe that retained generation and its
-  state is stale
-
-#### Scenario: Grouped capacity carries resource multiplicity
-
-- **WHEN** a site's capacity projection contains two groups with resource
-  counts of three and two
-- **THEN** its capacity-family status reports five resources, regardless of
-  the groups' available dimension quantities
-
-#### Scenario: Inventory includes disabled and exhausted declarations
-
-- **WHEN** a site's resource-pool projection contains three declarations,
-  one disabled and two enabled, one of which is exhausted, and its capacity
-  projection contains those two enabled declarations
-- **THEN** status reports three resource-pool members and two capacity-family
-  resources, without asserting that either count proves sellable listings
-
-#### Scenario: Sites have different inventory counts
-
-- **WHEN** two sites hold resource-pool generations containing two and five
-  members respectively
-- **THEN** system status preserves the two site-scoped counts alongside their
-  respective generation identities rather than replacing them with seven
+- **WHEN** an operator reads a storefront's system status
+- **THEN** it reports each configured site's projection-family state and
+  carries no `resource_count` field
 
 ### Requirement: Projection-backed listing candidate derivation
 

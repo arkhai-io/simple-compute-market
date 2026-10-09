@@ -8,7 +8,8 @@ Section numbering is kept from the original plan. Section 0 is
 here with the local-inventory cutover. Section 1's endpoint tasks are
 struck because `kit/pool-overrides` is the write path. Resolved planning
 questions, kept as record. The diagnostic question added by the scope transfer
-is resolved in `design.md` as per-site, per-family projection counts:
+was first resolved as per-site, per-family projection counts and is now
+resolved in `design.md` as "Status reports no resource count":
 
 1. `resources`' commercial columns are dead in the default code path: read only
    by `_project_legacy_resource_row`, reached only when `compute_capacity_pools`
@@ -28,9 +29,10 @@ is resolved in `design.md` as per-site, per-family projection counts:
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-Tasks 3.4, 3.8, 4.4, 4.5, 6.1, and 6.2 are gated on the open decisions D4–D6
-in `design.md`'s Open Questions; they are amended when each decision is
-recorded. D2 is decided and folded into task 4.3, D3 into task 5.7.
+Tasks 4.4, 4.5, 6.1, and 6.2 are gated on the open decisions D5 and D6 in
+`design.md`'s Open Questions; they are amended when each decision is
+recorded. D2 is decided and folded into task 4.3, D3 into task 5.7, and D4
+into tasks 3.4 and 3.8.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -90,39 +92,41 @@ numbers and land before this change.
 Former tasks 3.3 (local-row reservation cleanup) and 3.4 (`resource_count`)
 are transferred here and retire with Section 4's local listing path and
 Section 5's CSV contract. The site-ledger half of `release_reservations`
-remains supported. The accepted diagnostic decision is implemented before
-removing the storefront-local count and its consumers.
+remains supported. Status reports no resource count afterwards (`design.md`,
+"Status reports no resource count").
 
 - [ ] 3.3 Remove only the local-row normalization in
       `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py`'s
       `release_reservations`; retain authoritative site-ledger release and
       correct its description. Update its focused cases in
       `domains/vms/storefront/tests/integration/test_admin_api.py`.
-- [ ] 3.4 Replace top-level `resource_count` with counts under
-      `site_projections[site_id][family]`: derive member counts for
-      `resource_pool` and sum group multiplicities for `capacity_bucket` from
-      the same cached view used for state and identity in
-      `domains/vms/storefront/src/market_storefront/services/site_projection_cache.py`.
-      Remove the local inventory read in
-      `domains/vms/storefront/src/market_storefront/services/system_service.py`.
-      Update `ProjectionFamilyStatus` and `HealthResponse` in
-      `core/storefront/src/core_storefront/models/system_models.py` and the
-      client model/parser in
-      `core/storefront-client/src/storefront_client/models.py`. Preserve
-      independent sites and families, zero for held empty generations, null
-      when no generation is held, and retained stale counts. Leave the site
-      projection protocol and liveness health unchanged.
-- [ ] 3.8 Verify counts and state together in
-      `domains/vms/storefront/tests/unit/services/test_site_projection_cache.py`
-      and the typed-client integration boundary in
-      `domains/vms/storefront/tests/integration/test_admin_api.py`; reconcile
-      injected summaries in
-      `domains/vms/storefront/tests/unit/services/test_system_service.py`.
-      Cover multiple sites, independently loaded families, empty and unknown
-      generations, stale retained generations, unequal group multiplicities,
-      disabled declarations, and exhausted declarations. Assert top-level
-      `resource_count` is absent and no local inventory read is needed.
-      Run the focused suites before the consumer migrations in task 5.6.
+- [ ] 3.4 ~~Replace top-level `resource_count` with counts under
+      `site_projections[site_id][family]`.~~ Superseded 2026-10-09 by
+      `design.md`, "Status reports no resource count": remove `resource_count`
+      from every storefront's status with no replacement count. Remove the
+      local inventory read in
+      `domains/vms/storefront/src/market_storefront/services/system_service.py`;
+      the field from `HealthResponse` in
+      `core/storefront/src/core_storefront/models/system_models.py`; the typed
+      field and its parsing in
+      `core/storefront-client/src/storefront_client/models.py`; and, in
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`,
+      `BareMetalHealthResponse.resource_count` in `models.py`, the count in
+      `runtime.py`'s `health()` (its database check stays), and
+      `count_open_bare_metal_resources` in `sqlite_client.py`. Leave
+      `ProjectionFamilyStatus`, the site projection protocol, liveness health,
+      and global pause unchanged.
+- [ ] 3.8 ~~Verify counts and state together.~~ Superseded 2026-10-09 with
+      task 3.4: assert `resource_count` is absent from VM and bare-metal
+      status through the typed client
+      (`domains/vms/storefront/tests/integration/test_admin_api.py` and
+      `domains/bare_metal/storefront/tests/test_http_system.py`), that VM
+      status performs no local inventory read
+      (`domains/vms/storefront/tests/unit/services/test_system_service.py`),
+      and that per-site projection state is unchanged
+      (`tests/unit/services/test_site_projection_cache.py`). Run the
+      `core/storefront-client` suite and the focused storefront suites before
+      the consumer migrations in task 5.6.
 
 ## 4. Retire the local-table listing path
 
@@ -269,10 +273,13 @@ provisioning can trust two principals leaves it with no listing source.
       region from the legacy tier today; declare them on the pool hint or a
       site-scoped override and keep its published-term assertions. Confirm
       the other files' imports are vestigial before deleting them.
-      The resource-count assertions and their import diagnostics must be
-      replaced by per-site projection state and counts from Section 3;
-      known-empty is distinct from unknown, and inventory presence is distinct
-      from publishable supply. Preserve catalogue/deal assertions for the latter.
+      Replace the resource-count assertions and their import diagnostics: the
+      smoke test checks that each configured site's projection families are
+      loaded (as `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`
+      already does) and that its seeded declarations are present at
+      provisioning; stage 00f of both full-deal scenarios seeds through
+      provisioning and asserts the projection loaded. Preserve catalogue and
+      deal assertions as the evidence of sellable supply.
       `repair-multi-storefront-scenario` must already have migrated
       `test_multi_registry.py`'s Alice seeding and removed her local-path opt-out.
       Preserve that completed work and migrate the remaining CSV consumers
@@ -343,13 +350,12 @@ Per `openspec/README.md#plan-closeout-requirements`.
       list and legacy-terms bullet in "Storefront listing shapes and pool
       overrides".
       Replace the "Operator-visible acceptance state" requirement with the
-      delta's "Operator-visible acceptance and projection state", reconcile
-      its Evidence entry, and promote the count interpretation to
-      `openspec/specs/storefront-publication/architecture.md`'s "Projection
-      families". Update `docs/seller-quickstart.md` and
-      `docs/development/VALIDATION_RUNBOOK.md` to diagnose inventory by site,
-      family, state, and count; diagnose import failures at provisioning and
-      sellable listings through publication diagnostics and catalogue checks.
+      delta's "Operator-visible acceptance and projection state" and reconcile
+      its Evidence entry. Update `docs/seller-quickstart.md` and
+      `docs/development/VALIDATION_RUNBOOK.md` to diagnose inventory
+      readiness by per-site projection state, import failures at
+      provisioning, and sellable listings through publication diagnostics and
+      catalogue checks; remove every `resource_count` check.
       Correct the CSV-input descriptions the retired pricing migration
       leaves: `openspec/specs/storefront-publication/architecture.md`'s
       "Settlement option reconciliation",
@@ -411,5 +417,5 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Local resource-count diagnosis and local reservation normalization retire with their inventory source | Temporary sequencing decision in this change's `design.md` |
 | Complete the separate multi-storefront repair first; retire the local inventory contract, its writers and consumers, and fresh-schema creation together | Temporary sequencing decision in this change's `design.md`; dependency/status in `openspec/changes/README.md` |
 | `remove-dead-storefront-physical-surfaces` lands before this change, so this freeze covers only the local inventory tables | Temporary sequencing decision in this change's `design.md`, "The zero-caller removal lands first"; dependency/status in `openspec/changes/README.md` |
-| Inventory counts remain separate per site and projection family, describing the same cached generation as the reported state and identity | `openspec/specs/storefront-publication/spec.md` — "Operator-visible acceptance and projection state"; companion `architecture.md` — "Projection families" |
-| Zero means known-empty, null means unknown, and a stale count describes retained inventory rather than current sellable supply | `openspec/specs/storefront-publication/spec.md`; `docs/seller-quickstart.md`; `docs/development/VALIDATION_RUNBOOK.md` |
+| ~~Inventory counts remain separate per site and projection family~~ — superseded: status reports no resource count; inventory readiness is per-site projection state, sellable supply is listings and publication diagnostics, import outcomes are provisioning's | `openspec/specs/storefront-publication/spec.md` — "Operator-visible acceptance and projection state"; `docs/seller-quickstart.md`; `docs/development/VALIDATION_RUNBOOK.md` |
+| Why no count replaces `resource_count`, and its provenance | This change's `design.md`, "Status reports no resource count" |

@@ -120,20 +120,19 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
 - Remove the local-row normalization half of `release_reservations` when the
   local listing path retires; retain the authoritative site-ledger release
   operation. Correct its operator description for the resulting behavior.
-- **BREAKING (status):** replace top-level `resource_count` with
-  `site_projections[site_id][family].resource_count` when CSV inventory retires.
-  Count projected resource-pool members and sum the capacity groups' existing
-  counts, separately per site and family. Report zero for a held empty
-  generation, `null` when none is held, and the retained count with stale state
-  after refresh failure. No site projection protocol change is needed.
-  Reconcile both health models, the operator acceptance requirement and its
-  Evidence entry, smoke and full-deal assertions, the seller quickstart, and
-  the validation runbook. Publication diagnostics and catalogue checks prove
-  sellable supply separately from inventory presence.
+- **BREAKING (status):** remove `resource_count` from every storefront's
+  system status, with no replacement count: the VM storefront's local-row
+  count, the core `HealthResponse` field, bare metal's open-listing count
+  (`BareMetalHealthResponse.resource_count` and
+  `count_open_bare_metal_resources`), and the shared typed client's field.
+  Inventory readiness is read from per-site, per-family projection state;
+  sellable supply from listings and publication diagnostics; import failures
+  from provisioning. Reconcile the operator acceptance requirement and its
+  Evidence entry, the smoke, full-deal, and bare-metal HTTP assertions, the
+  seller quickstart, and the validation runbook.
 - These two removals were transferred from
   `remove-dead-storefront-physical-surfaces` during its design review. The
-  replacement operator diagnostic is now resolved in `design.md` as counts
-  attached to each site's independently versioned projection families.
+  replacement is resolved in `design.md`, "Status reports no resource count".
 
 ## Capabilities
 
@@ -163,11 +162,11 @@ None.
   plumbing) — `remove-dead-storefront-physical-surfaces`.
 - Do not fix a Resource Pool's provider at creation —
   `fix-resource-pool-provider-at-creation`.
-- Do not migrate the bare-metal storefront, which has no local tables.
-- Do not change projection protocols or the listing-creation paths as part of
-  replacing the inventory diagnostic. Preserve independent physical-resource
-  counts for pools that do not use capacity buckets, and the per-site,
-  per-family structure for any further projection family.
+- Do not migrate the bare-metal storefront's publication, which has no local
+  tables; only its status count retires.
+- Do not add an inventory or listing count to status, change projection
+  protocols, or change the listing-creation paths as part of retiring the
+  inventory diagnostic.
 
 ## Impact
 
@@ -194,11 +193,12 @@ None.
 - `kit/pool-overrides` loses the `inactive` state: `OVERRIDE_INACTIVE` is
   deleted and its projection source is never `None` (`design.md`, "The
   pool-override kit loses `inactive`").
+- Bare metal: `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`
+  (`models.py`, `runtime.py`, `sqlite_client.py`) and
+  `tests/test_http_system.py` lose the status count; nothing else in bare metal
+  changes.
 - Not affected: `kit/resource-pools`, the pool-override store, routes, clients,
-  and CLI, the
-  region/SLA/pricing hint mechanism, bare-metal publication. Bare metal shares
-  the status models and typed client this change edits, so its status output
-  is checked for regressions.
+  and CLI, the region/SLA/pricing hint mechanism, bare-metal publication.
 - Behaviour after upgrade: a home-site pool that took a commercial field from
   the legacy record resolves it from the pool hint, then the configured
   default; `region` has no legacy fallback and must be declared on the pool
@@ -233,11 +233,11 @@ None.
   operator deployment documentation.
 - Why legacy values are not carried over, and why the schema is frozen rather
   than dropped — this change's `design.md`.
-- Per-site, per-family counts describe the cached projection generation;
-  inventory presence, freshness, and publication feasibility are separate
-  observations — `openspec/specs/storefront-publication/spec.md` and its
-  architecture companion, with operational interpretation in the
-  quickstart/runbook.
+- Status reports no resource count. Inventory readiness is per-site,
+  per-family projection state; sellable supply is listings and publication
+  diagnostics; import outcomes are provisioning's —
+  `openspec/specs/storefront-publication/spec.md`, with operational
+  interpretation in the quickstart and runbook.
 
 ## Dependencies and Related Changes
 
