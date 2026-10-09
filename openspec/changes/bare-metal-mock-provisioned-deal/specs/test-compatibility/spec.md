@@ -66,20 +66,26 @@ MAY insert stages of its own; a stage whose body differs between domains is not 
 - **WHEN** a compute domain would need its own negotiation stage
 - **THEN** the difference is resolved in its storefront composition, not in the stage
 
-### Requirement: Each domain runs in its own lane on images built once
+### Requirement: Each domain runs in its own lane
 
 The end-to-end pipeline MUST run each market domain's scenarios in a lane of its own, as
 a pipeline job separate from every other domain's lane, so a failure in one domain's
-lane cannot hide or stand in for another's evidence. A pipeline run MUST build each image
-once and every lane MUST run on those images; a lane MUST NOT rebuild them. Local lane
-targets MAY build before they run.
+lane cannot hide or stand in for another's evidence. Each lane MUST build the images its
+own stack runs and compose only its own services, including every registry its
+scenarios read.
 
 #### Scenario: The pipeline runs
 
 - **WHEN** the end-to-end pipeline runs
-- **THEN** one job builds the images, and the VM, bare-metal, and API-credit lanes each
-  load them and run their own stack and scenarios
+- **THEN** the VM, bare-metal, and API-credit lanes each build their own stack's images
+  and run their own stack and scenarios, in parallel
 - **AND** the VM lane's stack does not include the API-credit services
+
+#### Scenario: A scenario reads a registry of another schema
+
+- **WHEN** a lane's scenario discovers across registries of more than one schema
+- **THEN** the lane deploys each of those registries in its own stack, and the scenario
+  reads them from that lane's settings
 
 ### Requirement: Bare-metal storefront restart recovery is proven at integration level
 

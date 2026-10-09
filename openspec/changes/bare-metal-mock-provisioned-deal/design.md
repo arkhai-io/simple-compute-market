@@ -2959,6 +2959,82 @@ Reviewed against run 37899278727 and decided with the maintainer.
 | The roadmap still listed the pipeline's missing bare-metal deal as open | Closed in Goal 4's table, whose state now names the lane's deal |
 | Promotion is deferred to Section 11, while section closeout calls for it | Section 9's closeout stays open until 11.2 and 11.4 land; its implementation and live gate are complete once 9.6's rerun passes |
 
+### Section 10 design: each lane builds and composes its own stack (2026-10-09)
+
+Re-read against the workflow, the Makefiles, every compose file, and run 37899278727
+before planning Section 10; decided with the maintainer. Supersedes "Lanes run on images
+built once" and refines "API credits runs in its own lane" and "Lane composition files".
+
+| Finding | Consequence |
+|---|---|
+| Each lane job builds every image, and a whole job took 4m25s (bare metal) and 6m55s (VM), about three minutes of it the build | One build job ahead of the lanes, plus saving, uploading, downloading, and loading the image set, would lengthen every lane's wall-clock time. What it saves is runner time, which costs this repository nothing (decision 1) |
+| `build-dev` builds every image, the API-credit images included, whichever lane runs | Each lane builds only what its stack runs (decision 1) |
+| `compose.local-identities.yml` binds VM and API-credit services together | The overlay splits per market, as planned (decision 3) |
+| `compose.apicredits.yml` omits the API-credit storefront's `APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY`, so its stack cannot settle, and requires `APICREDITS_BUYER_*` paths no target prints | The API-credit bindings and buyer paths move to its overlay, with an environment target of its own (decisions 3 and 4) |
+| The plan held that Compose refuses a file redefining a service it `include`s; Compose 5.5.1 merges the definitions instead, and the runner's version is not recorded | `compose.apicredits.yml` becomes `include`-only anyway, so no stack depends on either behaviour (decision 3) |
+| `test_credits_deal_buyer_cli` pins a compute-schema registry beside the credits registry, to exercise discovery routed by schema; in the VM lane that is VM's registry | The API-credit lane deploys a compute-schema registry of its own (decision 4) |
+| `e2e_credits_payment_deal` exists beside `e2e_credits_deal` and skips in the VM lane with no payments target | It moves with the credits deal (decision 5) |
+| 10.1's reference list names a test since removed and two files that no longer mention the overlay | The task names the references that exist |
+
+Decisions:
+
+1. **Each lane builds the images its stack runs, in its own job.** The root `Makefile`
+   gains `build-e2e-vm`, `build-e2e-bare-metal`, and `build-e2e-apicredits`: the wheels,
+   the dev chain image with its baked state, the test image, and the lane's runtime
+   images (VM: registry, storefront, provisioning; bare metal: registry, provisioning,
+   bare-metal storefront; API credits: registry, credits service, credits storefront,
+   sample app). `build-dev` keeps building everything for local use. The three lane jobs
+   run in parallel, each building, and share no image artifact; wall-clock time is the
+   measure. Rejected: one build job publishing the images as an artifact (a serial
+   build, plus the transfer and load, before any lane starts) and a registry-backed
+   build cache (machinery for builds that take about three minutes).
+2. **Lane targets.** `e2e-tests/Makefile`'s `test-e2e-vm`, `test-e2e-bare-metal`, and a
+   new `test-e2e-apicredits` each write the lane's environment file, take its stack
+   down, run its build target, bring the stack up, and run its markers in the test
+   container on its network; `test-e2e` runs the three in turn, taking each stack down
+   before the next, since each runs its own `anvil`. `E2E_MODULE` drops
+   `e2e_credits_deal` and `e2e_credits_payment_deal`, and `E2E_APICREDITS_MODULE` holds
+   them. No run-only targets: nothing loads prebuilt images any more.
+3. **Composition files.** `compose.local-identities.yml` splits into
+   `compose.vms-local.yml` (the VM services' bindings and the VM buyer service) and
+   `compose.apicredits-local.yml` (the API-credit services' bindings, the storefront's
+   EVM key, and the credits buyer service), following `compose.bare-metal-local.yml`.
+   `compose.apicredits.yml` becomes `include`-only, as `compose.vms.yml` is.
+   `docker-compose.yml` stays the full local stack and documents layering both overlays.
+   The VM lane composes `compose.vms.yml` and its overlay, so its stack has no API-credit
+   service.
+4. **The API-credit lane owns its topology.** It is a compose project of its own
+   (`simple-market-apicredits`), with its own network, volumes, and environment file
+   from `make e2e-apicredits-dev-env`; `make e2e-vms-dev-env` prints the VM lane's, and
+   `e2e-dev-identities-env` prints both for the full stack. The compute-schema registry
+   the credits scenario routes across is the lane's own, `compute-registry`, from the
+   registry image with the compute filter spec and a development identity, declared in
+   `compose.apicredits-lane.yml`, which only the lane layers: the full stack already has
+   VM's. The scenario reads that registry and its pins from the `api_credits` settings,
+   so it names nothing of the VM lane. Rejected: the lane borrowing VM's registry service
+   (it would compose another market's topology), and declaring the registry in
+   `compose.apicredits-local.yml` (the full stack would gain a redundant compute
+   registry).
+5. **Scenario placement.** `e2e_credits_deal` and `e2e_credits_payment_deal` run in the
+   API-credit lane; the payment deal still skips without a payments target.
+   `e2e_alkahest_escrow_codecs` and `multi_registry` stay in VM's, which alone needs
+   VM's two registries.
+6. **Workflow.** `.github/workflows/e2e.yml` runs three parallel jobs, `e2e-vm`,
+   `e2e-bare-metal`, and `e2e-apicredits`, each with uv and Foundry (the dev chain's
+   baked state is generated against Anvil), running its `test-e2e-<lane>` target and
+   collecting logs and tearing down with its own files, project, and environment file.
+7. **The lane requirement drops "images built once".** The `test-compatibility` delta's
+   requirement becomes "Each domain runs in its own lane": a lane per market domain, as
+   its own job, building what its stack runs and composing only its own services.
+
+Unchanged: holding and stepping the API-credit storefront's loops in that lane, and its
+production-application integration tests, stay with `apicredits-end-to-end-lane`.
+
+Permanent destinations: the lane requirement in `openspec/specs/test-compatibility/spec.md`
+through this change's delta (11.4); the three lanes, their targets, and their composition
+in `docs/development/TESTING.md` (11.2) and the compose file list in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` (11.3).
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,
@@ -2989,6 +3065,9 @@ under "Where each route's typed client lives"; this change does not move the cli
 
 ### Lanes run on images built once
 
+*Superseded by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decision 1: each lane builds the images its stack runs.*
+
 Decided with the maintainer. One pipeline job builds the wheels and every image once and
 publishes them as a short-lived workflow artifact; each lane job depends on it, loads the
 images, and runs its stack and scenarios without building. Each lane gains a run-only
@@ -2996,6 +3075,10 @@ Make target, and the existing `test-e2e-<lane>` targets become build plus run so
 use is unchanged. Toolchains needed only to build move to the build job.
 
 ### API credits runs in its own lane
+
+*Refined by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decisions 4 and 5: the lane owns its topology, including the compute
+registry its scenario routes across, and the payment deal moves with the credits deal.*
 
 Decided with the maintainer, and migrated from `apicredits-end-to-end-lane`: the third
 lane runs the API-credit stack (`compose.apicredits.yml`) and `e2e_credits_deal` as its
@@ -3056,6 +3139,9 @@ removed lease registration ("5B.12.D decision gate (2026-10-06)"); what remains 
 is in "Section 6 design: bare metal on the negotiation runtime (2026-10-07)".*
 
 ### Lane composition files
+
+*Refined by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decisions 3 and 4.*
 
 Found in planning. `compose.local-identities.yml` binds both the VM and API-credit
 services, so the VM stack cannot drop the API-credit services while it is layered.

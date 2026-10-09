@@ -25,7 +25,7 @@ close before it is.
   the API-credit deal scenario runs in its own lane. The lane itself — its own pipeline
   job, compose stack, development identities, and lane environment, with the scenario
   moved out of the VM lane — moved to `bare-metal-mock-provisioned-deal` on 2026-10-01,
-  which restructures every lane onto images built once.
+  which gives each lane its own build and topology.
 - Give the API-credit storefront production-application integration tests: the real
   application through its lifespan, a real database, and the canonical typed client,
   with the credits service and capacity authority supplied as the tests need.

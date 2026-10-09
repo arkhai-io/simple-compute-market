@@ -135,8 +135,8 @@ API-credit deal runs inside the VM lane.
   `compute_deal_stages.py`, with a per-domain driver, move VM's scenario onto them, and
   add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.
-- Build pipeline images once and share them across lanes; give API credits its own lane
-  (migrated from `apicredits-end-to-end-lane`).
+- Give API credits its own lane (migrated from `apicredits-end-to-end-lane`), with each
+  lane building the images its stack runs and composing its own topology.
 - Keep the real-host scenario, deactivated; move the buyer CLI requirements to
   `bare-metal-and-credits-domain-stacks`.
 
@@ -150,8 +150,9 @@ None.
 
 - `test-compatibility`: a deployable domain's deal runs on every pipeline run against
   its ordinary local authorities, with compute provisioning in its mock profile where
-  delivery crosses it; compute domains share deal stages; every lane runs on images
-  built once; bare-metal storefront restart recovery is proven at integration level.
+  delivery crosses it; compute domains share deal stages; each domain runs in its own
+  lane, building its own stack; bare-metal storefront restart recovery is proven at
+  integration level.
 - `market-composition`: storefront deal controls are kit-owned route services;
   administrative acceptance and opening previews go through the negotiation runtime;
   compute mock executors share one compute-family mechanism; the runtime rechecks a
@@ -301,7 +302,7 @@ None.
 
 - A deployable domain's deal runs on every pipeline run against its ordinary local
   authorities, with compute provisioning mocked where delivery crosses it; compute
-  domains share deal stages; lanes run on images built once —
+  domains share deal stages; each domain runs in its own lane —
   `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.
 - Storefront deal controls are kit-owned route services; administrative acceptance and
   opening previews go through the negotiation runtime; compute mock executors share

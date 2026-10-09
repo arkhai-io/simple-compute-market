@@ -53,7 +53,9 @@ migrated from three sibling changes; `design.md` records each decision.
       integration tests, as VM's is ("Restart recovery is proven at integration level, as
       VM's is").
 - [x] 1.13 **Decision gate.** Decide how lanes obtain images. Decided: built once per
-      pipeline run and shared ("Lanes run on images built once").
+      pipeline run and shared ("Lanes run on images built once"). Superseded 2026-10-09
+      ("Section 10 design: each lane builds and composes its own stack", decision 1):
+      each lane builds the images its stack runs.
 - [x] 1.14 **Decision gate.** Decide whether API credits gets its own lane here. Decided:
       yes, migrated from `apicredits-end-to-end-lane` ("API credits runs in its own
       lane").
@@ -4710,35 +4712,59 @@ lane (9.1–9.5).
       closes; its closeout stays open until the 11.2 and 11.4 promotions land, since
       this change promotes every delta in Section 11.
 
-## 10. Pipeline: images built once and an API-credit lane
+## 10. Pipeline: three lanes, each building and composing its own stack
 
-Decisions: "Lanes run on images built once", "API credits runs in its own lane", "Lane
-composition files". Reviewable alone: compose files, Make targets, and the workflow; no
-service code.
+Decisions: "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decisions 1–7, refining "API credits runs in its own lane" and "Lane
+composition files". Reviewable alone: compose files, Make targets, the workflow, the
+lane settings, and the credits scenario's registry settings; no service code.
 
-- [ ] 10.1 Split the overlay: `compose.vms-local.yml` (VM bindings) and
-      `compose.apicredits-local.yml` (API-credit bindings, including the storefront EVM
-      key); tombstone `compose.local-identities.yml`; `compose.apicredits.yml` becomes
-      `include`-only; `docker-compose.yml` documents layering both. Update every
-      reference: `compose.vms.yml`, `domains/apicredits/compose.yml`,
-      `e2e-tests/Makefile`, `.github/workflows/e2e.yml`,
-      `scripts/tests/test_multi_storefront_compose.py`,
-      the hosted public-boundary unit test (removed with hosted settlement by `settle-through-arkhai-payments`),
-      `e2e-tests/tests/e2e/roles/README.md`, `dev-env/identities/README.md`,
+- [ ] 10.1 Split the overlay (decision 3): `compose.vms-local.yml` (the VM services'
+      bindings and the VM buyer service) and `compose.apicredits-local.yml` (the
+      API-credit services' bindings, the storefront's EVM key, and the credits buyer
+      service, moved from `compose.apicredits.yml`); tombstone
+      `compose.local-identities.yml`; `compose.apicredits.yml` becomes `include`-only;
+      `docker-compose.yml` documents layering both overlays. Update every reference:
+      `compose.vms.yml`, `docker-compose.yml`, `e2e-tests/Makefile`,
+      `.github/workflows/e2e.yml`, `scripts/tests/test_multi_storefront_compose.py`,
+      `dev-env/identities/README.md`, and
       `openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.
-- [ ] 10.2 Lane targets in `e2e-tests/Makefile`: `e2e-vm-run`, `e2e-bare-metal-run`,
-      `e2e-apicredits-run` bring a lane up from loaded images and run its markers;
-      `test-e2e-<lane>` becomes `build-dev` plus run; `test-e2e` runs all three in turn;
-      `E2E_MODULE` drops `e2e_credits_deal` and a new `E2E_APICREDITS_MODULE` holds it;
-      `e2e-images-save` and `e2e-images-load` save and load the image set
-      `build-dev` produces as one zstd archive.
-- [ ] 10.3 `.github/workflows/e2e.yml`: an `e2e-images` job (uv, Foundry, `make
-      build-dev`, `e2e-images-save`, `actions/upload-artifact` with one-day retention);
-      `e2e-vm`, `e2e-bare-metal`, and new `e2e-apicredits` jobs `needs: e2e-images`,
-      download, load, run their target, and collect logs and tear down with their own
-      compose files.
-- [ ] 10.4 **Gate.** All three lanes pass from one build; record each job's duration beside
-      the previous single-lane build time.
+- [ ] 10.2 The API-credit lane's own topology (decision 4): `compose.apicredits-lane.yml`
+      declares `compute-registry` (the registry image, the compute filter spec, a
+      development identity); the root `Makefile` gains `e2e-apicredits-dev-env` (the
+      API-credit values, buyer paths, and the compute registry's credential) and
+      `e2e-vms-dev-env` (the VM values), with `e2e-dev-identities-env` printing both for
+      the full stack; `e2e-tests/config/config-docker.yml`'s `api_credits` gains the
+      compute registry's URL and pins, and `test_credits_deal_buyer_cli.py` reads them
+      there instead of the VM lane's `registry` settings. A compose render test, beside
+      `scripts/tests/test_bare_metal_compose.py`, asserts the lane's services and that
+      the full stack has no `compute-registry`.
+- [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5): the root `Makefile` gains
+      `build-e2e-vm`, `build-e2e-bare-metal`, and `build-e2e-apicredits`, each the wheels,
+      the dev chain image, the test image, and that lane's runtime images; `build-dev` is
+      unchanged. In `e2e-tests/Makefile`, `test-e2e-vm` composes `compose.vms.yml` with
+      its overlay and builds with `build-e2e-vm`, `test-e2e-bare-metal` builds with
+      `build-e2e-bare-metal`, and `test-e2e-apicredits` brings up the
+      `simple-market-apicredits` project and runs `E2E_APICREDITS_MODULE`
+      (`e2e_credits_deal or e2e_credits_payment_deal`), which `E2E_MODULE` no longer
+      lists; `test-e2e` runs the three in turn, taking each stack down before the next.
+- [ ] 10.4 `.github/workflows/e2e.yml` (decision 6): jobs `e2e-vm`, `e2e-bare-metal`, and
+      `e2e-apicredits`, in parallel, each with uv and Foundry, running its
+      `test-e2e-<lane>` target, and collecting logs and tearing down with its own
+      files, project, and environment file.
+- [ ] 10.5 **Gate.** All three lanes pass, VM's with no API-credit service in its stack;
+      record each job's wall-clock time beside run 37899278727's (VM 6m55s, bare metal
+      4m25s). Also: the compose render tests, the e2e unit suite, collection of each
+      lane's marker set, `make check-packaging`, comment hygiene, citations, and strict
+      OpenSpec validation.
+- [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
+      Section 10): comment hygiene over the compose files and Makefiles; documentation
+      compliance against decisions 1–7; roadmap currency (`ROADMAP.md`'s Goal 4 gap
+      that API credits has no lane of its own, which this section closes for the lane
+      and `apicredits-end-to-end-lane` keeps for its loops and integration tests);
+      campaign index currency (this change's row and `apicredits-end-to-end-lane`'s);
+      documentation citations; `make check-packaging`; 10.5's run recorded; and
+      promotion pending at 11.2, 11.3, and 11.4.
 
 ## 11. Permanent documentation
 
@@ -4769,7 +4795,7 @@ service code.
       mechanisms start fulfillment through the servicing worker, that an Alkahest
       fulfillment publishes only its evidence's digest, and that an evidence submission
       whose outcome is unknown parks its obligation for an operator.
-- [ ] 11.2 `docs/development/TESTING.md`: three lanes on images built once; the loop table
+- [ ] 11.2 `docs/development/TESTING.md`: three lanes, each building and composing its own stack; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
       "blocked—not mocked" bare-metal statement replaced by the pipeline deal and the
@@ -4962,7 +4988,7 @@ service code.
 |---|---|
 | A deployable domain's deal runs on every pipeline run, holding, previewing, and advancing each transition | `openspec/specs/test-compatibility/spec.md` — "A deployable domain's deal runs on every end-to-end run"; `docs/development/TESTING.md` |
 | The canonical compute deal's shared stages are defined once, with a per-domain driver | `openspec/specs/test-compatibility/spec.md` — "The canonical compute deal's shared stages are defined once"; `docs/development/TESTING.md` |
-| Each domain runs in its own lane on images built once | `openspec/specs/test-compatibility/spec.md` — "Each domain runs in its own lane on images built once"; `docs/development/TESTING.md` |
+| Each domain runs in its own lane, building and composing its own stack | `openspec/specs/test-compatibility/spec.md` — "Each domain runs in its own lane"; `docs/development/TESTING.md` |
 | Bare-metal restart recovery is proven at integration level | `openspec/specs/test-compatibility/spec.md` — "Bare-metal storefront restart recovery is proven at integration level" |
 | Deal controls are kit-owned route services | `openspec/specs/market-composition/spec.md` — "Storefront deal controls are kit-owned route services"; `docs/development/ARCHITECTURE.md` kit layers |
 | Compute mock executors share `compute_provisioning.executor_mock`; job execution resolves its executor by `(offering_mode, action)` | `openspec/specs/market-composition/spec.md` — "Compute mock executors share one compute-family mechanism"; `openspec/specs/physical-provisioning/spec.md` — "Job execution resolves its executor by offering mode and action"; `docs/development/ARCHITECTURE.md`; `docs/development/TESTING.md` |

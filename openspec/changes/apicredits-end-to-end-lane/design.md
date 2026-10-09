@@ -23,8 +23,8 @@
 
 Decided with the maintainer. Evidence for each domain stays attributable to that
 domain, and a failure in one lane does not mask the other. Building the lane moved to
-`bare-metal-mock-provisioned-deal` on 2026-10-01, which restructures every lane onto
-images built once; this change holds and steps the API-credit loops once that lane
+`bare-metal-mock-provisioned-deal` on 2026-10-01, where each lane builds and composes
+its own stack; this change holds and steps the API-credit loops once that lane
 exists.
 
 ### The storefront's integration tests run the production application
