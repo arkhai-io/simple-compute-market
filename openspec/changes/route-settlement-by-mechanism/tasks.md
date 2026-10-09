@@ -49,7 +49,7 @@ settlement and physical/contact services.
 - [x] 3.2 Seller declares Alkahest/payment/fused contact; hooks own acceptance/resources/settlement.
 - [x] 3.3 Versioned Agreement-bound evidence is separate from escrow/lifecycle state; no chain sentinel fallback. Lifecycle references are neutral; public DTOs remain unchanged.
 - [x] 3.4 Common physical begin/status/result/access/teardown consume verified evidence through selected-entry revalidation; Alkahest recovery rechecks active journal plus chain source/index.
-- [x] 3.5 Enabled-contact reveal/auth/retention/delivery, installed wheels and controlled physical recovery pass. Disabled-contact accepted re-read is the B2 gap in 8.2.
+- [x] 3.5 Enabled-contact reveal/auth/retention/delivery, installed wheels and controlled physical recovery pass. Disabled-contact accepted re-read was the B2 gap in 8.2, closed by 10.3.
 - [x] 3.6 Promote table/evidence/selected-site gating/reset into physical-provisioning and market-composition architecture; comments/imports/placement checked.
 
 15-file storefront group 90; buyer 9. Setup:
@@ -61,7 +61,7 @@ selected-site hardware/payment complete deal remains unavailable.
 Owner: API-credit buyer/storefront tables/stages/CLI, controller/runtime,
 evidence/progress repositories and common issuance; consumes section 5 DTO.
 
-- [x] 4.1 Buy and accepted-run settlement bind selected Alkahest/payment buyer entries. Standalone credits negotiate is the B1 gap in 8.2.
+- [x] 4.1 Buy and accepted-run settlement bind selected Alkahest/payment buyer entries. Standalone credits negotiate was the B1 gap in 8.2, closed by 10.2.
 - [x] 4.2 Seller entries own Agreement dispatch, payer/mandate/hold hooks and readiness/publication/client construction.
 - [x] 4.3 Source evidence and issuance progress are independent of real escrow servicing, signed issuance and private results. Verified status/payload cannot be downgraded; stored receipt recovery survives unavailable polling.
 - [x] 4.4 Common issuance consumes evidence/neutral authorization and entry-supplied retry policy; entries own attestation/compensation. Prepared Alkahest delivery does not repeat preparation inside terminal-failure handling.
@@ -120,7 +120,7 @@ Owner: joined post-review closeout. Exact commands/counts/readiness/limits are i
 - [x] 8.4 Comment hygiene passes; directly read added/touched comments/docstrings, removed provenance wording, no production dependency on active change docs.
 - [x] 8.5 Added/touched local imports reviewed. API-credit imports moved and real suites pass; two VM cycles reproduced against actual imports/wheels, publication operator-config load deliberately lazy with local reasons.
 - [x] 8.6 Six capability deltas synchronized; existing companions/repository architecture promoted and current limits disclosed. Tasks/design compressed with baseline inventory and detailed evidence retained in attachments; no new companion/index edit needed.
-- [x] 8.7 Goal6 and active change status reflect repaired core/evidence boundaries and precise B1/B2 blockers while retaining carrier/wire/live gaps. Promotion record complete; residuals owned by move-escrow proposal and GitHub ideas #261/#262. Strict change/spec validation passes. Archive with `--skip-specs` after review; specs were promoted directly.
+- [x] 8.7 Goal6 and active change status reflect repaired core/evidence boundaries and precise B1/B2 blockers (since closed by 10.2/10.3) while retaining carrier/wire/live gaps. Promotion record complete; residuals owned by move-escrow proposal and GitHub ideas #261/#262. Strict change/spec validation passes. Archive with `--skip-specs` after review; specs were promoted directly.
 
 ## 10. Post-merge reconciliation
 
@@ -146,7 +146,11 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   clients (B2). Rewrite the successful negotiation, reveal and read in
   `test_accepted_introduction_survives_contact_disable` onto `StorefrontClient`
   and `IntroductionTransport` against a served app; keep the disabled-restart
-  persistence assertions.
+  persistence assertions. The seller's re-read goes through a new typed
+  `IntroductionSellerClient` in
+  `kit/contact-exchange/src/market_contact_exchange/seller_client.py`, with
+  unit coverage of its request in `kit/contact-exchange/tests/unit/test_seller_client.py`;
+  the bare-metal storefront binds the shared route constant.
 - [x] 10.8 Fresh selections carry their bargained amount. Files:
   `core/buyer/src/core_buyer/negotiation_client.py` (opening context carries
   the advertised option), `kit/policy/src/market_policy/scalar_policies.py`

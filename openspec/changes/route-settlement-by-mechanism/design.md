@@ -88,6 +88,10 @@ The [final inventory](../../../docs/attachments/route-settlement-closeout/final-
   [idea #262](https://github.com/arkhai-io/simple-compute-market/issues/262).
 - Optional convention adapter extraction is deferred until concrete reuse earns
   a kit home. No speculative module/dependency was created.
+- The seller introduction client has no production caller yet; a storefront
+  operator command that shows one introduction would be its first. One kit client
+  serving both parties, with the buyer moved off `IntroductionTransport`, is a
+  possible later consolidation.
 
 ## Post-merge reconciliation
 
@@ -117,8 +121,17 @@ repository's current closeout rules.
   the buyer as a development dependency. The command does not use the typed
   storefront client, and moving buyers onto it is not required here. Accepted
   contact reveal after disablement drives negotiation through
-  `StorefrontClient` and reveal/read through the production
-  `IntroductionTransport`; the disabled-restart persistence assertions stay.
+  `StorefrontClient`, the buyer's reveal/read through the production
+  `IntroductionTransport`, and the seller's re-read through a typed
+  `IntroductionSellerClient` in `kit/contact-exchange`; the disabled-restart
+  persistence assertions stay. The seller client follows the kit's operator
+  client: per-role methods over the core client's market-neutral
+  `authenticated_request`, with the route and operation shared with the
+  storefront route. Re-reading is its only method, since starting a reveal is
+  the buyer's alone. Rejected: a role parameter on the buyer transport (seller
+  code would depend on the buyer package), a method on the core client (which
+  carries no mechanism vocabulary), and a domain-local helper (VM composes
+  contact exchange too).
 - **Validation evidence is regenerated, not annotated.** The joined replay
   scripts hard-coded wheel versions and pre-merge paths. They are replaced by a
   validation record that names `make` targets and the change's own regression
@@ -160,8 +173,8 @@ repository's current closeout rules.
 | Accepted decision | Permanent location | Disposition |
 |---|---|---|
 | Opaque core carriers and unconstrained actor order | `openspec/specs/market-composition/spec.md`; `architecture.md#typed-phase-boundaries`; `docs/development/ARCHITECTURE.md#composition-from-above-and-below` / `#package-and-dependency-layers` | Permanent, promoted |
-| Registration/admission is distinct from execution; support intersection | `openspec/specs/settlement-configuration/spec.md`; `architecture.md#registration-and-ownership` / `#readiness-publication-and-selection` | Permanent, promoted; B1/B2 limitations disclosed |
-| Agreement-only buyer dispatch/recovery; buyer keeps references, not evidence | `openspec/specs/buyer-orchestration/spec.md`; `architecture.md#configured-mechanism-choice-and-buyer-actions` / `#current-limits` | Permanent, promoted; standalone credits limitation disclosed |
+| Registration/admission is distinct from execution; support intersection | `openspec/specs/settlement-configuration/spec.md`; `architecture.md#registration-and-ownership` / `#readiness-publication-and-selection` | Permanent, promoted; B1/B2 repaired (10.2/10.3) |
+| Agreement-only buyer dispatch/recovery; buyer keeps references, not evidence | `openspec/specs/buyer-orchestration/spec.md`; `architecture.md#configured-mechanism-choice-and-buyer-actions` / `#current-limits` | Permanent, promoted; standalone credits negotiation repaired (10.2) |
 | Domain evidence/progress, common delivery, stage continuations and recovery gates | `openspec/specs/vm-storefront-fulfillment/spec.md` / `architecture.md#evidence-and-delivery-ownership`; `openspec/specs/physical-provisioning/spec.md` / `architecture.md#bare-metal-storefront-pull-boundary` / `#signed-payment-receipt-boundary`; `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities` / `#settlement-servicing` | Permanent, promoted |
 | Credits authorization/authority, uniform grant replay, separate issuance/private results | `openspec/specs/api-credits/spec.md`; `architecture.md#authority-boundaries` / `#idempotency-boundaries` / `#payment-composition-and-recovery` / `#failure-and-compensation`; repository `ARCHITECTURE.md#authority-boundaries` | Permanent, promoted |
 | Opt-in convention has a future kit home, no mandatory adapter | `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` | Boundary permanent/promoted; implementation deferred; core protocol rejected |
