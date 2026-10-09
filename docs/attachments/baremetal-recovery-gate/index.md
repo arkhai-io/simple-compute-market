@@ -61,4 +61,4 @@ uv run --no-sync pytest tests/test_domain_runtime.py tests/test_app_composition.
 uv run --no-sync pytest tests/test_selection_dispatch.py tests/test_negotiation.py tests/test_domain_runtime.py tests/test_settlement.py tests/test_migrations.py tests/test_persistence.py tests/test_escrow_identity_backfill.py tests/test_fulfillment_service.py tests/test_site_clients.py tests/test_import_boundaries.py tests/test_http_settlement.py tests/test_http_negotiation.py tests/test_http_introductions.py tests/test_introduction_delivery.py tests/test_app_composition.py -q
 ```
 
-Temporary test databases are owned and cleaned by pytest. All supervised commands finished; no external running resources remain. Shared closeout documents and permanent promotion are recorded in `openspec/changes/route-settlement-by-mechanism`.
+Temporary test databases are owned and cleaned by pytest. All supervised commands finished; no external running resources remain. Shared closeout documents and permanent promotion are recorded in `openspec/changes/archive/2026-10-09-route-settlement-by-mechanism`.

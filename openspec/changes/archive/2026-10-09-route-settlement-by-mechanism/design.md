@@ -52,8 +52,8 @@ copy/adoption, payment chain sentinel or old issuance-payload adapter. Shared
 escrow carriers/obligation runtime and listing/registry wire changes are deferred
 to `move-escrow-into-alkahest` and `drop-escrow-from-shared-wire`.
 
-Implementation/review history is retained in Git and the [owner packets](../../../docs/attachments/route-settlement-closeout/final.md#documentation-and-residual-ownership).
-The [baseline 50-site inventory](../../../docs/attachments/route-settlement-closeout/baseline-inventory.md)
+Implementation/review history is retained in Git and the [owner packets](../../../../docs/attachments/route-settlement-closeout/final.md#documentation-and-residual-ownership).
+The [baseline 50-site inventory](../../../../docs/attachments/route-settlement-closeout/baseline-inventory.md)
 preserves T/E/M and proposal classifications without duplicating them here.
 
 Post-repair joined build/reinit, original suites and all four worker entries
@@ -65,9 +65,9 @@ prepared Alkahest delivery avoids duplicate preparation, and failure references
 are neutral. Buyer reference recovery and real carrier properties replace
 unused synthetic buyer evidence/declaration assertions.
 
-[Final evidence](../../../docs/attachments/route-settlement-closeout/final.md)
+[Final evidence](../../../../docs/attachments/route-settlement-closeout/final.md)
 records the repaired findings, controlled readiness/cleanup and unrun live
-lanes. The [validation record](../../../docs/attachments/route-settlement-closeout/validation.md)
+lanes. The [validation record](../../../../docs/attachments/route-settlement-closeout/validation.md)
 names the `make` targets, the regression test holding each finding, and counts
 and end-to-end runs on the merged tree. Controlled temporary databases/run logs
 and synthetic signers establish wiring, not live ledger/hardware qualification.
@@ -77,7 +77,7 @@ substituted with mocked success.
 
 ## Final inventory
 
-The [final inventory](../../../docs/attachments/route-settlement-closeout/final-inventory.md) found two surfaces outside the tables: `market credits negotiate` resolved Alkahest wallet, chain, escrow selection, price scaling and proposal itself (B1), and bare-metal introductions required current contact enablement for accepted reveal/re-read (B2). Both now go through the declared stages: B1 in [apicredits-negotiate](../../../docs/attachments/apicredits-negotiate/index.md), B2 in [contact-disablement](../../../docs/attachments/contact-disablement/index.md). No other mechanism dispatch remains outside a stage.
+The [final inventory](../../../../docs/attachments/route-settlement-closeout/final-inventory.md) found two surfaces outside the tables: `market credits negotiate` resolved Alkahest wallet, chain, escrow selection, price scaling and proposal itself (B1), and bare-metal introductions required current contact enablement for accepted reveal/re-read (B2). Both now go through the declared stages: B1 in [apicredits-negotiate](../../../../docs/attachments/apicredits-negotiate/index.md), B2 in [contact-disablement](../../../../docs/attachments/contact-disablement/index.md). No other mechanism dispatch remains outside a stage.
 
 ## Deferred residuals
 

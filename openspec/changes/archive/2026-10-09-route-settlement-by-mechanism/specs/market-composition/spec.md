@@ -32,21 +32,6 @@ Negotiation MUST pass its exact accepted Agreement to the domain's selected sett
 - **WHEN** the seller settles an accepted Agreement through `arkhai.payments.v1`
 - **THEN** VM, bare-metal or API-credit delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
 
-#### Scenario: A domain composes two settlement mechanisms
-
-- **WHEN** a domain advertises both Alkahest and Arkhai payment options
-- **THEN** its role table routes each accepted Agreement to the selected stage and compatible delivery reads normalized evidence without a new core or delivery mechanism conditional
-
-#### Scenario: A settlement mechanism also provides the service
-
-- **WHEN** a deal selects `contact-exchange.v1`
-- **THEN** the composed stage may fuse settlement and delivery, produce its introduction evidence and invoke no payment or physical-provisioning phase
-
-#### Scenario: A mechanism requires seller action first
-
-- **WHEN** a supporting domain composes a stage whose first effect belongs to the seller
-- **THEN** core dispatches that role's entry without requiring a prior buyer deposit, confirmation or escrow proposal
-
 ### Requirement: Buyer dispatch preserves Agreement-only settlement
 
 Core buyer settlement MUST select the composing domain's role-table entry using `Agreement.settlement.mechanism` and pass the accepted outcome unchanged. It MUST NOT choose a path from escrow-proposal presence, infer escrow terms, synthesize an obligation or select a replacement mechanism. A missing accepted entry MUST fail before settlement effects.

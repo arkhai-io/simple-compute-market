@@ -13,7 +13,7 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 ## Dependencies
 
 - Payments service `rate-parts`: rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
-- `route-settlement-by-mechanism`: the continuation lives in the VM payment seller stage.
+- `route-settlement-by-mechanism` (archived 2026-10-09): the continuation lives in the VM payment seller stage.
 - Snapshot verification. SCM verifies only the receipt embedded in a transaction snapshot, not the snapshot's own proof (`settle-through-arkhai-payments` design, R9). Funded-through times and stop events are snapshot state, so this change must first verify snapshot proofs and add a snapshot vector and receipt-kit fixture.
 
 ## Payments contract this builds on

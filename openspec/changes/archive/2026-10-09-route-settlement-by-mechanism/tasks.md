@@ -2,7 +2,7 @@
 
 Final implementation and post-review closeout checklist. Completed task IDs and
 ownership are retained; detailed implementation/review history is in Git and
-[final joined evidence](../../../docs/attachments/route-settlement-closeout/final.md).
+[final joined evidence](../../../../docs/attachments/route-settlement-closeout/final.md).
 No escrow-carrier/runtime extraction or public listing/registry wire cutover is
 included. Sections 1–9 are complete; section 10 reconciles the change with the merged development branch.
 

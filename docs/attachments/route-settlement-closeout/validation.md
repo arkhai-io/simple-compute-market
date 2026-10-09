@@ -16,7 +16,7 @@ make dist
 make test-core test-kits test-bare-metal test-apicredits test-vms-domain test-vms-buyer test-e2e-unit
 make -C kit/arkhai-payments test
 make check-comment-hygiene check-packaging
-make check-doc-citations CHANGE=route-settlement-by-mechanism
+make check-doc-citations
 ```
 
 Each project target reinitializes its environment from `.dist` before testing,
@@ -72,7 +72,7 @@ install derives its internal packages from its lock, every lock matches its
 project and the built wheelhouse, every Python version selection reads the root
 declaration, and every distribution is one editable package under `src/`.
 `make check-comment-hygiene` and
-`make check-doc-citations CHANGE=route-settlement-by-mechanism` passed, and
+`make check-doc-citations CHANGE=route-settlement-by-mechanism` passed before archival, and
 `openspec validate route-settlement-by-mechanism --strict` and
 `openspec validate --specs --strict` passed with the repository's pinned
 validator, 1.14.0.
@@ -87,6 +87,7 @@ The `E2E` workflow on this branch, after the merge:
 | [37935819676](https://github.com/arkhai-io/simple-compute-market/actions/runs/37935819676) | Bare metal passed. VM failed four later stages: three lease checks looked a deal's reservation up by escrow, and the force-accept listing advertised a stub escrow contract |
 | [37937212352](https://github.com/arkhai-io/simple-compute-market/actions/runs/37937212352) | Passed: VM and API credits 135 passed, 3 skipped; bare metal 16 passed |
 | [37938638936](https://github.com/arkhai-io/simple-compute-market/actions/runs/37938638936) | Passed on ab9bf345, after the unused-import cleanup |
+| [37952987858](https://github.com/arkhai-io/simple-compute-market/actions/runs/37952987858) | Passed on af27c28f, the final code head, with the seller introduction client |
 
 `dev` itself passed the same workflow in
 [37936939239](https://github.com/arkhai-io/simple-compute-market/actions/runs/37936939239),

@@ -2,17 +2,12 @@
 
 ### Requirement: Signed payment receipts gate selected-site execution
 
-VM and bare-metal payment stages MUST load the accepted mandate beside exact Agreement bytes and verify the matching service-signed receipt before producing verified SettlementEvidence. Physical delivery MUST consume that evidence and the accepted domain/site binding, never compare mechanism IDs or create payment escrow/obligation rows. Restart MUST revalidate through the selected stage and reuse durable reservation and fulfillment identities rather than buyer routing or current listing state.
+VM and bare-metal payment stages MUST load the accepted mandate from shared `negotiation_threads.settlement_data` beside exact `agreement_bytes` and verify the matching service-signed receipt before producing verified SettlementEvidence or any protected physical effect. Physical delivery MUST consume that evidence and the accepted domain/site binding, never compare mechanism IDs or create payment escrow/obligation rows. Restart MUST revalidate through the selected stage and reuse durable reservation and fulfillment identities rather than buyer-supplied routing or current listing state.
 
 #### Scenario: Receipt is pending or mismatched
 
 - **WHEN** the seller cannot verify a matching signed receipt
 - **THEN** it reports retryable pending or rejects invalid evidence without provisioning or creating access
-
-#### Scenario: Verified VM provisioning restarts
-
-- **WHEN** foreground work or recovery resumes verified payment progress
-- **THEN** the existing convergence lease and durable physical fulfillment ID prevent duplicate delivery
 
 #### Scenario: Bare-metal receipt is verified
 

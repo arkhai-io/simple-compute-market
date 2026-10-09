@@ -24,7 +24,7 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
 
 ## Dependencies
 
-- `route-settlement-by-mechanism`: stages must exist before the escrow branch they replace can be removed.
+- `route-settlement-by-mechanism` (archived 2026-10-09): stages must exist before the escrow branch they replace can be removed.
 
 ## Compatibility
 
