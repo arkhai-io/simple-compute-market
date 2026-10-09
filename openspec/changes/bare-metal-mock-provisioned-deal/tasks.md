@@ -4719,55 +4719,98 @@ Decisions: "Section 10 design: each lane builds and composes its own stack
 composition files". Reviewable alone: compose files, Make targets, the workflow, the
 lane settings, and the credits scenario's registry settings; no service code.
 
-- [ ] 10.1 Split the overlay (decision 3): `compose.vms-local.yml` (the VM services'
-      bindings and the VM buyer service) and `compose.apicredits-local.yml` (the
-      API-credit services' bindings, the storefront's EVM key, and the credits buyer
-      service, moved from `compose.apicredits.yml`); tombstone
-      `compose.local-identities.yml`; `compose.apicredits.yml` becomes `include`-only;
-      `docker-compose.yml` keeps including `compose.vms.yml` and
-      `domains/apicredits/compose.yml`, never `compose.apicredits.yml`, and documents
-      layering both overlays; `.gitignore` gains `.e2e-vms.env` and
-      `.e2e-apicredits.env`. Update every reference:
-      `compose.vms.yml`, `docker-compose.yml`, `e2e-tests/Makefile`,
-      `.github/workflows/e2e.yml`, `scripts/tests/test_multi_storefront_compose.py`,
-      `dev-env/identities/README.md`, and
-      `openspec/changes/repair-storefront-alkahest-configuration/tasks.md`.
-- [ ] 10.2 The API-credit lane's own topology (decision 4): `compose.apicredits-lane.yml`
-      declares `compute-registry` (the registry image, the compute filter spec, a
-      development identity); the root `Makefile` gains `e2e-apicredits-dev-env` (the
-      API-credit values, buyer paths, and the compute registry's credential) and
-      `e2e-vms-dev-env` (the VM values), with `e2e-dev-identities-env` printing both for
-      the full stack; `e2e-tests/config/config-docker.yml`'s `api_credits` gains the
-      compute registry's URL and pins, and `test_credits_deal_buyer_cli.py` reads them
-      there instead of the VM lane's `registry` settings. A compose render test, beside
-      `scripts/tests/test_bare_metal_compose.py`, renders the three stacks of decision
-      3's table and asserts that each renders on its own, that VM's has no API-credit
-      service, that the API-credit lane's has `compute-registry`, and that the full
-      stack has one `anvil` and no `compute-registry`.
-- [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5): the root `Makefile` gains
-      `build-e2e-vm`, `build-e2e-bare-metal`, and `build-e2e-apicredits`, each the wheels,
-      the dev chain image, the test image, and that lane's runtime images; `build-dev` is
-      unchanged. In `e2e-tests/Makefile`, `test-e2e-vm` composes `compose.vms.yml` with
-      its overlay and builds with `build-e2e-vm`, `test-e2e-bare-metal` builds with
-      `build-e2e-bare-metal`, and `test-e2e-apicredits` brings up the
-      `simple-market-apicredits` project and runs `E2E_APICREDITS_MODULE`
-      (`e2e_credits_deal or e2e_credits_payment_deal`), which `E2E_MODULE` no longer
-      lists. Each lane writes its environment file first (`.e2e-vms.env`,
-      `.e2e-bare-metal.env`, `.e2e-apicredits.env`) and has `e2e-<lane>-down` and
-      `e2e-<lane>-logs`, which write it only if missing; `test-e2e` runs `test-e2e-vm`,
-      `e2e-vm-down`, `test-e2e-bare-metal`, `e2e-bare-metal-down`, then
-      `test-e2e-apicredits`.
-- [ ] 10.4 `.github/workflows/e2e.yml` (decision 6): jobs `e2e-vm`, `e2e-bare-metal`, and
-      `e2e-apicredits`, in parallel, each with uv and Foundry, running its
-      `test-e2e-<lane>` target, then `e2e-<lane>-logs` and `e2e-<lane>-down`. In the
-      same task, `scripts/fetch-e2e-logs.py` and `scripts/tests/test_fetch_e2e_logs.py`
-      add the `e2e-apicredits-logs` artifact, and `docs/development/TESTING.md`'s
-      paragraph on fetching a run's logs names the three lanes and their artifacts.
-- [ ] 10.5 **Gate.** The three live jobs pass concurrently; 10.2's render test passes;
-      each lane's marker expression collects exactly that lane's scenarios. Record each
-      job's wall-clock time beside run 37899278727's (VM 6m55s, bare metal 4m25s), as an
-      observation, not a threshold. Also: the compose and log-fetch tests, the e2e unit
-      suite, `make check-packaging`, comment hygiene, citations, and strict OpenSpec
+- [ ] 10.1 Split the overlay (decision 3).
+      - `compose.vms-local.yml` (new): `registry`, `registry-b`, `bob-storefront`,
+        `alice-storefront`, `provisioning`, `alice-provisioning`, and `buyer-cli`, moved
+        verbatim from `compose.local-identities.yml` with their comments; its header
+        follows `compose.bare-metal-local.yml`'s.
+      - `compose.apicredits-local.yml` (new): `api-credits-registry` and
+        `credits-storefront` (its env files and the `@str` wallet key) from the same
+        file, and `credits-buyer-cli` moved from `compose.apicredits.yml`.
+      - `compose.apicredits.yml`: `include` of `compose.dev.yml` and
+        `domains/apicredits/compose.yml` only, its header naming the overlay.
+      - `compose.local-identities.yml`: tombstone.
+      - `docker-compose.yml`: unchanged includes; its comment layers
+        `compose.vms-local.yml` and `compose.apicredits-local.yml` and says why it never
+        includes `compose.apicredits.yml`. `compose.vms.yml`'s comment names its overlay.
+      - `dev-env/identities/api-credits-buyer.config.toml` (new): the credits buyer
+        service's public config, pinning `api-credits-registry`, a development fixture
+        with its statement inline, as `buyer.config.toml` has.
+      - `.gitignore`: `.e2e-vms.env` and `.e2e-apicredits.env`.
+      - References: `dev-env/identities/README.md` (the overlay table row, the files
+        `make` targets must satisfy, and the new fixture),
+        `scripts/tests/test_multi_storefront_compose.py` (the full stack's three files),
+        and `openspec/changes/repair-storefront-alkahest-configuration/tasks.md` (the
+        file Alice's key moved to). The workflow and `e2e-tests/Makefile` change in
+        10.3 and 10.4.
+- [ ] 10.2 The API-credit lane's own topology (decision 4).
+      - `compose.apicredits-lane.yml` (new): `compute-registry`, the `arkhai:registry`
+        image with its default compute filter spec, `core/registry/.env.docker-compose`
+        and `shared-env` as VM's `registry` has, `REGISTRY_AUTHORITY_ID=compute-registry`
+        signed by `registry-a.eip191` through
+        `${APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE:?…}`, no host port, and
+        VM's healthcheck.
+      - Root `Makefile`: `e2e-vms-dev-env` prints the VM values now in
+        `e2e-dev-identities-env`; `e2e-apicredits-dev-env` prints the `APICREDITS_*`
+        values, the credits buyer service's paths (the new config, `buyer.eip191`, and
+        profile and state directories under `.e2e-buyer/apicredits/`), and
+        `APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE`;
+        `e2e-dev-identities-env` prints both lanes' values except the lane-only
+        registry's, so the full stack is unchanged in what it requires.
+      - `e2e-tests/config/config-docker.yml`'s `api_credits`: `compute_registry_url`
+        (`http://compute-registry:8080`), `compute_registry_authority_id`,
+        `compute_registry_scheme`, and `compute_registry_identifier`, the
+        development values with their statement; its comment names
+        `compose.apicredits-local.yml`.
+      - `test_credits_deal_buyer_cli.py`: reads the compute registry and its pins from
+        those settings in place of the VM lane's `registry`.
+      - A render test, `test_lane_compose.py`, new in `scripts/tests/` beside
+        `test_bare_metal_compose.py` and skipping without Compose: renders the VM lane, the
+        API-credit lane, and the full stack from their `make` environment targets and
+        asserts each renders, VM's has no API-credit service, the API-credit lane's has
+        `compute-registry` and the storefront's wallet key, and the full stack has one
+        `anvil` and no `compute-registry`.
+- [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5).
+      - Root `Makefile`: `build-e2e-vm`, `build-e2e-bare-metal`, and
+        `build-e2e-apicredits`, each `init-prerequisites`, `dist`, `build-dev-env`, and
+        `build-test-image`, then the lane's images in parallel (VM: `build-registry`,
+        `build-storefront`, `build-provisioning`; bare metal: `build-registry`,
+        `build-provisioning`, `build-bare-metal-storefront`; API credits:
+        `build-registry`, `build-apicredits-service`, `build-apicredits-storefront`,
+        `build-apicredits-sample-app`). None needs `build-buyer`: the test image installs
+        `market` from the wheels. `build-dev` is unchanged.
+      - `e2e-tests/Makefile`: per lane, an environment file (`E2E_VMS_ENV`,
+        `E2E_BARE_METAL_ENV`, `E2E_APICREDITS_ENV`), its compose arguments with an
+        explicit project (`simple-market-service`, `simple-market-bare-metal`,
+        `simple-market-apicredits`), so local and pipeline runs share one network name
+        without `COMPOSE_PROJECT_NAME`, and three targets: `test-e2e-<lane>` (write the
+        file, take the stack down, `build-e2e-<lane>`, bring it up with the existing
+        failure diagnostics, run its markers on its network), `e2e-<lane>-down`, and
+        `e2e-<lane>-logs`, the latter two writing the file only if missing.
+        `E2E_MODULE` drops both credits markers; `E2E_APICREDITS_MODULE` is
+        `e2e_credits_deal or e2e_credits_payment_deal`. `test-e2e` is `test-e2e-vm`,
+        `e2e-vm-down`, `test-e2e-bare-metal`, `e2e-bare-metal-down`,
+        `test-e2e-apicredits`. Comments state why the stacks run in turn.
+- [ ] 10.4 Workflow and diagnostics (decision 6).
+      - `.github/workflows/e2e.yml`: `e2e-vm`, `e2e-bare-metal`, and `e2e-apicredits`,
+        each checkout, uv, Foundry, `make -C e2e-tests test-e2e-<lane>`, then
+        `e2e-<lane>-logs` teed into `compose-logs.txt`, the `e2e-<lane>-logs` artifact,
+        and `e2e-<lane>-down`; `PROVISIONING_MODE: mock` moves to the VM job, the only
+        stack reading it; the workflow-level `COMPOSE_PROJECT_NAME` goes. The header
+        describes three lanes.
+      - `scripts/fetch-e2e-logs.py`'s `LOG_ARTIFACTS` and
+        `scripts/tests/test_fetch_e2e_logs.py` gain `e2e-apicredits-logs`, the
+        missing-artifact and reuse cases covering all three.
+      - `docs/development/TESTING.md`'s paragraph on running the lanes and fetching
+        their logs: three lanes and the three artifacts.
+- [ ] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane running
+      `e2e_credits_deal` and skipping `e2e_credits_payment_deal` as VM's did. 10.2's
+      render test and the log-fetch tests pass; `pytest --collect-only` with each lane's
+      marker expression collects that lane's scenarios and no other's (VM's without the
+      credits scenarios, API credits' exactly them). Record each job's wall-clock time
+      beside run 37899278727's (VM 6m55s, bare metal 4m25s), as an observation, not a
+      threshold. Also: the release-tooling suite (`scripts/tests`), the e2e unit suite,
+      `make check-packaging`, comment hygiene, citations, and strict OpenSpec
       validation.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
       Section 10): comment hygiene over the compose files and Makefiles; documentation
