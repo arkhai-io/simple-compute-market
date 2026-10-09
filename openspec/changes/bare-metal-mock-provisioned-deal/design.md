@@ -3196,8 +3196,8 @@ terminal handling. Changing the shared stage or resuming timers would hide the
 route defect and weaken deterministic coverage, so those alternatives are rejected.
 
 Files: `deal_controls.py` for the live read; `tests/test_deal_controls.py` for
-a paused-worker, pending-to-active regression; the current and delta
-`storefront-publication/spec.md` for the wait contract. No repository-wide
+a paused-worker, pending-to-active regression; the `storefront-publication`
+delta for the wait contract, promoted with the delta at 11.4. No repository-wide
 architecture or proposal scope change is required. Validate the route suite,
 bare-metal storefront suite, chart render tests, the failing scenario on locally
 deployed Helm charts, both Compose lanes, packaging, comment hygiene, citations,
@@ -3225,3 +3225,10 @@ that progress under its held convergence controls; 12e still proves one release.
 No production teardown behavior changes. The scenario file joins this follow-up's
 fileset and validation scope. The existing physical-provisioning contract for
 storefront teardown and idempotent lease termination remains authoritative.
+
+Reviewed 2026-10-09 and accepted, with two points recorded for closeout task 2.6:
+the wake is the wait's alone, so a buyer's status read that observes activation
+first leaves evidence to the pending retry, where waking at the recorded transition
+in `BareMetalFulfillmentService.status` would cover every reader; and the wait reads
+the site on every poll, so a site error fails the wait rather than being polled
+through. Run 37899278727 is 9.6's evidence.

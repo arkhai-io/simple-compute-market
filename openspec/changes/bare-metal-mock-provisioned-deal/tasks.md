@@ -4640,7 +4640,7 @@ lane (9.1–9.5).
       absent without it. The status admission and the callback both use the site
       bindings, so no service-role credential is added (design, "Section 9 design",
       implementation findings).
-- [ ] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
+- [x] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
       and the mock deal, and the VM lane with 9.0b's hooks. Also: the bare-metal
       storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
       e2e unit suite, `make check-packaging`, comment hygiene, documentation citations,
@@ -4666,32 +4666,29 @@ lane (9.1–9.5).
       refusal with the default type, and with the bare-metal type scheduled the
       machine, its nested publication view intact, and began the grant. Bare metal's
       lane is to run again.
-- [x] 9.6a Fix the administrator settlement wait in
-      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/deal_controls.py`
-      to observe already-started fulfillment at its selected site and wake its
-      adopted obligation when delivery becomes active. Replace the
-      preparatory status read in `tests/test_deal_controls.py` with a paused-worker
-      pending-to-active regression. Correct the repeated teardown assertion in
-      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_mock_deal.py`
-      to compare operation identities while allowing dispatched teardown.
-      Promote the wait contract to the current and
-      delta `storefront-publication/spec.md`; run local Helm and both Compose lanes
-      before commit/push. Remote dispatch and fetched logs remain evidence for 9.6.
-      Regression fails before the patch; route tests (6), storefront suite (291),
-      e2e unit suite (38), local VM lane (135 passed, 3 skipped), and local bare-metal
-      Compose lane (51) pass. Helm reproduces 09b on the original image; the patched
-      lane validates readiness, evidence, lease expiry, and repeated teardown.
-      Packaging, chart render, comment hygiene, scoped citations, strict OpenSpec
-      validation, and touched-file pyflakes pass. The repository-wide citation check
-      reports 22 pre-existing unresolved references outside this fileset; this change's
-      citations resolve. No new local imports or production provenance comments;
-      wait behavior is promoted to the current spec. Overall campaign/index status
-      and roadmap mapping remain unchanged while pipeline restructuring and closeout
-      are pending.
-      Remote E2E run 37899278727 on commit 6cfa4650 passed both lanes: VM
-      (135 passed, 3 skipped) and bare metal (51 passed), including publication,
-      introduction, the mock-provisioned deal, evidence publication, lease expiry,
-      and repeated buyer teardown. Actions and both Compose artifacts were fetched.
+    - Run 37899278727, on commit 6cfa4650 with 9.6a: both lanes pass, VM 135 passed and
+      3 skipped, bare metal 51 passed (publication 11, introduction 5, and all 35
+      mock-deal stages, through evidence publication, lease expiry and release, the
+      reopened listing, the second deal, and the repeated buyer teardown). The suites
+      and checks above pass; the VM storefront's two Alkahest integration tests need
+      a local Node and Anvil chain the workspace lacks, as before.
+- [x] 9.6a Settlement wait and the repeated teardown (design, "Settlement wait observes
+      the selected site (2026-10-09)"). Run 37896157446 timed out at 09b: with
+      servicing held, the administrator wait read the storefront's cached dispatch
+      state while the site had converged the lease to active. `deal_controls.py`'s wait
+      now reads a begun fulfillment through `BareMetalFulfillmentService.status` and,
+      on the transition to active, wakes the escrow's adopted obligation, so the next
+      servicing pass publishes the evidence rather than waiting out the pending retry.
+      `tests/test_deal_controls.py` replaces the route test's preparatory status read
+      with a paused-worker, pending-to-active regression that fails without the fix.
+      12d compares the repeated teardown's negotiation, reservation, and fulfillment,
+      accepting `teardown_dispatch_pending` on the retry, since termination can
+      dispatch teardown synchronously; 12e still proves one release.
+    - Checks: route tests (6), the bare-metal storefront suite (291), the e2e unit
+      suite (38), both lanes locally (VM 135 passed, 3 skipped; bare metal 51), the
+      scenario on locally deployed charts, packaging, chart render, comment hygiene,
+      citations, strict OpenSpec validation, and pyflakes on touched files. The wait
+      scenario is in the `storefront-publication` delta, promoted at 11.4.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
@@ -4927,6 +4924,12 @@ service code.
       owning change. The bare-metal storefront's settlement servicing worker is
       composed with no event callback, so a servicing step that fails (a refused
       schedule, say) is retried with no stage event or log line at the storefront.
+      Found in 9.6a: only the administrator's settlement wait wakes servicing when it
+      observes a lease become active, so a buyer's status read that observes it first
+      leaves evidence publication to the pending retry; the wake belongs where
+      `BareMetalFulfillmentService.status` records the transition. And the wait now
+      reads the site on every poll, so a site error fails the wait rather than being
+      polled through.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
@@ -4988,4 +4991,4 @@ service code.
 | Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |
-| Administrator settlement wait observes already-started fulfillment at its selected site and wakes deferred servicing when delivery becomes active | `openspec/specs/storefront-publication/spec.md` — "Administrator waits while settlement servicing is held"; no roadmap or campaign status change for this corrective follow-up |
+| Administrator settlement wait observes already-started fulfillment at its selected site and wakes deferred servicing when delivery becomes active | `openspec/specs/storefront-publication/spec.md` — "Administrator waits while settlement servicing is held", through this change's delta, at 11.4 |
