@@ -4877,7 +4877,7 @@ and the credits scenario's settings; no service code or package version changes.
         their logs: three lanes and the three artifacts.
     - Done; `test_fetch_e2e_logs.py` also pins the fetcher's artifact list to the
       three lanes.
-- [ ] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane reporting
+- [x] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane reporting
       exactly one passed (`e2e_credits_deal`) and three skipped
       (`e2e_credits_payment_deal`, with no payments target). 10.2's render test, 10.2a's
       tests, and the log-fetch tests pass; `pytest --collect-only` with each lane's
@@ -4887,6 +4887,22 @@ and the credits scenario's settings; no service code or package version changes.
       bare metal 4m16s), as an observation, not a threshold. Also: the release-tooling
       suite (`scripts/tests`), the e2e unit suite, `make check-packaging`, comment
       hygiene, citations, and strict OpenSpec validation.
+    - Run 37919102415, on commit d30bd2ae: the three jobs pass concurrently. VM 134
+      passed, with no credits scenario and no skip; bare metal 51 passed; API credits 1
+      passed (`e2e_credits_deal`, through the lane's own compute registry) and 3
+      skipped (the payment deal, with no payments target). The bare-metal job builds no
+      API-credit image. Job times, an observation: VM 3m48s, bare metal 3m26s, API
+      credits 2m31s, against 5m44s and 4m16s in run 37910886195 and 6m55s and 4m25s in
+      run 37899278727.
+    - Local checks: the render tests (`test_lane_compose.py`, `test_bare_metal_compose.py`,
+      `test_multi_storefront_compose.py`, 21), the release-tooling suite
+      (`scripts/tests`, 208), the e2e unit suite (38), each lane's marker expression
+      collecting its own modules only (VM 134 tests with no credits module, API credits
+      exactly its 4, bare metal 51), `make check-packaging`, comment hygiene, citations
+      scoped to this change, strict OpenSpec validation (1.14.0), and pyflakes on
+      touched modules. The repository-wide citation check reports 15 misses, every one
+      in other changes or the validation runbook's `scripts/validate/` paths, and none
+      new. The live lanes need a Docker daemon the workspace lacks.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
       Section 10): comment hygiene over the compose files, Makefiles, and the VM
       storefronts' development configuration; documentation compliance against
@@ -4898,6 +4914,15 @@ and the credits scenario's settings; no service code or package version changes.
       for a change isolating the lanes' host ports and networks, so they run
       concurrently on one host (design, "Section 10 design", decision 2), written and
       given its index row; and promotion pending at 11.2, 11.3, and 11.4.
+    - Done: comment hygiene, with a direct read of the compose files' and Makefiles'
+      new comments; documentation compliance against decisions 1–9 (decision 9's
+      fixture reads no storefront setting, which its discovery finds); roadmap
+      currency (Goal 4's gap closed for the lane, the loops and integration tests left
+      to `apicredits-end-to-end-lane`); campaign index currency (this change's row,
+      `apicredits-end-to-end-lane`'s, and its proposal's stated gap); citations;
+      packaging; 10.5's run recorded; and `isolate-end-to-end-lane-stacks` proposed
+      with its index row. Section 10's implementation and live gate are complete; its
+      closeout stays open only for the 11.2, 11.3, and 11.4 promotions.
 
 ## 11. Permanent documentation
 
