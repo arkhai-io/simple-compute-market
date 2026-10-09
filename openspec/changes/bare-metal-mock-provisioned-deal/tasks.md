@@ -4924,6 +4924,10 @@ and the credits scenario's settings; no service code or package version changes.
       - Checks: the e2e unit suite (38), `scripts/tests` (208), the credits lane's
         collection, comment hygiene, citations for this change and
         `apicredits-end-to-end-lane`, and `make check-packaging`.
+      - Run 37935829083, on commit 6e1d03c9: the three jobs pass on fresh runners
+        with the reordered builds (the job log shows the wheels, then the dev chain,
+        the test image, and the lane's images): VM 134 passed, bare metal 51, API
+        credits 1 passed and 3 skipped. Jobs took 5m04s, 3m16s, and 2m33s.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
       Section 10): comment hygiene over the compose files, Makefiles, and the VM
       storefronts' development configuration; documentation compliance against
