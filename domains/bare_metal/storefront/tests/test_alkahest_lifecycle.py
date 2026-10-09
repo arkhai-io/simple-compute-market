@@ -413,3 +413,23 @@ async def test_the_buyers_fulfillment_status_names_the_published_evidence(
     [(published, _ref_uid)] = chain.string_obligation.submitted
     assert before["evidence_digest"] is None
     assert after["evidence_digest"] == published
+    assert before["evidence_attestation_uid"] is None
+    assert after["evidence_attestation_uid"] == ATTESTATION_UID
+
+
+async def test_a_rejected_publication_reports_its_digest_but_no_attestation(
+    tmp_path,
+) -> None:
+    """The stored digest is not publication: only the chain's acceptance names one."""
+    chain = ChainClient(StringObligations(raises=RuntimeError("execution reverted")))
+    runtime, _app_, obligation_ref = await _settled(
+        tmp_path, site=_Site("active"), chain=chain, escrow=EscrowOnChain()
+    )
+    await runtime.settlement_worker.service_obligation(obligation_ref)
+    with serving(_app(runtime)) as base_url:
+        status = _fulfillment_client(base_url).status("neg-accepted")
+
+    assert chain.string_obligation.submitted
+    assert status["evidence_digest"] is not None
+    assert status["evidence_attestation_uid"] is None
+    assert await runtime.settlement_runtime.manual_required_count() == 0

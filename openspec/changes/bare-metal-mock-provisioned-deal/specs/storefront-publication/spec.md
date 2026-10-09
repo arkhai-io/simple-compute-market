@@ -52,7 +52,7 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Evidence is resolved
 - **WHEN** a caller requests lease-ready evidence by its digest
 - **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
-- **AND** the buyer's fulfillment status names the digest the storefront published, once it has published one
+- **AND** the buyer's fulfillment status names the evidence digest once the evidence is stored, and the attestation that published it only once settlement has recorded the chain's acceptance of the submission, so a stored digest awaiting a retry never reads as published
 
 #### Scenario: A settlement ends uncollected after delivery started
 - **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started
@@ -180,7 +180,7 @@ The bare-metal storefront's administrator status MUST report its registry's reac
 #### Scenario: A site checks its link to the storefront
 
 - **WHEN** a configured site authority reads the storefront's status under the `service` role
-- **THEN** the storefront answers, signed; any other service principal is refused
+- **THEN** the storefront answers, signed, with its readiness checks and provisioning contract version, and without its pool overrides or the count of obligations waiting for an operator, which only an administrator reads; any other service principal is refused
 
 #### Scenario: Readiness is read before a deal
 

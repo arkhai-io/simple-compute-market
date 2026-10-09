@@ -4640,38 +4640,24 @@ lane (9.1–9.5).
       absent without it. The status admission and the callback both use the site
       bindings, so no service-role credential is added (design, "Section 9 design",
       implementation findings).
-- [x] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
+- [ ] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
       and the mock deal, and the VM lane with 9.0b's hooks. Also: the bare-metal
       storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
       e2e unit suite, `make check-packaging`, comment hygiene, documentation citations,
       OpenSpec strict validation, and pyflakes.
-    - Run 37850683369: VM's lane passed (135), meeting 9.0b's gate; bare metal's
-      passed publication, introduction, and the mock deal through 04a, so the
-      readiness checks, supply, publication, and the registry listing hold live, and
-      failed at 05a: the preview accepted at round zero, priced from nothing, for the
-      unpinned proposal the storefront client sends when a buyer names no contract,
-      and the real opening did the same. Fixed in the storefront (design, "Section 9
-      design", implementation findings): an unpinned proposal is priced from the
-      listing's first accepted escrow, as VM's is; three integration tests in
-      `test_http_negotiation.py` (an unpinned opening below the listed rate exits under
-      the default chain and is countered under `bisection`, its preview reporting the
-      same; a pinned unlisted contract is refused in both), each of the first two
-      failing without the fix. Bare metal's lane is to run again.
-    - Run 37853584444: VM's lane passed (135); bare metal's passed through 08c and
-      failed at 08b, where no fulfillment had begun: the site refused the storefront's
-      schedule (422 `no_eligible_resource`) because the driver declared the machine
-      as `compute.gpu`, the site's default, and bare-metal scheduling places only
-      `compute.bare-metal`. The driver now declares that type. A site integration
-      probe over the driver's declaration and the storefront's claim reproduced the
-      refusal with the default type, and with the bare-metal type scheduled the
-      machine, its nested publication view intact, and began the grant. Bare metal's
-      lane is to run again.
+    - Runs 37850683369 and 37853584444 failed at 05a and 08b: bare metal priced an
+      opening naming no escrow contract from nothing, and the driver declared its
+      machine as `compute.gpu`, which bare-metal scheduling never places. Both are
+      fixed and recorded in design, "Section 9 design", implementation findings. Run
+      37896157446 timed out at 09b; 9.6a fixed it.
     - Run 37899278727, on commit 6cfa4650 with 9.6a: both lanes pass, VM 135 passed and
       3 skipped, bare metal 51 passed (publication 11, introduction 5, and all 35
-      mock-deal stages, through evidence publication, lease expiry and release, the
-      reopened listing, the second deal, and the repeated buyer teardown). The suites
-      and checks above pass; the VM storefront's two Alkahest integration tests need
-      a local Node and Anvil chain the workspace lacks, as before.
+      mock-deal stages). The suites and checks above pass; the VM storefront's two
+      Alkahest integration tests need a local Node and Anvil chain the workspace
+      lacks.
+    - Open until the bare-metal lane runs again with 9.6b: that run's 09bb inferred
+      publication from the stored evidence digest, which a rejected submission also
+      leaves behind.
 - [x] 9.6a Settlement wait and the repeated teardown (design, "Settlement wait observes
       the selected site (2026-10-09)"). Run 37896157446 timed out at 09b: with
       servicing held, the administrator wait read the storefront's cached dispatch
@@ -4689,6 +4675,24 @@ lane (9.1–9.5).
       scenario on locally deployed charts, packaging, chart render, comment hygiene,
       citations, strict OpenSpec validation, and pyflakes on touched files. The wait
       scenario is in the `storefront-publication` delta, promoted at 11.4.
+- [x] 9.6b Pre-closeout review (design, "Section 9 pre-closeout review (2026-10-09)"):
+      - 09bb reads publication from the chain. The buyer's fulfillment status names
+        `evidence_attestation_uid`, the attestation settlement recorded as the escrow
+        obligation's fulfillment after the chain accepted the submission;
+        `helpers/escrow.py`'s `read_string_obligation` loads it through alkahest-py,
+        and 09bb asserts it references the escrow, carries the digest, and is not
+        revoked. `test_alkahest_lifecycle.py`: the attestation is absent before
+        publication and present after, and a rejected submission reports a digest and
+        no attestation.
+      - A site authority's status read carries the readiness checks and contract
+        version only; pool overrides and the manual-required count stay the
+        administrator's (`api.py`; `test_http_system.py`; the delta's "A site checks
+        its link to the storefront").
+      - `ROADMAP.md`: Goal 4's pipeline gap is closed and its state names the lane's
+        deal.
+      - Checks: the bare-metal storefront suite, the e2e unit suite, fixture
+        resolution for the mock-deal module, `make check-packaging`, comment hygiene,
+        citations, strict OpenSpec validation, and pyflakes.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
@@ -4698,6 +4702,13 @@ lane (9.1–9.5).
       campaign index currency (this change's row); documentation citations; `make
       check-packaging`; 9.6's run recorded; and promotion pending at 11.2 and 11.4 for
       the `storefront-publication` and `test-compatibility` deltas.
+    - Done with 9.6b: roadmap currency (the gap is Goal 4's, closed, and Goal 4's
+      state names the lane's deal), narrative compression of 9.6, citations, comment
+      hygiene, and packaging. Remaining: the direct read of the section's new modules
+      and the import-placement pass, 9.6's rerun, and this change's index row once
+      both land. Section 9's implementation and live gate are complete when 9.6
+      closes; its closeout stays open until the 11.2 and 11.4 promotions land, since
+      this change promotes every delta in Section 11.
 
 ## 10. Pipeline: images built once and an API-credit lane
 

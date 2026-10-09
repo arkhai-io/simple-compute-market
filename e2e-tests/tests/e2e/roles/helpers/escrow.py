@@ -157,3 +157,41 @@ def create_buyer_escrow(
         return uid
 
     return asyncio.run(_do_it())
+
+
+def read_string_obligation(
+    uid: str,
+    *,
+    private_key: str,
+    rpc_url: str = "ws://localhost:8545",
+    chain_name: str = "anvil",
+) -> dict[str, object]:
+    """Read a string obligation attestation from the chain itself.
+
+    What a seller publishes as an escrow's fulfillment: the attestation's
+    identity, the escrow it references, whether it was revoked, and its string
+    payload. Read through alkahest-py as any party would, so the answer is the
+    chain's, not a storefront's record of it. The key signs nothing; the client
+    requires one.
+    """
+    rpc_url = ensure_ws_rpc_url(rpc_url)
+    addr_config_path = _alkahest_addresses_path()
+    prewarm_alkahest_address_config_cache(addr_config_path)
+    address_config = resolve_alkahest_address_config(
+        get_alkahest_network(chain_name), config_path=addr_config_path
+    )
+    client = AlkahestClient(
+        private_key=private_key, rpc_url=rpc_url, address_config=address_config,
+    )
+
+    async def _read() -> dict[str, object]:
+        decoded = await client.string_obligation.get_obligation(uid)
+        attestation, data = decoded["attestation"], decoded["data"]
+        return {
+            "uid": str(attestation.uid),
+            "ref_uid": str(attestation.ref_uid),
+            "revoked": bool(attestation.is_revoked()),
+            "item": str(data.item),
+        }
+
+    return asyncio.run(_read())

@@ -72,7 +72,8 @@ class BareMetalHealthResponse(BaseModel):
     # administrator status only.
     settlement_manual_required: int | None = None
     # The storefront-to-provisioning contract version this storefront speaks,
-    # from its installed contract wheel; administrator status only.
+    # from its installed contract wheel; on the status an administrator or a
+    # configured site's authority reads.
     provisioning_contract_version: str | None = None
 
 
@@ -92,6 +93,10 @@ class BareMetalFulfillmentResponse(BaseModel):
         default=None,
         validation_alias=AliasChoices("evidence_digest", "lease_ready_evidence_digest"),
     )
+    # The on-chain attestation that published the digest, once settlement has
+    # recorded it as the escrow's fulfillment; never reported before the chain
+    # accepted the submission.
+    evidence_attestation_uid: str | None = None
 
 
 class BareMetalFulfillmentResultResponse(BaseModel):

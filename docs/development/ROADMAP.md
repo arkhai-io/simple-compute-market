@@ -158,7 +158,8 @@ local copies; pool-declared offering mode and persisted selected-site binding
 remain authoritative through publication and recovery. Bare metal composes the
 same capacity and publication seams, the shared watchdog and chain factory, and
 selected-site fulfillment, result, and teardown, and has a deployable stack with
-its own end-to-end lane; it still carries a domain-local negotiation service and
+its own end-to-end lane, which runs a mock-provisioned deal stage for stage with
+VM's; it still carries a domain-local negotiation service and
 its own negotiate and listing routes beside the negotiation kit. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
@@ -200,7 +201,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Every storefront carries its own route set, executable assembly, and health service | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence; VM keeps its own per-site projection cache | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
 | Every storefront carries its own authentication middleware and a persistence client whose boundary with core's is unstated | [`kit-owned-storefront-auth-and-persistence`](../../openspec/changes/kit-owned-storefront-auth-and-persistence/) |
-| No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/bare-metal-mock-provisioned-deal/) |
+| ~~No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host~~ — closed: the bare-metal lane runs a mock-provisioned whole-host deal on the compute deal stages VM's lane runs, from publication through settlement, on-chain evidence publication, lease expiry and release, and a second deal | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/bare-metal-mock-provisioned-deal/) |
 
 **Design promotion (2026-08-15).** `kit-storefront-composition-seam`,
 `kit-owned-negotiation-runtime`, and `kit-owned-capacity-and-publication` are now

@@ -72,7 +72,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11b_TeardownCompletion,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.escrow import create_buyer_escrow
+from tests.e2e.roles.helpers.escrow import create_buyer_escrow, read_string_obligation
 from tests.e2e.roles.scenarios.bare_metal.conftest import BareMetalDealState
 
 log = logging.getLogger(__name__)
@@ -269,15 +269,18 @@ class TestStage09b_SettlementReadyAndCredentials(Stage09b_SettlementReadyAndCred
 class TestStage09bb_EvidencePublishedForTheFulfilledEscrow:
     def test_09bb_servicing_publishes_the_lease_ready_evidence(
         self, storefront_client, storefront_admin_client, buyer_fulfillment,
-        deal_state: BareMetalDealState,
+        buyer_config, deal_state: BareMetalDealState,
     ):
-        """One servicing step publishes the deal's evidence, which the buyer resolves.
+        """One servicing step publishes the deal's evidence on chain.
 
         Bare metal's own stage: its servicing pass after the lease is active is
         what stores the lease-ready evidence and publishes its digest on chain
-        as the escrow's fulfillment, where VM records a seller claim. Asserts
-        publication, not collection: collection waits on a chain condition this
-        scenario does not control.
+        as the escrow's fulfillment, where VM records a seller claim. A stored
+        digest is not publication, since a rejected submission leaves one
+        behind to retry, so publication is read from the chain: the attestation
+        settlement recorded holds the digest and references the escrow.
+        Asserts publication, not collection: collection waits on a chain
+        condition this scenario does not control.
         """
         require_state(deal_state, "real_escrow_uid", "settlement_status", "negotiation_id")
         result = advance_storefront(storefront_admin_client, "settlement-servicing")
@@ -285,7 +288,21 @@ class TestStage09bb_EvidencePublishedForTheFulfilledEscrow:
 
         status = buyer_fulfillment.status(deal_state.negotiation_id)
         digest = status.get("evidence_digest")
-        assert digest, f"no lease-ready evidence was published: {status}"
+        assert digest, f"no lease-ready evidence was stored: {status}"
+        attestation_uid = status.get("evidence_attestation_uid")
+        assert attestation_uid, (
+            f"settlement recorded no published attestation for the evidence: {status}"
+        )
+        published = read_string_obligation(
+            attestation_uid,
+            private_key=buyer_config["private_key"],
+            rpc_url=buyer_config["rpc_url"],
+        )
+        assert published["uid"].lower() == attestation_uid.lower(), published
+        assert published["ref_uid"].lower() == deal_state.real_escrow_uid.lower(), published
+        assert published["item"] == digest, published
+        assert not published["revoked"], published
+
         signed = SyncBareMetalEvidenceClient(
             storefront_client, role="buyer"
         ).lease_ready_evidence(digest)
@@ -296,7 +313,10 @@ class TestStage09bb_EvidencePublishedForTheFulfilledEscrow:
 
         system = storefront_admin_client.get_system_status()
         assert system.settlement_manual_required == 0, system
-        log.info("[09bb] Evidence %s published for %s", digest, deal_state.real_escrow_uid)
+        log.info(
+            "[09bb] Evidence %s published as %s for %s",
+            digest, attestation_uid, deal_state.real_escrow_uid,
+        )
 
 
 class TestStage09c_LeaseRecorded(Stage09c_LeaseRecorded):

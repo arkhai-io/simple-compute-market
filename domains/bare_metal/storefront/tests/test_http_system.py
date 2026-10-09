@@ -635,9 +635,16 @@ async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(
     async with app.router.lifespan_context(app):
         async with _status_client(app, SITE_SIGNER, "service") as site:
             status = await site.get_system_status()
+        async with _status_client(app, ADMIN_SIGNER, "admin") as admin:
+            administrator = await admin.get_system_status()
         async with _status_client(app, impostor, "service") as other:
             with pytest.raises(StorefrontClientError) as refused:
                 await other.get_system_status()
 
     assert status.checks["database"] == "ok"
+    assert status.provisioning_contract_version == COMPUTE_PROVISIONING_CONTRACT_VERSION
+    # The site reads readiness alone; operator state is the administrator's.
+    assert status.settlement_manual_required is None
+    assert status.extra.get("pool_overrides") is None
+    assert administrator.settlement_manual_required == 0
     assert refused.value.status_code in (401, 403)

@@ -102,6 +102,7 @@ from .models import (
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
+from .settlement_composition import ALKAHEST_MECHANISM
 from .settlement_service import PaymentSettleResult, SettlementRequestError
 
 router = APIRouter()
@@ -830,12 +831,36 @@ async def fulfillment_status(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        attestation = await _evidence_attestation(runtime, lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "evidence_attestation_uid": attestation}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail=exc.detail,
         ) from exc
+
+
+async def _evidence_attestation(
+    runtime: BareMetalStorefrontRuntime, lifecycle: Mapping[str, Any]
+) -> str | None:
+    """The attestation publishing the deal's evidence, once settlement recorded it.
+
+    Settlement records it as the escrow obligation's fulfillment only after the
+    chain accepted the submission, so a stored evidence digest alone never
+    reports one.
+    """
+
+    status = await runtime.settlement_runtime.get_status(str(lifecycle["negotiation_id"]))
+    for obligation in status.obligations:
+        if (
+            obligation.mechanism_ref == lifecycle.get("escrow_uid")
+            and obligation.obligation.get("mechanism") == ALKAHEST_MECHANISM
+            and obligation.fulfillment_ref
+        ):
+            return str(obligation.fulfillment_ref)
+    return None
 
 
 @router.get(
@@ -1011,14 +1036,17 @@ async def health(request: Request) -> BareMetalHealthResponse:
 
 @router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
 async def system_status(request: Request) -> BareMetalHealthResponse:
-    """The administrator's status, which a configured site may also read.
+    """The administrator's status, whose readiness a configured site may also read.
 
     A site's authority reads it under the ``service`` role to check that it can
     reach and authenticate to this storefront, the same trust its
-    capacity-released callback is authenticated against.
+    capacity-released callback is authenticated against. It is answered with the
+    readiness checks alone: pool overrides and obligations waiting for an
+    operator are the administrator's.
     """
     runtime = _runtime(request)
-    if request.headers.get("x-market-role") == "service":
+    as_site = request.headers.get("x-market-role") == "service"
+    if as_site:
         await _principal(
             request=request,
             runtime=runtime,
@@ -1037,12 +1065,13 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
             resource="system/status",
         )
     status = await runtime.status()
-    overrides = runtime.pool_override_service()
-    if overrides is not None:
-        status["pool_overrides"] = await overrides.statuses()
-    status["settlement_manual_required"] = (
-        await runtime.settlement_runtime.manual_required_count()
-    )
+    if not as_site:
+        overrides = runtime.pool_override_service()
+        if overrides is not None:
+            status["pool_overrides"] = await overrides.statuses()
+        status["settlement_manual_required"] = (
+            await runtime.settlement_runtime.manual_required_count()
+        )
     return BareMetalHealthResponse.model_validate(status)
 
 
