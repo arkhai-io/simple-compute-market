@@ -44,6 +44,7 @@ from fastapi.responses import JSONResponse
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
+    INTRODUCTION_ROUTE,
     AuthorizedIntroductionRequest,
     IntroductionRouteError,
     IntroductionStart,
@@ -326,7 +327,7 @@ async def start_introduction(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/api/v1/introductions/{obligation_ref}")
+@router.get(INTRODUCTION_ROUTE)
 async def read_introduction(
     obligation_ref: str,
     request: Request,

@@ -3,26 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
-import time
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     IntroductionAdminClient,
+    IntroductionSellerClient,
     format_introduction_timestamp,
 )
 from market_core.schemas import derive_settlement_option_id
 from market_identity import (
-    EMPTY_BODY,
     Eip191Signer,
-    RequestEnvelope,
     TrustedIdentitySet,
-    canonical_body_hash,
-    sign_request,
 )
 from market_settlement_runtime import SettlementPublicationClause, derive_obligation_ref
 
@@ -50,39 +44,6 @@ OUTSIDER_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 
 _SELLER_CONTACT = {"telegram": "@capacity_broker"}
 _BUYER_CONTACT = {"email": "buyer@example.com"}
-
-
-def _headers(
-    signer: Eip191Signer,
-    role: str,
-    operation: str,
-    resource_id: str,
-    body: Any,
-    *,
-    method: str = "POST",
-) -> dict[str, str]:
-    signed = sign_request(
-        signer=signer,
-        envelope=RequestEnvelope(
-            role=role,
-            principal=signer.identity,
-            method=method,
-            operation=operation,
-            resource=resource_id,
-            request_id=f"test-{uuid.uuid4().hex}",
-            timestamp=int(time.time()),
-            body_hash=canonical_body_hash(body),
-        ),
-    )
-    return {
-        "X-Market-Signature-Version": signed.protocol,
-        "X-Market-Identity-Scheme": signed.principal.scheme.value,
-        "X-Market-Identity-Identifier": signed.principal.identifier,
-        "X-Market-Role": signed.role,
-        "X-Market-Request-ID": signed.request_id,
-        "X-Market-Timestamp": str(signed.timestamp),
-        "X-Market-Signature": signed.proof.value,
-    }
 
 
 def _contact_option() -> dict[str, Any]:
@@ -263,6 +224,18 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
     return negotiation_id, obligation_ref, started
 
 
+async def _seller_read(base_url: str, obligation_ref: str) -> dict:
+    """Re-read one introduction as its seller, through the seller's typed client."""
+    async with StorefrontClient(
+        base_url,
+        signer=SELLER_SIGNER,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    ) as seller:
+        reveal = await IntroductionSellerClient(seller).read_introduction(obligation_ref)
+    return reveal.model_dump(exclude_none=True)
+
+
 async def test_contact_options_publish_through_the_composition() -> None:
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         {
@@ -308,27 +281,12 @@ async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
             base_url, option
         )
         read = _introductions(base_url).read(obligation_ref=obligation_ref)
+        seller_read = await _seller_read(base_url, obligation_ref)
     assert projection["revealed"] is True
     assert projection["counterparty_contact"] == _SELLER_CONTACT
     assert projection["introduction"]["channel"] == "telegram"
     assert read["counterparty_contact"] == _SELLER_CONTACT
-
-    # Deferred debt, not an exemption: no typed client reads an introduction as
-    # the seller, so the seller's read is hand-built until one exists.
-    with TestClient(app) as client:
-        seller_read = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                SELLER_SIGNER,
-                "seller",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-    assert seller_read.status_code == 200
-    assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
+    assert seller_read["counterparty_contact"] == _BUYER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
     evidence = await runtime.settlement_service().verified_evidence(
@@ -413,22 +371,10 @@ async def test_accepted_introduction_survives_contact_disable(
             await _negotiate_contact(base_url, option)
         assert refused.value.status_code == 400
 
-    # Deferred debt, not an exemption: no typed client reads an introduction as
-    # the seller, so the seller's read is hand-built until one exists.
-    with TestClient(app) as client:
-        seller_read = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                SELLER_SIGNER,
-                "seller",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-    assert seller_read.status_code == 200, seller_read.text
-    assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
+        # The seller re-reads the same persisted reveal after disablement.
+        seller_read = await _seller_read(base_url, obligation_ref)
+    assert seller_read["counterparty_contact"] == _BUYER_CONTACT
+    assert seller_read["obligation_ref"] == obligation_ref
 
     status = await restarted.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"

@@ -64,6 +64,13 @@ from .retention import (
     retention_disclosure,
     run_introduction_retention_sweep,
 )
+from .seller_client import (
+    INTRODUCTION_READ_OPERATION,
+    INTRODUCTION_ROUTE,
+    IntroductionReveal,
+    IntroductionSellerClient,
+    SyncIntroductionSellerClient,
+)
 from .settlement_config import (
     CONTACT_CONFIG_KEY,
     DEFAULT_RETENTION_SECONDS,
@@ -104,6 +111,8 @@ __all__ = [
     "INTRODUCTION_ASSET",
     "INTRODUCTION_PAYLOADS_DELETED",
     "INTRODUCTION_PAYLOADS_ROUTE",
+    "INTRODUCTION_READ_OPERATION",
+    "INTRODUCTION_ROUTE",
     "INTRODUCTION_RETENTION_LOOP",
     "INTRODUCTION_RETENTION_ROUTE",
     "MECHANISM",
@@ -124,6 +133,8 @@ __all__ = [
     "IntroductionDisclosure",
     "IntroductionPayloadsDeletedError",
     "IntroductionPayloadsDeletion",
+    "IntroductionReveal",
+    "IntroductionSellerClient",
     "IntroductionRecord",
     "IntroductionRetentionPolicy",
     "IntroductionRetentionService",
@@ -141,6 +152,7 @@ __all__ = [
     "SQLiteIntroductionStore",
     "SelectExpiredIntroductions",
     "SyncIntroductionAdminClient",
+    "SyncIntroductionSellerClient",
     "accepted_introduction",
     "contact_accepted_obligation_builder",
     "contact_buyer_compatibility",
