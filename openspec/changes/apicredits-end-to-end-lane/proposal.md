@@ -3,12 +3,11 @@
 API credits is a deployable market domain, but nothing proves its storefront works as
 assembled:
 
-- **No end-to-end lane of its own.** Its one scenario,
+- **Its lane never holds or steps its loops.** Its deal scenario,
   `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_deal_buyer_cli.py`,
-  runs inside the VM lane: the VM compose stack includes `domains/apicredits/compose.yml`.
-  A VM-lane failure therefore hides API-credit evidence and the reverse, and the
-  scenario never holds or steps the API-credit storefront's loops, which no
-  pipeline run exercises at all.
+  runs in the API-credit lane `bare-metal-mock-provisioned-deal` built, but never
+  holds or steps the API-credit storefront's loops, which no pipeline run exercises
+  at all.
 - **No production-application test.** Every API-credit storefront test builds a
   minimal application, or stubs the lifespan's start and stop hooks. Its startup —
   credits-service preflight, demo-listing seeding, capacity polling against
