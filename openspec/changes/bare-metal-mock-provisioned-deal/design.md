@@ -3121,6 +3121,17 @@ per-domain stack composition (11.3) and `docs/development/TESTING.md`'s lanes (1
 and the lane requirement's scenario in the `test-compatibility` delta (11.4); decision 9
 is `TESTING.md`'s existing rule, applied.
 
+### Section 10 implementation review (2026-10-09)
+
+Reviewed against run 37919102415 and decided with the maintainer.
+
+| Finding | Resolution |
+|---|---|
+| `test-e2e` listed the lanes and their teardowns as prerequisites, which `make -j` runs concurrently, though the stacks cannot coexist; `build-e2e-base`, `build`, and `build-dev` likewise relied on left-to-right prerequisites for the wheels to exist before the images and dev chain that copy `.dist/` | Each is a recipe of recursive calls in the required order, since GNU Make 4.3, the runners' version, has no `.WAIT`. The pipeline reaches only `build-e2e-base`, on a fresh checkout, so that target makes the wheels itself; only the images, which share nothing but `.dist/`, build in parallel |
+| The payment deal skipped on a missing `API_CREDITS` setting, and checked the payments target first, so a broken lane stayed hidden behind the blocked scenario | Both credits scenarios read lane settings through one `lane_setting` in the API-credit scenarios' `conftest.py`, which fails; the payment deal checks them before the payments target, the only cause it skips for |
+| `domains/bare_metal/compose.yml` still said only the local overlay enables the test controller; `apicredits-end-to-end-lane`'s design described the API-credit scenario in the VM lane; the validation runbook brought the full stack up with neither overlay nor environment file, so 10.6 overstated documentation compliance | Each describes the current system; the runbook runs every compose command through one invocation carrying the environment file and both overlays |
+| Two `.DS_Store` files were tracked | Removed and ignored |
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,

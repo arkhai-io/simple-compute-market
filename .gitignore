@@ -247,3 +247,6 @@ openspec/changes/*/reviews/*
 # archive tools write out as a separate file). It records where a file was
 # downloaded from, which can be a private local path.
 *:Zone.Identifier
+
+# macOS Finder metadata.
+.DS_Store

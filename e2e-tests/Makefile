@@ -184,9 +184,16 @@ e2e_env_if_missing = test -f "$(1)" || $(MAKE) -s --no-print-directory $(2) > "$
 
 # The stacks run one after another, never side by side on one host: each names
 # its chain container `anvil` and publishes fixed host ports (8545 in every
-# stack; 8080 and 8081 in the VM and bare-metal stacks). The pipeline runs each
-# lane as a job of its own instead.
-test-e2e: test-e2e-vm e2e-vm-down test-e2e-bare-metal e2e-bare-metal-down test-e2e-apicredits
+# stack; 8080 and 8081 in the VM and bare-metal stacks). The order is a recipe
+# of recursive calls, not a list of prerequisites, because `make -j` runs a
+# target's prerequisites concurrently and GNU Make 4.3 has no `.WAIT`. The
+# pipeline runs each lane as a job of its own instead.
+test-e2e:
+	$(MAKE) test-e2e-vm
+	$(MAKE) e2e-vm-down
+	$(MAKE) test-e2e-bare-metal
+	$(MAKE) e2e-bare-metal-down
+	$(MAKE) test-e2e-apicredits
 
 # VM lane: Bob's and Alice's storefronts and provisioning authorities, the two
 # VM registries, and the dev chain.

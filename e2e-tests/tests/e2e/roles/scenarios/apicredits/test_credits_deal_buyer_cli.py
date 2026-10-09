@@ -26,7 +26,6 @@ import httpx
 from market_identity import IdentityScheme
 import pytest
 
-from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import (
     BuyerCli,
     _alkahest_addresses_path,
@@ -39,33 +38,21 @@ from tests.e2e.roles.helpers.domain_deal import (
     assert_market_run_succeeded,
     ordered_events,
 )
+from tests.e2e.roles.scenarios.apicredits.conftest import lane_setting
 
 log = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.e2e_credits_deal
 
 
-def _required(name: str) -> str:
-    """One lane setting, failing the scenario when it is absent.
-
-    The lane supplies its own configuration, so a missing value is a broken
-    lane, not a scenario to skip: in this lane a skip would leave nothing
-    passing and the run green.
-    """
-    value = str(settings.get(name, "") or "").strip()
-    if not value:
-        pytest.fail(f"API-credit lane setting {name} is not configured")
-    return value
-
-
 def _registry_pin(prefix: str) -> tuple[str, dict[str, Any]]:
-    url = _required(f"API_CREDITS.{prefix}_URL").rstrip("/")
+    url = lane_setting(f"API_CREDITS.{prefix}_URL").rstrip("/")
     return url, {
-        "authority": _required(f"API_CREDITS.{prefix}_AUTHORITY_ID"),
+        "authority": lane_setting(f"API_CREDITS.{prefix}_AUTHORITY_ID"),
         "identities": [
             {
-                "scheme": _required(f"API_CREDITS.{prefix}_SCHEME"),
-                "identifier": _required(f"API_CREDITS.{prefix}_IDENTIFIER"),
+                "scheme": lane_setting(f"API_CREDITS.{prefix}_SCHEME"),
+                "identifier": lane_setting(f"API_CREDITS.{prefix}_IDENTIFIER"),
             }
         ],
     }
@@ -74,11 +61,11 @@ def _registry_pin(prefix: str) -> tuple[str, dict[str, Any]]:
 @pytest.fixture(scope="module")
 def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
     """Compose API credits over the shared profile/config fixture."""
-    private_key = _required("BUYER.PRIVATE_KEY")
-    wallet_address = _required("BUYER.WALLET_ADDRESS")
-    marketplace_credential = _required("BUYER.MARKETPLACE_CREDENTIAL")
+    private_key = lane_setting("BUYER.PRIVATE_KEY")
+    wallet_address = lane_setting("BUYER.WALLET_ADDRESS")
+    marketplace_credential = lane_setting("BUYER.MARKETPLACE_CREDENTIAL")
 
-    rpc_url = _required("BUYER.CHAIN_RPC_URL")
+    rpc_url = lane_setting("BUYER.CHAIN_RPC_URL")
     if rpc_url.startswith("http://"):
         rpc_url = "ws://" + rpc_url[len("http://"):]
     elif rpc_url.startswith("https://"):

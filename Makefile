@@ -254,10 +254,20 @@ test-kits:
 	cd kit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
-# `build` produces the production artifacts: the three runtime images
-# (registry, storefront, provisioning) and the buyer CLI binary. `build-dev`
-# adds the test chain + integration-test image needed for the local e2e stack.
-build: init-prerequisites dist build-buyer
+# `build` produces the production artifacts: the runtime images and the buyer
+# CLI binary. `build-dev` adds the test chain + integration-test image needed
+# for the local e2e stack.
+#
+# Every image copies `.dist/` and the dev chain's state is generated from it,
+# so the wheels must be complete before any of them starts. Under `make -j` a
+# target's prerequisites run concurrently, and the GNU Make the pipeline's
+# runners carry (4.3) has no `.WAIT` to order them, so these targets order
+# their steps as recipe lines of recursive calls instead. Only the images,
+# which share nothing but `.dist/`, are built in parallel.
+build: ## Build the wheels, the buyer CLI binary, and every runtime image
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
 
@@ -436,13 +446,22 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
 	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
 
-build-dev: build build-dev-env build-test-image
+build-dev: ## Build everything `build` does, the dev chain image, and the test image
+	$(MAKE) build
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
 
 # One end-to-end lane's images: the wheels, the dev chain with its baked state,
 # the test image (which installs `market` from the wheels, so no lane needs
 # build-buyer), and the runtime images that lane's stack runs. Each lane job
-# builds only its own; build-dev keeps building everything for local use.
-build-e2e-base: init-prerequisites dist build-dev-env build-test-image
+# builds only its own; build-dev keeps building everything for local use. The
+# pipeline runs a lane target on a fresh checkout, so this target, not its
+# caller, makes the wheels first, ordered as `build` orders its steps.
+build-e2e-base:
+	$(MAKE) init-prerequisites
+	$(MAKE) dist
+	$(MAKE) build-dev-env
+	$(MAKE) build-test-image
 
 build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
 	$(MAKE) -j3 build-registry build-storefront build-provisioning

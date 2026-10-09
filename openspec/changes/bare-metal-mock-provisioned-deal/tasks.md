@@ -4903,6 +4903,27 @@ and the credits scenario's settings; no service code or package version changes.
       touched modules. The repository-wide citation check reports 15 misses, every one
       in other changes or the validation runbook's `scripts/validate/` paths, and none
       new. The live lanes need a Docker daemon the workspace lacks.
+- [x] 10.5a Implementation-review fixes (design, "Section 10 implementation review
+      (2026-10-09)"):
+      - Ordering: `e2e-tests/Makefile`'s `test-e2e`, and the root `Makefile`'s
+        `build-e2e-base`, `build`, and `build-dev`, are recipes of recursive calls;
+        `make -n -j6` shows the lanes strictly in turn and the wheels before the dev
+        chain, the test image, and every runtime image.
+      - `scenarios/apicredits/conftest.py`'s `lane_setting`, used by both credits
+        scenarios; the payment deal checks `API_CREDITS.REGISTRY_URL` and
+        `STOREFRONT_URL` before the payments target. Under the docker profile a
+        blanked lane setting fails each scenario, and the payment deal still skips
+        without a payments target.
+      - Documentation: `domains/bare_metal/compose.yml`'s header,
+        `openspec/changes/apicredits-end-to-end-lane/design.md`'s context, and
+        `docs/development/VALIDATION_RUNBOOK.md`, whose compose commands all run
+        through `$SCM_COMPOSE`, a rendered invocation with the environment file, both
+        overlays, and the Redis override (it also drops a `contracts-deploy` service no
+        stack has).
+      - The root and inventory `.DS_Store` files removed; `.gitignore` ignores them.
+      - Checks: the e2e unit suite (38), `scripts/tests` (208), the credits lane's
+        collection, comment hygiene, citations for this change and
+        `apicredits-end-to-end-lane`, and `make check-packaging`.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
       Section 10): comment hygiene over the compose files, Makefiles, and the VM
       storefronts' development configuration; documentation compliance against
@@ -4915,7 +4936,8 @@ and the credits scenario's settings; no service code or package version changes.
       concurrently on one host (design, "Section 10 design", decision 2), written and
       given its index row; and promotion pending at 11.2, 11.3, and 11.4.
     - Done: comment hygiene, with a direct read of the compose files' and Makefiles'
-      new comments; documentation compliance against decisions 1–9 (decision 9's
+      new comments; documentation compliance against decisions 1–9, completed by
+      10.5a, which corrected three documents this note first passed (decision 9's
       fixture reads no storefront setting, which its discovery finds); roadmap
       currency (Goal 4's gap closed for the lane, the loops and integration tests left
       to `apicredits-end-to-end-lane`); campaign index currency (this change's row,
