@@ -4688,6 +4688,10 @@ lane (9.1–9.5).
       wait behavior is promoted to the current spec. Overall campaign/index status
       and roadmap mapping remain unchanged while pipeline restructuring and closeout
       are pending.
+      Remote E2E run 37899278727 on commit 6cfa4650 passed both lanes: VM
+      (135 passed, 3 skipped) and bare metal (51 passed), including publication,
+      introduction, the mock-provisioned deal, evidence publication, lease expiry,
+      and repeated buyer teardown. Actions and both Compose artifacts were fetched.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
