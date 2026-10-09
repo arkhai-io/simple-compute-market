@@ -156,13 +156,6 @@ controlled payment entry still observes `pending deliveries: 0`, then
 Comment hygiene and Ruff unused-name/import checks pass. No VM role static Make target is declared; no full
 repository or live chain/payment/provider suite was run.
 
-The managed-process completion notice failed to read the final regression
-output. `process logs` plus direct retained-stdout inspection recovered the
-105/270 counts without rerunning. This repeats the existing owning
-[pi process-log issue](https://github.com/mlegls/mlegls-pi/blob/main/docs/issues/managed-process-retained-logs-disappear-during-test-run.md);
-it does not show disappearance of retained files. No process-tool repair was
-made in this VM scope.
-
 ## Danger
 
 Code is reversible. Fresh negotiation no longer accepts the untagged legacy

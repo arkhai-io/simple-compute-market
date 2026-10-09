@@ -45,6 +45,4 @@ payment escrow rows: 0
 
 An extra temporary real-SQLite diagnostic observed provider failure, one failure-policy invocation, and zero replacement starts. Initial adaptation failures were missing fixture context/accepted-source state. Flat provision fixtures hid an incorrect SSH-field decoder; extending the smoke through the planner exposed it; the planner now uses the domain's provision-envelope decoder. One validation command named the nonexistent `test_failure_actions.py`; it ran no tests and was replaced by the existing `test_failure_policy.py`.
 
-Process completion notices intermittently could not read logs; direct retained-path inspection recovered the counts. Existing owner: [mlegls-pi process-log issue](~/dev/mlegls-pi/docs/issues/managed-process-retained-logs-disappear-during-test-run.md). Observation recorded in that repository at `86a62a2`.
-
 No screenshots apply. No server, container, tunnel, browser page or external resource remains running. Permanent destinations remain `openspec/specs/vm-storefront-fulfillment/{spec.md,architecture.md}` and `openspec/specs/physical-provisioning/{spec.md,architecture.md}` after review in 2.6.

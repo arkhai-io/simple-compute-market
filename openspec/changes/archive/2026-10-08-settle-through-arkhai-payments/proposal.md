@@ -2,7 +2,7 @@
 
 The settlement slot is shaped like the first mechanism that filled it. Alkahest is escrow: money stays the payer's until a condition is proven, and the payer reclaims after expiry. `SettlementObligation` carries that model as typed "lifecycle universals" (`claimant`, `expiration_unix` as the collect-vs-reclaim boundary, `conditions`), and `ConditionalEscrowClient` gives every mechanism escrow verbs (`materialize`, `check`, `collect`, `reclaim_expired`).
 
-Fiat is charge-first: money moves at payment and is undone by refund or dispute. Fitting the hosted Stripe mechanism to the escrow shape produced most of its friction, for example escrowing a maximum amount up front and refunding the unused rest instead of charging the actual amount once it is known. The hosted Stripe service (`arkhai-io/stripe-settlement-service`, consumed through `kit/hosted-settlement` as `fiat.stripe.v1`) is being replaced by the Arkhai payments service (`arkhai-io/arkhai-payments`): a balance ledger on Formance where a buyer approves a mandate from their Arkhai account and receives a service-signed receipt. Its v1 serves fixed-interval deals.
+Fiat is charge-first: money moves at payment and is undone by refund or dispute. Fitting the hosted Stripe mechanism to the escrow shape produced most of its friction, for example escrowing a maximum amount up front and refunding the unused rest instead of charging the actual amount once it is known. The hosted Stripe service (consumed through `kit/hosted-settlement` as `fiat.stripe.v1`) is being replaced by the Arkhai payments service: a balance ledger on Formance where a buyer approves a mandate from their Arkhai account and receives a service-signed receipt. Its v1 serves fixed-interval deals.
 
 ## What Changes
 

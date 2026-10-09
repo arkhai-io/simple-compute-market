@@ -122,7 +122,7 @@ Fresh authority diagnostic [`inspect_credits_schema.py`](inspect_credits_schema.
 
 No checkout-owned live deployment or explicit payment/site/provider/auth target was handed off. No inherited `ACTIVE_PROFILES`, `CONFIG_DIRECTORY` or compose project selector was present. The committed generic local profile addresses are not proof of ownership and were not seeded or mutated. Read-only readiness probes at its storefront `/health`, registry `/api/v1/system/status`, provisioner `/api/v1/system/ansible/readiness` returned curl HTTP **000** (connection failure). Podman could not connect to its local machine socket. No owned ready live lane exists; no private payments service/account or hardware access was established by this setup.
 
-Stopped before scenario execution, including state-changing readiness seeds. VM `test_full_deal_buyer_cli.py`, API-credit `test_credits_deal_buyer_cli.py`, bare-metal `test_bare_metal_deal.py` are **unavailable/unqualified**, not failed product journeys or mocked successes. Live payment complete-deal ownership remains `scm-complete-deal-e2e` in private `arkhai-io/arkhai-payments`; physical live qualification remains the domain roadmap's existing release gate. Public controlled qualification does not close those owners.
+Stopped before scenario execution, including state-changing readiness seeds. VM `test_full_deal_buyer_cli.py`, API-credit `test_credits_deal_buyer_cli.py`, bare-metal `test_bare_metal_deal.py` are **unavailable/unqualified**, not failed product journeys or mocked successes. Live payment complete deals are qualified outside this repository, against the payments service's published contract (see `docs/development/TESTING.md`); physical live qualification remains the domain roadmap's existing release gate. Public controlled qualification does not close those owners.
 
 ## Frictions and replayable checks
 
@@ -131,7 +131,6 @@ Stopped before scenario execution, including state-changing readiness seeds. VM 
 - Pydantic schema shadowing: [#259](https://github.com/arkhai-io/simple-compute-market/issues/259); no serialization failure observed.
 - New credits TestClient Starlette deprecation: [#260](https://github.com/arkhai-io/simple-compute-market/issues/260); HTTP checks pass without suppressing it.
 - VM agent-ID default warning remains visible; controlled composition succeeds, not proof of valid production identity configuration.
-- VM process completion notice could not read retained output; `process logs` → `read` recovered 244 passes without rerun. Existing owning pi issue `~/dev/mlegls-pi/docs/issues/managed-process-retained-logs-disappear-during-test-run.md` updated in that repository at `8f8ff8a`; no missing-file conclusion is inferred.
 - Checks prompted by use: pending must leave zero effects; loss of acknowledgement must retain one grant; reopen must reverify source and reuse operation; foreign principal must not see secret; malformed verified evidence must not become frozen authority; terminal reclaimed source must refuse physical recovery. First four held in the committed entries; last two have explicit counterexamples above. Branch inspection must follow real callers, not count only mechanism-ID literals.
 
 ## Task disposition and cleanup

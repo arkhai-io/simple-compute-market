@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/arkhai-io/arkhai-payments/schema/payments.schema.json",
+  "$id": "urn:arkhai:payments:wire-contract",
   "title": "arkhai-payments wire contract",
   "$defs": {
     "AccountId": {

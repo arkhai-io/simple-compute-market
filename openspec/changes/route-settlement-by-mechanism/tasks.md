@@ -157,7 +157,7 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   Kit policy unit tests for scalar and unpriced selections; a VM storefront
   integration test running the real VM buyer client with an Alkahest
   selection against the served storefront to acceptance.
-- [ ] 10.4 Public-repository discipline. Remove private repository names,
+- [x] 10.4 Public-repository discipline. Remove private repository names,
   commits, planning-document paths and private test-target names from this
   change, its attachments, the payments kit (`schema/SOURCE.md`, generator and
   generated models header, schema `$id` with its recorded SHA-256), permanent
