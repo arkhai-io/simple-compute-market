@@ -9,6 +9,8 @@ on:
       - 'domains/vms/**'
       - 'domains/apicredits/**'
       - 'domains/bare_metal/**'
+      - 'domains/compute/**'
+      - 'provisioning/compute/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -41,6 +43,10 @@ permissions:
 # build-matrix below and the per-package path filters above it. Service
 # apps deployed only via Docker/Helm (the registry indexer), the e2e
 # harness, the sample app, and internal tooling are intentionally absent.
+# A published package installs only from PyPI, so every repository
+# distribution it depends on, including through an extra, is in the table
+# too; scripts/tests/test_publish_matrix.py fails when one is missing, when
+# a package lacks its path filter, or when RELEASING.md's table disagrees.
 #
 # Internal build order does not matter: each wheel is built with
 # `uv build --no-sources` in an isolated build env that installs only the
@@ -83,6 +89,19 @@ jobs:
             core-registry: ['core/registry/**', '.github/workflows/publish-pypi.yml']
             kit-site: ['kit/site/**', '.github/workflows/publish-pypi.yml']
             kit-site-client: ['kit/site-client/**', '.github/workflows/publish-pypi.yml']
+            kit-capability-shape: ['kit/capability-shape/**', '.github/workflows/publish-pypi.yml']
+            kit-capability-pricing: ['kit/capability-pricing/**', '.github/workflows/publish-pypi.yml']
+            kit-capacity-publication: ['kit/capacity-publication/**', '.github/workflows/publish-pypi.yml']
+            kit-contact-exchange: ['kit/contact-exchange/**', '.github/workflows/publish-pypi.yml']
+            kit-delivery: ['kit/delivery/**', '.github/workflows/publish-pypi.yml']
+            kit-delivery-apprise: ['kit/delivery-apprise/**', '.github/workflows/publish-pypi.yml']
+            kit-fulfillment: ['kit/fulfillment/**', '.github/workflows/publish-pypi.yml']
+            kit-pool-overrides: ['kit/pool-overrides/**', '.github/workflows/publish-pypi.yml']
+            kit-resource-pools: ['kit/resource-pools/**', '.github/workflows/publish-pypi.yml']
+            kit-resource-pools-contracts: ['kit/resource-pools-contracts/**', '.github/workflows/publish-pypi.yml']
+            kit-resource-pools-client: ['kit/resource-pools-client/**', '.github/workflows/publish-pypi.yml']
+            kit-storefront: ['kit/storefront/**', '.github/workflows/publish-pypi.yml']
+            compute: ['domains/compute/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-provisioning-adapter: ['domains/bare_metal/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
@@ -91,7 +110,12 @@ jobs:
             vms-negotiation: ['domains/vms/negotiation/**', '.github/workflows/publish-pypi.yml']
             vms-settlement: ['domains/vms/settlement/**', '.github/workflows/publish-pypi.yml']
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
+            vms-provisioning-operator-client: ['domains/vms/provisioning/client/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning-adapter: ['domains/vms/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
+            compute-provisioning: ['provisioning/compute/pyproject.toml', 'provisioning/compute/README.md', 'provisioning/compute/src/**', 'provisioning/compute/tests/**', '.github/workflows/publish-pypi.yml']
+            compute-provisioning-contracts: ['provisioning/compute/contracts/**', '.github/workflows/publish-pypi.yml']
+            compute-provisioning-client: ['provisioning/compute/client/**', '.github/workflows/publish-pypi.yml']
+            compute-provisioning-ansible: ['provisioning/compute/ansible/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-service: ['provisioning/compute/service/**', '.github/workflows/publish-pypi.yml']
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
             apicredits-domain: ['domains/apicredits/pyproject.toml', 'domains/apicredits/src/**', 'domains/apicredits/tests/**', '.github/workflows/publish-pypi.yml']
@@ -125,6 +149,19 @@ jobs:
             {"key": "core-registry",          "path": "core/registry",                    "dist": "arkhai-core-registry"},
             {"key": "kit-site",              "path": "kit/site",                        "dist": "arkhai-kit-site"},
             {"key": "kit-site-client",       "path": "kit/site-client",                 "dist": "arkhai-kit-site-client"},
+            {"key": "kit-capability-shape",   "path": "kit/capability-shape",             "dist": "arkhai-kit-capability-shape"},
+            {"key": "kit-capability-pricing", "path": "kit/capability-pricing",           "dist": "arkhai-kit-capability-pricing"},
+            {"key": "kit-capacity-publication", "path": "kit/capacity-publication",       "dist": "arkhai-kit-capacity-publication"},
+            {"key": "kit-contact-exchange",   "path": "kit/contact-exchange",             "dist": "arkhai-kit-contact-exchange"},
+            {"key": "kit-delivery",           "path": "kit/delivery",                     "dist": "arkhai-kit-delivery"},
+            {"key": "kit-delivery-apprise",   "path": "kit/delivery-apprise",             "dist": "arkhai-kit-delivery-apprise"},
+            {"key": "kit-fulfillment",        "path": "kit/fulfillment",                  "dist": "arkhai-kit-fulfillment"},
+            {"key": "kit-pool-overrides",     "path": "kit/pool-overrides",               "dist": "arkhai-kit-pool-overrides"},
+            {"key": "kit-resource-pools",     "path": "kit/resource-pools",               "dist": "arkhai-kit-resource-pools"},
+            {"key": "kit-resource-pools-contracts", "path": "kit/resource-pools-contracts", "dist": "arkhai-kit-resource-pools-contracts"},
+            {"key": "kit-resource-pools-client", "path": "kit/resource-pools-client",     "dist": "arkhai-kit-resource-pools-client"},
+            {"key": "kit-storefront",         "path": "kit/storefront",                   "dist": "arkhai-kit-storefront"},
+            {"key": "compute",                "path": "domains/compute",                  "dist": "arkhai-compute"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-provisioning-adapter", "path": "domains/bare_metal/provisioning/adapter", "dist": "arkhai-bare-metal-provisioning-adapter"},
@@ -133,7 +170,12 @@ jobs:
             {"key": "vms-negotiation", "path": "domains/vms/negotiation", "dist": "arkhai-vms-negotiation"},
             {"key": "vms-settlement", "path": "domains/vms/settlement", "dist": "arkhai-vms-settlement"},
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
+            {"key": "vms-provisioning-operator-client", "path": "domains/vms/provisioning/client", "dist": "arkhai-vms-provisioning-operator-client"},
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
+            {"key": "compute-provisioning",   "path": "provisioning/compute",             "dist": "arkhai-compute-provisioning"},
+            {"key": "compute-provisioning-contracts", "path": "provisioning/compute/contracts", "dist": "arkhai-compute-provisioning-contracts"},
+            {"key": "compute-provisioning-client", "path": "provisioning/compute/client", "dist": "arkhai-compute-provisioning-client"},
+            {"key": "compute-provisioning-ansible", "path": "provisioning/compute/ansible", "dist": "arkhai-compute-provisioning-ansible"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},
             {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront", "wheel_only": true},
             {"key": "apicredits-domain",       "path": "domains/apicredits",               "dist": "arkhai-apicredits-domain"},

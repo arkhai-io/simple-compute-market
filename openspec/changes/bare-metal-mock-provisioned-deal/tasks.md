@@ -4952,7 +4952,7 @@ and the credits scenario's settings; no service code or package version changes.
 
 ## 11. Permanent documentation
 
-- [ ] 11.1 `docs/development/ARCHITECTURE.md`: the definition of a family kit, its
+- [x] 11.1 `docs/development/ARCHITECTURE.md`: the definition of a family kit, its
       placement tests, and the repository layers with family kits between domains and
       family vocabulary; the compute family's packages (`domains/compute`,
       `compute_provisioning`, the service as composition root) — promoted 2026-10-02 at
@@ -4979,33 +4979,67 @@ and the credits scenario's settings; no service code or package version changes.
       mechanisms start fulfillment through the servicing worker, that an Alkahest
       fulfillment publishes only its evidence's digest, and that an evidence submission
       whose outcome is unknown parks its obligation for an operator.
-- [ ] 11.2 `docs/development/TESTING.md`: three lanes, each building and composing its own stack, with the
+    - Done in `ARCHITECTURE.md`: "Family kits" names the Ansible distribution and the
+      thin contracts and client distributions, the `(offering_mode, action)` executor
+      table, and `compute_provisioning.jobs.executor_mock`; the kit layers gain the
+      deal-control route services, the trading pause, the runtime's
+      `preview_opening` and `accept_administratively`, and the resource-pool
+      contracts and client; `VersionedEnvelope` is core's; "Release" states the
+      aggregate-driven release behind the composition's release guard; the
+      fulfillment-hook paragraph, "Discovery and negotiation", and "Operator lifecycle
+      controls" as listed. Two items are stated as the code has them, not as worded
+      above: Alkahest fulfillment starts through the servicing worker, while Arkhai
+      payments starts it from the settle path and its reconciliation once the receipt
+      verifies (as the `storefront-publication` delta has it); and teardown through
+      lease termination is stated for the bare-metal storefront, the only storefront
+      with a buyer teardown (VM's admin expiry and abandonment truncate the lease).
+- [x] 11.2 `docs/development/TESTING.md`: three lanes, each building and composing its own stack, with the
       compute lanes' mock profile chosen per run by `PROVISIONING_MODE`; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
       "blocked—not mocked" bare-metal statement replaced by the pipeline deal and the
       protected lane's distinct role.
-- [ ] 11.3 `docs/development/DEPLOYMENT_AND_CONFIG.md`: the compose file list names the
+    - Done: the loop table's publication preview, the shared stages and both drivers,
+      the mock profile's per-adapter executors and `/test` rule routes, the bare-metal
+      mock deal, and the real-host scenario's protected-lane role in place of the
+      "blocked—not mocked" statement.
+- [x] 11.3 `docs/development/DEPLOYMENT_AND_CONFIG.md`: the compose file list names the
       per-market overlays and the API-credit lane's compute registry; each compute
       stack's provisioning profile is chosen per run (`PROVISIONING_MODE`, defaulting to
       real in the base files as Helm's `mockMode` does), never a storefront setting. (The bare-metal settlement root and Alkahest inputs land with
       7B.5.)
-- [ ] 11.4 Promote the deltas into `openspec/specs/test-compatibility/spec.md`,
+    - Done: the full stack, the per-market overlays and what each binds,
+      `compose.apicredits-lane.yml`, the environment targets, and the per-run
+      provisioning profile.
+- [x] 11.4 Promote the deltas into `openspec/specs/test-compatibility/spec.md`,
       `market-composition/spec.md`, `physical-provisioning/spec.md`,
       `storefront-publication/spec.md`, `site-capacity/spec.md`, `fulfillment/spec.md`
       (and its ownership list, which names versioned envelopes),
       `compute-provisioning-contract/spec.md` (and its purpose statement, which names
       action submission), `resource-pool-management/spec.md`, and
       `settlement-servicing/spec.md`.
-- [ ] 11.5 `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md`
+    - Done at archival by the pinned OpenSpec CLI, which applied every delta: 47
+      requirements added, 20 modified, and 7 removed across the ten capabilities, with
+      strict validation of every specification passing. Outside the requirements:
+      `fulfillment/spec.md`'s ownership list names its use of core's
+      `VersionedEnvelope` rather than owning it, `compute-provisioning-contract`'s
+      purpose no longer names action submission, and `site-capacity`'s evidence line
+      cites `test_vm_inventory_views.py` for the pool-metadata provider gate.
+- [x] 11.5 `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md`
       name the four new distributions wherever their siblings are listed.
-
+    - Done: `RELEASING.md`'s table rebuilt from the workflow and each `pyproject.toml`,
+      naming the four thin distributions and the Ansible distribution (it also lacked
+      six packages the workflow already published, and most internal-dependency
+      entries were stale). `BUILD_AND_PACKAGING.md` lists no sibling distributions, so
+      it needs no edit.
 ## 2. Closeout
 
-- [ ] 2.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match,
+- [x] 2.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match,
       then read the comments this change adds for references to the review or
       migration that introduced them. Amended 2026-10-01 from a placeholder.
-- [ ] 2.0 **Published dependency graph.** Ruled at the A0 checkpoint review (`design.md`,
+    - Done: `make check-comment-hygiene` passes; each section's closeout read its own
+      comments directly.
+- [x] 2.0 **Published dependency graph.** Ruled at the A0 checkpoint review (`design.md`,
       "Findings recorded for closeout"): before closeout, every package
       `.github/workflows/publish-pypi.yml` publishes must depend only on published packages.
       Enumerate the published packages' internal dependency closure, add each unpublished
@@ -5014,6 +5048,26 @@ and the credits scenario's settings; no service code or package version changes.
       maintainer the trusted-publisher setup each new package needs before its first release.
       A check that fails when a published package depends on an unpublished one belongs beside
       the workflow, if it can run without network access.
+    - Done. Fourteen published packages depended on seventeen unpublished repository
+      distributions. Eighteen are added to the workflow's table and path filters, the
+      push trigger gains `provisioning/compute/**` and `domains/compute/**`, and
+      `RELEASING.md` and `manifests/published-distributions.json` list them; the
+      manifest, which broke its own dependency-order rule, now holds 51 entries in
+      dependency order. `scripts/tests/test_publish_matrix.py` fails when a published
+      package (through an extra too) depends on an unlisted repository distribution, in
+      the workflow or the manifest, when the manifest's order violates dependency order,
+      when a package lacks its filter or push path, or when `RELEASING.md` disagrees.
+      Each new package needs a PyPI trusted publisher before its first release (owner
+      `arkhai-io`, repository `simple-compute-market`, workflow `publish-pypi.yml`,
+      environment `pypi-<dist>`, and a repository environment of that name):
+      `arkhai-kit-capability-shape`, `-kit-capability-pricing`,
+      `-kit-capacity-publication`, `-kit-contact-exchange`, `-kit-delivery`,
+      `-kit-delivery-apprise`, `-kit-fulfillment`, `-kit-pool-overrides`,
+      `-kit-resource-pools`, `-kit-resource-pools-contracts`,
+      `-kit-resource-pools-client`, `-kit-storefront`, `arkhai-compute`,
+      `-compute-provisioning`, `-compute-provisioning-contracts`,
+      `-compute-provisioning-client`, `-compute-provisioning-ansible`, and
+      `arkhai-vms-provisioning-operator-client`.
 - [ ] 2.2 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
@@ -5022,14 +5076,22 @@ and the credits scenario's settings; no service code or package version changes.
       access): `domains/vms/storefront` and `domains/vms/buyer`, whose locks were hand-edited
       and are unverified by a real relock, and `kit/policy`; confirm each relock produces no
       diff, or commit the diff it produces.
+    - `make check-packaging` passes. The relock cannot run here: the environment's
+      network policy refuses `download.pytorch.org`, which the three projects' resolution
+      reaches, so the locks of `domains/vms/storefront`, `domains/vms/buyer`, and
+      `kit/policy` remain unverified by a real relock. Open until a run with that host
+      allowed relocks them.
 - [ ] 2.3 **Import placement.** For each function-level import this change adds or
       touches, move it to module level unless a verified circular import or a documented
       lazy-load reason keeps it; verify each move against the real suites.
-- [ ] 2.4 **Documentation compliance.** Re-check every accepted decision in `design.md`
+- [x] 2.4 **Documentation compliance.** Re-check every accepted decision in `design.md`
       against `openspec/README.md`'s placement rules.
+    - Done: every accepted decision has its permanent location in the promotion record
+      below; scope migrations, superseded decisions, and the real-host scenario's
+      disposition stay in this design, as `openspec/README.md` places change history.
 - [ ] 2.5 **Narrative compression.** Compress completed-task notes to final behaviour,
       validation evidence, deferred work, and permanent destinations.
-- [ ] 2.6 **Roadmap currency.** Update Goal 7's current state (and Goal 4's, for the
+- [x] 2.6 **Roadmap currency.** Update Goal 7's current state (and Goal 4's, for the
       bare-metal deal and the negotiation composition) in
       `docs/development/ROADMAP.md`.
       Record the deferred stronger protection scheme for host connection secrets
@@ -5158,19 +5220,45 @@ and the credits scenario's settings; no service code or package version changes.
       `BareMetalFulfillmentService.status` records the transition. And the wait now
       reads the site on every poll, so a site error fails the wait rather than being
       polled through.
+    - Done in `ROADMAP.md`: Goal 4's state and Goal 3's and Goal 4's gap rows say bare
+      metal negotiates through the kit runtime, its own routes over it the remaining
+      gap; Goal 7's state names the lane's backed bare-metal deal; Goal 4 closes the
+      API-credit lane gap (Section 10). Open gaps recorded, each unowned: sealed or
+      managed protection of host connection secrets, structured terminal-failure
+      evidence from the real runner, VM guest network isolation, disabled-host
+      admission, a relay-backed lane scenario, and the repository-wide administrator
+      stance (Goal 1); the lease-start rule (Goal 5); and pricing an escrow that names
+      no contract (Goal 6). The remaining findings above are owned by the new proposal
+      `resolve-compute-family-findings`, with its index row; two were stale against the
+      code and are recorded as it has them (a reservation's `executor_ref` is written,
+      carrying the host; `find_active_lease_by_vm_target` and its `executor_target`
+      match are what is uncalled). The 500-character requirements belong to
+      `shorten-long-requirements`, whose scope is every permanent requirement; the
+      site-capacity evidence path is corrected at 11.4; and
+      `kit-owned-listing-and-fulfillment-lifecycles`' design still carries the access
+      rule (its decision 5).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
       `apicredits-end-to-end-lane`, and `unbacked-bare-metal-listings`, whose
       dependency on this change is satisfied.
-- [ ] 2.8 **Documentation citations.** Run
+- [x] 2.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=bare-metal-mock-provisioned-deal` and resolve
       every match, including references to the tombstoned compose overlay, escrow
       helper, release, compute-adapter, lease-controller, and client modules.
-- [ ] 2.9 **End-to-end pipeline.** Confirm all three lanes pass, each building its own
+    - Done: `make check-doc-citations CHANGE=bare-metal-mock-provisioned-deal` passes; the
+      unscoped run's misses are all in other changes and the validation runbook's
+      `scripts/validate/` paths.
+- [x] 2.9 **End-to-end pipeline.** Confirm all three lanes pass, each building its own
       stack, and record the run, its result, and the scenarios exercising this change: VM's
       `test_full_deal.py` on the shared stages, `test_bare_metal_mock_deal.py`, and
       `test_credits_deal_buyer_cli.py` in its own lane.
+    - Done: run 37935829083, on commit 6e1d03c9, passes all three lanes on fresh runners,
+      each building its own stack. VM 134 passed, including `test_full_deal.py` on the
+      shared compute deal stages; bare metal 51, including all 35 stages of
+      `test_bare_metal_mock_deal.py`; API credits `test_credits_deal_buyer_cli.py`
+      through the lane's own compute registry, with the payment deal's three scenarios
+      blocked without a payments target.
 - [ ] 2.10 **Promotion.** Complete the design-promotion record below.
 
 ## Design promotion record
@@ -5219,6 +5307,9 @@ and the credits scenario's settings; no service code or package version changes.
 | A thread is successful only once its agreed terms, any hold, and its plan are recorded; a thread is resumed only when it ends with the seller's counter and records no agreement or plan | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation" |
 | The trading pause is one process-local kit mechanism, separate from the loop pause; bare metal's durable pause is reversed | `openspec/specs/market-composition/spec.md` — "The trading pause is one process-local kit mechanism"; `docs/development/ARCHITECTURE.md` "Operator lifecycle controls" |
 | Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
-| Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
+| Findings recorded under "Controls and routes (5B.8)" and in later sections | The substantive gaps in `docs/development/ROADMAP.md`'s Goal 1, 5, and 6 tables (unowned); the rest in `openspec/changes/resolve-compute-family-findings/proposal.md`; requirements over 500 characters with `shorten-long-requirements` |
+| Every published package depends only on published packages | `docs/development/RELEASING.md`; `manifests/published-distributions.json`; enforced by `scripts/tests/test_publish_matrix.py` |
+| Roadmap currency | `docs/development/ROADMAP.md`: Goal 3's and Goal 4's negotiation gap rows, Goal 4's state and closed API-credit lane gap, Goal 7's state, and the open gaps above |
+| Campaign index currency | `openspec/changes/README.md`: this change's row (archived) and the Goal 3, 4, and 7 graphs; the rows of `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`, `apicredits-end-to-end-lane`, `unbacked-bare-metal-listings`, and `market-platform-compute-40-multi-domain-proof`; new rows for `isolate-end-to-end-lane-stacks` and `resolve-compute-family-findings` |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |
 | Administrator settlement wait observes already-started fulfillment at its selected site and wakes deferred servicing when delivery becomes active | `openspec/specs/storefront-publication/spec.md` — "Administrator waits while settlement servicing is held", through this change's delta, at 11.4 |
