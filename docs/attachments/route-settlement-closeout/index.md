@@ -2,6 +2,8 @@
 
 Post-repair joined validation and final task disposition: [final.md](final.md).
 This document preserves the independent observations at the revision below.
+F1, F2 and F3 are repaired; [validation.md](validation.md) names the
+regression test that holds each and how to rerun validation on the current tree.
 
 Tested production revision: `66d83b9f` (`settlement-dispatch-campaign`), in checkout-owned `closeout-verify`. Mode: auditing; this assignment explicitly includes production control-flow inspection and named test surfaces. No product repairs or new permanent tests were made. This is backend/CLI/library evidence, not a rendered journey.
 
@@ -26,9 +28,9 @@ Tested production revision: `66d83b9f` (`settlement-dispatch-campaign`), in chec
 
 `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_stages.py:386–405`, `revalidate_alkahest`, reads `settlement_runtime.get_status` and checks reference/materialization/obligation identity plus absence of fulfillment reference. It does not recheck chain evidence or inspect `reclaim_state`/`mechanism_status`. `BareMetalSettlementService.verified_evidence` invokes this gate before common begin/status/access/teardown, so invoking a callback is not itself proof of source revalidation.
 
-The selected installed stage's isolated library diagnostic [`reclaimed_gate.py`](reclaimed_gate.py) supplies a matching materialized journal record with `reclaim_state='succeeded'`, `mechanism_status='reclaimed'` and no fulfillment reference. Observed: `reclaimed_journal_authorized_by_revalidation=True`. No chain or hardware effect was attempted; the observation is gate acceptance, not a demonstrated live unauthorized allocation.
+An isolated library diagnostic of the selected installed stage supplied a matching materialized journal record with `reclaim_state='succeeded'`, `mechanism_status='reclaimed'` and no fulfillment reference. Observed: `reclaimed_journal_authorized_by_revalidation=True`. No chain or hardware effect was attempted; the observation is gate acceptance, not a demonstrated live unauthorized allocation.
 
-Replay: `domains/bare_metal/storefront/.venv/bin/python docs/attachments/route-settlement-closeout/reclaimed_gate.py`. Acceptable result: refusal before protected effects, with selected-stage authoritative source revalidation. Reviewer should encode coverage at the production recovery surface; 6.2 cannot yet be confirmed.
+Acceptable result: refusal before protected effects, with selected-stage authoritative source revalidation. Reviewer should encode coverage at the production recovery surface; 6.2 cannot yet be confirmed.
 
 ### F2 — P2: standalone VM negotiation still chooses mechanism behavior outside its entry
 
@@ -38,11 +40,11 @@ Replayable check: inspect fresh `market negotiate` selection/prerequisite/propos
 
 ### F3 — P2: VM evidence persistence does not validate delivery envelope or accepted digest shape
 
-`domains/vms/storefront/src/market_storefront/payment_repository.py:81–135` checks only the top-level schema string and a truthy `agreement_sha256` before accepting a first verified record. Fresh installed-library diagnostic [`inspect_vm_schema.py`](inspect_vm_schema.py) successfully persisted/reloaded a `verified` record with digest `diagnostic-digest`, no authoritative source, and delivery `{kind: 'not-a-vm-payload', schema_version: 999}`. Observed: `unsupported_delivery_persisted=` followed by that payload.
+`domains/vms/storefront/src/market_storefront/payment_repository.py:81–135` checks only the top-level schema string and a truthy `agreement_sha256` before accepting a first verified record. A fresh installed-library diagnostic successfully persisted/reloaded a `verified` record with digest `diagnostic-digest`, no authoritative source, and delivery `{kind: 'not-a-vm-payload', schema_version: 999}`. Observed: `unsupported_delivery_persisted=` followed by that payload.
 
 The common planner rejects unsupported delivery facts, so this is **not** evidence of a delivery bypass. It is a repository contract/poisoned-state gap: verified payloads become conflict-frozen without the promised versioned validated delivery data. Pending records legitimately have incomplete facts; validation must distinguish pending from verified. 6.1 cannot yet be confirmed.
 
-Replay: `domains/vms/storefront/.venv/bin/python docs/attachments/route-settlement-closeout/inspect_vm_schema.py`. Acceptable result: verified malformed source/delivery/digest refused without a stored authoritative record; supported pending and exact valid retries remain usable.
+Acceptable result: verified malformed source/delivery/digest refused without a stored authoritative record; supported pending and exact valid retries remain usable.
 
 ## Setup and preparation
 
@@ -73,7 +75,7 @@ Counts are per executed suite group; separate integration/storage rows below are
 | Credits authority key/API/migration suites | 35 |
 | Payments kit tests | 7 |
 
-**667 passing checks in the primary groups.** Exact focused file sets are the committed owner packets' reproduction commands, with these joined additions: VM includes `test_settlement_publication.py` as well as the delivery packet's named set; bare-metal includes `test_app_composition.py` in its 15-suite set. [`replay.sh`](replay.sh) contains the actual joined preparation/focused/integration/storage/first-use commands.
+**667 passing checks in the primary groups.** Exact focused file sets are the committed owner packets' reproduction commands, with these joined additions: VM includes `test_settlement_publication.py` as well as the delivery packet's named set; bare-metal includes `test_app_composition.py` in its 15-suite set.
 
 | Required isolated integration/storage slice | Passed |
 |---|---:|
@@ -112,7 +114,7 @@ Observed: pending grants **0**, lost-ack grants **1**, final grants **2**, balan
 
 Fresh storefront SQL: negotiation PK evidence, Agreement digest, unique established ref, constrained status and independent issuance-progress table with credentials reference. Actual common `credit_delivery` validation and repository conflict checks guard accepted delivery payloads. Signed issuance/private storage remains separate.
 
-Fresh authority diagnostic [`inspect_credits_schema.py`](inspect_credits_schema.py) uses public bootstrap twice and schema check: `credit_grants` has unique fulfillment/negotiation, key FK, immutable owner/service/resource/quantity/key target/digest snapshot plus operational hold hint; no mechanism/escrow columns. Engine disposed and temporary database removed. Initial manual diagnostic used only authority Base metadata and omitted site ledger tables; bootstrap correctly refused it. Replayed with actual `run_migrations` (which initializes site/resource-pool metadata) and passed; not a product defect.
+A fresh authority diagnostic used public bootstrap twice and schema check: `credit_grants` has unique fulfillment/negotiation, key FK, immutable owner/service/resource/quantity/key target/digest snapshot plus operational hold hint; no mechanism/escrow columns. Engine disposed and temporary database removed. Initial manual diagnostic used only authority Base metadata and omitted site ledger tables; bootstrap correctly refused it. Replayed with actual `run_migrations` (which initializes site/resource-pool metadata) and passed; not a product defect.
 
 ## Payment double conformance (9.1)
 

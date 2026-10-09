@@ -18,14 +18,11 @@ a fresh pytest-owned database, accepts a contact deal, then reconstructs the
 runtime on that database with `contact.enabled = false` and empty priority.
 Retained contact configuration supplies the first reveal's seller payload.
 
-From the repository checkout:
-
-```sh
-bash docs/attachments/contact-disablement/replay.sh
-```
-
-The command builds all wheels, reinstalls the storefront's internal dependencies,
-and runs the two signed API journeys. Observed readiness: build/reinit succeeded,
+The journeys are `test_accepted_introduction_survives_contact_disable` in
+`domains/bare_metal/storefront/tests/test_http_introductions.py`, run by the
+storefront's `make test`; [route-settlement-closeout/validation.md](../route-settlement-closeout/validation.md) records how to rerun validation. The run built
+all wheels, reinstalled the storefront's internal dependencies, and ran the two
+signed API journeys. Observed readiness: build/reinit succeeded,
 and the initial negotiation accepted before either disabled-runtime encounter.
 No resident server or external resource is created; TestClient and pytest clean
 their owned application/database state.

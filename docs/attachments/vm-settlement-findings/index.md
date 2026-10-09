@@ -38,11 +38,10 @@ cd domains/vms/storefront
 ENABLE_EVENT_QUEUE=true AGENT_WALLET_ADDRESS='' .venv/bin/python -m pytest \
   tests/unit/test_vm_evidence_validation.py tests/unit/test_migrations.py \
   tests/unit/test_vm_fulfillment_planner.py -q
-.venv/bin/python ../../../docs/attachments/route-settlement-closeout/inspect_vm_schema.py
 ```
 
 Focused suite: **22 passed** (one existing agent-ID configuration warning).
-Replay refuses the original poisoned record with `ValueError: verified VM
+The original poisoned record is refused with `ValueError: verified VM
 evidence requires a sha256 Agreement digest`; `temporary_database_removed=True`.
 
 ## Established reference conflict (review F5)
@@ -137,11 +136,8 @@ Proving tests:
 
 ## Final affected regression and first use
 
-The runnable entry point from the repository root is:
-
-```sh
-bash docs/attachments/vm-settlement-findings/replay.sh
-```
+These suites run under the VM buyer's and storefront's `make test`; [route-settlement-closeout/validation.md](../route-settlement-closeout/validation.md)
+records how to rerun validation on the current tree.
 
 Rebuilt all internal wheels and consuming VM environments before suites.
 Final affected groups: **105 buyer passed**, **270 storefront passed**.

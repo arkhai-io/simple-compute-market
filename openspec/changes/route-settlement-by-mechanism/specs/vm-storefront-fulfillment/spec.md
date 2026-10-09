@@ -20,7 +20,12 @@ Before the first recoverable physical mutation, the VM storefront MUST persist a
 
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, required lease registration and listing/delivery progress. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Early lease-termination client plumbing remains available without requiring a buyer-facing flow. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs.
+The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, required lease registration and listing/delivery progress. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Early lease-termination client plumbing remains available without requiring a buyer-facing flow. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+
+#### Scenario: An escrow-settled deal's reservation is looked up
+
+- **WHEN** an operator or test looks up the site reservation of a VM deal settled through Alkahest
+- **THEN** it finds the reservation by the negotiation its hold names, not by the escrow
 
 #### Scenario: Physical success converges commercial delivery
 

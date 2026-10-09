@@ -58,3 +58,26 @@ Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvi
 
 - **WHEN** recovery finds reclaim or collection in progress or completed, a non-ready mechanism status, or chain evidence no longer matching the accepted obligation
 - **THEN** it refuses before reservation, fulfillment, access or teardown effects
+
+### Requirement: Bare-metal obligation servicing follows the accepted seller entry
+
+Each bare-metal seller entry MUST declare its own obligation servicing: the
+continuation the settlement servicing worker runs when an obligation becomes ready
+and when it ends. The runtime MUST compose servicing only for entries that provide
+it, and the worker's hooks MUST resolve the entry from the accepted Agreement of the
+obligation's `agreement_ref`, not compare the obligation's mechanism with concrete
+mechanism IDs. An obligation whose mechanism differs from its Agreement's, or whose
+entry composes no servicing, MUST be refused before any servicing effect. An entry
+whose obligations need no servicing, such as contact exchange whose reveal binds the
+obligation, MUST decline explicitly.
+
+#### Scenario: An Alkahest obligation becomes ready
+
+- **WHEN** the servicing worker reports an Alkahest obligation ready
+- **THEN** the hook resolves the Alkahest entry from the accepted Agreement and only
+  that entry's lifecycle starts delivery
+
+#### Scenario: An obligation names another mechanism than its Agreement
+
+- **WHEN** a serviced obligation's mechanism differs from its accepted Agreement's
+- **THEN** the hook refuses it and no entry's servicing acts

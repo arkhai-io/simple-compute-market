@@ -554,6 +554,29 @@ Bare-metal buyer and seller roles MUST each declare exactly their supported sett
 - **WHEN** its declared contact-exchange stage settles an accepted introduction
 - **THEN** the fused stage retains introduction evidence and no physical reservation, access grant or payment is required
 
+### Requirement: Bare-metal obligation servicing follows the accepted seller entry
+
+Each bare-metal seller entry MUST declare its own obligation servicing: the
+continuation the settlement servicing worker runs when an obligation becomes ready
+and when it ends. The runtime MUST compose servicing only for entries that provide
+it, and the worker's hooks MUST resolve the entry from the accepted Agreement of the
+obligation's `agreement_ref`, not compare the obligation's mechanism with concrete
+mechanism IDs. An obligation whose mechanism differs from its Agreement's, or whose
+entry composes no servicing, MUST be refused before any servicing effect. An entry
+whose obligations need no servicing, such as contact exchange whose reveal binds the
+obligation, MUST decline explicitly.
+
+#### Scenario: An Alkahest obligation becomes ready
+
+- **WHEN** the servicing worker reports an Alkahest obligation ready
+- **THEN** the hook resolves the Alkahest entry from the accepted Agreement and only
+  that entry's lifecycle starts delivery
+
+#### Scenario: An obligation names another mechanism than its Agreement
+
+- **WHEN** a serviced obligation's mechanism differs from its accepted Agreement's
+- **THEN** the hook refuses it and no entry's servicing acts
+
 
 ### Requirement: Bare-metal evidence is independent of escrow rows
 
@@ -1170,6 +1193,7 @@ without applying either.
 
 ## Evidence
 
+- Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
 - Multidimensional scheduling eligibility, including secondary-dimension rejection and GPU-only requests: `provisioning/compute/service/tests/integration/test_scheduling_composition.py`.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.

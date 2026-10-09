@@ -21,6 +21,7 @@ This conflicts with the pipeline decision from `settle-through-arkhai-payments`:
 - `settlement-configuration`: registration remains the shared surface for publication, readiness and compatibility. Settling is not a registration hook.
 - `buyer-orchestration`: dispatch on the Agreement's mechanism, with no escrow branch.
 - `api-credits`, `vm-storefront-fulfillment`, `physical-provisioning`: domain evidence tables, and dispatch through the table.
+- `negotiation-protocol`: a fresh selection bargains its option's amount, and a plan the seller materializes from a selection is checked against the selected entry.
 
 ## Non-Goals
 

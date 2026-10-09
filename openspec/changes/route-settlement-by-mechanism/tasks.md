@@ -128,7 +128,7 @@ Owner: joined post-merge closeout on the tree that merged the development
 branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
 `design.md#post-merge-reconciliation`.
 
-- [ ] 10.1 Bare-metal obligation servicing through seller entries. Files:
+- [x] 10.1 Bare-metal obligation servicing through seller entries. Files:
   `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/{settlement_stages,settlement_composition,alkahest_lifecycle,runtime}.py`
   and tests. Add the optional entry servicing factory and continuation
   protocol; Alkahest builds its lifecycle when its section is configured,
@@ -147,16 +147,23 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   `test_accepted_introduction_survives_contact_disable` onto `StorefrontClient`
   and `IntroductionTransport` against a served app; keep the disabled-restart
   persistence assertions.
-- [ ] 10.8 Fresh selections carry their bargained amount. Files:
+- [x] 10.8 Fresh selections carry their bargained amount. Files:
   `core/buyer/src/core_buyer/negotiation_client.py` (opening context carries
   the advertised option), `kit/policy/src/market_policy/scalar_policies.py`
   (opening is scalar when the selected option bargains an amount),
   `domains/apicredits/buyer/src/arkhai_apicredits_buyer/settlement_stages.py`
   and `negotiate_cli.py` (remove per-entry rate injection),
-  `e2e-tests/.../vms/test_full_deal.py` (force-accept opens with a selection).
+  `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py` (force-accept opens with a selection).
   Kit policy unit tests for scalar and unpriced selections; a VM storefront
   integration test running the real VM buyer client with an Alkahest
-  selection against the served storefront to acceptance.
+  selection against the served storefront to acceptance. The VM buyer's
+  Alkahest entry checks the plan the seller materializes from a selection
+  through `kit/alkahest/src/market_alkahest/proposals.py`.
+- [x] 10.9 End-to-end checks follow the merged tree. Files:
+  `e2e-tests/tests/e2e/roles/scenarios/vms/{conftest,test_full_deal,test_full_deal_buyer_cli,test_buy_oneshot_buyer_cli,test_listing_shapes}.py`.
+  Lease and commitment checks find a VM deal's reservation by its
+  negotiation; the full-deal listing advertises the dev chain's escrow
+  contract. Recorded in the validation record with the passing run.
 - [x] 10.4 Public-repository discipline. Remove private repository names,
   commits, planning-document paths and private test-target names from this
   change, its attachments, the payments kit (`schema/SOURCE.md`, generator and
@@ -164,14 +171,15 @@ branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
   documents (`docs/development/TESTING.md`,
   `openspec/specs/market-composition/spec.md`) and the change documents that
   repeat them; identify the contract by content.
-- [ ] 10.5 Regenerate joined validation on the merged tree: replace
-  `docs/attachments/route-settlement-closeout/replay*.sh` and the pre-merge
+- [x] 10.5 Regenerate joined validation on the merged tree: replace
+  `docs/attachments/route-settlement-closeout/replay*.sh`, the repair packets'
+  replay scripts it called, its diagnostic scripts, and the pre-merge
   counts with a validation record naming `make` targets and this change's
   regression tests, and reconcile `final.md`, `final-inventory.md`, `index.md`
   and `design.md` to the repaired B1/B2 state.
-- [ ] 10.6 Promote the servicing rule (physical-provisioning, market-composition)
+- [x] 10.6 Promote the servicing rule (physical-provisioning, market-composition)
   and the content-identified payments contract; reconcile Goal 6's gap table.
-- [ ] 10.7 Closeout per `openspec/README.md#plan-closeout-requirements`: comment
+- [x] 10.7 Closeout per `openspec/README.md#plan-closeout-requirements`: comment
   hygiene; import placement for touched imports; documentation compliance;
   narrative compression of this section; roadmap currency (Goal 6); campaign
   index currency (`openspec/changes/README.md` row); `make check-doc-citations

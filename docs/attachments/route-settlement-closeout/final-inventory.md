@@ -1,10 +1,12 @@
 # Final joined production inventory
 
-Audited production: campaign `4d04fbf7`; closeout import/comment-only repair `2d22f6e4`. Scope: tracked Python under `core/` and `domains/`, excluding tests, examples, `.venv`, build, caches and docs. `inspect_dispatch.py` scans comparisons and generic conditional/type paths for mechanism/config-key, proposal, chain and settlement-data vocabulary; caller reads distinguish dispatch from identity checks and carrier projections. The original 50-site T/E/M map is preserved in [baseline-inventory.md](baseline-inventory.md); the prior audit is [inventory.md](inventory.md).
+Audited production: campaign `4d04fbf7`; closeout import/comment-only repair `2d22f6e4`. Scope: tracked Python under `core/` and `domains/`, excluding tests, examples, `.venv`, build, caches and docs. A one-off AST scan covered comparisons and generic conditional/type paths for mechanism/config-key, proposal, chain and settlement-data vocabulary; caller reads distinguish dispatch from identity checks and carrier projections. The original 50-site T/E/M map is preserved in [baseline-inventory.md](baseline-inventory.md); the prior audit is [inventory.md](inventory.md).
 
-## Result: 8.2 does not hold
+## Result at this audit: 8.2 did not hold
 
-The original VM finding is repaired, but the broadened inventory finds an equivalent API-credit standalone path. Accepted contact recovery also still depends on current enablement. These are behavioral findings, not mechanical breakage; closeout does not repair them or tick 8.2.
+The original VM finding is repaired, but the broadened inventory finds an equivalent API-credit standalone path. Accepted contact recovery also still depends on current enablement. These are behavioral findings, not mechanical breakage; this closeout did not repair them.
+
+**Current state:** both are repaired through their declared stages and 8.2 holds. B1 is repaired in [apicredits-negotiate](../apicredits-negotiate/index.md) and B2 in [contact-disablement](../contact-disablement/index.md); [validation.md](validation.md) names the regression tests that hold them.
 
 ### B1 — API-credit standalone negotiation bypasses the declared buyer table
 

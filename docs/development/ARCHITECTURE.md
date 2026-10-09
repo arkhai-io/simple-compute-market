@@ -665,7 +665,7 @@ exact Agreement bytes + opaque settlement_data
 
 ### Settlement servicing
 
-The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API.
+The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API. When the shared servicing worker reports an obligation ready or ended, the domain resolves the continuation from the seller entry the accepted Agreement selected; each entry declares its own servicing or declines it, so the worker's hooks hold no mechanism switch.
 
 `arkhai.payments.v1` is a stateless peer of Alkahest in VM, bare-metal, and API-credit compositions. Shared registration, typed configuration, and owner-scoped client provision live in `kit/arkhai-payments`'s `settlement_config.py`. Seller acceptance returns the derived mandate in opaque `settlement_data`, persisted next to exact `agreement_bytes` in `negotiation_threads`. Buyer `payer_account` travels in selection params and Agreement `settlement_params`, separately from marketplace identity.
 

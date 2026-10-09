@@ -30,19 +30,13 @@ Proving tests in `tests/test_http_settlement.py`:
 - `test_alkahest_recovery_rechecks_chain_before_physical_effects`: an active local journal does not authorize a revoked chain source, a different obligation index or a boolean index. Refusal leaves no lifecycle or physical effect. Restoring valid source verification permits recovery, and repeat begin retains one reservation and one fulfillment.
 - The existing settlement restart/status check retains the normal idempotent response and now configures the chain authority and observes the second source verification. Its former single-call/no-chain expectation is intentionally replaced: recovery must not trust local adoption alone.
 
-Replay from the repository root:
-
-```sh
-domains/bare_metal/storefront/.venv/bin/python docs/attachments/route-settlement-closeout/reclaimed_gate.py
-```
-
-Observed installed-wheel result:
+The audit's isolated reclaimed-journal diagnostic, rerun against the installed wheel, observed:
 
 ```text
 refused= SettlementRequestError verified settlement is no longer active
 ```
 
-The prior `reclaimed_journal_authorized_by_revalidation=True` observation is no longer produced. The isolated replay has no chain or hardware effects; the production recovery tests prove the protected-effect boundary and authoritative-source check.
+The prior `reclaimed_journal_authorized_by_revalidation=True` observation is no longer produced. The isolated diagnostic has no chain or hardware effects; the production recovery tests prove the protected-effect boundary and authoritative-source check.
 
 ## Review F8 — held
 

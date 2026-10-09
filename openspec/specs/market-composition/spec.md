@@ -576,6 +576,11 @@ Mechanism-specific post-delivery attestation, claim binding, compensation and so
 - **WHEN** a payment stage resumes delivery after restart
 - **THEN** it revalidates its stored receipt before passing evidence to common recovery and reuses accepted operation identities
 
+#### Scenario: A servicing worker's hook needs a stage continuation
+
+- **WHEN** a generic settlement servicing worker reports an obligation ready or ended
+- **THEN** the domain resolves the continuation from the seller entry the accepted Agreement selected, and the hook compares no mechanism ID
+
 #### Scenario: A stage requires seller action first
 
 - **WHEN** a domain composes a supporting stage whose first effect belongs to the seller

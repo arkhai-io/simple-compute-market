@@ -66,12 +66,14 @@ are neutral. Buyer reference recovery and real carrier properties replace
 unused synthetic buyer evidence/declaration assertions.
 
 [Final evidence](../../../docs/attachments/route-settlement-closeout/final.md)
-records 680 original primary passes, 723 cases across expanded selections,
-repeat slice counts, typing/vectors, controlled readiness/cleanup and unrun live
-lanes. Controlled temporary databases/run logs and synthetic signers establish
-wiring, not live ledger/hardware qualification. No owned ready external target
-was supplied. Live qualification stays with its existing private-payment/domain
-owners; it is not substituted with mocked success.
+records the repaired findings, controlled readiness/cleanup and unrun live
+lanes. The [validation record](../../../docs/attachments/route-settlement-closeout/validation.md)
+names the `make` targets, the regression test holding each finding, and counts
+and end-to-end runs on the merged tree. Controlled temporary databases/run logs
+and synthetic signers establish wiring, not live ledger/hardware qualification.
+Live payment qualification stays with the payments service's own end-to-end
+suite and physical qualification with the domain release gate; neither is
+substituted with mocked success.
 
 ## Final inventory
 
@@ -138,9 +140,16 @@ repository's current closeout rules.
   selected in the opening's policy context, and the kit's opening policy
   injects the amount when that option bargains one. This replaces the
   API-credit buyer's per-entry rate injection. The force-accept scenario opens
-  with a selection. Rejected: accepting legacy escrow-shaped openings on VM by
-  mapping them to Alkahest, which would infer the mechanism from an escrow
-  proposal's presence.
+  with a selection. The seller materializes a selected Alkahest option into a
+  concrete escrow plan, so the buyer checks that plan against the selected
+  entry (chain, escrow contract, token, arbiter) through the Alkahest kit, and
+  the scenario's listing advertises the dev chain's real escrow contract.
+  Rejected: accepting legacy escrow-shaped openings on VM by mapping them to
+  Alkahest, which would infer the mechanism from an escrow proposal's presence.
+- **End-to-end lease lookups follow the negotiation.** VM delivery holds and
+  commits site capacity under the deal's negotiation, so a deal settled through
+  escrow has no escrow on its reservation; the end-to-end lease and commitment
+  checks find the reservation by the negotiation its hold names.
 - **Closeout follows the current checklist:** documentation citations,
   `make check-packaging`, and the end-to-end pipeline with its run recorded.
   Goal 6's gap table drops the contact-exchange and delivery rows that the
@@ -158,6 +167,8 @@ repository's current closeout rules.
 | Opt-in convention has a future kit home, no mandatory adapter | `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` | Boundary permanent/promoted; implementation deferred; core protocol rejected |
 | Explicit fresh-database reset, no compatibility adoption | Three domain specs; VM `architecture.md#explicit-database-reset`, physical `architecture.md#explicit-storefront-database-reset`, API credits `architecture.md#explicit-database-reset`; repository `ARCHITECTURE.md#build-packaging-and-initialization` | Current reset contract permanent/promoted; in-place migration method temporary provenance |
 | Goal 6 current-state and gap mapping | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Updated: core/delivery and B1/B2 gaps closed; carrier/wire/live gaps retained |
-| Seller entries own obligation servicing; hooks resolve the accepted Agreement's entry | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/market-composition/spec.md` | Planned (section 10) |
+| Seller entries own obligation servicing; hooks resolve the accepted Agreement's entry | `openspec/specs/physical-provisioning/spec.md#requirement-bare-metal-obligation-servicing-follows-the-accepted-seller-entry`; `openspec/specs/market-composition/spec.md#requirement-mechanism-continuation-stays-stage-owned`; `docs/development/ARCHITECTURE.md#settlement-servicing` | Permanent, promoted |
+| Fresh selections bargain their option's amount; a materialized plan is checked against the selected entry | `openspec/specs/negotiation-protocol/spec.md#requirement-scalar-negotiation-participation-is-a-mechanism-declaration` | Permanent, promoted |
 | Payments contract identified by content, not source repository | `kit/arkhai-payments/schema/SOURCE.md`; `openspec/specs/market-composition/spec.md#requirement-arkhai-payments-authority-remains-external`; `docs/development/TESTING.md#private-service-dependencies` | Permanent, promoted |
-| Goal 6 gap table after cross-compute contact exchange and retention | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Planned (section 10) |
+| Goal 6 gap table after cross-compute contact exchange and retention | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Updated: one table; contact-exchange and delivery-beyond-bare-metal rows closed, second delivery event producer retained |
+| End-to-end lease lookups follow the negotiation | `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py` (`SiteCapacity.reservations_for_negotiation`) | Permanent, promoted: the reservation keying is in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-full-settlement-convergence-ownership`; the lookup is test-local |

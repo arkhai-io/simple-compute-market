@@ -25,8 +25,8 @@ After another `make dist`, buyer reinit and core sync/reinstall, all **11 new ca
 
 ## Replay
 
-Run `bash docs/attachments/core-settlement-closeout/replay.sh` from the repository root. It rebuilds wheels, reinstalls consumers and opens the library/run-log recovery surface plus the existing VM `market settle --from <run>` CLI replay. The CLI replay seeds its own exact accepted Agreement/mandate and uses controlled approval/signed seller HTTP. It does not claim live receipt, ledger or physical-delivery qualification.
+The run rebuilt wheels, reinstalled consumers and opened the library/run-log recovery surface plus the existing VM `market settle --from <run>` CLI replay. [route-settlement-closeout/validation.md](../route-settlement-closeout/validation.md) records how to rerun validation on the current tree. The CLI replay seeds its own exact accepted Agreement/mandate and uses controlled approval/signed seller HTTP. It does not claim live receipt, ledger or physical-delivery qualification.
 
-The complete committed script was re-driven successfully: **26 carrier/boundary**, **51 buyer**, and **2 CLI checks**, plus mypy, comment hygiene and strict change validation. These repeat the focused measurements above, not additional unique coverage. Final buyer/domain-buyer grep returned no `SettlementEvidence` or `settlement_evidence` matches. Generated lock changes were restored; all processes finished and no external resources remain.
+The complete run was re-driven successfully: **26 carrier/boundary**, **51 buyer**, and **2 CLI checks**, plus mypy, comment hygiene and strict change validation. These repeat the focused measurements above, not additional unique coverage. Final buyer/domain-buyer grep returned no `SettlementEvidence` or `settlement_evidence` matches. Generated lock changes were restored; all processes finished and no external resources remain.
 
 Reinit lock churn remains owned by [#257](https://github.com/arkhai-io/simple-compute-market/issues/257). Restore only generated lock changes after execution, keeping the fresh installs; do not resync to restored locks before reading evidence.
