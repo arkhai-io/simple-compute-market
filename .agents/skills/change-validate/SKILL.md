@@ -145,6 +145,10 @@ The result, overall and per part, is one of:
 - `inconclusive` — no failure is caused by the commit, but some part produced no
   evidence for an environmental reason the owner declined or could not remedy.
 
+`make review KIND=pre-closeout` reads the `Commit:` and `Result:` lines, so keep
+them exactly as the template shows: the full commit, then the result word, with no
+backticks or emphasis around either.
+
 ```markdown
 # Validation — <change> — <short commit>
 
@@ -216,5 +220,6 @@ conclusion, the coverage of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and
 anything under "About the validation". Then say what comes next: the
 implementation round — this record, the implementation review of the same commit,
-and the owner's own notes — is triaged together with `change-triage`, which fixes
-what the owner accepts; the fix commit is then validated again.
+and the owner's own notes — is triaged together in a fresh session,
+`make triage CHANGE=<change>`, which fixes what the owner accepts; the fix commit
+is then validated again.

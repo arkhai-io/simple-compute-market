@@ -541,7 +541,7 @@ The review, validation, and the owner's notes on one commit are triaged together
 a fresh session (`design.md`, "An implementation round is triaged in a fresh
 session").
 
-- [ ] 9.1 Extend `change-triage` for an implementation round: its inputs are the
+- [x] 9.1 Extend `change-triage` for an implementation round: its inputs are the
       untriaged implementation reviews, the validation record of their commit, and
       the owner's notes, pasted and saved verbatim as
       `NN-implementation-owner.md`; each validation failure is a finding (lens
@@ -552,22 +552,57 @@ session").
       check, are committed as one commit, and the owner is told to validate it
       again; the pre-closeout gate does not pass without a passing validation of
       `HEAD`.
-- [ ] 9.2 Add `make triage CHANGE=`, opening a Claude Code session with
+      Done in `.agents/skills/change-triage/`, amending its steps rather than adding
+      a parallel procedure, so the presentation and ledger rules keep one copy. A
+      new outcome, `fix`, covers code changes made in the session; the
+      implementation round runs `change-implement`'s checks (its step 5) before
+      one commit — fixes, edited change documents, and `interventions.jsonl` — and
+      never pushes. Environmental entries and `inconclusive` parts are missing
+      evidence; observations about other changes or the tooling are presented, not
+      triaged against the change. After the fresh-context check, it also states:
+      how a round is recognized, the branch and worktree check and the base the
+      fixes are diffed against, superseded validation records, a validation naming
+      another commit than the reviews (ask the owner), a lone re-validation, and
+      owner-note labels `O<n>`. Skill text; proven by 9.5.
+- [x] 9.2 Add `make triage CHANGE=`, opening a Claude Code session with
       `/change-triage <change>`.
-- [ ] 9.3 In `scripts/run_change_review.py`: allocate a record's number when it is
+      Done. Its help names the round's inputs.
+- [x] 9.3 In `scripts/run_change_review.py`: allocate a record's number when it is
       written rather than when the run starts, so parallel records never share one;
       and make `KIND=pre-closeout` refuse unless the latest validation record names
       `HEAD` and its result is `passed`, overridden by `UNVALIDATED=1`. Tests in
       `scripts/tests/test_run_change_review.py`.
-- [ ] 9.4 Amend `change-implement`'s closing report (review and validation in
+      Done. Unit (`test_run_change_review.py`, the runner and `HEAD` injected): a
+      record written while the reviewer runs makes the review take the next
+      number, and its transcript is renamed from its provisional name, also when
+      the run is interrupted; a
+      pre-closeout review refuses, and starts no reviewer, with no validation
+      record, one naming another commit, an `inconclusive` result, or a later
+      `failed` record over an earlier `passed` one; it runs on a passing record or
+      `UNVALIDATED=1`; an implementation review never checks; a short commit
+      prefix is accepted and a decorated `Commit:` or `Result:` line fails closed,
+      which `change-validate`'s template now warns about. `make -n review …
+      UNVALIDATED=1` emits `--unvalidated`. The existing test of the reviewer's
+      command now passes the override, since it runs with no repository.
+- [x] 9.4 Amend `change-implement`'s closing report (review and validation in
       parallel, the owner's notes, then `make triage`; the first three were done
       in 8.12, `make triage` remains) and `change-review`'s inputs
       (read the validation record of the reviewed commit when one exists; never
       wait for one).
+      Done. `change-review` reads the validation of the commit it reviews when one
+      exists, never waits, and names the pre-closeout requirement;
+      `change-implement` and `change-validate` close with `make triage`.
 - [ ] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
       `08-implementation-external.md` with 8.6's validation record and the owner's
       notes, through `make triage`; compare the two reviews for the pilot record;
       the change stays `in implementation`.
+      Handoff: the owner runs `make triage CHANGE=capacity-shape-envelope` in a
+      fresh session and pastes their notes when asked. The record is
+      `10-validation.md` (commit `004e580e`, `passed` on the narrowed Helm scope,
+      no `V<n>` findings; it notes the API-credits payment skips from the merged
+      `dev`). `07` reviewed sections 1–4 against base `22115762`, so the triage
+      should say how far the validated commit has moved past what the reviews
+      read. Record here what the skill could not handle unaided.
 
 ## 10. Closeout and archival
 

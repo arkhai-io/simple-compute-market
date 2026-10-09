@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 from typing import Sequence
 
@@ -85,7 +86,7 @@ def test_reviewer_runs_read_only_with_the_skill(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     reviewer.run_review(CHANGE, "pre-closeout", base="main", model="m1", effort="high", root=root,
-                        runner=_writing(_review("pre-closeout"), calls=calls))
+                        unvalidated=True, runner=_writing(_review("pre-closeout"), calls=calls))
 
     command = calls[0]
     assert command[command.index("--sandbox") + 1] == "read-only"
@@ -265,3 +266,115 @@ def test_progress_cuts_long_messages_short() -> None:
 def test_progress_always_shows_errors() -> None:
     assert _shown("model: m\nERROR: the model is not supported\n") == [
         "model: m", "ERROR: the model is not supported"]
+
+
+def test_a_record_written_during_the_run_takes_the_earlier_number(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "01-design.log")
+    inner = _writing(_review("implementation"))
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        # A validation started beside the review publishes its record meanwhile.
+        (_reviews(root) / "02-validation.md").write_text("x", "utf-8")
+        return inner(command, log)
+
+    path = reviewer.run_review(CHANGE, "implementation", root=root, runner=runner)
+
+    assert path.name == "03-implementation.md"
+    assert (_reviews(root) / "transcripts" / "03-implementation.log").is_file()
+    assert not list((_reviews(root) / "transcripts").glob("pending-*"))
+
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _validation(commit: str, result: str) -> str:
+    return (f"# Validation — {CHANGE} — {commit[:12]}\n\n- **Commit:** {commit} on feat/x\n"
+            f"- **Result:** {result} — why\n")
+
+
+@pytest.mark.parametrize("records, reason", [
+    ({}, "no validation record"),
+    ({"03-validation.md": _validation("f" * 40, "passed")}, "not HEAD"),
+    ({"03-validation.md": _validation(HEAD, "inconclusive")}, "inconclusive, not passed"),
+    ({"03-validation.md": _validation(HEAD, "passed"),
+      "05-validation.md": _validation(HEAD, "failed")}, "05-validation.md's result is failed"),
+])
+def test_a_pre_closeout_review_needs_a_passing_validation_of_head(
+    tmp_path: Path, records: dict[str, str], reason: str
+) -> None:
+    root = _repository(tmp_path)
+    for name, text in records.items():
+        (_reviews(root) / name).write_text(text, "utf-8")
+    calls: list[list[str]] = []
+
+    with pytest.raises(reviewer.ReviewError, match=reason):
+        reviewer.run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                            runner=_writing(_review("pre-closeout"), calls=calls))
+
+    assert calls == []
+
+
+def test_a_passing_validation_of_head_admits_a_pre_closeout_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(HEAD, "passed"), "utf-8")
+
+    path = reviewer.run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                               runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "04-pre-closeout.md"
+
+
+def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    path = reviewer.run_review(CHANGE, "pre-closeout", root=root, unvalidated=True,
+                               head=lambda _: HEAD, runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "01-pre-closeout.md"
+
+
+def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    path = reviewer.run_review(CHANGE, "implementation", root=root, head=lambda _: HEAD,
+                               runner=_writing(_review("implementation")))
+
+    assert path.name == "01-implementation.md"
+
+
+def test_make_review_passes_the_override() -> None:
+    command = subprocess.run(
+        ["make", "-n", "--no-print-directory", "review", f"CHANGE={CHANGE}",
+         "KIND=pre-closeout", "UNVALIDATED=1"],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
+    ).stdout
+
+    assert "scripts/run_change_review.py" in command and "--unvalidated" in command
+
+
+def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        log.write_text("partial\n", "utf-8")
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        reviewer.run_review(CHANGE, "design", root=root, runner=runner)
+
+    transcripts = _reviews(root) / "transcripts"
+    assert [p.name for p in transcripts.iterdir()] == ["01-design.log"]
+
+
+@pytest.mark.parametrize("record, admitted", [
+    (f"- **Commit:** {HEAD[:12]} on feat/x\n- **Result:** passed — why\n", True),
+    (f"- **Commit:** `{HEAD}` on feat/x\n- **Result:** passed — why\n", False),
+    (f"- **Commit:** {HEAD} on feat/x\n- **Result:** **passed**\n", False),
+])
+def test_the_validation_record_lines_are_read_exactly(
+    tmp_path: Path, record: str, admitted: bool
+) -> None:
+    reviews = _reviews(_repository(tmp_path))
+    (reviews / "02-validation.md").write_text(record, "utf-8")
+
+    assert (reviewer.validation_problem(reviews, HEAD) is None) is admitted

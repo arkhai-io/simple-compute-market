@@ -1,6 +1,6 @@
 ---
 name: change-triage
-description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, carry accepted outcomes into the change, and ask whether the review's gate is passed. Use after a review lands in a change's reviews/ directory, when the owner pastes a review from elsewhere, or when the owner says "triage the review of <change>".
+description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, carry accepted outcomes into the change, and ask whether the review's gate is passed. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
 ---
 
 # Triaging a review
@@ -14,6 +14,19 @@ not wrong because it criticizes work you did. Agreement needs a reason exactly a
 disagreement does.
 
 Change nothing in response to a finding until the owner has disposed of it.
+
+**An implementation round** is the reviews of a commit's implementation, the
+validation of the same commit, and the owner's own notes on its diff, triaged
+together in one session — a fresh one, not the implementing session. It follows
+every step below, with three additions: the validation record and the owner's notes
+are inputs (step 1); you fix what the owner accepts, in this session, and commit it
+(step 5); and the fix commit is validated again.
+
+It is an implementation round when any untriaged record is an implementation
+review, a validation record, or the owner's notes, or when `make triage` opened the
+session for a change `in implementation`. Before anything else, check as
+`change-implement` does: the checked-out branch carries the change, and the
+worktree is clean. Record `HEAD`: it is the base the fixes are made against.
 
 ## 1. Find the review and load the context
 
@@ -31,6 +44,36 @@ that you did.
 When two reviews of the same kind await triage — typically one from `make review`
 and one pasted — triage them together. Where both raise the same issue, present it
 once, naming both findings.
+
+For an implementation round, also take:
+
+- **The validation record** of the commit the reviews describe — the latest
+  `NN-validation.md`, with no triage file beside it. Its `V<n>` failures, caused by
+  the commit or of unknown cause, are findings: lens `testing`, basis `evidence`,
+  severity `blocking`. Check each diagnosis against the logs it cites, under
+  `.snapshot/`, rather than trusting it. Its `## Environment` entries and an
+  `inconclusive` part are missing evidence, never findings: say what evidence is
+  missing and whether the round can be judged without it. Observations it records
+  about other changes or about the validation tooling are presented, not triaged as
+  findings against this change. Earlier untriaged validation records are
+  superseded by the latest: write each a triage file saying so, so no later round
+  picks it up again.
+  If the validation names a commit other than the one the reviews describe, or
+  there is none, say so before anything else: name both commits and summarize what
+  changed between them (`git log --oneline <reviewed>..<validated>`), and ask the
+  owner whether to triage on that evidence or validate the reviewed commit first.
+  Proceed only on the owner's word.
+  A validation record alone — the re-validation of an earlier round's fix commit —
+  is a round of its own: a `passed` record with no `V<n>` needs only its triage
+  file saying it confirms that commit; any `V<n>` is triaged like any finding, with
+  the owner's notes asked for as usual.
+- **The owner's notes.** Ask for them if the owner has not pasted them. Save them
+  verbatim as the next numbered record, `NN-implementation-owner.md`, label its
+  points `O1`, `O2`, … in the order they appear, and triage each point like any
+  finding: assign its lens, basis, and severity, and take your
+  own position. A point the owner raised is advice, like any other; where the
+  files contradict it, say so with the evidence. Note each point no review raised
+  — it is the clearest sign of a check the guidance is missing.
 
 Each issue has exactly one label for its whole life: its finding ID, or the joined
 IDs of merged duplicates (`03 F2 / 04 F4a`). Carry that label into the design
@@ -57,8 +100,10 @@ For each finding, open what it cites and decide:
   - **decision** — the fix requires choosing between real alternatives, which is
     design work: it goes to the design discussion (`change-design`), not into an
     edit you choose yourself;
-  - **task** — work for implementation, appended to `tasks.md` in the section it
+  - **task** — work for a later section, appended to `tasks.md` in the section it
     concerns, preserving completed tasks;
+  - **fix** — in an implementation round only: a change to the code, tests, or
+    documentation that this session makes after the dispositions (step 5);
   - **none** — the finding is informational or already handled.
 - **Section:** the `tasks.md` section the finding concerns, when it concerns one.
 
@@ -96,7 +141,8 @@ it early only for the decision to overturn it wastes the owner's attention and
 leaves revised dispositions behind.
 
 **First pass, in one message:** every finding that needs no choice between
-alternatives — outcomes `edit`, `task`, or `none`, and findings you disagree with —
+alternatives — outcomes `edit`, `task`, `fix`, or `none`, and findings you disagree
+with —
 ordered by lens (`direction`, `consistency`, `architecture`, `testing`,
 `documentation`, `scope`, `readiness`) and within a lens by severity. Close by
 listing, by label only, the findings left for the second pass. The owner disposes
@@ -113,7 +159,8 @@ decision in the design discussion, under the finding's label.
 
 ## 4. Record the dispositions
 
-Write `reviews/NN-<kind>.triage.md` beside each review triaged, in this form:
+Write `reviews/NN-<kind>.triage.md` beside each record triaged — the validation
+record and the owner's notes included — in this form:
 
 ```markdown
 # Triage — <NN-kind> — <change>
@@ -122,9 +169,9 @@ Write `reviews/NN-<kind>.triage.md` beside each review triaged, in this form:
 
 - **Lens / basis / severity:** <as triaged; note any change from the reviewer's>
 - **Position:** <agree | disagree | partly> — <reason, with evidence>
-- **Proposed outcome:** <edit | decision | task | none> — <what>
+- **Proposed outcome:** <edit | decision | task | fix | none> — <what>
 - **Owner disposition:** <what the owner decided, in their terms>
-- **Result:** <what was done: the edit made, the decision sent to design, the task added>
+- **Result:** <what was done: the edit made, the decision sent to design, the task added, the fix made>
 
 ## Gate
 
@@ -138,7 +185,8 @@ the shape `design.md` and the `change-workflow` delta define:
 {"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
 ```
 
-`review` names the record (`NN-<kind>` or `NN-<kind>-external`); `section` is the
+`review` names the record (`NN-<kind>`, `NN-<kind>-external`, `NN-validation`, or
+`NN-implementation-owner`); `section` is the
 `tasks.md` section or `null`. A review finding is always logged under its own
 review record, even when it was settled in the second pass as a design decision;
 `"review": "design"` is only for a redirection of a decision no review raised. When
@@ -159,6 +207,22 @@ the owner cannot otherwise see that it was written.
   settled, as `change-design` records decisions.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
+- **fix:** once every finding has a disposition, make the accepted fixes, as
+  `change-implement` makes a section's changes: the change and the decision it
+  rests on, and no more; at the lowest test level that proves it; comments
+  describing the current system. Record each in the task notes of the section it
+  concerns, naming the finding; a fix that concerns no section goes in a note
+  under the last implemented section. Then run `change-implement`'s checks before
+  committing (its step 5): `make lock` and `make check-packaging` when a
+  dependency changed, the focused suites, `make test`, `make check-comment-hygiene`,
+  `make check-doc-citations CHANGE=<change>`, `make check-agent-skills` when the
+  diff touches `.agents/`, `.claude/`, or `.codex/`, and a fresh-context compliance
+  check of the diff against the `HEAD` recorded at the start. Commit, as one commit
+  naming the change and the round: the fixes, the change documents the dispositions
+  edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
+  The triage records stay in `reviews/`, which is untracked. Do not push: the fix commit is
+  validated next (`make validate CHANGE=<change>`), which pushes it. Say whether
+  the fixes also need another review round; the owner decides.
 
 Then run `openspec validate <change> --strict` and report the result.
 
@@ -179,7 +243,7 @@ its status misleads every agent that reads the index:
 |---|---|
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
-| `pre-closeout` | `ready for closeout` |
+| `pre-closeout` | `ready for closeout` — only once the latest validation names `HEAD` and is `passed`, unless the owner overrides it |
 | `closeout` | `ready for archival` |
 
 When the gate does not pass, leave the status, and say what must happen before the

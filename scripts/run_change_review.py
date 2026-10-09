@@ -10,6 +10,14 @@ non-authoritative transcript that no review or triage step reads, kept for expor
 A run whose output is not a review publishes nothing; its output is kept beside the
 transcript as `NN-<kind>.rejected.md`.
 
+A review takes its number when it is published, not when its run starts: a
+validation started beside it writes its own record meanwhile, and the two must
+never share a number. Until then its transcript has a provisional name.
+
+A pre-closeout review asks whether the change is ready for closeout, which a failing
+pipeline answers, so it refuses to start unless the change's latest validation
+record names `HEAD` and its result is `passed`; the owner may override that.
+
 A later review of the same kind continues the reviewer session that wrote the
 latest one, so the reviewer weighs a revision with the context that led to its
 findings; the session is named in a comment at the end of each published record,
@@ -23,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import uuid
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +55,8 @@ _FINDING = re.compile(r"^### F\d+\b", re.M)
 _FIELD = re.compile(r"^- \*\*(\w+):\*\*\s*(.*?)\s*$", re.M)
 _SESSION_LINE = re.compile(r"^session id: (\S+)\s*$", re.M)
 _SESSION_MARKER = re.compile(r"<!-- reviewer-session: (\S+) -->")
+_VALIDATION_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{7,40})\b", re.M)
+_VALIDATION_RESULT = re.compile(r"^- \*\*Result:\*\*\s*(\w+)", re.M)
 
 Runner = Callable[[Sequence[str], Path], int]
 
@@ -64,6 +75,33 @@ def next_review_path(reviews: Path, kind: str) -> Path:
                for entry in directory.iterdir()]
     numbers = [int(match.group(1)) for entry in entries if (match := _NUMBERED.match(entry.name))]
     return reviews / f"{max(numbers, default=0) + 1:02d}-{kind}.md"
+
+
+def validation_problem(reviews: Path, head: str) -> str | None:
+    """Why the latest validation record does not clear `head` for closeout, if it does not."""
+    records = [(int(match.group(1)), entry) for entry in
+               (reviews.glob("[0-9]*-validation.md") if reviews.is_dir() else [])
+               if (match := _NUMBERED.match(entry.name))]
+    if not records:
+        return "the change has no validation record"
+    record = max(records)[1]
+    text = record.read_text("utf-8")
+    commit = _VALIDATION_COMMIT.search(text)
+    result = _VALIDATION_RESULT.search(text)
+    if not commit or not head.startswith(commit.group(1)):
+        named = commit.group(1)[:12] if commit else "no commit"
+        return f"{record.name} validates {named}, not HEAD {head[:12]}"
+    if not result or result.group(1).lower() != "passed":
+        return f"{record.name}'s result is {result.group(1) if result else 'missing'}, not passed"
+    return None
+
+
+def _git_head(root: Path) -> str:
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ReviewError(f"could not read HEAD to check the validation record: {exc}") from exc
 
 
 def review_problems(text: str, kind: str, change: str) -> list[str]:
@@ -221,18 +259,23 @@ def _run_codex(command: Sequence[str], log: Path) -> int:
 
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path = ROOT,
-               runner: Runner = _run_codex) -> Path:
+               runner: Runner = _run_codex, unvalidated: bool = False,
+               head: Callable[[Path], str] = _git_head) -> Path:
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     change_dir = root / CHANGES / change
     if change in ("", "archive") or "/" in change or not change_dir.is_dir():
         raise ReviewError(f"no active change {change!r} under {CHANGES}")
     reviews = change_dir / "reviews"
+    if kind == "pre-closeout" and not unvalidated:
+        if problem := validation_problem(reviews, head(root)):
+            raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
+                              f"{problem}; validate first, or set UNVALIDATED=1 to override")
     transcripts = reviews / TRANSCRIPTS
     transcripts.mkdir(parents=True, exist_ok=True)
-    output = next_review_path(reviews, kind)
-    log = transcripts / output.with_suffix(".log").name
-    draft = transcripts / output.with_suffix(".rejected.md").name
+    provisional = f"pending-{kind}-{uuid.uuid4().hex[:12]}"
+    log = transcripts / f"{provisional}.log"
+    draft = transcripts / f"{provisional}.rejected.md"
     prior = None if fresh else prior_session(reviews, kind)
     if prior:
         session, previous = prior
@@ -240,7 +283,16 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                                  draft, model, effort)
     else:
         command = codex_command(review_prompt(kind, change, base), draft, root, model, effort)
-    status = runner(command, log)
+    try:
+        status = runner(command, log)
+    finally:
+        # Numbered now, after every record written while the reviewer ran; an
+        # interrupted run keeps its number too.
+        output = next_review_path(reviews, kind)
+        if log.is_file():
+            log = log.rename(transcripts / output.with_suffix(".log").name)
+        if draft.is_file():
+            draft = draft.rename(transcripts / output.with_suffix(".rejected.md").name)
     text = draft.read_text("utf-8") if draft.is_file() else ""
     problems = [f"the reviewer exited {status}"] if status != 0 else review_problems(text, kind, change)
     if problems:
@@ -265,10 +317,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--effort", default=None)
     parser.add_argument("--fresh", action="store_true",
                         help="start a new reviewer session instead of continuing the last one")
+    parser.add_argument("--unvalidated", action="store_true",
+                        help="run a pre-closeout review without a passing validation of HEAD")
     args = parser.parse_args(argv)
     try:
         output = run_review(args.change, args.kind, base=args.base, model=args.model or None,
-                            effort=args.effort or None, fresh=args.fresh)
+                            effort=args.effort or None, fresh=args.fresh,
+                            unvalidated=args.unvalidated)
     except ReviewError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
