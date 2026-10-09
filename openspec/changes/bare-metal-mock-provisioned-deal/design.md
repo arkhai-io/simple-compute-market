@@ -3178,3 +3178,50 @@ Earlier:
 - **Admin reserve's VM path** (`/api/v1/admin/portfolio/reservations`) carries VM
   vocabulary; it is kept for client compatibility. `remove-dead-storefront-physical-surfaces`
   does not retire it (checked 2026-10-01).
+
+### Settlement wait observes the selected site (2026-10-09)
+
+Run 37896157446 passed the VM lane and bare-metal provisioning through 09a2,
+then timed out at 09b. The site had converged fulfillment to active, while the
+administrator wait hook read only the storefront's cached dispatch state. The
+scenario deliberately holds settlement servicing; the existing route test hid
+the defect by refreshing fulfillment before waiting.
+
+Decision: once fulfillment has begun, the administrator wait hook refreshes it
+through `BareMetalFulfillmentService.status`, using the accepted thread's buyer
+principal and the durable selected-site references. This observes and records
+delivery without starting fulfillment, stepping servicing, or publishing evidence.
+Pre-dispatch waits remain pending. Released lifecycles retain the service's
+terminal handling. Changing the shared stage or resuming timers would hide the
+route defect and weaken deterministic coverage, so those alternatives are rejected.
+
+Files: `deal_controls.py` for the live read; `tests/test_deal_controls.py` for
+a paused-worker, pending-to-active regression; the current and delta
+`storefront-publication/spec.md` for the wait contract. No repository-wide
+architecture or proposal scope change is required. Validate the route suite,
+bare-metal storefront suite, chart render tests, the failing scenario on locally
+deployed Helm charts, both Compose lanes, packaging, comment hygiene, citations,
+and OpenSpec validation. Closeout includes review of touched imports/comments,
+compressed task evidence, documentation promotion, and explicit roadmap/index
+disposition; campaign completion remains governed by the existing closeout.
+
+The local Helm run reproduced 09b on the original image. Fixing that wait
+exposed 09bb: the servicing pass processed zero obligations because the
+initial pending fulfillment scheduled a 30-second retry. Observing the
+transition to active now wakes only the obligation adopted for that escrow
+through the worker's existing `wake` operation. It does not run servicing;
+the explicit next pass owns evidence publication. Repeated ready reads do
+not wake again. The route regression also asserts that the next servicing
+pass processes the obligation immediately. This preserves the production
+backoff for unchanged pending work and avoids timing-dependent scenarios.
+
+The next local Helm run passed readiness, evidence publication, expiry, release,
+and the second deal, then exposed an invalid assertion in 12d. Lease termination
+can synchronously begin provider teardown even while its timer is held. The first
+response records `terminating`; the retry observes `teardown_dispatch_pending`
+from the site. These are the same release, with unchanged negotiation, reservation,
+and fulfillment identities. The scenario compares those identities and accepts
+that progress under its held convergence controls; 12e still proves one release.
+No production teardown behavior changes. The scenario file joins this follow-up's
+fileset and validation scope. The existing physical-provisioning contract for
+storefront teardown and idempotent lease termination remains authoritative.

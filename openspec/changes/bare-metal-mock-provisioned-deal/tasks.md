@@ -4666,6 +4666,28 @@ lane (9.1–9.5).
       refusal with the default type, and with the bare-metal type scheduled the
       machine, its nested publication view intact, and began the grant. Bare metal's
       lane is to run again.
+- [x] 9.6a Fix the administrator settlement wait in
+      `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/deal_controls.py`
+      to observe already-started fulfillment at its selected site and wake its
+      adopted obligation when delivery becomes active. Replace the
+      preparatory status read in `tests/test_deal_controls.py` with a paused-worker
+      pending-to-active regression. Correct the repeated teardown assertion in
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_mock_deal.py`
+      to compare operation identities while allowing dispatched teardown.
+      Promote the wait contract to the current and
+      delta `storefront-publication/spec.md`; run local Helm and both Compose lanes
+      before commit/push. Remote dispatch and fetched logs remain evidence for 9.6.
+      Regression fails before the patch; route tests (6), storefront suite (291),
+      e2e unit suite (38), local VM lane (135 passed, 3 skipped), and local bare-metal
+      Compose lane (51) pass. Helm reproduces 09b on the original image; the patched
+      lane validates readiness, evidence, lease expiry, and repeated teardown.
+      Packaging, chart render, comment hygiene, scoped citations, strict OpenSpec
+      validation, and touched-file pyflakes pass. The repository-wide citation check
+      reports 22 pre-existing unresolved references outside this fileset; this change's
+      citations resolve. No new local imports or production provenance comments;
+      wait behavior is promoted to the current spec. Overall campaign/index status
+      and roadmap mapping remain unchanged while pipeline restructuring and closeout
+      are pending.
 - [ ] 9.7 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped
       to Section 9): comment hygiene, with a direct read of the new modules; import
       placement for every function-level import the section adds or touches;
@@ -4962,3 +4984,4 @@ service code.
 | Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |
+| Administrator settlement wait observes already-started fulfillment at its selected site and wakes deferred servicing when delivery becomes active | `openspec/specs/storefront-publication/spec.md` — "Administrator waits while settlement servicing is held"; no roadmap or campaign status change for this corrective follow-up |

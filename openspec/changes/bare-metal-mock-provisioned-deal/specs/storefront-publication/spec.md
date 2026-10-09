@@ -3,6 +3,12 @@
 ### Requirement: Complete bare-metal seller lifecycle
 A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
 
+#### Scenario: Administrator waits while settlement servicing is held
+- **WHEN** an accepted bare-metal deal has begun fulfillment and its selected site converges it to active while the storefront's settlement-servicing loop is held
+- **THEN** the administrator's settlement wait refreshes that fulfillment through the accepted thread's buyer principal and durable site binding, reports ready, and records its buyer-safe delivery
+- **AND** observing the transition to active wakes only the obligation adopted for that escrow, so its next servicing pass can publish evidence without waiting for the pending-fulfillment retry deadline; repeated ready reads do not wake it again
+- **AND** the wait starts no fulfillment, creates no reservation, and publishes no settlement evidence
+
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
 - **THEN** the thread records the canonical buyer and seller principals and the exact listing/site/domain binding, and it is recorded as successful only after its agreement payloads and settlement plan are recorded

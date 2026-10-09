@@ -429,7 +429,10 @@ class TestStage12d_BuyerTeardownSentTwice:
         first = buyer_fulfillment.teardown(deal_state.second_negotiation_id)
         again = buyer_fulfillment.teardown(deal_state.second_negotiation_id)
         assert first.get("state") == "terminating", first
-        for name in ("negotiation_id", "state", "capacity_reservation_id", "fulfillment_id"):
+        # Termination can already have dispatched teardown when the retry
+        # observes it; its durable identities establish the same operation.
+        assert again.get("state") in {"terminating", "teardown_dispatch_pending"}, again
+        for name in ("negotiation_id", "capacity_reservation_id", "fulfillment_id"):
             assert again.get(name) == first.get(name), (name, first, again)
         deal_state.second_teardown = first
 
