@@ -3070,6 +3070,57 @@ through this change's delta (11.4); the three lanes, their targets, and their co
 in `docs/development/TESTING.md` (11.2) and the compose file list in
 `docs/development/DEPLOYMENT_AND_CONFIG.md` (11.3).
 
+### Section 10 design review: mock provisioning and the plan against the code (2026-10-09)
+
+Section 10's plan re-read against the code before implementation; decided with the
+maintainer.
+
+| Finding | Consequence |
+|---|---|
+| The workflow's `PROVISIONING_MODE: mock`, which 10.4 moved to the VM job as "the only stack reading it", reaches no lane's mock. Compose passes it only to the VM storefronts, as `ARKHAI_PROVISIONING_MODE` beside `MOCK_PROVISIONING_SUCCESS`; the storefront reads its environment under the `STOREFRONT` prefix, and nothing reads `[provisioning] mode` | The mock is the provisioning service's `mock` profile, which its own profile file calls "a provisioning service concern, not an agent concern". The VM stack is mock because `domains/vms/compose.yml` hard-codes `ACTIVE_PROFILES=mock` in the base topology; the bare-metal stack is mock because the lane's local overlay replaces the base's `docker`. Helm already has the intended shape, the provisioning chart's `mockMode` (decision 8) |
+| The credits deal skips when a lane setting is missing; in its own lane it is the only scenario that can pass, so a misconfigured lane reports nothing passed and the job is green | `TESTING.md` already holds that a lane's scenario fails rather than skips on a missing lane setting, and the bare-metal lane's fixtures fail (decision 9) |
+| 10.2's `compute-registry` names its authority id and credential but not the scheme, identifier, or credential path, nor the descriptor's base URL, display name, and operator identity, without which the registry refuses to start | 10.2 names every input |
+| 10.1's references miss `dev-env/identities/README.md`'s registry-pin paragraph and Alice's pin, the lane's reuse of `registry-a.eip191` as `compute-registry`, and `e2e-tests/tests/e2e/roles/README.md`'s "Running" block, which starts each wrapper without its overlay | 10.1 names them |
+| Closeout 2.9 still confirms "all three lanes pass from one image build", which decision 1 superseded | 2.9 reads each lane building its own stack |
+| Run 37910886195's jobs took 5m44s (VM) and 4m16s (bare metal) | 10.5 records each lane beside both runs |
+
+Decisions:
+
+8. **Mock provisioning is the provisioning service's setting, chosen per run.** Mock and
+   local are separate choices: a local stack can provision real hosts, and a dev cluster
+   runs mock through Helm's `mockMode`. One input, `PROVISIONING_MODE` (`mock` or
+   `real`), selects it for the compose stacks. The workflow keeps it at workflow level,
+   where both compute lanes now read it and the API-credit stack, which has no
+   provisioning service, ignores it. The lane environment targets (`e2e-vms-dev-env`,
+   `e2e-bare-metal-dev-env`, and `e2e-dev-identities-env` for the full stack) refuse any
+   other value, default it to `mock`, since the lanes' scenarios hold jobs through the
+   mock profile's `/test` controls, and print each stack's provisioning profiles:
+   `VMS_PROVISIONING_ACTIVE_PROFILES` and `BARE_METAL_PROVISIONING_ACTIVE_PROFILES`,
+   `mock` under mock, as each lane runs today, and `docker` under real, the profile the
+   bare-metal base already names and the VM service's container profile. The
+   provisioning services read `ACTIVE_PROFILES` from those variables, defaulting to
+   `docker`, as Helm's `mockMode` defaults to false; `compose.bare-metal-local.yml` no
+   longer sets the profile, so the local overlay means the dev chain and the storefront's
+   seller chain only. No storefront carries a provisioning mode: `ARKHAI_PROVISIONING_MODE`
+   and `MOCK_PROVISIONING_SUCCESS` leave `domains/vms/compose.yml`, `PROVISIONING_MODE`
+   leaves the VM storefronts' development env files, and the VM development profiles'
+   `[provisioning] mode` and its comment go. The storefront wheel's shipped `mode` key,
+   and the validation runbook's Helm override of it, are recorded for 2.6, so this
+   section bumps no service. Rejected: moving the setting to the VM job unchanged (it
+   would keep a switch that switches nothing) and dropping it (mock is a per-run choice,
+   which the pipeline states).
+9. **The API-credit lane's settings are required.** The credits deal reads every lane
+   setting it needs (the credits registry and its pin, the compute registry and its pin,
+   the storefront, and the buyer's wallet and credential) through a helper that fails
+   naming the setting, as the bare-metal lane's does. The payment deal's skip without a
+   payments target stays, since a blocked scenario is not a missing setting. The gate
+   checks the lane reports exactly one passed and three skipped.
+
+Permanent destinations: decision 8 in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
+per-domain stack composition (11.3) and `docs/development/TESTING.md`'s lanes (11.2),
+and the lane requirement's scenario in the `test-compatibility` delta (11.4); decision 9
+is `TESTING.md`'s existing rule, applied.
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,

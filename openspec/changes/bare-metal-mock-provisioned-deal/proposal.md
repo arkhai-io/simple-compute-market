@@ -269,7 +269,10 @@ None.
   client.
 - `domains/vms/storefront` and `domains/bare_metal/storefront`: the thin contracts and
   client in place of the family kit.
-- Root `Makefile`, compose files, and `.github/workflows/e2e.yml`.
+- Root `Makefile`, compose files, and `.github/workflows/e2e.yml`: three lanes, the
+  per-market overlays, and each compute stack's provisioning profile chosen per run by
+  `PROVISIONING_MODE`; the VM storefronts' development configuration loses its unread
+  provisioning mode.
 - `openspec/changes/bare-metal-and-credits-domain-stacks/`,
   `openspec/changes/kit-owned-storefront-shell/`, and
   `openspec/changes/apicredits-end-to-end-lane/`: migrated scope recorded.
@@ -304,6 +307,10 @@ None.
   authorities, with compute provisioning mocked where delivery crosses it; compute
   domains share deal stages; each domain runs in its own lane —
   `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.
+- Mock provisioning is the provisioning service's profile, chosen per run, never a
+  storefront setting — `docs/development/DEPLOYMENT_AND_CONFIG.md`,
+  `docs/development/TESTING.md`, and the lane requirement's scenario in
+  `openspec/specs/test-compatibility/spec.md`.
 - Storefront deal controls are kit-owned route services; administrative acceptance and
   opening previews go through the negotiation runtime; compute mock executors share
   `compute_provisioning.executor_mock` — `openspec/specs/market-composition/spec.md`,

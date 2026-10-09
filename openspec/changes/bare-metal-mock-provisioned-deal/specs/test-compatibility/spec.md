@@ -87,6 +87,13 @@ scenarios read.
 - **THEN** the lane deploys each of those registries in its own stack, and the scenario
   reads them from that lane's settings
 
+#### Scenario: A compute lane provisions through the mock profile
+
+- **WHEN** a compute lane runs
+- **THEN** its provisioning services run their mock profile because the run selects mock
+  provisioning, not because the lane's local overlay or stack hard-codes it
+- **AND** no storefront in the lane carries a provisioning mode
+
 ### Requirement: Bare-metal storefront restart recovery is proven at integration level
 
 Bare-metal storefront restart recovery MUST be proven by integration tests that rebuild

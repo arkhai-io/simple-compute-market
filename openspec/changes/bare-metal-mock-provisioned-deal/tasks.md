@@ -4722,8 +4722,10 @@ lane (9.1–9.5).
 
 Decisions: "Section 10 design: each lane builds and composes its own stack
 (2026-10-09)", decisions 1–7, refining "API credits runs in its own lane" and "Lane
-composition files". Reviewable alone: compose files, Make targets, the workflow, the
-lane settings, and the credits scenario's registry settings; no service code.
+composition files", and "Section 10 design review: mock provisioning and the plan
+against the code (2026-10-09)", decisions 8 and 9. Reviewable alone: compose files, Make
+targets, the workflow, the lane settings, the VM storefronts' development configuration,
+and the credits scenario's settings; no service code or package version changes.
 
 - [ ] 10.1 Split the overlay (decision 3).
       - `compose.vms-local.yml` (new): `registry`, `registry-b`, `bob-storefront`,
@@ -4743,39 +4745,86 @@ lane settings, and the credits scenario's registry settings; no service code.
         service's public config, pinning `api-credits-registry`, a development fixture
         with its statement inline, as `buyer.config.toml` has.
       - `.gitignore`: `.e2e-vms.env` and `.e2e-apicredits.env`.
-      - References: `dev-env/identities/README.md` (the overlay table row, the files
-        `make` targets must satisfy, and the new fixture),
+      - References: `dev-env/identities/README.md` (the account table's
+        `provisioning-admin.eip191` row, the files `make` targets must satisfy, the
+        paragraph naming where the API-credit registry's identifier is pinned, now
+        `compose.apicredits-local.yml` and `storefront.credits.toml`, Alice's pin, the new
+        fixture, and an "API-credit lane" section beside "The bare-metal lane" recording
+        `registry-a.eip191` as the lane's `compute-registry`),
         `scripts/tests/test_multi_storefront_compose.py` (the full stack's three files),
-        and `openspec/changes/repair-storefront-alkahest-configuration/tasks.md` (the
-        file Alice's key moved to). The workflow and `e2e-tests/Makefile` change in
-        10.3 and 10.4.
-- [ ] 10.2 The API-credit lane's own topology (decision 4).
+        `e2e-tests/tests/e2e/roles/README.md` ("Running" brings each stack up through its
+        lane target, since a wrapper alone has none of its bindings), and
+        `openspec/changes/repair-storefront-alkahest-configuration/tasks.md` (the file
+        Alice's key moved to). The workflow and `e2e-tests/Makefile` change in 10.3 and
+        10.4.
+- [ ] 10.2 The API-credit lane's own topology (decisions 4 and 9).
       - `compose.apicredits-lane.yml` (new): `compute-registry`, the `arkhai:registry`
         image with its default compute filter spec, `core/registry/.env.docker-compose`
-        and `shared-env` as VM's `registry` has, `REGISTRY_AUTHORITY_ID=compute-registry`
-        signed by `registry-a.eip191` through
-        `${APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE:?…}`, no host port, and
-        VM's healthcheck.
+        and `./shared-env` as VM's `registry` has, and the inputs the registry refuses to
+        start without: `REGISTRY_AUTHORITY_ID=compute-registry`, scheme `eip191`,
+        identifier `0x90f79bf6eb2c4f870365e785982e1f101e93b906`, the credential path,
+        `REGISTRY_DESCRIPTOR_BASE_URL=http://compute-registry:8080` (it has no host port),
+        a display name, and the operator identity; the credential mounted from
+        `${APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE:?…}`
+        (`registry-a.eip191`), and VM's healthcheck.
       - Root `Makefile`: `e2e-vms-dev-env` prints the VM values now in
-        `e2e-dev-identities-env`; `e2e-apicredits-dev-env` prints the `APICREDITS_*`
-        values, the credits buyer service's paths (the new config, `buyer.eip191`, and
-        profile and state directories under `.e2e-buyer/apicredits/`), and
-        `APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE`;
-        `e2e-dev-identities-env` prints both lanes' values except the lane-only
-        registry's, so the full stack is unchanged in what it requires.
+        `e2e-dev-identities-env` and creates the VM buyer's profile and state directories;
+        `e2e-apicredits-dev-env` prints the `APICREDITS_*` values, the credits buyer
+        service's paths (the new config, `buyer.eip191`, and profile and state
+        directories under `.e2e-buyer/apicredits/`, which it creates), and
+        `APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE`; `e2e-dev-identities-env`
+        prints both lanes' values except the lane-only registry's, so the full stack is
+        unchanged in what it requires.
       - `e2e-tests/config/config-docker.yml`'s `api_credits`: `compute_registry_url`
         (`http://compute-registry:8080`), `compute_registry_authority_id`,
-        `compute_registry_scheme`, and `compute_registry_identifier`, the
-        development values with their statement; its comment names
-        `compose.apicredits-local.yml`.
-      - `test_credits_deal_buyer_cli.py`: reads the compute registry and its pins from
-        those settings in place of the VM lane's `registry`.
+        `compute_registry_scheme`, and `compute_registry_identifier`, the development
+        values with their statement; its comment names `compose.apicredits-local.yml`.
+      - `test_credits_deal_buyer_cli.py` (decision 9): reads the compute registry and its
+        pin from those settings in place of the VM lane's `registry`, and every lane
+        setting it needs (both registries and their pins, the storefront, the buyer's
+        wallet, key, and credential) through a helper that fails naming the setting, as
+        `scenarios/bare_metal/conftest.py`'s does. `test_credits_payment_deal.py` keeps
+        its skip without a payments target.
       - A render test, `test_lane_compose.py`, new in `scripts/tests/` beside
         `test_bare_metal_compose.py` and skipping without Compose: renders the VM lane, the
         API-credit lane, and the full stack from their `make` environment targets and
         asserts each renders, VM's has no API-credit service, the API-credit lane's has
         `compute-registry` and the storefront's wallet key, and the full stack has one
-        `anvil` and no `compute-registry`.
+        `anvil` and no `compute-registry`. 10.2a adds its provisioning assertions.
+- [ ] 10.2a Mock provisioning chosen per run (decision 8).
+      - Root `Makefile`: `PROVISIONING_MODE ?= mock`, its comment stating that mock and
+        local are separate choices and that the lanes' scenarios need the mock profile's
+        `/test` controls; `e2e-vms-dev-env`, `e2e-bare-metal-dev-env`, and
+        `e2e-dev-identities-env` refuse any value but `mock` or `real` and print
+        `VMS_PROVISIONING_ACTIVE_PROFILES` (VM and full stack) and
+        `BARE_METAL_PROVISIONING_ACTIVE_PROFILES` (bare metal): `mock` under mock,
+        `docker` under real.
+      - `domains/vms/compose.yml`: `provisioning` and `alice-provisioning` read
+        `ACTIVE_PROFILES=${VMS_PROVISIONING_ACTIVE_PROFILES:-docker}`, their comment
+        stating the `/test` controllers mount only under the mock profile; the
+        `bob-storefront` and `alice-storefront` lose `ARKHAI_PROVISIONING_MODE`,
+        `MOCK_PROVISIONING_SUCCESS`, and the comment introducing them.
+      - `domains/bare_metal/compose.yml`: `bare-metal-provisioning` reads
+        `ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}`.
+      - `compose.bare-metal-local.yml`: no `bare-metal-provisioning` entry; its header
+        says the overlay adds the dev chain and the storefront's seller chain, and the
+        profile comes from the environment file.
+      - VM storefront development configuration: `PROVISIONING_MODE=mock` and its
+        http-mode comment leave `domains/vms/storefront/.env.bob.docker` and
+        `.env.alice.docker`; `[provisioning] mode` leaves `storefront.bob.toml` (with its
+        comment) and `storefront.alice.toml`. The shipped `settings.toml` key is 2.6's.
+      - References: `tools/issue-discovery/config/phases/local.yaml` and
+        `targeted_repros.yaml` set `VMS_PROVISIONING_ACTIVE_PROFILES=mock` in place of
+        `PROVISIONING_MODE=mock`; `docs/development/VALIDATION_RUNBOOK.md`'s local stack
+        bring-up and its note on the local mock path do the same.
+      - Tests: `e2e-tests/tests/unit/test_domain_stack_configuration.py` asserts the
+        bare-metal domain file's profile variable with its `docker` default;
+        `scripts/tests/test_bare_metal_compose.py` asserts the provisioning profile
+        follows the environment file's mode, with and without the overlay (`mock` by
+        default, `docker` with `PROVISIONING_MODE=real`); `test_lane_compose.py` asserts
+        VM's two provisioning services follow the mode the same way, no storefront in any
+        stack carries `ARKHAI_PROVISIONING_MODE`, `MOCK_PROVISIONING_SUCCESS`, or
+        `PROVISIONING_MODE`, and an unknown mode fails each environment target.
 - [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5).
       - Root `Makefile`: `build-e2e-vm`, `build-e2e-bare-metal`, and
         `build-e2e-apicredits`, each `init-prerequisites`, `dist`, `build-dev-env`, and
@@ -4793,39 +4842,44 @@ lane settings, and the credits scenario's registry settings; no service code.
         file, take the stack down, `build-e2e-<lane>`, bring it up with the existing
         failure diagnostics, run its markers on its network), `e2e-<lane>-down`, and
         `e2e-<lane>-logs`, the latter two writing the file only if missing.
+        `PROVISIONING_MODE` reaches the environment targets unchanged.
         `E2E_MODULE` drops both credits markers; `E2E_APICREDITS_MODULE` is
         `e2e_credits_deal or e2e_credits_payment_deal`. `test-e2e` is `test-e2e-vm`,
         `e2e-vm-down`, `test-e2e-bare-metal`, `e2e-bare-metal-down`,
         `test-e2e-apicredits`. Comments state why the stacks run in turn.
-- [ ] 10.4 Workflow and diagnostics (decision 6).
+- [ ] 10.4 Workflow and diagnostics (decisions 6 and 8).
       - `.github/workflows/e2e.yml`: `e2e-vm`, `e2e-bare-metal`, and `e2e-apicredits`,
         each checkout, uv, Foundry, `make -C e2e-tests test-e2e-<lane>`, then
         `e2e-<lane>-logs` teed into `compose-logs.txt`, the `e2e-<lane>-logs` artifact,
-        and `e2e-<lane>-down`; `PROVISIONING_MODE: mock` moves to the VM job, the only
-        stack reading it; the workflow-level `COMPOSE_PROJECT_NAME` goes. The header
-        describes three lanes.
+        and `e2e-<lane>-down`. `PROVISIONING_MODE: mock` stays at workflow level, its
+        comment saying both compute lanes' environment targets read it to select their
+        provisioning services' mock profile and the API-credit stack has no provisioning
+        service; the workflow-level `COMPOSE_PROJECT_NAME` goes. The header describes
+        three lanes.
       - `scripts/fetch-e2e-logs.py`'s `LOG_ARTIFACTS` and
         `scripts/tests/test_fetch_e2e_logs.py` gain `e2e-apicredits-logs`, the
         missing-artifact and reuse cases covering all three.
       - `docs/development/TESTING.md`'s paragraph on running the lanes and fetching
         their logs: three lanes and the three artifacts.
-- [ ] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane running
-      `e2e_credits_deal` and skipping `e2e_credits_payment_deal` as VM's did. 10.2's
-      render test and the log-fetch tests pass; `pytest --collect-only` with each lane's
+- [ ] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane reporting
+      exactly one passed (`e2e_credits_deal`) and three skipped
+      (`e2e_credits_payment_deal`, with no payments target). 10.2's render test, 10.2a's
+      tests, and the log-fetch tests pass; `pytest --collect-only` with each lane's
       marker expression collects that lane's scenarios and no other's (VM's without the
       credits scenarios, API credits' exactly them). Record each job's wall-clock time
-      beside run 37899278727's (VM 6m55s, bare metal 4m25s), as an observation, not a
-      threshold. Also: the release-tooling suite (`scripts/tests`), the e2e unit suite,
-      `make check-packaging`, comment hygiene, citations, and strict OpenSpec
-      validation.
+      beside runs 37899278727 (VM 6m55s, bare metal 4m25s) and 37910886195 (VM 5m44s,
+      bare metal 4m16s), as an observation, not a threshold. Also: the release-tooling
+      suite (`scripts/tests`), the e2e unit suite, `make check-packaging`, comment
+      hygiene, citations, and strict OpenSpec validation.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
-      Section 10): comment hygiene over the compose files and Makefiles; documentation
-      compliance against decisions 1–7; roadmap currency (`ROADMAP.md`'s Goal 4 gap
-      that API credits has no lane of its own, which this section closes for the lane
-      and `apicredits-end-to-end-lane` keeps for its loops and integration tests);
-      campaign index currency (this change's row and `apicredits-end-to-end-lane`'s);
-      documentation citations; `make check-packaging`; 10.5's run recorded; the
-      proposal for a change isolating the lanes' host ports and networks, so they run
+      Section 10): comment hygiene over the compose files, Makefiles, and the VM
+      storefronts' development configuration; documentation compliance against
+      decisions 1–9; roadmap currency (`ROADMAP.md`'s Goal 4 gap that API credits has no
+      lane of its own, which this section closes for the lane and
+      `apicredits-end-to-end-lane` keeps for its loops and integration tests); campaign
+      index currency (this change's row and `apicredits-end-to-end-lane`'s);
+      documentation citations; `make check-packaging`; 10.5's run recorded; the proposal
+      for a change isolating the lanes' host ports and networks, so they run
       concurrently on one host (design, "Section 10 design", decision 2), written and
       given its index row; and promotion pending at 11.2, 11.3, and 11.4.
 
@@ -4858,13 +4912,16 @@ lane settings, and the credits scenario's registry settings; no service code.
       mechanisms start fulfillment through the servicing worker, that an Alkahest
       fulfillment publishes only its evidence's digest, and that an evidence submission
       whose outcome is unknown parks its obligation for an operator.
-- [ ] 11.2 `docs/development/TESTING.md`: three lanes, each building and composing its own stack; the loop table
+- [ ] 11.2 `docs/development/TESTING.md`: three lanes, each building and composing its own stack, with the
+      compute lanes' mock profile chosen per run by `PROVISIONING_MODE`; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
       "blocked—not mocked" bare-metal statement replaced by the pipeline deal and the
       protected lane's distinct role.
 - [ ] 11.3 `docs/development/DEPLOYMENT_AND_CONFIG.md`: the compose file list names the
-      per-market overlays. (The bare-metal settlement root and Alkahest inputs land with
+      per-market overlays and the API-credit lane's compute registry; each compute
+      stack's provisioning profile is chosen per run (`PROVISIONING_MODE`, defaulting to
+      real in the base files as Helm's `mockMode` does), never a storefront setting. (The bare-metal settlement root and Alkahest inputs land with
       7B.5.)
 - [ ] 11.4 Promote the deltas into `openspec/specs/test-compatibility/spec.md`,
       `market-composition/spec.md`, `physical-provisioning/spec.md`,
@@ -5024,6 +5081,10 @@ lane settings, and the credits scenario's registry settings; no service code.
       owning change. The bare-metal storefront's settlement servicing worker is
       composed with no event callback, so a servicing step that fails (a refused
       schedule, say) is retried with no stage event or log line at the storefront.
+      Found in Section 10's design review: the VM storefront wheel's shipped
+      `[provisioning] mode` (`settings.toml`) has no reader, and neither has the
+      validation runbook's Helm override `storefront.agents[0].config.provisioning.mode`;
+      both go with the storefront's next release.
       Found in 9.6a: only the administrator's settlement wait wakes servicing when it
       observes a lease become active, so a buyer's status read that observes it first
       leaves evidence publication to the pending retry; the wake belongs where
@@ -5039,8 +5100,8 @@ lane settings, and the credits scenario's registry settings; no service code.
       `make check-doc-citations CHANGE=bare-metal-mock-provisioned-deal` and resolve
       every match, including references to the tombstoned compose overlay, escrow
       helper, release, compute-adapter, lease-controller, and client modules.
-- [ ] 2.9 **End-to-end pipeline.** Confirm all three lanes pass from one image build and
-      record the run, its result, and the scenarios exercising this change: VM's
+- [ ] 2.9 **End-to-end pipeline.** Confirm all three lanes pass, each building its own
+      stack, and record the run, its result, and the scenarios exercising this change: VM's
       `test_full_deal.py` on the shared stages, `test_bare_metal_mock_deal.py`, and
       `test_credits_deal_buyer_cli.py` in its own lane.
 - [ ] 2.10 **Promotion.** Complete the design-promotion record below.
@@ -5064,6 +5125,8 @@ lane settings, and the credits scenario's registry settings; no service code.
 | The unified fulfillment path, VM's plan rebuild, and the unconfigured-mechanism startup refusal are another change's | `openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/design.md`; nothing permanent from this change |
 | The bare-metal storefront requires its settlement configuration, requires a configured mechanism's recovery resources whether or not it is enabled, and its Helm chart and Compose file carry the Alkahest chain and wallet inputs once each | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Bare-metal role configuration"; `docs/bare-metal-seller-quickstart.md`; enforces `openspec/specs/settlement-configuration/spec.md` — "Peer mechanism configuration hierarchy", "Mechanism configuration cannot reinterpret durable plans", with no new requirement |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
+| Mock provisioning is the provisioning service's profile, chosen per run by `PROVISIONING_MODE`; no storefront carries a provisioning mode | `openspec/specs/test-compatibility/spec.md` — "Each domain runs in its own lane" (its mock-profile scenario); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
+| The API-credit lane's scenario fails on a missing lane setting | `docs/development/TESTING.md` (the existing rule, applied); nothing new |
 | A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
 | The job authority persists result and credential envelopes and an opaque execution handle, owns retry timing while executors classify retryability and redact, and never lets a late outcome undo cancellation | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities", "A cancelled job stays cancelled"; `docs/development/ARCHITECTURE.md` |
 | The host authority is connection-neutral: a connection envelope with public fields and opaque protected values it never decrypts or discloses, an immutable `ExecutionHost`, per-kind codecs in implementation distributions that decrypt just in time (only `ssh` implemented) | `openspec/specs/physical-provisioning/spec.md` — "Host connections are typed by their implementation's codec", "Connection secrets stay protected"; `docs/development/ARCHITECTURE.md` "Family kits" compute example |
