@@ -50,7 +50,7 @@ fresh `make dist`.
 | `core/storefront` | 190 (2 skipped) |
 | `domains/vms/buyer` | 197 |
 | `domains/vms/storefront` unit | 1073 (1 skipped) |
-| `domains/vms/storefront` integration | 347 |
+| `domains/vms/storefront` integration | 385 |
 | `domains/bare_metal/buyer` | 11 |
 | `domains/bare_metal/storefront` | 296 |
 | `domains/apicredits` (domain) | 41 |
@@ -63,9 +63,8 @@ fresh `make dist`.
 | `kit/policy` | 63 |
 | `e2e-tests` unit | 22 |
 
-The VM storefront integration count excludes `test_publication_loop.py` (see
-below) and `test_alkahest.py`, which needs a local Anvil chain and runs in the
-end-to-end lanes instead.
+The VM storefront integration count excludes `test_alkahest.py`, which needs a
+local Anvil chain and runs in the end-to-end lanes instead.
 
 ## End-to-end
 
@@ -80,11 +79,3 @@ The `E2E` workflow on this branch, after the merge:
 `dev` itself passed the same workflow in
 [37936939239](https://github.com/arkhai-io/simple-compute-market/actions/runs/37936939239),
 so every failure above was this branch's and is fixed.
-
-## Known pre-existing failures
-
-`domains/vms/storefront/tests/integration/test_publication_loop.py` hangs when
-run in sequence with the other integration modules and has five failing tests
-on its own. Both reproduce identically on the tree `dev` carried before this
-merge, so they are excluded from the counts above rather than attributed to
-this change.
