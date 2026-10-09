@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import uuid
-from typing import Any, Callable
+from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.listings.models import Listing
+from arkhai_vms_listings import extract_compute_from_order
+from arkhai_vms_listings.models import Listing
 
 
 _REQUIRED_COMPUTE_KEYS = (
@@ -18,14 +17,14 @@ _REQUIRED_COMPUTE_KEYS = (
 )
 
 # Every VM listing today is GPU compute -- ComputeGpuResourceAdapter is the
-# only resource adapter this domain registers (domains/vms/listings/resources.py),
+# only resource adapter this domain registers (domains/vms/listings/src/arkhai_vms_listings/resources.py),
 # so this is a domain constant, not something the order schema needs to
 # carry yet. Must match what capacity registration actually advertises
 # (kit/site's CapacityBucket.resource_type for VM resources), or the
 # claim's resource_type constraint would reject every resource that
 # exists.
 _VM_RESOURCE_TYPE = "compute.gpu"
-_VM_EXECUTOR_KIND = "vm"
+_VM_OFFERING_MODE = "vm"
 
 # _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
 # arkhai_vms.compute_requirements -- the same shared vocabulary the
@@ -39,7 +38,7 @@ def compute_capacity_claim_from_order(
 ) -> dict[str, Any]:
     """Extract inventory-matching attributes from a VM listing/order.
 
-    ``offer_resource`` may arrive as a JSON string, a plain dict, or a
+    ``listing_resource`` may arrive as a JSON string, a plain dict, or a
     ``ComputeResource`` model instance — ``Listing.model_validate`` mutates
     rows it validates, replacing the dict in place, and several callers (the
     negotiation accept paths) run after such validation. Silently returning
@@ -51,23 +50,25 @@ def compute_capacity_claim_from_order(
     claim so matching pins to the named resource rather than requiring both
     to match.
 
-    The returned claim also carries a ``dimensions`` map built from
-    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb``. These are the
-    listing's fixed, seller-declared shape, so admission checks that every
-    requested dimension fits rather than checking GPU count alone.
+    The returned claim also carries a ``dimensions`` map holding each of
+    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb`` the listing publishes.
+    A listing publishes exactly the quantities its listing shape declares, so
+    admission checks that every committed dimension fits, and requests none the
+    shape omits: the site provisions an omitted dimension from its own
+    defaults.
 
     Raises ``ValueError`` if the order is missing or yields neither ``pool_id``
     nor ``resource_id`` — an under-specified claim would otherwise silently
     match on shape attributes (region/gpu_model/gpu_count) alone, which is
     exactly the "grabs whatever resource is first in line" bug class this
     function exists to prevent. Listing creation is expected to already
-    reject this shape (``ListingService._parse_offer_and_escrows``); this is
+    reject this shape (``ListingService._parse_listing_resource_and_escrows``); this is
     a backstop for any listing that reaches claim-building anyway.
     """
     if not order_dict:
         raise ValueError("Cannot build a capacity claim without a settlement order.")
     capacity_claim: dict[str, Any] = {
-        "executor_kind": _VM_EXECUTOR_KIND,
+        "offering_mode": _VM_OFFERING_MODE,
         "resource_type": _VM_RESOURCE_TYPE,
     }
     dimensions: dict[str, Any] = {}
@@ -92,7 +93,7 @@ def compute_capacity_claim_from_order(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         raise ValueError(
             f"Cannot build a capacity claim for order {order_id!r}: neither "
-            "pool_id nor resource_id is present on its offer_resource."
+            "pool_id nor resource_id is present on its listing_resource."
         )
     if dimensions:
         capacity_claim["dimensions"] = dimensions
@@ -105,19 +106,20 @@ async def build_provisioning_job_spec(
     ssh_public_key: str,
     duration_seconds: int,
     capacity: Any,
-    vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
-    """Probe the capacity ledger (read-only) and build a VM job spec."""
+    """Probe the capacity ledger (read-only) and build a VM job spec.
+
+    The spec names no guest: provisioning names it from the capacity
+    reservation, which a probe has not made.
+    """
     capacity_claim = compute_capacity_claim_from_order(order_dict)
     selected = await capacity.probe(claim=capacity_claim)
     if not selected:
         return None
 
-    make_vm_target = vm_target_factory or (lambda: f"tenant-{uuid.uuid4().hex[:4]}")
     return {
         "resource_id": str(selected["resource_id"]),
-        "vm_host": selected["vm_host"],
-        "vm_target": make_vm_target(),
+        "host_id": selected["host_id"],
         "required_attributes": capacity_claim,
         "ssh_public_key": ssh_public_key,
         "duration_seconds": duration_seconds,

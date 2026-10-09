@@ -12,6 +12,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,12 @@ from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
+from market_storefront.services.capacity_client import (
+    listing_source_projection,
+    site_capacity_buckets,
+)
+from market_storefront.services.site_projection_cache import refresh_site_projections
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -59,8 +66,25 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.server import _set_globally_paused
+from market_storefront import lifecycle as _lifecycle
+from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 - registers the steps
+from market_storefront_kit import (
+    LifecycleRouteError,
+    StorefrontLifecycleRouteService,
+    TradingPauseRouteService,
+)
+from market_pool_overrides import (
+    PoolOverrideDeleteResponse,
+    PoolOverrideListResponse,
+    PoolOverrideRecord,
+    PoolOverrideResponse,
+    PoolOverrideRouteError,
+    PoolOverrideRouteService,
+    PoolOverrideWriteResponse,
+)
 from market_capacity_publication import (
+    CapacityAdminRouteError,
+    CapacityAdminRouteService,
     CapacityBinding,
     CapacityBindingError,
     remote_site_clients,
@@ -82,6 +106,56 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 )
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+#: Route alias -> the loop's registered name. Aliases are hyphenated where loop
+#: names are underscored, and `site-projections` does not transform into
+#: `site_projection_poller` by any rule -- so the mapping is declared rather
+#: than inferred. Declaring it makes the route's spelling and the registry's
+#: agree by construction, which is the drift that let `claims` outlive the
+#: claims engine.
+#: Fields `ReserveCapacityResponse` cannot be built without.
+#:
+#: Deliberately not `resource_id`: `kit/site`'s reserve route strips physical
+#: identity from every reservation response, so requiring it asked the site
+#: authority for something it is designed never to return.
+_REQUIRED_RESERVATION_FIELDS = ("capacity_reservation_id",)
+
+
+def require_reservation_fields(
+    reserved: Mapping[str, Any], *, site_id: str
+) -> None:
+    """Refuse a reservation payload this response cannot be built from.
+
+    These fields were subscripted directly, two lines after the sibling stage
+    event read the same payload with `.get`. When one was absent the `KeyError`
+    reached the caller as `500 Storefront administrator request failed`, naming
+    neither the field nor the authority that returned it -- a message that cost
+    several rounds to trace back to one subscript.
+
+    A `502`, not a `500`: the site authority returned something this storefront
+    cannot use, which is a bad gateway rather than this service faulting. The
+    payload's keys are reported because the useful question is what the
+    authority *did* send -- a fungible pool reservation legitimately has no
+    resource of its own to name, and whether it should carry one is a contract
+    question this error surfaces instead of hiding.
+    """
+    missing = [f for f in _REQUIRED_RESERVATION_FIELDS if f not in reserved]
+    if not missing:
+        return
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            f"site {site_id!r} returned a reservation without "
+            f"{', '.join(missing)}; payload carried {sorted(reserved)}. This "
+            "response requires those fields, so either the authority omitted "
+            "them or the two disagree on the reservation shape."
+        ),
+    )
+
+
+def _lifecycle_routes() -> StorefrontLifecycleRouteService:
+    return StorefrontLifecycleRouteService(_lifecycle.controller())
 
 
 @cbv(router)
@@ -180,10 +254,7 @@ class AdminController:
         summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
-        _set_globally_paused(True)
-        return AdminPauseResponse(
-            paused=True, message="Storefront paused. New negotiations will receive 503."
-        )
+        return TradingPauseRouteService(_lifecycle.trading_pause()).pause()
 
     @router.post(
         "/resume",
@@ -191,8 +262,7 @@ class AdminController:
         summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
-        _set_globally_paused(False)
-        return AdminPauseResponse(paused=False, message="Storefront resumed.")
+        return TradingPauseRouteService(_lifecycle.trading_pause()).resume()
 
     @router.post(
         "/deals/{escrow_uid}/interrupt",
@@ -300,6 +370,189 @@ class AdminController:
             refund_amount=body.refund_amount,
             reservation=truncated or reservation,
         )
+
+    # ------------------------------------------------------------------
+    # Holding the timer loops, and one cycle of one loop while they are held.
+    #
+    # Each step is the operation the loop's timer invokes, registered with the
+    # loop controller beside the loop (`market_storefront.lifecycle_steps`), and
+    # returns what that operation returns. Running while held is the purpose.
+    # ------------------------------------------------------------------
+
+    @router.delete(
+        "/introductions/{obligation_ref}/payloads",
+        summary="Delete one introduction's contact payloads now (admin)",
+    )
+    async def delete_introduction_payloads(self, obligation_ref: str) -> dict:
+        """Delete one introduction's contact payloads, whatever the window says.
+
+        The same deletion the retention sweep runs. The deal and its obligation
+        record remain; repeating the request converges.
+        """
+        composition = _container.resolved_contact_exchange
+        retention = composition.retention() if composition is not None else None
+        if retention is None:
+            raise HTTPException(status_code=404, detail="contact exchange is disabled")
+        return await retention.delete_one(obligation_ref)
+
+    @router.post(
+        "/lifecycle/pause",
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> dict:
+        """Hold the timer loops idle. Trading is unaffected.
+
+        Two controls, deliberately separate. `/admin/pause` stops the
+        storefront accepting new negotiations; this stops the loops
+        reconciling behind a caller's back. A scenario needs deterministic
+        reconciliation *and* a deal to agree, so a control that did both would
+        make the second impossible.
+
+        Loops are held rather than stopped: nothing is torn down, no cycle is
+        cut part-way, and a poller keeps its feed position. Each loop's work
+        stays reachable through its own run-cycle route while held.
+        """
+        result = await _lifecycle_routes().pause()
+        logger.info("[ADMIN] Timer loops paused: %s", result["loops"])
+        return result
+
+    @router.post(
+        "/lifecycle/resume",
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> dict:
+        """Return the loops to work; each performs its next cycle."""
+        result = await _lifecycle_routes().resume()
+        logger.info("[ADMIN] Timer loops resumed: %s", result["loops"])
+        return result
+
+    @router.post(
+        "/lifecycle/{loop}/run-cycle",
+        summary="Run one cycle of one lifecycle loop now (admin)",
+    )
+    async def run_lifecycle_cycle(self, loop: str) -> dict:
+        """Run exactly the cycle the loop's timer runs, whether or not loops are held."""
+        try:
+            return dict(await _lifecycle_routes().run_cycle(loop))
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    @router.post(
+        "/lifecycle/{loop}/dry-run",
+        summary="Report what one cycle of one lifecycle loop would do (admin)",
+    )
+    async def dry_run_lifecycle_cycle(self, loop: str) -> dict:
+        """Report the loop's next cycle without applying it, where it offers a preview."""
+        try:
+            return dict(await _lifecycle_routes().dry_run(loop))
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    @router.post(
+        "/capacity/projections/refresh",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def refresh_site_projections(self) -> dict[str, Any]:
+        """Reload every site projection and report what each site now holds.
+
+        Projections are pull-synchronized on a poller interval. A caller that
+        has just declared capacity at the site authority would otherwise wait
+        that interval out, and a caller holding the lifecycle loops paused
+        would wait forever: the poller that would pull it is one of the loops
+        being held. Neither is a wait a test may take.
+
+        Returns the per-site load state so a caller asserts the pull happened
+        rather than assuming it. A site reporting `not_loaded`, `unavailable`,
+        or `invalid` has not confirmed its projection and must not be read as
+        an authoritative empty -- an unconfirmed projection and an empty one
+        are indistinguishable downstream, which is how an inventory failure
+        becomes a negotiation failure several stages away.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections(self._db)
+        summary = projection_status_summary()
+        logger.info(
+            "[ADMIN] Site projections refreshed on demand: %s",
+            {
+                site: {family: view.get("state") for family, view in families.items()}
+                for site, families in summary.items()
+            },
+        )
+        return {"sites": summary}
+
+    # -- storefront pool overrides ------------------------------------------
+    # Site and pool IDs are operator-chosen strings with no character
+    # restriction, so they travel in the body or query, never the path.
+
+    @staticmethod
+    def _pool_overrides() -> PoolOverrideRouteService:
+        return PoolOverrideRouteService(_container.resolved_pool_override_service)
+
+    @staticmethod
+    def _http(exc: PoolOverrideRouteError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+    @router.put(
+        "/pool-overrides",
+        response_model=PoolOverrideWriteResponse,
+        summary="Replace one pool override, checked against the live site (admin)",
+    )
+    async def put_pool_override(
+        self, record: PoolOverrideRecord
+    ) -> PoolOverrideWriteResponse:
+        """Replace the whole override at the record's site, pool, and offering mode.
+
+        Refused with 422 for an unconfigured site, a mode no market serves, or
+        vocabulary or clauses that do not validate; 503 (retryable) when the site
+        cannot answer usably; and 404 when its live projection lacks the pool. A
+        shape no member is feasible for is reported, not refused.
+        """
+        try:
+            return await self._pool_overrides().replace(record)
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @router.get(
+        "/pool-overrides",
+        response_model=PoolOverrideResponse | PoolOverrideListResponse,
+        summary="Read one pool override, or list them (admin)",
+    )
+    async def get_pool_overrides(
+        self,
+        site_id: str | None = Query(default=None),  # noqa: B008
+        pool_id: str | None = Query(default=None),  # noqa: B008
+        offering_mode: str | None = Query(default=None),  # noqa: B008
+    ) -> PoolOverrideResponse | PoolOverrideListResponse:
+        """With a site, pool, and offering mode, one override; otherwise a list,
+        optionally narrowed to a site or to one site's pool."""
+        try:
+            return await self._pool_overrides().read(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
+
+    @router.delete(
+        "/pool-overrides",
+        response_model=PoolOverrideDeleteResponse,
+        summary="Delete one pool override; idempotent (admin)",
+    )
+    async def delete_pool_override(
+        self,
+        site_id: str = Query(),  # noqa: B008
+        pool_id: str = Query(),  # noqa: B008
+        offering_mode: str = Query(),  # noqa: B008
+    ) -> PoolOverrideDeleteResponse:
+        try:
+            return await self._pool_overrides().delete(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
 
     @router.post(
         "/portfolio/resources/import",
@@ -603,15 +856,15 @@ class AdminController:
         listing: dict[str, Any],
         thread: dict[str, Any] | None,
     ) -> bool:
-        offer = self._json_object(listing.get("offer_resource"))
-        if offer.get("interruptible") is True:
+        listing_resource = self._json_object(listing.get("listing_resource"))
+        if listing_resource.get("interruptible") is True:
             return True
 
         proposal = (thread or {}).get("buyer_escrow_proposal")
         if not isinstance(proposal, dict):
             return False
         try:
-            from domains.vms.settlement.proposals import proposal_is_splitter_gated
+            from arkhai_vms_settlement.proposals import proposal_is_splitter_gated
 
             from market_storefront.utils.config import CHAINS
 
@@ -682,6 +935,11 @@ class AdminController:
         listing_id = deal_ref.get("listing_id")
         if isinstance(listing_id, str) and listing_id.strip():
             binding = await capacity_binding_for_listing(self._db, listing_id)
+            if not isinstance(binding, CapacityBinding):
+                raise CapacityBindingError(
+                    "a reservation cannot belong to a listing with no admission "
+                    "authority"
+                )
             if binding.site_id != site_id:
                 raise CapacityBindingError(
                     "reservation authority disagrees with the durable listing binding"
@@ -745,10 +1003,14 @@ class AdminController:
                 f"{capacity_reservation_id!r}: {exc}",
             ) from exc
         closed_listing_ids = (
-            await self._close_oversized_compute_listings() if close_oversized else []
+            await self._close_oversized_compute_listings(site_id)
+            if close_oversized
+            else []
         )
         reopened_listing_ids = (
-            await self._reopen_available_compute_listings() if reopen_available else []
+            await self._reopen_available_compute_listings(site_id)
+            if reopen_available
+            else []
         )
         stage_event(
             "fulfillment",
@@ -793,39 +1055,15 @@ class AdminController:
             )
             return None
 
-    async def _close_oversized_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
-            mark_derived_listings_closed,
-            stale_open_listing_ids,
-        )
+    async def _close_oversized_compute_listings(self, changed_site: str) -> list[str]:
+        """Close the capacity-backed listings ``changed_site``'s change made stale.
 
-        home_site, configured_site_count = self._site_topology()
-        if home_site is None:
-            return []
-        availability = await self._member_availability()
-        if availability is None:
-            return []
-        closed_listing_ids = stale_open_listing_ids(
-            self._db.db_path,
-            home_site=home_site,
-            configured_site_count=configured_site_count,
-            member_availability=availability,
-        )
-        for listing_id in closed_listing_ids:
-            await self._db.update_listing(listing_id=listing_id, status="closed")
-        mark_derived_listings_closed(
-            self._db.db_path,
-            closed_listing_ids,
-            home_site=home_site,
-            configured_site_count=configured_site_count,
-        )
-        return closed_listing_ids
+        The site's cached projection predates the change this operation just made,
+        so it is refreshed first; reconciling against it unrefreshed would report
+        nothing now and let a later operation report these closes as its own.
+        """
+        from arkhai_vms_listings.reconciler import stale_open_listing_ids
 
-    async def _reopen_available_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
-            closed_available_listing_ids,
-            mark_derived_listings_open,
-        )
 
         home_site, _ = self._site_topology()
         if home_site is None:
@@ -833,14 +1071,55 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
+        await refresh_site_projections(changed_site)
+        projection = listing_source_projection()
+        closed_listing_ids = stale_open_listing_ids(
+            self._db.db_path,
+            home_site=home_site,
+            configured_sites=self._runtime().site_ids,
+            member_availability=availability,
+            # The same source publication derives from, so reconciliation here
+            # cannot close a listing publication would keep.
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            backed_only=True,
+            shape_feasible=vm_shape_feasibility(),
+        )
+        for listing_id in closed_listing_ids:
+            await self._db.update_listing(
+                listing_id=listing_id,
+                status="closed",
+                closed_by="reconciliation",
+            )
+        return closed_listing_ids
+
+    async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
+        """Reopen the capacity-backed listings ``changed_site``'s change made
+        available again, after refreshing that site's cached projection."""
+        from arkhai_vms_listings.reconciler import closed_available_listing_ids
+
+
+        home_site, _ = self._site_topology()
+        if home_site is None:
+            return []
+        availability = await self._member_availability()
+        if availability is None:
+            return []
+        await refresh_site_projections(changed_site)
+        projection = listing_source_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
             home_site=home_site,
             member_availability=availability,
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            shape_feasible=vm_shape_feasibility(),
+            configured_sites=self._runtime().site_ids,
         )
         for listing_id in reopened_listing_ids:
-            await self._db.update_listing(listing_id=listing_id, status="open")
-        mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
+            await self._db.update_listing(
+                listing_id=listing_id, status="open", reopened_by="reconciliation"
+            )
         return reopened_listing_ids
 
     @router.post(
@@ -881,8 +1160,6 @@ class AdminController:
             provider_id=body.provider_id,
             provider_lease_id=body.provider_lease_id,
             provider_resource_id=body.resource_id,
-            vm_host=body.vm_host,
-            vm_target=body.vm_target,
             lease_end_utc=body.lease_end_utc,
         )
 
@@ -902,7 +1179,6 @@ class AdminController:
             state="releasing",
             close_oversized=True,
             provider_lease_id=body.provider_lease_id,
-            vm_remove_job_id=body.vm_remove_job_id,
         )
 
     @router.post(
@@ -914,18 +1190,29 @@ class AdminController:
         self,
         body: CapacityReleasedEventRequest,
     ) -> FulfillmentEventResponse:
-        return await self._apply_fulfillment_event(
-            capacity_reservation_id=body.capacity_reservation_id,
-            site_id=body.site_id,
+        try:
+            recorded = await CapacityAdminRouteService(
+                reserve=None, released=self._record_capacity_released
+            ).capacity_released(body.model_dump(mode="python"))
+        except CapacityAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return FulfillmentEventResponse(**recorded)
+
+    async def _record_capacity_released(self, event) -> dict:
+        """Apply a site's capacity-released callback to this storefront's state."""
+        applied = await self._apply_fulfillment_event(
+            capacity_reservation_id=event["capacity_reservation_id"],
+            site_id=event["site_id"],
             event_name="capacity_released",
             state="released",
             close_oversized=False,
             reopen_available=True,
             release_reservation=True,
-            provider_lease_id=body.provider_lease_id,
-            provider_resource_id=body.resource_id,
-            released_at=body.released_at,
+            provider_lease_id=event.get("provider_lease_id"),
+            provider_resource_id=event.get("resource_id"),
+            released_at=event.get("released_at"),
         )
+        return applied.model_dump(mode="python")
 
     @router.post(
         "/fulfillment/events/failed",
@@ -955,11 +1242,17 @@ class AdminController:
                 detail=f"Reservation {body.capacity_reservation_id!r} not found",
             )
         deal_ref = reservation.get("deal_ref") or {}
+        # The reservation's own escrow is the one commit recorded on a hold
+        # placed before the deal had an escrow; its deal reference never
+        # learns it.
+        escrow_uid = (
+            body.escrow_uid or reservation.get("escrow_uid") or deal_ref.get("escrow_uid")
+        )
         result = await apply_fulfillment_failure_policy(
             self._db,
             FulfillmentFailureContext(
                 capacity_reservation_id=body.capacity_reservation_id,
-                escrow_uid=body.escrow_uid or deal_ref.get("escrow_uid"),
+                escrow_uid=escrow_uid,
                 listing_id=listing_id,
                 provider_id=body.provider_id,
                 provider_job_id=body.provider_job_id,
@@ -1027,81 +1320,84 @@ class AdminController:
             capacity_binding_for_listing,
         )
 
-        if not body.listing_id:
-            raise HTTPException(
-                status_code=400,
-                detail="A durable VM listing binding is required",
+        async def reserve(listing_id, claim, deal_ref):
+            open_listing_ids = await self._open_bound_vm_listing_ids()
+            try:
+                binding = await capacity_binding_for_listing(self._db, listing_id)
+            except RuntimeError as exc:
+                raise CapacityBindingError(str(exc)) from exc
+            claim = {**claim, "offering_mode": binding.offering_mode}
+            try:
+                reserved = await self._runtime().reserve(
+                    binding, claim=claim, deal_ref=deal_ref
+                )
+            except CapacityBindingError as exc:
+                raise CapacityBindingError(
+                    f"Listing {listing_id!r} is mapped to site "
+                    f"{binding.site_id!r}, which is not currently configured"
+                ) from exc
+            except Exception as exc:
+                raise ConnectionError(
+                    f"site {binding.site_id!r}: {exc}"
+                ) from exc
+            if not reserved:
+                return None
+            closed_listing_ids = await self._close_oversized_compute_listings(
+                binding.site_id
             )
-        open_listing_ids = await self._open_bound_vm_listing_ids()
+            # The capacity-delta subscriber can race this inline
+            # reconciliation. Include listings that were open when reservation
+            # began but that the subscriber closed first, so the response
+            # reports the full effect of this reservation rather than only the
+            # inline worker's share.
+            closed_listing_ids = sorted(
+                set(closed_listing_ids)
+                | await self._closed_since_snapshot(open_listing_ids)
+            )
+            stage_event(
+                "portfolio",
+                "capacity_reserved_by_admin",
+                capacity_reservation_id=reserved.get("capacity_reservation_id"),
+                pool_id=reserved.get("pool_id"),
+                member_id=reserved.get("member_id"),
+                resource_id=reserved.get("resource_id"),
+                gpu_count=reserved.get("allocated_gpu_count"),
+                resource_state=reserved.get("state"),
+                listing_id=listing_id,
+                escrow_uid=deal_ref.get("escrow_uid"),
+                closed_listing_ids=closed_listing_ids,
+            )
+            # Pools are the aggregator's concept, not the ledger's. The
+            # reservation payload carries neither a `pool_id` nor pool-bearing
+            # resource attributes -- the capacity boundary reports the hold and
+            # withholds the topology the storefront published from -- so read
+            # the membership from the durable listing binding, which is where
+            # this storefront recorded it at publication time.
+            durable = await self._db.load_listing_binding(listing_id=listing_id)
+            pool_id = (
+                reserved.get("pool_id")
+                or (reserved.get("attributes") or {}).get("pool_id")
+                or (durable.pool_id if durable is not None else None)
+            )
+            require_reservation_fields(reserved, site_id=binding.site_id)
+            return {
+                "capacity_reservation_id": str(reserved["capacity_reservation_id"]),
+                "pool_id": str(pool_id) if pool_id else None,
+                "member_id": (
+                    str(reserved["member_id"]) if reserved.get("member_id") else None
+                ),
+                "gpu_count": int(reserved.get("allocated_gpu_count") or 1),
+                "resource_state": reserved.get("state") or "available",
+                "closed_listing_ids": closed_listing_ids,
+            }
+
         try:
-            binding = await capacity_binding_for_listing(self._db, body.listing_id)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        claim = dict(body.required_attributes or {})
-        claim["executor_kind"] = binding.offering_mode
-        try:
-            reserved = await self._runtime().reserve(
-                binding,
-                claim=claim,
-                deal_ref={
-                    "listing_id": body.listing_id,
-                    "escrow_uid": body.escrow_uid,
-                    "reserved_by": "admin",
-                },
-            )
-        except CapacityBindingError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Listing {body.listing_id!r} is mapped to site "
-                f"{binding.site_id!r}, which is not currently configured",
-            ) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Could not reach site {binding.site_id!r} for listing "
-                f"{body.listing_id!r}: {exc}",
-            ) from exc
-        if not reserved:
-            raise HTTPException(
-                status_code=409,
-                detail="No available compute VM matched required attributes",
-            )
-        closed_listing_ids = await self._close_oversized_compute_listings()
-        # The capacity-delta subscriber can race this inline reconciliation.
-        # Include listings that were open when reservation began but that the
-        # subscriber closed first, so the response reports the full effect of
-        # this reservation rather than only the inline worker's share.
-        closed_listing_ids = sorted(
-            set(closed_listing_ids)
-            | await self._closed_since_snapshot(open_listing_ids)
-        )
-        stage_event(
-            "portfolio",
-            "capacity_reserved_by_admin",
-            capacity_reservation_id=reserved.get("capacity_reservation_id"),
-            pool_id=reserved.get("pool_id"),
-            member_id=reserved.get("member_id"),
-            resource_id=reserved.get("resource_id"),
-            gpu_count=reserved.get("allocated_gpu_count"),
-            resource_state=reserved.get("state"),
-            listing_id=body.listing_id,
-            escrow_uid=body.escrow_uid,
-            closed_listing_ids=closed_listing_ids,
-        )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
-            "pool_id"
-        )
-        return ReserveCapacityResponse(
-            capacity_reservation_id=str(reserved["capacity_reservation_id"]),
-            pool_id=str(pool_id) if pool_id else None,
-            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
-            gpu_count=int(reserved.get("allocated_gpu_count") or 1),
-            resource_state=reserved.get("state") or "available",
-            closed_listing_ids=closed_listing_ids,
-        )
+            result = await CapacityAdminRouteService(
+                reserve=reserve, released=self._record_capacity_released
+            ).reserve(body.model_dump(mode="python"))
+        except CapacityAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return ReserveCapacityResponse(**result)
 
     @router.post(
         "/portfolio/release-reservations",

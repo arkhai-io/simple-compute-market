@@ -11,6 +11,7 @@ from typing import Any
 
 import typer
 from arkhai_bare_metal import (
+    BARE_METAL_OFFERING_MODE,
     BareMetalProvisionTerms,
 )
 from core_buyer import (
@@ -21,23 +22,28 @@ from core_buyer import (
     report_delivery,
     resolve_buyer_action_policy,
 )
+from core_buyer.introductions import IntroductionPayloadsDeleted
+from core_buyer.negotiation_client import negotiate_with_seller
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
+from market_contact_exchange import (
+    RecoveredIntroductionRun,
+    create_contact_command_group,
+)
 from core_buyer.deal_helpers import (
     load_deal_context,
     open_run_log,
     settlement_acceptance_fields,
 )
-from core_buyer.negotiation_client import negotiate_with_seller
 from core_buyer.run_log import RunLog
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import (
     SettlementOption,
-    SettlementPlan,
     SettlementSelection,
     compute_rate_total,
 )
 from market_identity import TrustedIdentitySet
-from market_settlement_runtime import derive_obligation_ref
 from pydantic_core import to_jsonable_python
+from registry_client.query import compile_resource_query
+from market_settlement_runtime import derive_obligation_ref
 
 from .config import (
     fresh_identity,
@@ -46,7 +52,9 @@ from .config import (
     registry_client,
 )
 from .fulfillment import BareMetalFulfillmentTransport
-from .arkhai_payments import BareMetalArkhaiPaymentsBuyer, BareMetalSettlementTransport
+from market_arkhai_payments import PaymentApproval
+
+from .arkhai_payments import BareMetalSettlementTransport
 from .settlement_composition import BUYER_STAGES
 
 bare_metal_app = typer.Typer(
@@ -152,14 +160,49 @@ def _recovered_transports(
 def list_bare_metal(
     config: str | None = typer.Option(None, "--config"),
     limit: int = typer.Option(50, min=1, max=200),
+    resource: str | None = typer.Option(
+        None,
+        "--resource",
+        help=(
+            "Filter by hardware and region in the registry's own query vocabulary, "
+            "e.g. 'gpu_model=H200 gpu_count>=8'."
+        ),
+    ),
 ) -> None:
-    """List authenticated bare-metal listings from the configured registry."""
+    """List authenticated bare-metal listings from the configured registry.
+
+    A resource query is compiled against the registry's published filter
+    specification and sent with its ETag, so a field the registry does not
+    declare is refused before any listing is read, and a specification that
+    changed since is refused by the registry rather than silently reinterpreted.
+    """
 
     buyer_config = load_bare_metal_buyer_config(config)
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
-        response = client.list_listings(limit=limit, virtualization_type="bare_metal")
+        params = bare_metal_listing_params(client, resource, registry_url=buyer_config.registry_url)
+        response = client.list_listings(limit=limit, **params)
     _json(response)
+
+
+def bare_metal_listing_params(
+    client: Any, resource: str | None, *, registry_url: str
+) -> dict[str, Any]:
+    """The query parameters one bare-metal listing read sends.
+
+    Always restricted to bare metal; with ``resource``, also the compiled query
+    and the ETag of the filter specification it was compiled against.
+    """
+    params: dict[str, Any] = {"offering_mode": BARE_METAL_OFFERING_MODE}
+    if resource is None:
+        return params
+    try:
+        compiled = compile_resource_query(
+            resource, filter_spec=client.get_filter_spec(), registry_url=registry_url
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--resource") from exc
+    return {**params, **compiled.as_params(), "etag": compiled.etag}
 
 
 @bare_metal_app.command("show")
@@ -221,40 +264,64 @@ def teardown_fulfillment(
     _json(fulfillment.teardown(deal.negotiation_id))
 
 
-def _parse_contact(entries: list[str]) -> dict[str, str]:
-    payload: dict[str, str] = {}
-    for entry in entries:
-        key, separator, value = entry.partition("=")
-        if not separator or not key.strip() or not value.strip():
-            raise typer.BadParameter("contact entries must be key=value pairs")
-        payload[key.strip()] = value.strip()
-    return payload
 
 
-def _recovered_introduction(
-    run_id: str,
-    config: str | None,
-) -> tuple[Any, Any, IntroductionTransport, str]:
-    deal, identity, trust = _recovered_deal(run_id, config)
-    if deal.settlement_plan is None:
-        raise typer.BadParameter("accepted run has no settlement plan")
-    plan = SettlementPlan.model_validate(deal.settlement_plan)
-    if len(plan.obligations) != 1 or plan.obligations[0].mechanism != (
-        CONTACT_MECHANISM
-    ):
-        raise typer.BadParameter("accepted run is not an introduction deal")
-    obligation_ref = derive_obligation_ref(
-        deal.negotiation_id,
-        0,
-        plan.obligations[0].model_dump(mode="json"),
-    )
-    transport = IntroductionTransport(
-        seller_url=deal.seller_url,
-        principal=deal.buyer_principal,
-        signer=identity.signer,
-        resolve_seller_principals=trust,
-    )
-    return deal, identity, transport, obligation_ref
+class _IntroductionContext:
+    """The bare-metal buyer's run recovery and delivery for the introduction commands."""
+
+    deleted_error = IntroductionPayloadsDeleted
+
+    def recover(
+        self, run_id: str, config: str | None, *, deliver: bool
+    ) -> RecoveredIntroductionRun:
+        sinks = load_buyer_delivery_sinks(config) if deliver else None
+        deal, identity, trust = _recovered_deal(run_id, config)
+        transport = IntroductionTransport(
+            seller_url=deal.seller_url,
+            principal=deal.buyer_principal,
+            signer=identity.signer,
+            resolve_seller_principals=trust,
+        )
+
+        def record(name: str, **fields: Any) -> None:
+            open_run_log(
+                run_id, signer=identity.signer, profile_id=identity.profile_id
+            ).event(name, **fields)
+
+        def deliver_copy(projection: Any) -> None:
+            """The buyer's own copy, never fatal: the reveal is re-readable."""
+
+            outcomes = deliver_introduction(
+                projection,
+                sinks=sinks,
+                agreement_ref=deal.negotiation_id,
+                counterparty=_seller_principal(deal),
+            )
+            report_delivery(outcomes, sinks.warnings)
+            if outcomes:
+                record(
+                    "introduction_delivered",
+                    obligation_ref=projection.get("obligation_ref"),
+                    outcomes=[
+                        {"sink": outcome.sink, "delivered": outcome.delivered}
+                        for outcome in outcomes
+                    ],
+                )
+
+        return RecoveredIntroductionRun(
+            negotiation_id=deal.negotiation_id,
+            settlement_plan=deal.settlement_plan,
+            start=transport.start,
+            read=transport.read,
+            record=record,
+            deliver=deliver_copy if sinks is not None else None,
+        )
+
+
+settlement_app.add_typer(
+    create_contact_command_group(_IntroductionContext),
+    name="contact",
+)
 
 
 @bare_metal_app.command("buy")
@@ -295,9 +362,8 @@ def buy_bare_metal(
         ) from exc
     rate = selected.rates[0]
     amount = compute_rate_total(rate, duration_seconds)
-    payment_buyer = BareMetalArkhaiPaymentsBuyer(
-        config=buyer_config.arkhai_payments,
-        payer_account=buyer_config.payer_account,
+    payment_approval = PaymentApproval(
+        buyer_config.arkhai_payments, buyer_config.payer_account
     )
     run_log = RunLog.start(
         profile_id=identity.profile_id,
@@ -340,14 +406,14 @@ def buy_bare_metal(
         settlement_selection=selection,
         max_rounds=buyer_config.default_max_rounds,
         validate_acceptance=lambda accepted: stage.validate_acceptance(
-            accepted, payment_buyer
+            accepted, payment_approval
         ),
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
         run_log.end("exited", reason=outcome.reason)
         _json({"run_id": run_log.run_id, **outcome.to_dict()})
         return
-    stage.validate_acceptance(outcome, payment_buyer)
+    stage.validate_acceptance(outcome, payment_approval)
     run_log.event(
         "agreement_accepted",
         negotiation_id=outcome.negotiation_id,
@@ -360,7 +426,6 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-
     settlement = BareMetalSettlementTransport(
         seller_url=listing.storefront_url,
         principal=identity.principal,
@@ -368,20 +433,13 @@ def buy_bare_metal(
         resolve_seller_principals=lambda: listing.publisher_principals,
         timeout=buyer_config.timeout_seconds,
     )
-    transaction = stage.settle(
+    transaction, fulfillment = stage.settle(
         outcome=outcome,
-        buyer=payment_buyer,
+        approval=payment_approval,
         transport=settlement,
         timeout=payment_timeout_seconds,
         run_log=run_log,
     )
-    fulfillment = BareMetalFulfillmentTransport(
-        seller_url=listing.storefront_url,
-        principal=identity.principal,
-        signer=identity.signer,
-        resolve_seller_principals=lambda: listing.publisher_principals,
-        timeout=buyer_config.timeout_seconds,
-    ).begin(outcome.negotiation_id)
     run_log.end(
         "agreed",
         negotiation_id=outcome.negotiation_id,
@@ -520,92 +578,10 @@ def request_introduction(
     )
 
 
-def _deliver_locally(projection: Any, deal: Any, sinks: Any, log: Any) -> None:
-    """Send the buyer's own copy onward, after the answer has been printed.
-
-    Never fatal: the reveal is durable and re-readable, so a sink that fails
-    costs a re-send and nothing else. Outcomes carry a sink name and a deal
-    reference, never the contact payload.
-    """
-
-    outcomes = deliver_introduction(
-        projection,
-        sinks=sinks,
-        agreement_ref=deal.negotiation_id,
-        counterparty=_seller_principal(deal),
-    )
-    report_delivery(outcomes, sinks.warnings)
-    if outcomes:
-        log.event(
-            "introduction_delivered",
-            obligation_ref=projection.get("obligation_ref"),
-            outcomes=[
-                {"sink": outcome.sink, "delivered": outcome.delivered}
-                for outcome in outcomes
-            ],
-        )
-
-
 def _seller_principal(deal: Any) -> Any:
     principals = getattr(deal, "seller_principals", None)
     identities = getattr(principals, "identities", ()) if principals else ()
     return identities[0] if identities else None
-
-
-@bare_metal_app.command("introduce")
-def introduce(
-    run_id: str = typer.Option(...),
-    contact: list[str] = typer.Option(
-        ...,
-        "--contact",
-        help="Your contact payload as key=value entries (repeatable).",
-    ),
-    config: str | None = typer.Option(None, "--config"),
-) -> None:
-    """Start the introduction: supply your contact, receive the seller's."""
-
-    # Built before the reveal: a misconfigured sink is the operator's own
-    # mistake and should surface before anything irreversible happens.
-    sinks = load_buyer_delivery_sinks(config)
-    deal, identity, transport, obligation_ref = _recovered_introduction(run_id, config)
-    projection = transport.start(
-        negotiation_id=deal.negotiation_id,
-        obligation_ref=obligation_ref,
-        contact_payload=_parse_contact(contact),
-    )
-    log = open_run_log(
-        run_id,
-        signer=identity.signer,
-        profile_id=identity.profile_id,
-    )
-    log.event("introduction_revealed", obligation_ref=obligation_ref)
-    _json(projection)
-    _deliver_locally(projection, deal, sinks, log)
-
-
-@bare_metal_app.command("introduction")
-def read_introduction(
-    run_id: str = typer.Option(...),
-    deliver: bool = typer.Option(
-        False,
-        "--deliver",
-        help="Send the introduction to your configured sinks again.",
-    ),
-    config: str | None = typer.Option(None, "--config"),
-) -> None:
-    """Re-read the revealed introduction; the reveal is durable."""
-
-    sinks = load_buyer_delivery_sinks(config) if deliver else None
-    deal, identity, transport, obligation_ref = _recovered_introduction(run_id, config)
-    projection = transport.read(obligation_ref=obligation_ref)
-    _json(projection)
-    if sinks is not None:
-        log = open_run_log(
-            run_id,
-            signer=identity.signer,
-            profile_id=identity.profile_id,
-        )
-        _deliver_locally(projection, deal, sinks, log)
 
 
 def register_commands(app: object) -> None:

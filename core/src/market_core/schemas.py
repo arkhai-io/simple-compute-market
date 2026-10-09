@@ -12,17 +12,16 @@ the only exception, and they leave with the client-wheel wire bump) and
 no dependencies beyond pydantic — the wheel must stay importable by
 every role without dragging in role or kit code.
 
-Settlement mechanisms: the negotiated outcome is carried as a
-``SettlementPlan`` — per obligation, lifecycle universals
-(payer/claimant, amount/asset, expiration, conditions) as typed fields
-and everything mechanism-specific behind a ``{mechanism, params}``
-envelope whose deterministic interpretation lives in kit codecs
-(``kit/alkahest`` first; fiat providers later). The flat alkahest
-shapes (``EscrowTerms``; proposals keyed on chain + contract address)
-predate the envelope: ``EscrowTerms`` survives as the typed params
-shape of the ``alkahest.v1`` mechanism and as a marked legacy wire
-coercion into the envelope (work item I.1 of
-``docs/development/ARCHITECTURE.md, "Settlement Lifecycle"``).
+Settlement mechanisms: acceptance produces an ``Agreement``, the exact
+accepted terms both parties keep, which a settle stage consumes. Mechanisms
+that settle from the Agreement alone need nothing else from core.
+Mechanisms serviced through the obligation runtime additionally carry a
+``SettlementPlan`` of obligations, whose fields describe escrow-style
+obligations (payer and claimant, amount and asset, expiration, conditions),
+with mechanism-specific materialization behind a ``{mechanism, params}``
+envelope that kit codecs interpret. ``EscrowTerms`` is the typed params
+shape of the ``alkahest.v1`` mechanism and the legacy flat proposal shape
+coerced into that envelope.
 """
 
 from __future__ import annotations
@@ -31,11 +30,13 @@ import json
 import re
 from datetime import datetime, timezone
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
+    PlainSerializer,
     SerializeAsAny,
     field_serializer,
     field_validator,
@@ -102,6 +103,70 @@ def _serialize_uint256_str(v: int | None) -> str | None:
     return None if v is None else str(v)
 
 
+def _uint256_before(v: Any) -> Any:
+    return _parse_uint256_str(v, "uint256 amount")
+
+
+#: A uint256-domain amount: Python ``int`` in memory, decimal-digit string on
+#: the wire. Use this for any field carrying base units rather than a bare
+#: ``int`` -- a response body is canonicalized for the responder's signature,
+#: and a JSON number above 2^53-1 has no canonical form, so an ordinary
+#: 18-decimal amount in a bare ``int`` field makes the response unsignable.
+Uint256Amount = Annotated[
+    int,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(lambda v: str(v), return_type=str),
+]
+
+#: The same, where absent is a distinct answer from zero.
+OptionalUint256Amount = Annotated[
+    int | None,
+    BeforeValidator(_uint256_before),
+    PlainSerializer(_serialize_uint256_str, return_type=str | None),
+]
+
+
+#: JSON numbers are IEEE-754 doubles to most parsers, and canonical JSON has
+#: no number form for an integer outside this range at all.
+JSON_SAFE_INT_MAX = 2**53 - 1
+
+
+def json_safe_wire_value(value: Any) -> Any:
+    """Rewrite out-of-range integers in an untyped payload as decimal strings.
+
+    For payloads that reach the wire without passing through a typed field:
+    persisted rows embedded in a response, diagnostic event bodies. A
+    response is canonicalized for the responder's signature, so an amount
+    read back out of storage as a Python int makes the whole response
+    unsignable -- and the failure lands on whichever route embeds it rather
+    than on the negotiation that recorded the value.
+
+    Deliberately magnitude-dependent: round numbers, counts and identifiers
+    are genuinely numbers and consumers read them as such. Only a value with
+    no canonical number form changes shape, and it changes to the same
+    decimal-digit string typed uint256 fields serialize to.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if -JSON_SAFE_INT_MAX <= value <= JSON_SAFE_INT_MAX:
+            return value
+        return str(value)
+    if isinstance(value, dict):
+        return {key: json_safe_wire_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_wire_value(item) for item in value]
+    return value
+
+
+#: Untyped rows embedded in a signed response: normalized on the way in so
+#: the response can be canonicalized whatever storage handed back.
+EmbeddedWireRows = Annotated[
+    list[dict[str, Any]],
+    BeforeValidator(json_safe_wire_value),
+]
+
+
 class Resource(BaseModel):
     """Domain-agnostic base resource model."""
 
@@ -128,7 +193,7 @@ class TokenResource(Resource):
       * positive integer — the public price (the seller advertises this
         floor and uses it as the negotiation anchor).
       * ``0`` — free / public-test offering (the seller advertises zero
-        cost; strategy accepts any non-negative offer).
+        cost; strategy accepts any non-negative listing_resource).
       * ``None`` — hidden reserve (the seller publishes the listing without
         advertising a price; the negotiation strategy falls back to
         ``[seller.pricing].default_min_price`` for the floor; buyer must
@@ -275,15 +340,16 @@ dispatches on it. The matching codec lives in ``kit/alkahest``.
 class SettlementObligation(BaseModel):
     """One obligation in a settlement plan.
 
-    The lifecycle universals every settlement mechanism shares are typed
-    fields: who funds it, who collects it, how much of what, when the
-    collect-vs-reclaim boundary falls, and what conditions gate
-    collection. Everything needed to *materialize and verify* the
-    obligation under a particular mechanism — chain + contract address
-    and the ``ObligationData`` struct for alkahest; provider + payment
-    refs for a fiat escrow — rides in ``params``, interpreted by the kit
-    codec registered for ``mechanism``. Core code drives obligations
-    through injected per-mechanism hooks and never reads ``params``.
+    Plans and obligations belong to mechanisms serviced through the
+    obligation runtime; a mechanism that settles from the Agreement alone
+    creates none. The typed fields describe an escrow-style obligation: who
+    funds it, who collects it, how much of what, when collection gives way to
+    reclaim, and which conditions gate collection. Everything needed to
+    *materialize and verify* the obligation under its mechanism (for alkahest,
+    the chain, contract address and ``ObligationData`` struct) rides in
+    ``params``, interpreted by the kit codec registered for ``mechanism``.
+    Core code drives obligations through injected per-mechanism hooks and
+    never reads ``params``.
 
     ``amount``/``asset`` are the *display/lifecycle* view of the
     obligation's value (None when the mechanism's value isn't a scalar,
@@ -291,11 +357,10 @@ class SettlementObligation(BaseModel):
     authoritative materialization input, and the codec's verification is
     responsible for their consistency.
 
-    ``conditions`` carries declared condition descriptors for the deal
-    servicing engine (lifecycle doc work item I.3). Opaque to core;
-    empty means "whatever the mechanism params already encode" — for
-    alkahest the arbiter demand tree inside ``params`` is authoritative
-    and is decoded by the kit codec on demand.
+    ``conditions`` carries declared condition descriptors for the servicing
+    engine. Opaque to core; empty means "whatever the mechanism params
+    already encode": for alkahest the arbiter demand tree inside ``params``
+    is authoritative and is decoded by the kit codec on demand.
     """
 
     payer: Literal["buyer", "seller"] = Field(
@@ -431,16 +496,18 @@ class SettlementPlan(BaseModel):
     Generalizes the single accepted-escrow handoff: a plan is N
     obligations (payment escrows, interval escrows, penalty bonds —
     possibly under different mechanisms) plus the off-chain duties each
-    party takes on while servicing the deal. The determinism contract
-    extends unchanged in kind: both sides must derive the same plan from
-    the shared message history; for mechanisms whose materialization is
-    not independently derivable (fiat), determinism covers the agreed
-    terms and the codec verifies the materialized object against them.
+    party takes on while servicing the deal. Plans belong to mechanisms
+    serviced through the obligation runtime; a mechanism that settles from
+    the Agreement alone creates none. The determinism contract extends
+    unchanged in kind: both sides must derive the same plan from the shared
+    message history; for mechanisms whose materialization is not
+    independently derivable, determinism covers the agreed terms and the
+    codec verifies the materialized object against them.
 
     ``service_terms`` is the attachment point for heartbeat cadence and
-    schema, oracle identity, evidence format, and interval boundaries
-    (lifecycle doc work items I.4/I.5). Opaque to core; empty for plans
-    with no off-chain duties beyond the mechanism defaults.
+    schema, oracle identity, evidence format, and interval boundaries.
+    Opaque to core; empty for plans with no off-chain duties beyond the
+    mechanism defaults.
     """
 
     obligations: list[SettlementObligation] = Field(
@@ -590,8 +657,8 @@ class SettlementSelection(BaseModel):
     expiration_unix: int | None = Field(default=None, gt=0)
     # Buyer-side mechanism parameters, opaque to core. The seller's option
     # params cannot name the buyer's own mechanism identity (for example the
-    # payer account an Arkhai payments mandate charges), so the buyer supplies
-    # it here and the Agreement carries it as settlement_params.
+    # account a charge-first mechanism debits), so the buyer supplies it here
+    # and the Agreement carries it as settlement_params.
     params: dict[str, Any] | None = None
 
 

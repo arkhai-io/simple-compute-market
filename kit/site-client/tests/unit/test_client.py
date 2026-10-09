@@ -41,7 +41,7 @@ def site(signer_pair: tuple[Signer, Signer]) -> FakeSite:
     fake.add_resource(
         "compute-kvm1-001",
         8,
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        attributes={"host_id": "kvm1", "gpu_model": "H200"},
     )
     return fake
 
@@ -96,27 +96,30 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
     assert (await capacity_client.capacity_bucket_projection_version())["revision"] == 1
     assert (await capacity_client.capacity_bucket_projection())["capacity_buckets"] == []
     assert await capacity_client.probe(
-        claim={"executor_kind": "vm", "gpu_model": "A100"}
+        claim={"offering_mode": "vm", "gpu_model": "A100"}
     ) is None
     assert (
         await capacity_client.probe(
-            claim={"executor_kind": "vm", "gpu_model": "H200"}
+            claim={"offering_mode": "vm", "gpu_model": "H200"}
         )
-    )["vm_host"] == "kvm1"
+    )["host_id"] == "kvm1"
 
     reserved = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 3},
+        claim={"offering_mode": "vm", "gpu_count": 3},
         deal_ref={"escrow_uid": "0xesc"},
         request_id="reserve",
     )
     assert reserved is not None
     reservation_id = reserved["capacity_reservation_id"]
     assert "resource_id" not in reserved
-    await capacity_client.commit(
+    committed = await capacity_client.commit(
         capacity_reservation_id=reservation_id,
         idempotency_ref="0xesc",
         request_id="commit",
     )
+    # The commit answers with the reservation as the site recorded it.
+    assert committed["capacity_reservation_id"] == reservation_id
+    assert committed["state"] == "leased"
     assert (await capacity_client.get_reservation(reservation_id))["state"] == "leased"
     assert [
         row["capacity_reservation_id"]
@@ -177,11 +180,13 @@ async def test_resource_registration_body_uses_json_defaults_and_omits_none(
     admin_client: SiteCapacityAdminClient, site: FakeSite
 ) -> None:
     await admin_client.register_resource(
-        "r1", total_units=1, request_id="registration-defaults"
+        "r1", total_units=1, request_id="registration-defaults",
+        pool_id="default",
     )
     assert site.seen_requests[-1]["resource"] == "r1"
     assert site.seen_requests[-1]["body"] == {
         "total_units": 1,
+        "pool_id": "default",
         "resource_type": "compute.gpu",
         "attributes": {},
         "enabled": True,
@@ -197,14 +202,14 @@ async def test_later_exact_retry_refreshes_signature_without_redispatch(
     clock = [int(time.time())]
     monkeypatch.setattr("market_site_client.client.time.time", lambda: clock[0])
     first = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
     dispatches = site.dispatch_count
     clock[0] += 1
     second = await capacity_client.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"escrow_uid": "exact"},
         request_id="stable-request",
     )
@@ -221,14 +226,14 @@ async def test_changed_local_request_id_reuse_fails_before_transport(
     capacity_client: SiteCapacityClient, site: FakeSite
 ) -> None:
     await capacity_client.probe(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         request_id="fixed",
     )
     sent = len(site.seen_requests)
 
     with pytest.raises(ValueError, match="changed request content"):
         await capacity_client.probe(
-            claim={"executor_kind": "vm", "gpu_count": 2},
+            claim={"offering_mode": "vm", "gpu_count": 2},
             request_id="fixed",
         )
 
@@ -253,13 +258,13 @@ async def test_changed_reuse_from_an_independent_client_gets_verified_conflict(
         transport=site.transport(),
     )
     await first.probe(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         request_id="shared",
     )
 
     with pytest.raises(SiteCapacityClientError) as excinfo:
         await second.probe(
-            claim={"executor_kind": "vm", "gpu_count": 2},
+            claim={"offering_mode": "vm", "gpu_count": 2},
             request_id="shared",
         )
 
@@ -274,7 +279,7 @@ async def test_request_body_mutation_is_rejected_but_signed_error_is_accepted(
     site.mutate_next_request_body = True
     with pytest.raises(SiteCapacityClientError) as excinfo:
         await capacity_client.reserve(
-            claim={"executor_kind": "vm", "gpu_count": 1},
+            claim={"offering_mode": "vm", "gpu_count": 1},
             request_id="mutated-request",
         )
 
@@ -425,7 +430,8 @@ async def test_admin_transport_failure_keeps_the_typed_error_contract(
     )
     with pytest.raises(SiteCapacityAdminClientError) as excinfo:
         await client.register_resource(
-            "r1", total_units=1, request_id="transport-failure"
+            "r1", total_units=1, request_id="transport-failure",
+            pool_id="default",
         )
 
     assert excinfo.value.status_code is None
@@ -438,3 +444,35 @@ async def test_commit_requires_a_reservation_id(
 ) -> None:
     with pytest.raises(ValueError, match="capacity_reservation_id"):
         await capacity_client.commit(capacity_reservation_id=None)
+
+
+@pytest.mark.asyncio
+async def test_caller_role_is_signed_and_only_seller_or_admin_is_accepted(
+    signer_pair: tuple[Signer, Signer],
+) -> None:
+    """An operator signs as ``admin``; the default stays the seller's role."""
+    caller, authority = signer_pair
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["X-Market-Role"])
+        return httpx.Response(503)
+
+    for role in ("seller", "admin"):
+        client = SiteCapacityAdminClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            transport=httpx.MockTransport(handler),
+            caller_role=role,
+        )
+        with pytest.raises(SiteCapacityAdminClientError):
+            await client.list_resources()
+    assert seen == ["seller", "admin"]
+    with pytest.raises(ValueError, match="caller_role"):
+        SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            caller_role="service",
+        )

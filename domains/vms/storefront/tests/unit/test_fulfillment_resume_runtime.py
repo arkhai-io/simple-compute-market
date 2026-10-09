@@ -33,7 +33,6 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
         get_fulfillment_result=AsyncMock(
             return_value=vm_fulfillment_result(
                 provisioned_resource_id="vm-1",
-                connection_info={"vm_name": "tenant-1", "host": "kvm1"},
             )
         ),
     )
@@ -103,7 +102,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     request = {
         "kind": "vm.fulfillment.request",
         "schema_version": 1,
-        "payload": {"vm_target": "tenant-fixed", "ssh_pubkey": "ssh-ed25519 test"},
+        "payload": {"ssh_pubkey": "ssh-ed25519 test"},
     }
     lifecycle = await make_vm_lifecycle_fixture(
         tmp_path / "replay.db",
@@ -114,6 +113,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
         },
     )
     db = lifecycle.reopen()
+    order: list[str] = []
     capacity = SimpleNamespace(
         reserve=AsyncMock(
             return_value={
@@ -121,14 +121,16 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
                 "resource_id": "resource-1",
                 "site": "site-1",
             }
-        )
+        ),
+        commit=AsyncMock(side_effect=lambda **_: order.append("commit") or _RECORDED),
     )
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(
             return_value=SimpleNamespace(settlement_resource_id="resource-1")
         ),
         begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(fulfillment_id="fulfillment-1")
+            side_effect=lambda *_, **__: order.append("begin")
+            or SimpleNamespace(fulfillment_id="fulfillment-1")
         ),
         get_fulfillment_status=AsyncMock(
             return_value=SimpleNamespace(state="dispatching", failure_message=None)
@@ -149,12 +151,19 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     )
 
     capacity.reserve.assert_awaited_once_with(
-        claim={"gpu_count": 1, "executor_kind": "vm"},
+        claim={"gpu_count": 1, "offering_mode": "vm"},
         deal_ref={"listing_id": "listing-1", "negotiation_id": "neg-1"},
         lease_start_utc="2026-01-01T00:00:00+00:00",
         lease_duration_seconds=7200,
         site="site-1",
     )
+    # The recovered reservation is committed, beginning the lease and naming
+    # the deal, before its fulfillment begins.
+    assert order == ["commit", "begin"]
+    committed = capacity.commit.await_args.kwargs
+    assert committed["capacity_reservation_id"] == "reservation-1"
+    assert committed["deal_ref"] == {"negotiation_id": "neg-1"}
+    assert committed["site_id"] == "site-1"
     remote.schedule_resource.assert_awaited_once()
     scheduled_body = remote.schedule_resource.await_args.args[0]
     assert scheduled_body.market == "vms"
@@ -180,12 +189,9 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
 
 @pytest.mark.asyncio
 async def test_post_physical_convergence_records_ready_and_claim():
-    from functools import partial
-
     from market_storefront.services.fulfillment_resume_runtime import (
         converge_post_physical_delivery,
     )
-    from market_storefront.settlement_stages import VmAlkahestSellerStage
 
     db = SimpleNamespace(
         update_vm_delivery=AsyncMock(),
@@ -194,7 +200,6 @@ async def test_post_physical_convergence_records_ready_and_claim():
         update_listing=AsyncMock(),
     )
     capacity = SimpleNamespace(commit=AsyncMock())
-    register = AsyncMock()
     submit = AsyncMock(return_value="attestation-1")
     bind_fulfillment = AsyncMock()
     escrow = {
@@ -211,7 +216,7 @@ async def test_post_physical_convergence_records_ready_and_claim():
         "seller_order_id": "order-1",
         "duration_seconds": 3600,
         "fulfillment_request": {
-            "payload": {"vm_target": "tenant-1"},
+            "payload": {"ssh_pubkey": "ssh-ed25519 AAA"},
         },
     }
     assert (
@@ -220,10 +225,8 @@ async def test_post_physical_convergence_records_ready_and_claim():
             context=context,
             sqlite_client=db,
             capacity_client=capacity,
-            connection_details={"host": "kvm-1", "vm_name": "tenant-1"},
+            connection_details={"host": "203.0.113.1", "port": 2222, "user": "tenant"},
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
-            register_lease=register,
-            evidence=vm_delivery_evidence(),
             continuation=partial(
                 VmAlkahestSellerStage(None).continue_delivery,
                 evidence=vm_delivery_evidence(),
@@ -232,26 +235,14 @@ async def test_post_physical_convergence_records_ready_and_claim():
                 bind=bind_fulfillment,
                 client=object(),
             ),
-            site_id="site-1",
         )
         is True
     )
     submit.assert_awaited_once()
     assert submit.await_args.kwargs["allow_submit"] is True
-    capacity.commit.assert_awaited_once()
-    assert capacity.commit.await_args.kwargs["capacity_reservation_id"] == (
-        "reservation-1"
-    )
-    assert capacity.commit.await_args.kwargs["site_id"] == "site-1"
-    register.assert_awaited_once_with(
-        resource_id="resource-1",
-        capacity_reservation_id="reservation-1",
-        negotiation_id="neg-1",
-        vm_host="kvm-1",
-        vm_target="tenant-1",
-        lease_start_utc=capacity.commit.await_args.kwargs["lease_start_utc"],
-        lease_end_utc=capacity.commit.await_args.kwargs["lease_end_utc"],
-    )
+    # The lease was written at commit, before the fulfillment began, and its
+    # target at activation: nothing after delivery writes it.
+    capacity.commit.assert_not_awaited()
     assert any(
         call.kwargs.get("status") == "ready"
         and call.kwargs.get("fulfillment_phase") == "complete"
@@ -286,10 +277,9 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             delivery=escrow,
             context={"fulfillment_request": {"payload": {}}},
             sqlite_client=db,
-            capacity_client=SimpleNamespace(commit=AsyncMock()),
+            capacity_client=SimpleNamespace(commit=AsyncMock(return_value=_RECORDED)),
             connection_details={},
             authentication=None,
-            evidence=vm_delivery_evidence(),
             continuation=partial(
                 VmAlkahestSellerStage(None).continue_delivery,
                 evidence=vm_delivery_evidence(),
@@ -297,6 +287,13 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
                 submit=submit,
                 client=object(),
             ),
-            site_id="site-1",
         )
     assert submit.await_args.kwargs["allow_submit"] is False
+
+
+_RECORDED = {
+    "capacity_reservation_id": "reservation-1",
+    "state": "leased",
+    "lease_start_utc": "2026-01-01T00:00:00+00:00",
+    "lease_end_utc": "2026-01-01 01:00",
+}

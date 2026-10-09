@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 .PHONY: help init reinit test serve build clean
 
 .DEFAULT_GOAL := help
@@ -7,27 +10,11 @@ help: ## Show available commands
 
 DIST_DIR ?= ../../../.dist
 
-init: ## Install dependencies using uv
+init: reinit ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
-	uv sync --dev --find-links $(DIST_DIR)
 
 reinit: ## Force-reinstall all internal wheel dependencies. Run make dist-* from the monorepo root first.
-	uv sync --dev --find-links $(DIST_DIR) \
-		--reinstall-package arkhai-apicredits-storefront \
-		--upgrade-package arkhai-core                 --reinstall-package arkhai-core \
-		--upgrade-package arkhai-apicredits-domain    --reinstall-package arkhai-apicredits-domain \
-		--upgrade-package arkhai-core-storefront      --reinstall-package arkhai-core-storefront \
-		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
-		--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
-		--upgrade-package arkhai-kit-alkahest         --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-arkhai-payments  --reinstall-package arkhai-kit-arkhai-payments \
-		--upgrade-package arkhai-kit-config           --reinstall-package arkhai-kit-config \
-		--upgrade-package arkhai-kit-identity         --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-policy           --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-storefront      --reinstall-package arkhai-kit-storefront \
-		--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-		--upgrade-package arkhai-kit-site-client      --reinstall-package arkhai-kit-site-client
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q

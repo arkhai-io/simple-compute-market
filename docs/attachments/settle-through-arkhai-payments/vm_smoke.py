@@ -8,9 +8,8 @@ from pathlib import Path
 
 from arkhai_vms import make_vm_provision_terms
 from core_storefront.domain_registry import StorefrontThreadBinding
-from domains.vms.buyer.arkhai_payments import VmArkhaiPaymentsBuyer
+from market_arkhai_payments import PaymentApproval, PaymentSellerStage
 from market_core import ImmutableFulfillmentCapability
-from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -43,7 +42,7 @@ async def main(directory, phase):
     )
     registry = build_vm_storefront_registry(domain)
     db = SQLiteClient(str(Path(directory) / "storefront.db"), registry=registry)
-    stage = VmArkhaiPaymentsStage(settings)
+    stage = PaymentSellerStage(settings)
     state_file = Path(directory) / "state.json"
     if phase == "crash":
         provision = make_vm_provision_terms(
@@ -52,7 +51,7 @@ async def main(directory, phase):
         accepted = agreement("vm-smoke-" + Path(directory).name, provision)
         raw = accepted.model_dump_json(exclude_none=True).encode()
         state_file.write_text(json.dumps({"id": accepted.negotiation_id}))
-        mandate = stage.mandate_for_agreement(json.loads(raw))
+        settlement_data = stage.settlement_data(json.loads(raw)).to_wire()
         binding = prepare_vm_listing_binding(
             listing_id=accepted.listing_id,
             candidate={"site_id": "site-smoke", "pool_id": "pool-smoke"},
@@ -98,7 +97,7 @@ async def main(directory, phase):
             agreement_bytes=raw,
             accepted_at=accepted.accepted_at,
             agreed_start_utc=accepted.start_utc,
-            settlement_data={"mandate": mandate},
+            settlement_data=settlement_data,
         )
         await db.update_negotiation_thread_terminal(
             negotiation_id=accepted.negotiation_id, terminal_state="success"
@@ -108,15 +107,15 @@ async def main(directory, phase):
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
     if phase == "crash":
         result = await coordinator.start(identifier, thread)
-        assert result["status"] == "pending"
-        VmArkhaiPaymentsBuyer(settings, PAYER).approve(
-            agreement=thread["agreement_bytes"],
-            settlement_data=thread["settlement_data"],
+        assert result.payload["status"] == "pending"
+        PaymentApproval(settings, PAYER).approve(
+            thread["agreement_bytes"],
+            thread["settlement_data"],
             timeout=10,
             interval=0.01,
         )
         result = await coordinator.start(identifier, thread)
-        assert result["status"] == "provisioning"
+        assert result.payload["status"] == "provisioning"
         record = await db.load_vm_payment_record(negotiation_id=identifier)
         assert record["receipt"] is not None
         crash(
@@ -125,7 +124,7 @@ async def main(directory, phase):
     result = await coordinator.start(identifier, thread)
     await coordinator.tasks[identifier]
     repeated = await coordinator.start(identifier, thread)
-    assert repeated["status"] == "ready", repeated
+    assert repeated.payload["status"] == "ready", repeated
     assert effect(directory, identifier) == 1
     print("VM: restarted -> ready; repeated settle -> ready; deliveries=1")
     await coordinator.stop()

@@ -27,8 +27,6 @@ async def test_malformed_evidence_fails_before_capacity_or_failure_policy():
             capacity=capacity,
             stage_event=stage_event,
             provision_vm=AsyncMock(),
-            schedule_shutdown=AsyncMock(),
-            register_lease=AsyncMock(),
             apply_failure_policy=apply_failure_policy,
         )
     # An invalid authorization is rejected before physical failure handling.
@@ -84,8 +82,6 @@ async def test_interrupted_fulfillment_never_persists_the_string_none_as_settlem
         capacity=capacity,
         stage_event=lambda *a, **k: None,
         provision_vm=failing_provision_vm,
-        schedule_shutdown=AsyncMock(),
-        register_lease=AsyncMock(),
         apply_failure_policy=apply_failure_policy,
     )
 

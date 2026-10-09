@@ -20,32 +20,36 @@ distribution name.
 ## Published packages
 
 "Internal deps" are dependencies on other packages in this table,
-constrained with lower bounds (see Versioning policy).
+constrained with lower bounds (see Versioning policy). Each package's version
+is the one its `pyproject.toml` declares.
 
-| Package | Path | Version | Internal deps |
-|---|---|---|---|
-| `arkhai-core` | `core/` | 0.1.0 | none |
-| `arkhai-core-buyer` | `core/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-core-storefront` | `core/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-core-storefront-client` | `core/storefront-client/` | 0.15.0 | none |
-| `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
-| `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
-| `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
-| `arkhai-kit-identity` | `kit/identity/` | 0.3.0 | none |
-| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | 0.1.0 | `arkhai-kit-identity` |
-| `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
-| `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
-| `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
-| `arkhai-bare-metal` | `domains/bare_metal/` | 0.1.0 | none (`storefront` extra: `arkhai-core-storefront`) |
-| `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | 0.1.0 | `arkhai-compute-provisioning`, `arkhai-kit-site`, `arkhai-kit-resource-pools`, `arkhai-core-storefront-client` (`adapters` extra installs both current adapters) |
-| `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | 0.1.0 | compute service, VM operator client, resource pools |
-| `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | 0.1.0 | compute service, bare-metal domain |
-| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-apicredits-service` | `domains/apicredits/service/` | 0.1.0 | `arkhai-kit-site` |
-| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | 0.1.0 | none |
+| Package | Path | Internal deps |
+|---|---|---|
+| `arkhai-core` | `core/` | none |
+| `arkhai-core-buyer` | `core/buyer/` | `arkhai-core`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
+| `arkhai-core-storefront` | `core/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-core-storefront-client` | `core/storefront-client/` | none |
+| `arkhai-core-registry-client` | `core/registry-client/` | none |
+| `arkhai-core-registry` | `core/registry/` | `arkhai-kit-identity` |
+| `arkhai-kit-site` | `kit/site/` | none |
+| `arkhai-kit-identity` | `kit/identity/` | none |
+| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
+| `arkhai-kit-policy` | `kit/policy/` | none |
+| `arkhai-kit-alkahest` | `kit/alkahest/` | none |
+| `arkhai-kit-config` | `kit/config/` | `arkhai-kit-alkahest` |
+| `arkhai-bare-metal` | `domains/bare_metal/` | none (`storefront` extra: `arkhai-core-storefront`) |
+| `arkhai-vms-listings` | `domains/vms/listings/` | `arkhai-kit-alkahest`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` (`pools` extra: `arkhai-kit-resource-pools`) |
+| `arkhai-vms-negotiation` | `domains/vms/negotiation/` | `arkhai-vms-listings`, `arkhai-kit-alkahest`, `arkhai-kit-policy` |
+| `arkhai-vms-settlement` | `domains/vms/settlement/` | `arkhai-vms-listings`, `arkhai-kit-alkahest` |
+| `arkhai-vms-buyer` | `domains/vms/buyer/` | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy`, `arkhai-vms-listings`, `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
+| `arkhai-vms-storefront` | `domains/vms/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-listings` (`pools`), `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
+| `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | `arkhai-compute-provisioning`, `arkhai-kit-site`, `arkhai-kit-resource-pools`, `arkhai-core-storefront-client` (`adapters` extra installs both current adapters) |
+| `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | compute service, VM operator client, resource pools |
+| `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | compute service, bare-metal domain |
+| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
+| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-kit-site` |
+| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | none |
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a
@@ -63,11 +67,17 @@ below.
 - Each job builds with `uv build --no-sources` and publishes via OIDC
   trusted publishing.
 
-Most packages publish an sdist and a wheel. The two buyer plugins
-(`arkhai-vms-buyer`, `arkhai-apicredits-buyer`) publish a wheel only: they
-vendor sibling concept modules (`listings`, `negotiation`) through `../`
-force-includes that an sdist cannot carry. They are marked `wheel_only`
-in the table and built with `uv build --wheel`.
+Most packages publish an sdist and a wheel. Packages marked `wheel_only`
+in the table (the two buyer plugins and the VM storefront) are built with
+`uv build --wheel` and publish a wheel only.
+
+No package vendors another's modules. Each package builds exactly one import
+package from `src/<package>` (see
+[`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md#project-layout)), so a module
+added there ships without a packaging edit. Code another package needs is its
+own wheel and a declared dependency: the VM storefront and buyer depend on
+`arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
+rather than carrying their sources.
 
 Build order is not constrained. `uv build --no-sources` builds in an
 isolated environment that installs only the build backend, never the
@@ -118,17 +128,48 @@ Each package follows [SemVer](https://semver.org):
 - **Minor** — new public API, backwards compatible.
 - **Patch** — bug fix or internal change.
 
+Before a package reaches 1.0.0 its major version stays at zero: an
+incompatible change takes a **minor** bump in place of a major one, and
+the other rules apply unchanged. A consumer that depends on the
+incompatible behaviour raises its lower bound to the new minor version.
+Moving a package to 1.0.0 is a deliberate decision that sets its
+compatibility commitment, not a consequence of shipping an incompatible
+change.
+
+### Import package renames
+
+These releases moved each package to one import package under `src/`. The old
+import paths were removed without an alias; consumers change their imports and
+raise their lower bound to the version shown.
+
+| Package | Release | Import package before | Import package after |
+|---|---|---|---|
+| `arkhai-vms-buyer` | 0.4.0 | `domains.vms.buyer` | `arkhai_vms_buyer` |
+| `arkhai-vms-listings` | 0.4.0 | `domains.vms.listings` | `arkhai_vms_listings` |
+| `arkhai-vms-negotiation` | 0.2.0 | `domains.vms.negotiation` | `arkhai_vms_negotiation` |
+| `arkhai-vms-settlement` | 0.2.0 | `domains.vms.settlement` | `arkhai_vms_settlement` |
+| `arkhai-apicredits-buyer` | 0.4.0 | `domains.apicredits.buyer` | `arkhai_apicredits_buyer` |
+| `arkhai-apicredits-domain` | 0.4.0 | `domains.apicredits` | `arkhai_apicredits` |
+| `arkhai-core-registry` | 0.3.0 | top-level `api`, `db`, `services`, `types` | `core_registry` |
+| `arkhai-apicredits-service` | 0.4.0 | top-level `controllers`, `db`, `middleware`, `models`, `services` | `apicredits_service` |
+
+`arkhai-vms-storefront` 0.8.0 and `arkhai-apicredits-storefront` 0.5.0 import the
+renamed packages and require the releases above. The entry-point group
+`domains.vms.buyer.aggregation_policies` keeps its name, so installed plugin
+packages continue to register without change.
+
 Cross-package compatibility is enforced via dependency constraints in
 `pyproject.toml`. Use `>=X.Y` (lower bound) for forward compatibility,
 or `>=X.Y,<X+1` when a breaking major release is anticipated.
 
 ## Local development
 
-`tool.uv.sources` workspace path overrides stay in `pyproject.toml` for
-local development — they let `uv sync` pick up sibling-package changes
-without a publish round-trip. `uv build --no-sources` strips those
-overrides so the built wheel records plain PyPI dependencies; the publish
-workflow always passes `--no-sources`.
+Projects consume sibling packages as wheels from the repository wheelhouse,
+never through `tool.uv.sources` path overrides; `make dist` builds the wheels
+and `make reinit` refreshes a project's environment from them without a
+publish round-trip ([`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md)). The
+publish workflow passes `--no-sources`, so the only sources a published wheel
+could record are index pins, such as the PyTorch CPU index.
 
 
 ## Troubleshooting

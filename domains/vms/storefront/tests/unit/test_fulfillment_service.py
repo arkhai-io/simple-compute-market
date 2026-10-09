@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 import market_storefront.container as container
@@ -81,21 +81,25 @@ async def _seed_bound_listing(
         binding=prepare_vm_listing_binding(
             listing_id=listing_id,
             candidate={
+                "capacity_backing": "backed",
                 "site_id": "default",
                 "pool_id": "pool-h200-1",
-                "gpu_count": gpu_count,
+                # The listing publishes this resource, so its binding names it:
+                # a stored key is read from the binding, not the published fields.
+                "resource_id": "pool-h200-1",
+                "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
             },
         ),
         status="open",
         created_at="2026-01-01T00:00:00",
         updated_at="2026-01-01T00:00:00",
-        offer_resource={
+        listing_resource={
             "resource_id": "pool-h200-1",
             "gpu_model": "H200",
             "gpu_count": gpu_count,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         accepted_escrows=_compute_listing(gpu_count=gpu_count)["accepted_escrows"],
         demands=[],
@@ -120,13 +124,13 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
         "listing_id": f"listing-{gpu_count}x",
         "seller_principal": _TEST_SELLER_PRINCIPAL.model_dump(mode="json"),
         "buyer_principal": _TEST_BUYER_PRINCIPAL.model_dump(mode="json"),
-        "offer_resource": {
+        "listing_resource": {
             "resource_id": "pool-h200-1",
             "gpu_model": "H200",
             "gpu_count": gpu_count,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         "accepted_escrows": [
             {
@@ -144,7 +148,7 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment_fails(
+async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     client,
     monkeypatch,
 ):
@@ -158,8 +162,6 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
@@ -197,7 +199,6 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
         "_do_provision",
         controlled_provision,
     )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
     alkahest = MagicMock()
     alkahest.string_obligation.do_obligation = AsyncMock(
@@ -249,8 +250,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     await _seed_compute_pool(client)
     await client.upsert_resource(
@@ -306,7 +305,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         "_do_provision",
         controlled_provision,
     )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
 
     with (
         settings_overrides(
@@ -340,65 +338,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         3: "closed",
         4: "closed",
     }
-
-
-@pytest.mark.asyncio
-async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
-    """Moved from the now-removed test_compute_provisioning_orchestration.py:
-    _register_vm_lease_with_settings is unrelated to
-    the direct-executor-dispatch path removed alongside that file, and stays
-    in production use (removed only once the legacy teardown path it feeds
-    no longer needs it)."""
-    captured = {}
-
-    class FakeComputeClient:
-        def __init__(self, *args, **kwargs):
-            captured["client_args"] = args
-            captured["client_kwargs"] = kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def register_lease(self, registration):
-            captured["registration"] = registration
-
-    monkeypatch.setattr(
-        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
-    )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "settings",
-        SimpleNamespace(
-            provisioning=SimpleNamespace(service_url="http://provisioning"),
-            admin_api_key="admin",
-        ),
-    )
-
-    await fulfillment_service._register_vm_lease_with_settings(
-        resource_id="resource-1",
-        negotiation_id="neg-1",
-        vm_host="kvm1",
-        vm_target="tenant-1",
-        lease_start_utc="2026-07-13T12:00:00+00:00",
-        lease_end_utc="2026-07-13T13:00:00+00:00",
-        capacity_reservation_id="reservation-1",
-    )
-
-    registration = captured["registration"]
-    assert registration.contract_version == "1.0"
-    assert registration.capacity_reservation_id == "reservation-1"
-    assert registration.deal_ref == {"negotiation_id": "neg-1"}
-    assert registration.executor_kind == "vm"
-    assert registration.executor_target == "tenant-1"
-    assert captured["client_kwargs"]["caller_role"] == "seller"
-    assert captured["client_kwargs"]["signer"] is _TEST_STOREFRONT_SIGNER
-    assert (
-        captured["client_kwargs"]["expected_authorities"]
-        == _TEST_PROVISIONING_AUTHORITIES
-    )
 
 
 @pytest.mark.asyncio
@@ -505,33 +444,17 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
                         }
                     ],
                     "domain_result": {
-                        "kind": "vm.fulfillment.result.v1",
+                        "kind": "compute.access-delivery",
                         "schema_version": 1,
                         "payload": {
-                            "connection_info": {
-                                "vm_name": "vm-e2e-1",
-                                "host": "host-1",
-                            },
-                            "credentials": [
-                                {
-                                    "role": "root",
-                                    "password": "root-pw",
-                                    "ssh_commands": {"internal": "ssh root@host-1"},
-                                    "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                    "provisioned_resource_ids": [
-                                        "provisioned-vm-e2e-1"
-                                    ],
-                                },
-                                {
-                                    "role": "tenant",
-                                    "password": "tenant-pw",
-                                    "ssh_commands": {"external": "ssh tenant@host-1"},
-                                    "key_type": "generated",
-                                    "provisioned_resource_ids": [
-                                        "provisioned-vm-e2e-1"
-                                    ],
-                                },
+                            "endpoints": [
+                                {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
                             ],
+                            "credentials": [
+                                {"role": "root", "password": "root-pw", "key_type": None},
+                                {"role": "tenant", "password": "tenant-pw", "key_type": "generated"},
+                            ],
+                            "ready_at": "2030-01-01T00:00:01+00:00",
                         },
                     },
                 },
@@ -549,16 +472,11 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(
-        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
-    )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
+    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
@@ -567,8 +485,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
             poll_interval=0.001,
             service_url="http://provisioning",
             frp_server_addr="",
-            frp_domain="",
-            frp_dashboard_password="",
         ),
         raising=False,
     )
@@ -595,7 +511,8 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     roles = {row["role"]: row for row in stored}
     assert set(roles) == {"root", "tenant"}
     assert roles["root"]["password"] == "root-pw"
-    assert roles["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
+    # A delivery carries no key path on a provisioner host, so none is stored.
+    assert roles["root"]["ssh_key_path_host"] is None
     assert roles["tenant"]["password"] == "tenant-pw"
     assert roles["tenant"]["key_type"] == "generated"
 
@@ -651,18 +568,16 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
                 {"provisioned_resource_id": "provisioned-vm-dup-1", "status": "active"}
             ],
             "domain_result": {
-                "kind": "vm.fulfillment.result.v1",
+                "kind": "compute.access-delivery",
                 "schema_version": 1,
                 "payload": {
-                    "connection_info": {"vm_name": "vm-dup-1"},
-                    "credentials": [
-                        {
-                            "role": "tenant",
-                            "password": "tenant-pw",
-                            "ssh_commands": {"external": "ssh tenant@host-1"},
-                            "provisioned_resource_ids": ["provisioned-vm-dup-1"],
-                        },
+                    "endpoints": [
+                        {"protocol": "ssh", "host": "host-1", "port": 2222, "user": "tenant"}
                     ],
+                    "credentials": [
+                        {"role": "tenant", "password": "tenant-pw", "key_type": None},
+                    ],
+                    "ready_at": "2030-01-01T00:00:01+00:00",
                 },
             },
         },
@@ -692,26 +607,16 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def register_lease(self, registration):
-            return registration
 
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(
-        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
-    )
-    monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
+    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
         SimpleNamespace(
-            timeout=5.0,
-            poll_interval=0.001,
-            service_url="http://provisioning",
-            frp_server_addr="",
-            frp_domain="",
-            frp_dashboard_password="",
+            timeout=5.0, poll_interval=0.001, service_url="http://provisioning",
         ),
         raising=False,
     )

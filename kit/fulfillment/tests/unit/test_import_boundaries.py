@@ -5,7 +5,9 @@ test_import_boundaries.py`` and ``provisioning/compute/service/tests/
 unit/test_import_boundaries.py``.
 
 Dependency direction (``openspec/specs/fulfillment/spec.md#dependency-boundary``): ``kit/fulfillment`` depends on ``kit/site``
-(``market_site``) and ``kit/resource-pools`` (``market_resource_pools``).
+(``market_site``), ``kit/resource-pools`` (``market_resource_pools``) and its
+contracts (``market_resource_pools_contracts``), and the core carrier package
+(``market_core``) for versioned envelopes.
 Nothing here may depend on ``compute_provisioning``, the extracted
 compute provisioning service, any VM/bare-metal domain package, or the
 storefront -- those depend on this package, not the reverse. In
@@ -23,9 +25,8 @@ FORBIDDEN_PREFIXES = (
     "compute_provisioning_service",
     "core_storefront",
     "market_storefront",
-    "domains.vms",
-    "domains.bare_metal",
-    "domains.apicredits",
+    "arkhai_vms_",
+    "arkhai_apicredits",
     "arkhai_bare_metal",
     "vm_provisioning_adapter",
     "bare_metal_provisioning_adapter",
@@ -76,16 +77,15 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "settlement_types.py": {"pydantic"},
         "scheduling.py": set(),
         "round_robin_policy.py": set(),
-        "envelopes.py": {"pydantic", "typing"},
-        "results.py": {"pydantic", "typing"},
-        "scheduler.py": {"market_resource_pools", "market_site"},
+        "results.py": {"market_core", "pydantic", "typing"},
+        "scheduler.py": {"market_resource_pools", "market_resource_pools_contracts", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
-        "provider.py": set(),
-        "fulfillment.py": {"market_resource_pools"},
-        "fulfillment_persistence.py": {"market_resource_pools", "sqlalchemy"},
+        "provider.py": {"market_core"},
+        "fulfillment.py": {"market_core", "market_resource_pools", "market_resource_pools_contracts"},
+        "fulfillment_persistence.py": {"market_core", "market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),
         "db.py": {"sqlalchemy"},
-        "settlement_repository.py": {"sqlalchemy"},
+        "settlement_repository.py": {"market_core", "sqlalchemy"},
         "backoff.py": set(),
         "backfill.py": set(),
         "recovery_diagnostics.py": set(),

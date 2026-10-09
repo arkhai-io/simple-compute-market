@@ -7,9 +7,16 @@ from market_core import SettlementEvidence
 
 from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
 
+# Evidence statuses whose payload carries verified delivery facts. A seller
+# refund moves the status from ``verified`` through ``refunding`` to
+# ``refunded`` but never changes the facts, so a delivery that started before
+# the refund can still complete from them. Only ``verified`` admits a new
+# delivery start; the delivery-record insert enforces that.
+VERIFIED_EVIDENCE_STATUSES = frozenset({"verified", "refunding", "refunded"})
+
 
 def build_vm_fulfillment_plan(*, evidence: SettlementEvidence) -> VmFulfillmentPlan:
-    if evidence.status != "verified" or not evidence.settlement_ref:
+    if evidence.status not in VERIFIED_EVIDENCE_STATUSES or not evidence.settlement_ref:
         raise ValueError("VM delivery requires verified settlement evidence")
     payload = evidence.evidence
     delivery = payload.get("delivery") or {}

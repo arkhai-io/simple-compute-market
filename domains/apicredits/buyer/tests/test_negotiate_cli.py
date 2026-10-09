@@ -17,8 +17,8 @@ from market_core.schemas import Agreement, RateValue, SettlementOption, derive_s
 from market_identity import Ed25519Signer, ResponseEnvelope, TrustedIdentitySet, canonical_body_hash, sign_response
 from typer.testing import CliRunner
 
-from domains.apicredits.buyer import common, negotiate_cli, payments, settlement_composition, settlement_stages
-from domains.apicredits.buyer.cli import app
+from arkhai_apicredits_buyer import common, negotiate_cli, payments, settlement_composition, settlement_stages
+from arkhai_apicredits_buyer.cli import app
 from test_negotiation_flow import _MockResponse, _request_header
 
 _BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
@@ -90,7 +90,7 @@ def surface(monkeypatch, tmp_path):
         }
         monkeypatch.setattr(common, "fetch_listing_dict", lambda *a, **kw: dict(listing))
         monkeypatch.setattr("core_buyer.orchestration.fetch_listing_dict", lambda *a, **kw: dict(listing))
-        monkeypatch.setattr("domains.apicredits.buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: dict(listing))
+        monkeypatch.setattr("arkhai_apicredits_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: dict(listing))
         state.option = option
         return state
 
@@ -183,7 +183,7 @@ def test_payment_only_cli_is_wallet_free_and_preserves_accepted_state(surface, m
     result = _fresh(*prices)
     assert result.exit_code == 0, (result.output, result.exception)
     opening = state.opening
-    assert opening["proposal"]["fields"]["amount"] == amount
+    assert opening["proposal"]["fields"]["amount"] == str(amount)
     assert opening["proposal"]["settlement_selection"]["params"] == {"payer_account": _PAYER}
     events = read_run(_run_id(result), signer=_BUYER)
     accepted = events[-1]
@@ -205,7 +205,7 @@ def test_payment_cli_resume_uses_recorded_selection_without_fresh_admission(surf
     assert resumed.exit_code == 0, resumed.output
     assert state.requests[-1][0].endswith("/negotiate/neg-1")
     assert state.requests[-1][1]["proposal"] == state.opening["proposal"]
-    assert state.requests[-1][1]["proposal"]["fields"]["amount"] == 8
+    assert state.requests[-1][1]["proposal"]["fields"]["amount"] == "8"
 
 
 @pytest.mark.parametrize("prices,amount", [
@@ -221,7 +221,7 @@ def test_alkahest_cli_keeps_explicit_scaling_and_derived_base_units(surface, mon
     result = _fresh(*prices)
     assert result.exit_code == 4, (result.output, result.exception)
     proposal = state.opening["proposal"]
-    assert proposal["fields"]["amount"] == amount
+    assert proposal["fields"]["amount"] == str(amount)
     assert proposal["chain_name"] == "anvil"
     assert proposal["escrow_address"] == _ENTRY["escrow_address"]
     assert proposal["fields"]["token"] == _TOKEN

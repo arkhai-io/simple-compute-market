@@ -83,3 +83,76 @@ def test_api_credit_watchdog_preserves_configured_schedule():
     assert policy.interval_seconds == 60
     assert policy.log_loop_start is False
     assert policy.log_cutoff is False
+
+
+def test_api_credit_app_serves_the_lifecycle_routes():
+    paths = {route.path for route in server.app.routes}
+    assert {
+        "/api/v1/admin/lifecycle/pause",
+        "/api/v1/admin/lifecycle/resume",
+        "/api/v1/admin/lifecycle/{loop}/run-cycle",
+        "/api/v1/admin/lifecycle/{loop}/dry-run",
+    } <= paths
+
+
+@pytest.mark.asyncio
+async def test_startup_registers_exactly_the_loops_it_starts_each_with_a_step(monkeypatch):
+    import asyncio
+
+    import apicredits_storefront.container as container
+    import market_policy.negotiation_thread as negotiation_thread
+    from apicredits_storefront import startup
+    from apicredits_storefront.lifecycle_steps import register_api_credit_lifecycle_steps
+    from apicredits_storefront.services import capacity_client
+    from market_storefront_kit import StorefrontLoopController
+
+    domain = get_market_domain_contract()
+    loops = StorefrontLoopController()
+    register_api_credit_lifecycle_steps(loops)
+
+    class _Worker:
+        async def run(self, *, paused=None, wait=None):
+            await asyncio.Event().wait()
+
+    async def _noop():
+        return None
+
+    async def _poller(controller):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(container, "resolved_market_domain", domain)
+    monkeypatch.setattr(container, "resolved_sqlite_client", object())
+    monkeypatch.setattr(container, "resolved_settlement_runtime", None)
+    monkeypatch.setattr(container, "resolved_settlement_worker", _Worker())
+    monkeypatch.setattr(container, "resolved_loop_controller", loops)
+    monkeypatch.setattr(negotiation_thread, "get_thread_store", lambda **_kwargs: None)
+    monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
+    monkeypatch.setattr(startup, "_seed_demo_listing", _noop)
+    monkeypatch.setattr(capacity_client, "capacity_events_poller_loop", _poller)
+
+    try:
+        await startup._startup_tasks(domain=domain)
+        assert loops.registered_loop_names() == [
+            "capacity_events_poller",
+            "negotiation_watchdog",
+            "settlement_servicing",
+        ]
+        assert set(loops.step_routes().values()) == set(loops.registered_loop_names())
+    finally:
+        handles = list(loops._handles.values())
+        loops.clear_loops()
+        await asyncio.gather(*handles, return_exceptions=True)
+
+def test_every_settlement_route_contract_is_mounted() -> None:
+    """The settle, status, and refund routes are mounted where the contract declares them."""
+    from storefront_client.settlement_routes import unmounted_settlement_routes
+
+    mounted = [
+        (method, route.path)
+        for route in server.app.routes
+        if getattr(route, "path", None)
+        for method in (getattr(route, "methods", None) or ())
+    ]
+
+    assert unmounted_settlement_routes(mounted) == []
+

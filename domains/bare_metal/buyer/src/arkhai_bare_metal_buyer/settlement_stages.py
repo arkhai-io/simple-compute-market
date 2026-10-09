@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import base64
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from market_arkhai_payments import create_arkhai_payments_registration
+from market_arkhai_payments import PaymentApproval, create_arkhai_payments_registration
 
-from .arkhai_payments import BareMetalArkhaiPaymentsBuyer
+
+def _agreement_bytes(outcome: Any) -> bytes:
+    if (
+        outcome.agreement is None
+        or outcome.settlement_data is None
+        or not outcome.agreement_bytes
+    ):
+        raise ValueError("accepted payment negotiation omitted its Agreement or mandate")
+    return base64.b64decode(outcome.agreement_bytes, validate=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,50 +32,42 @@ class PaymentStage:
             raise ValueError("bare-metal purchase currently requires an hourly option")
 
     @staticmethod
-    def validate_acceptance(outcome: Any, buyer: BareMetalArkhaiPaymentsBuyer) -> None:
-        if (
-            outcome.agreement is None
-            or outcome.settlement_data is None
-            or not outcome.agreement_bytes
-        ):
-            raise ValueError(
-                "accepted payment negotiation omitted its Agreement or mandate"
-            )
-        buyer.validate_acceptance(
-            agreement=outcome.agreement,
-            settlement_data=outcome.settlement_data,
-        )
+    def validate_acceptance(outcome: Any, approval: PaymentApproval) -> None:
+        approval.check(_agreement_bytes(outcome), outcome.settlement_data)
 
     def settle(
         self,
         *,
         outcome: Any,
-        buyer: BareMetalArkhaiPaymentsBuyer,
+        approval: PaymentApproval,
         transport: Any,
         timeout: float,
         run_log: Any,
-    ) -> str:
-        self.validate_acceptance(outcome, buyer)
-        transaction = buyer.approve(
-            agreement=outcome.agreement,
-            settlement_data=outcome.settlement_data,
+    ) -> tuple[str, dict[str, Any]]:
+        """Approve the mandate, then settle until the seller starts delivery.
+
+        The seller verifies the receipt and starts fulfillment in the same settle
+        call, so the buyer only retries while the seller reports no payment
+        evidence yet. Returns the transaction ID and the seller's settle response.
+        """
+
+        transaction = approval.approve(
+            _agreement_bytes(outcome),
+            outcome.settlement_data,
             timeout=timeout,
         )
         run_log.event("payment_approved", transaction_id=transaction)
         deadline = time.monotonic() + timeout
         while True:
             settled = transport.settle(outcome.negotiation_id)
-            if settled.get("status") == "settlement_verified":
-                if settled.get("escrow_uid") != transaction:
-                    raise RuntimeError(
-                        "seller verified a different payment transaction"
-                    )
-                return transaction
-            if settled.get("status") != "settlement_pending":
-                raise RuntimeError("seller returned an unexpected settlement status")
+            if settled.get("status") != "pending":
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
                     "seller has not observed the verified payment receipt"
                 )
             time.sleep(min(1.0, remaining))
+        if settled.get("settlement_ref") != transaction:
+            raise RuntimeError("seller settled a different payment transaction")
+        return transaction, settled

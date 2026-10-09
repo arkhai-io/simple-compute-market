@@ -14,7 +14,7 @@ from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationRound,
 )
-from domains.vms.negotiation.policies import (
+from arkhai_vms_negotiation.policies import (
     accept_exact_listing_middleware,
     escrow_shape_guard,
 )
@@ -142,7 +142,7 @@ class TestAcceptExactListing:
         assert decision is not None
         assert decision.action == "accept"
         assert decision.reason == "exact_listing"
-        assert decision.proposal["fields"]["amount"] == 1000
+        assert decision.proposal["fields"]["amount"] == "1000"
 
     def test_accepted_escrows_can_be_serialized_json(self):
         import json

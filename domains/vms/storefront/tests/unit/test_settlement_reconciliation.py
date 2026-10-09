@@ -36,7 +36,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         "updated_at": "2026-08-12T00:00:00",
         "storefront_url": "http://seller.test",
         "seller_principal": TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
-        "offer_resource": {
+        "listing_resource": {
             "resource_type": "compute",
             "gpu_model": "H200",
             "gpu_count": 1,
@@ -68,6 +68,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         domain_registry=registry,
         market_domain=domain,
         load_listing=AsyncMock(return_value=stored),
+        load_listing_binding=AsyncMock(return_value=None),
         update_listing=AsyncMock(),
     )
     new_option = {

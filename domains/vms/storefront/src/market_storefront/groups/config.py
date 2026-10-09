@@ -22,6 +22,8 @@ from market_config.config_loader import (
     load_user_config,
     set_dotted,
     storefront_config_file,
+    storefront_config_files,
+    storefront_public_config_files,
     user_config_dir,
     write_user_config,
 )
@@ -49,10 +51,11 @@ def _validate_settlement_candidate(
     # Mechanism packages and the process-global storefront settings stay lazy:
     # config path/help commands must not initialize operator configuration, and
     # this validator must evaluate the supplied in-memory candidate instead.
-    from market_alkahest import create_alkahest_registration
-    from market_settlement_runtime import SettlementConfigurationRegistry
+    from market_storefront.settlement_registry import (
+        build_storefront_settlement_registry,
+    )
 
-    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    registry = build_storefront_settlement_registry()
     registry.resolve(document.get("Settlement", {}), role=role)
 
     from market_storefront.utils.config import settlement_publication_defaults
@@ -62,16 +65,22 @@ def _validate_settlement_candidate(
     settlement_publication_defaults(candidate)
 
 
+def _installed_settlement_mechanisms() -> dict[str, str]:
+    from market_storefront.settlement_registry import installed_settlement_mechanisms
+
+    return installed_settlement_mechanisms()
+
+
 def _seller_publication_clause_compiler(
     document: Mapping[str, Any],
 ) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
-    from market_alkahest import create_alkahest_registration
-    from market_settlement_runtime import (
-        SettlementConfigurationRegistry,
-        compile_settlement_publication_clause,
+    from market_settlement_runtime import compile_settlement_publication_clause
+
+    from market_storefront.settlement_registry import (
+        build_storefront_settlement_registry,
     )
 
-    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    registry = build_storefront_settlement_registry()
     settlement = document.get("Settlement", document.get("settlement", {}))
     if not isinstance(settlement, Mapping):
         raise SettlementMigrationError("Settlement must be a table")
@@ -112,17 +121,29 @@ def config_show(
     raw: bool = typer.Option(
         False,
         "--raw",
-        help="Print the TOML file verbatim instead of the loaded mapping.",
+        help="Print each public config file verbatim instead of the merged mapping.",
     ),
 ) -> None:
-    """Show the current storefront config."""
-    p = storefront_config_file()
-    if not p.exists():
-        typer.secho(f"No storefront config at {p}.", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
+    """Show the storefront config merged from every layer present."""
     if raw:
-        typer.echo(p.read_text())
+        public = [path for path in storefront_public_config_files() if path.exists()]
+        if not public:
+            typer.secho("No public storefront config file present.", fg=typer.colors.YELLOW)
+            raise typer.Exit(1)
+        # The Secret overlay is never printed verbatim: raw output is for
+        # inspecting what an operator or a chart wrote, not credentials.
+        for index, path in enumerate(public):
+            if index:
+                typer.echo("")
+            typer.echo(f"# {path}")
+            typer.echo(path.read_text())
         return
+    if not any(path.exists() for path in storefront_config_files()):
+        typer.secho(
+            f"No storefront config in {storefront_config_file().parent}.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(1)
     cfg = load_storefront_config()
     typer.echo(json.dumps(cfg, indent=2, sort_keys=True))
 
@@ -173,12 +194,13 @@ def config_get(
         ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
     ),
 ) -> None:
-    """Print the value of a single config key from the storefront's storefront.toml."""
+    """Print the value of a single key from the storefront's merged config files."""
     doc = load_storefront_config()
     val = get_dotted(doc, key)
     if val is None:
         typer.secho(
-            f"Key {key!r} not set in {storefront_config_file()}.",
+            f"Key {key!r} not set in the storefront config files in "
+            f"{storefront_config_file().parent}.",
             fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1)
@@ -274,6 +296,7 @@ def config_migrate(
                 backup=backup,
                 environ=os.environ,
                 validator=_validate_settlement_candidate,
+                installed=_installed_settlement_mechanisms(),
             )
             lines = format_migration_result(result)
         elif scope == "publication":
@@ -396,7 +419,6 @@ _INIT_USER_TEMPLATE = """\
 # resource_lease_grace_seconds = 1800
 # negotiation_timeout_seconds = 1800
 # negotiation_watchdog_interval = 60
-# default_vm_host = "kvm1"                      # KVM host name from ansible inventory
 
 # ---------------------------------------------------------------------------
 # Shared sections (also used by the buyer-side `market` CLI)
@@ -441,9 +463,6 @@ _INIT_USER_TEMPLATE = """\
 # poll_interval = 15
 # preflight_timeout = 30                        # how long startup waits for /health to come up
 # fail_on_unreachable = true                    # set false in dev when service comes up later
-# frp_server_addr = ""
-# frp_domain = ""
-# frp_dashboard_password = ""
 # Public response authority overlap for the provisioning service:
 # [provisioning.identity]
 # principals = [
@@ -473,18 +492,20 @@ _INIT_USER_TEMPLATE = """\
 #                                              # erc1155 = "erc1155_bisection"
 #                                              # [negotiation.policies.erc721]
 #                                              # chain = ["accept_exact_listing"]
-# seller_model_path = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
-# buyer_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+# seller_model_path = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
+# buyer_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 
 [pricing]
 # settlements = [                             # complete structured publication
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
-# default_min_price = "1"                      # negotiation floor when a resource row has no min_price;
+# default_min_price = "1"                      # hidden-reserve negotiation floor, base units per hour;
                                                 # it never constructs a settlement option. Each settlement
                                                 # clause owns its explicit asset, decimal rate, and unit.
-# default_token_address = "0x..."              # demand-side token for the resource-imbalance policy only;
-                                                # it never supplies a settlement option asset or rate.
+# [pricing.defaults.gpu.H100]                  # family rates make listings shape-priced: clauses then
+# rates = [ { asset = "usd", rate = "2", per = "hour" } ]   # state no rate and each clause's rate is
+# [pricing.defaults.memory]                    # composed from the listing's shape, per card-hour,
+# rates = [ { asset = "usd", rate = "0.01", per = "hour" } ] # per GiB-hour, and so on.
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
 # publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
                                                 # publication still requires complete typed clauses.

@@ -120,11 +120,18 @@ registry:
       name: arkhai-registry-identity
       key: credential
 
+  descriptor:
+    baseUrl: "http://localhost:8080"
+    displayName: "Local VM Compute Registry"
+    operatorIdentity: "Arkhai local development"
+    accessAcquisitionPointer: ""
+
   service:
     type: NodePort
     port: 8080
 
   config:
+    filterSpecPath: "/app/filter-spec.yaml"
     databaseUrl: "sqlite:///./indexer.db"
     host: "0.0.0.0"
     enableHealthChecks: true
@@ -132,6 +139,68 @@ registry:
     endpointCheckTimeout: 10
     heartbeatTtlSecs: 60
     logLevel: "info"
+
+# ---------------------------------------------------------------------------
+# Optional API-credits registry. This is a second instance of the same
+# schema-opaque registry chart, with independent identity, state, and public
+# descriptor coordinates. Keep disabled to preserve the compute-only topology.
+# ---------------------------------------------------------------------------
+api-credits-registry:
+  enabled: false
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: registry
+    pullPolicy: IfNotPresent
+    digest: ""
+  identity:
+    authority: registry-api-credits
+    principal:
+      scheme: eip191
+      identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+    credentialSecret:
+      name: arkhai-api-credits-registry-identity
+      key: credential
+
+  descriptor:
+    baseUrl: "http://localhost:8082"
+    displayName: "Local API Credits Registry"
+    operatorIdentity: "Arkhai local development"
+    accessAcquisitionPointer: ""
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  config:
+    filterSpecPath: "/app/filter-spec-apicredits.yaml"
+    databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
+    host: "0.0.0.0"
+    rootPath: ""
+    enableHealthChecks: true
+    healthCheckInterval: 60
+    endpointCheckTimeout: 10
+    heartbeatTtlSecs: 60
+    logLevel: "info"
+    requireReadApiKey: false
+    requireWriteApiKey: false
+
+  auth:
+    bootstrapKeySecret:
+      name: ""
+      key: ""
+    adminKeySecret:
+      name: ""
+      key: ""
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 2Gi
+    accessMode: ReadWriteOnce
+    mountPath: /var/lib/arkhai-registry
+    existingClaim: ""
 
 # ---------------------------------------------------------------------------
 # storefront subchart
@@ -144,82 +213,77 @@ storefront:
     name: arkhai
     tag: storefront
     digest: ""
-    settlementConfigSchemaVersion: 1
     pullPolicy: IfNotPresent
 
   # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
   # client and is invoked as a one-shot process (or a helm-test Job),
   # not deployed alongside the storefront. Add more agents: entries to
   # run multiple seller identities on one cluster.
-  # See helm/charts/storefront/values.yaml for the per-agent schema.
+  # See helm/charts/storefront/values.yaml for the per-agent shape: `config`
+  # is the storefront's own configuration and passes through unchanged.
   agents:
     - name: bob
       port: 8001
       component: seller
-      agentId: ""        # pin after first registration; see charts/storefront/values.yaml
-      autoRegister: true # set false once registered to prevent accidental re-registration
       identity:
-        principal:
-          scheme: eip191
-          identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
         credentialSecret:
           name: arkhai-bob-identity
           key: credential
-        servicePeers:
-          provisioning_default:
-            role: service
-            siteId: default
-            principals:
-              - scheme: eip191
-                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-        administrators:
-          operator:
-            principals:
-              - scheme: eip191
-                identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+      internalRegistryTrust:
+        authority: registry-a
+        principals:
+          - scheme: eip191
+            identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
       secret:
         createSecret: false
         secretName: arkhai-bob-runtime
         configKey: storefront.secrets.toml
       config:
-        storefrontDomains:
+        agent_id: bob
+        log_file_path: ./logs/bob.log
+        storefront_domains:
           - contribution: vms
-            offeringMode: vm
-            domainIdentity: compute.v1
-            contractVersion: "1.0"
+            offering_mode: vm
+            domain_identity: compute.v1
+            contract_version: "1.0"
           - contribution: bare_metal
-            offeringMode: bare_metal
-            domainIdentity: bare_metal.v1
-            contractVersion: "1.0"
-        registryAuthority:
-          authority: registry-a
-          principals:
-            - scheme: eip191
-              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
-        seller:
-          agentId: bob
-          dbPath: "./agent.db"
-          logFilePath: "./logs/bob.log"
-          enableEventQueue: false
-          provisioning:
-            mode: "mock"
-            identity:
+            offering_mode: bare_metal
+            domain_identity: bare_metal.v1
+            contract_version: "1.0"
+        Identity:
+          principal:
+            scheme: eip191
+            identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          service_peers:
+            provisioning_default:
+              role: service
+              site_id: default
               principals:
                 - scheme: eip191
                   identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-          negotiation:
-            policies:
-              - "has_matching_inventory_guard"
-              - "escrow_shape_guard"
-              - "bisection"
-          integrations:
-            geminiApiKey: ""
-        settlement:
-          schema_version: 1
+          administrators:
+            operator:
+              principals:
+                - scheme: eip191
+                  identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        provisioning:
+          mode: mock
+          identity:
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        negotiation:
+          policies:
+            - has_matching_inventory_guard
+            - escrow_shape_guard
+            - bisection
+        Settlement:
           priority: []
-        wallet: {}
-        chains: {}
 
+# The dedicated bare-metal storefront is an optional role. The combined
+# compute storefront above already loads the bare-metal domain contribution.
+bare-metal-storefront:
+  enabled: false
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
@@ -277,7 +341,7 @@ provisioning:
     log_level: "info"
     database_url: "sqlite:////app/data/provisioning.db"
     ansible_timeout_seconds: 1800
-    default_vm_host: "kvm1"
+    default_host_id: "kvm1"
     lease_watchdog_enabled: true
     lease_watchdog_poll_interval_seconds: 60
     lease_watchdog_grace_period_seconds: 300

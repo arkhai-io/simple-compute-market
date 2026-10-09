@@ -39,6 +39,10 @@ PayloadBuilder = Callable[
 ]
 PublishOffer = Callable[..., dict[str, Any]]
 
+# The status a source's ``reopen_existing`` returns when the listing bound under
+# a candidate's identity needs no publication this cycle.
+REOPEN_UNCHANGED = "unchanged"
+
 
 @dataclass(frozen=True)
 class PublicationCycleResult:
@@ -110,7 +114,7 @@ class PublicationCommand:
     db_path: str
     base_url: str
     build_payload: PayloadBuilder
-    publish_offer: PublishOffer
+    publish_listing: PublishOffer
 
     def run(
         self,
@@ -125,7 +129,7 @@ class PublicationCommand:
             db_path=self.db_path,
             base_url=self.base_url,
             build_payload=self.build_payload,
-            publish_offer=self.publish_offer,
+            publish_listing=self.publish_listing,
             skip_ids=skip_ids,
             close_stale=close_stale,
             skip_open=skip_open,
@@ -171,14 +175,14 @@ class PublicationSourceSelection:
         db_path: str,
         base_url: str,
         build_payload: PayloadBuilder,
-        publish_offer: PublishOffer,
+        publish_listing: PublishOffer,
     ) -> PublicationCommand:
         return PublicationCommand(
             selection=self,
             db_path=db_path,
             base_url=base_url,
             build_payload=build_payload,
-            publish_offer=publish_offer,
+            publish_listing=publish_listing,
         )
 
     def run_cycle(
@@ -187,7 +191,7 @@ class PublicationSourceSelection:
         db_path: str,
         base_url: str,
         build_payload: PayloadBuilder,
-        publish_offer: PublishOffer,
+        publish_listing: PublishOffer,
         skip_ids: set[str] | None = None,
         close_stale: bool = True,
         skip_open: bool = True,
@@ -197,7 +201,7 @@ class PublicationSourceSelection:
                 db_path=db_path,
                 base_url=base_url,
                 build_payload=build_payload,
-                publish_offer=publish_offer,
+                publish_listing=publish_listing,
             )
             .run(
                 skip_ids=skip_ids,
@@ -235,7 +239,7 @@ def run_publication_cycle(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
     close_stale: bool = True,
     skip_open: bool = True,
@@ -264,7 +268,7 @@ def run_publication_cycle(
         db_path=db_path,
         base_url=base_url,
         build_payload=build_payload,
-        publish_offer=publish_offer,
+        publish_listing=publish_listing,
         skip_ids=covered,
     )
     return PublicationCycleResult(
@@ -281,7 +285,7 @@ def run_publication_command(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
     close_stale: bool = True,
     skip_open: bool = True,
@@ -292,7 +296,7 @@ def run_publication_command(
         db_path=db_path,
         base_url=base_url,
         build_payload=build_payload,
-        publish_offer=publish_offer,
+        publish_listing=publish_listing,
         skip_ids=skip_ids,
         close_stale=close_stale,
         skip_open=skip_open,
@@ -306,7 +310,7 @@ def publish_round(
     db_path: str,
     base_url: str,
     build_payload: PayloadBuilder,
-    publish_offer: PublishOffer,
+    publish_listing: PublishOffer,
     skip_ids: set[str] | None = None,
 ) -> tuple[
     list[dict[str, Any]], list[tuple[dict[str, Any], str]], list[dict[str, Any]]
@@ -328,8 +332,8 @@ def publish_round(
                 skipped.append(candidate)
                 continue
 
-            offer = source.offer_resource(candidate)
-            payload = build_payload(source, candidate, offer)
+            listing_resource = source.listing_resource(candidate)
+            payload = build_payload(source, candidate, listing_resource)
             if isinstance(payload, str):
                 failed.append((candidate, payload))
                 continue
@@ -351,7 +355,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -363,7 +367,7 @@ def publish_round(
                         db_path,
                         base_url,
                         candidate,
-                        offer,
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -373,6 +377,13 @@ def publish_round(
                 continue
 
             if reopened is not None:
+                # A source may report that the listing already bound under the
+                # candidate's identity needs nothing: it is current, or it is
+                # withheld for a reason the source records. Neither is a failure,
+                # and neither may fall through to creating a second listing.
+                if reopened.get("status") == REOPEN_UNCHANGED:
+                    skipped.append(candidate)
+                    continue
                 if reopened.get("status") in {"published", "disabled"}:
                     published.append(
                         {
@@ -395,8 +406,8 @@ def publish_round(
 
             try:
                 if extended_payload:
-                    response = publish_offer(
-                        offer,
+                    response = publish_listing(
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,
@@ -404,8 +415,8 @@ def publish_round(
                         publication_clauses=publication_clauses,
                     )
                 else:
-                    response = publish_offer(
-                        offer,
+                    response = publish_listing(
+                        listing_resource,
                         accepted_escrows,
                         demands,
                         max_duration_seconds,

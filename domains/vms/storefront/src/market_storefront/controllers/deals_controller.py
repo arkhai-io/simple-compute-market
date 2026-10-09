@@ -54,7 +54,7 @@ class DealsController:
         body: DealHeartbeatRequest,
         request: Request,
     ) -> DealHeartbeatResponse:
-        from domains.vms.settlement.heartbeats import (
+        from arkhai_vms_settlement.heartbeats import (
             VmHeartbeatError,
             validate_vm_heartbeat_payload,
         )

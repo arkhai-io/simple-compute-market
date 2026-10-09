@@ -17,9 +17,9 @@ from unittest.mock import patch
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_policy.negotiation_middleware import load_negotiation_chain
 
-from domains.apicredits.buyer.buyer_client import negotiate_with_seller
-from domains.apicredits.negotiation import make_api_credits_provision_terms
-from domains.apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
+from arkhai_apicredits_buyer.buyer_client import negotiate_with_seller
+from arkhai_apicredits.negotiation import make_api_credits_provision_terms
+from arkhai_apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
     APICREDITS_BUYER_GUARDS,
     answer_key_challenge,
 )
@@ -250,8 +250,10 @@ def test_round0_payload_carries_quantity_key_and_scaled_amount():
         "version": 1,
         "payload": {"quantity": 100, "key": {"mode": "existing", "key_id": "ak_42"}},
     }
-    # listed_price opens at initial_price × quantity, absolute.
-    assert round0["proposal"]["fields"]["amount"] == 300
+    # listed_price opens at initial_price × quantity, absolute, and in the
+    # wire form every amount travels in: a decimal-digit string, since a
+    # uint256 has no JSON number form and this body is signed.
+    assert round0["proposal"]["fields"]["amount"] == "300"
 
 
 def test_seller_counter_above_scaled_ceiling_exits():

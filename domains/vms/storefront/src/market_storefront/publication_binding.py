@@ -6,9 +6,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core_storefront.domain_registry import (
+    CAPACITY_BACKING_VALUES,
     StorefrontListingBinding,
     build_storefront_derivation_key,
     canonical_source_envelope,
+)
+
+from arkhai_vms_listings.listing_shapes import resolve_shape
+from arkhai_vms_listings.reconciler import (
+    LISTING_SOURCE_KIND,
+    LISTING_SOURCE_SCHEMA_VERSION,
 )
 
 from .domain_runtime import build_vm_storefront_registry
@@ -29,16 +36,27 @@ def prepare_vm_listing_binding(
     resource_id = candidate.get("resource_id")
     if pool_id is None and resource_id is None:
         raise ValueError("VM publication candidate requires pool or resource provenance")
+    # Every derivation path produces a shape; a candidate without a valid one
+    # is a programming error, not a default shape to be assumed.
+    listing_shape = resolve_shape(candidate.get("listing_shape")).shape
+    capacity_backing = candidate.get("capacity_backing")
+    if capacity_backing not in CAPACITY_BACKING_VALUES:
+        raise ValueError(
+            "VM publication candidate requires an explicit capacity_backing, "
+            f"not {capacity_backing!r}"
+        )
     registry = build_vm_storefront_registry()
     registration = registry.resolve_mode("vm")
+    # The derivation identity includes the canonical shape, whichever source
+    # produced it, so identity depends only on what is offered.
     source = {
-        "kind": "compute.listing_source",
-        "schema_version": 1,
+        "kind": LISTING_SOURCE_KIND,
+        "schema_version": LISTING_SOURCE_SCHEMA_VERSION,
         "payload": {
             "site_id": site_id,
             "pool_id": str(pool_id) if pool_id is not None else None,
             "resource_id": str(resource_id) if resource_id is not None else None,
-            "gpu_count": int(candidate.get("gpu_count") or 1),
+            "listing_shape": {family: dict(fields) for family, fields in listing_shape.items()},
         },
     }
     return StorefrontListingBinding(
@@ -53,6 +71,7 @@ def prepare_vm_listing_binding(
         ),
         source_envelope_json=canonical_source_envelope(source),
         last_reconciled_at=datetime.now(UTC).isoformat(),
+        capacity_backing=capacity_backing,
         pool_id=str(pool_id) if pool_id is not None else None,
         physical_resource_id=(
             str(resource_id) if resource_id is not None else None

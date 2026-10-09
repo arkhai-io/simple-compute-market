@@ -8,6 +8,14 @@ The storefront can publish interruptible listings, dry-run negotiation decisions
 
 **Non-Goals:** equate truncation with teardown/release, standardize premature plugins, or rely solely on best-effort logs.
 
+*Since 2026-10-05 (`bare-metal-mock-provisioned-deal` slice B):*
+- Lease truncation applies only to a `leased` reservation and may only move its end
+  earlier; any other request is refused.
+- A registered lease's end moves only through truncation; there is no lease update.
+- The lease lifecycle's writes are conditional transitions. An interruption that
+  truncates and then waits for teardown observes `releasing`, then `released`, through
+  the family lease surface (`GET /api/v1/contract/leases/{id}`).
+
 ## Decisions
 
 - Build an authenticated read model referencing storefront agreement/listing, site reservation/fulfillment, and settlement identifiers without copying their authoritative state.

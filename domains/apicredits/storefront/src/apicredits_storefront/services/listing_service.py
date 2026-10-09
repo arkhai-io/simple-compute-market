@@ -3,7 +3,7 @@
 A credit listing derives from a quota resource in the credits service's
 ledger (ARCHITECTURE.md, "API-credits market domain — Market shape"): ``publish_from_quota``
 reads the resource's availability, writes the local listing row with an
-``api_credits.v1`` offer naming that resource, and fans out to the
+``api_credits.v1`` listing_resource naming that resource, and fans out to the
 registries. Closing goes through the shared publication path.
 """
 
@@ -107,7 +107,7 @@ class ListingService:
 
         listing = get_market_domain_contract().codecs.listing(
             {
-                "offer_resource": {
+                "listing_resource": {
                     "service_name": service_name,
                     "description": description,
                     "openapi_url": openapi_url,
@@ -128,7 +128,7 @@ class ListingService:
             status="open",
             created_at=now_iso,
             updated_at=now_iso,
-            offer_resource=listing.offer_resource.model_dump(mode="json"),
+            listing_resource=listing.listing_resource.model_dump(mode="json"),
             accepted_escrows=listing.accepted_escrows,
             settlement_options=listing.settlement_options,
             demands=listing.demands,

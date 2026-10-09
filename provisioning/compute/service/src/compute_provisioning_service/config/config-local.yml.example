@@ -9,7 +9,7 @@
 
 # Override Ansible paths to your local checkout of domains/vms/provisioning/iac:
 # playbook_path: "/home/you/code/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
-# inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/hosts"
+# inventory_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 # management_vars_path: "/home/you/code/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
 # Public marketplace identity and exact storefront trust pin. Supply the

@@ -1,107 +1,33 @@
-"""VM provisioning operator client and direct VM administration models.
+"""VM's provisioning routes: their declarations, wire models, and typed client.
 
-This package is intentionally separate from the shared, executor-neutral
-``compute_provisioning`` contract used by storefront and domain callers.
+The compute family's own routes are served by ``compute_provisioning_client``;
+VM's typed client wraps that client's transport.
 """
 
-from compute_provisioning import (
-    PoolCreate,
-    PoolImportDiff,
-    PoolImportRequest,
-    PoolImportResponse,
-    PoolListResponse,
-    PoolReplace,
-    PoolResponse,
-    PoolUpdate,
-    PoolValidateResponse,
-    PoolValidationProblem,
-)
-from vm_provisioning_operator.client import (
-    ProvisioningClient,
-    ProvisioningError,
-    ProvisioningJobError,
-    ProvisioningTimeoutError,
-    SyncProvisioningClient,
-)
+from vm_provisioning_operator.client import SyncVmOperatorClient, VmOperatorClient
 from vm_provisioning_operator.models import (
-    AnsibleReadinessResponse,
     CreateVmRequest,
-    CredentialListResponse,
-    CredentialResponse,
-    FileInfo,
-    HealthResponse,
-    HostConnectivityResponse,
-    HostCreate,
-    HostListResponse,
-    HostResponse,
-    HostUpdate,
-    InventoryInfo,
-    JobListResponse,
-    JobLogsResponse,
-    JobStatusResponse,
-    JobSubmitResponse,
-    LeaseCreate,
-    LeaseForceReleaseRequest,
-    LeaseListResponse,
-    LeaseReleaseOversightRequest,
-    LeaseResponse,
-    LeaseRetryReleaseRequest,
-    LeaseTerminateRequest,
-    LeaseUpdate,
-    SshKeyInfo,
-    VersionResponse,
     VmActionRequest,
 )
+from vm_provisioning_operator.relays import (
+    RelayCreate,
+    RelayListResponse,
+    RelayResponse,
+    RelayTokenRotate,
+    RelayUpdate,
+)
+from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES, vm_route
 
 __all__ = [
-    # Clients
-    "ProvisioningClient",
-    "SyncProvisioningClient",
-    # Exceptions
-    "ProvisioningError",
-    "ProvisioningJobError",
-    "ProvisioningTimeoutError",
-    # Host models
-    "HostCreate",
-    "HostUpdate",
-    "HostResponse",
-    "HostListResponse",
-    "HostConnectivityResponse",
-    # Job models
-    "JobSubmitResponse",
-    "JobStatusResponse",
-    "JobLogsResponse",
-    "JobListResponse",
-    "CredentialResponse",
-    "CredentialListResponse",
-    # VM request models
+    "VM_PROVISIONING_ROUTES",
+    "vm_route",
+    "SyncVmOperatorClient",
+    "VmOperatorClient",
     "CreateVmRequest",
     "VmActionRequest",
-    # Lease models
-    "LeaseCreate",
-    "LeaseUpdate",
-    "LeaseTerminateRequest",
-    "LeaseReleaseOversightRequest",
-    "LeaseRetryReleaseRequest",
-    "LeaseForceReleaseRequest",
-    "LeaseResponse",
-    "LeaseListResponse",
-    # Resource pool models
-    "PoolCreate",
-    "PoolReplace",
-    "PoolUpdate",
-    "PoolResponse",
-    "PoolListResponse",
-    "PoolImportRequest",
-    "PoolImportResponse",
-    "PoolImportDiff",
-    "PoolValidateResponse",
-    "PoolValidationProblem",
-    # System models
-    "HealthResponse",
-    "VersionResponse",
-    "FileInfo",
-    "InventoryInfo",
-    "SshKeyInfo",
-    "AnsibleReadinessResponse",
+    "RelayCreate",
+    "RelayListResponse",
+    "RelayResponse",
+    "RelayTokenRotate",
+    "RelayUpdate",
 ]

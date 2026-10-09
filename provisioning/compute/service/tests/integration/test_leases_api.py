@@ -1,93 +1,88 @@
-"""Integration tests for the VM leases API — a view over the ledger.
+"""The compute family's lease surface, over the real API and the canonical client.
 
-The lease is the temporal tail of a capacity-ledger reservation; the
-``/api/v1/leases`` surface attaches lease tails to live reservations and
-reads them back in lease vocabulary.
+One surface serves every offering mode's leases as the neutral ``LeaseView``:
+get, list, terminate, release-oversight, retry-release, and force-release. A
+lease is the tail of a capacity reservation and is addressed by its reservation
+id. No route writes one: commit records its window and the deal's escrow, and
+provisioning records its target when the fulfillment becomes active. A
+storefront reads and terminates its own leases as the seller; the list and the
+release controls are the administrator's.
 
-Coverage:
-  - POST /api/v1/leases: attaches to the reservation's reservation;
-    404 when no live reservation matches
-  - GET /api/v1/leases: list (only reservations carrying a lease tail)
-  - GET /api/v1/leases/{id} and /by-escrow/{uid}
-  - POST /api/v1/system/check-leases: one watchdog cycle over the ledger
-
-What is NOT covered here (unit test jurisdiction):
-  - CapacityLedgerService transition logic
-  - LeaseLifecycleService grace period and force logic
+The ledger's write-once and truncation rules are proven in ``kit/site``; the
+lifecycle's paths by aggregate state in the service's unit suite and in
+``test_lease_release_api.py``. This covers the routes, their roles, their
+refusals, and the wire shape.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from compute_provisioning_service import container as _container_module
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport
+from market_fulfillment import SettlementRecord, SettlementRecordState
 
-from vm_provisioning_operator import ProvisioningError
+from compute_provisioning_client import (
+    ComputeProvisioningAuthenticationError,
+    ComputeProvisioningClient,
+    ComputeProvisioningError,
+)
+from compute_provisioning_contracts import (
+    LeaseForceRelease,
+    LeaseReleaseOversight,
+    LeaseRetryRelease,
+    LeaseState,
+    LeaseTermination,
+)
+from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.main import app, provisioning_route_table
+
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+_END = datetime(2099, 1, 1, tzinfo=timezone.utc)
+_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def _future_dt(hours: int = 2) -> str:
-    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
-
-
-def _past_dt(seconds: int = 10) -> str:
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
-
-
-def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
-    """Reserve capacity in the ledger the way a storefront deal does."""
+def _seeded():
+    """The site ledger, with the KVM host the lease tests reserve on."""
     ledger = _container_module.resolved_capacity_ledger_service
-    if "compute-kvm1-001" not in {
-        r["resource_id"] for r in ledger.list_resources()
-    }:
+    if "compute-kvm1-001" not in {r["resource_id"] for r in ledger.list_resources()}:
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,
-            attributes={"vm_host": "kvm1"},
+            host_id="kvm1",
+            attributes={},
+            pool_id="default",
         )
+    return ledger
+
+
+def _committed(escrow_uid: str, *, offering_mode: str = "vm", end: datetime = _END) -> str:
+    """A storefront's committed reservation: commit begins its lease."""
+    ledger = _seeded()
     reserved = ledger.reserve(
-        claim={
-            "executor_kind": "vm",
-            "gpu_count": gpu_count,
-            "vm_host": "kvm1",
-        },
+        claim={"offering_mode": offering_mode, "gpu_count": 1, "host_id": "kvm1"},
         deal_ref={"escrow_uid": escrow_uid},
     )
     assert reserved is not None
-    return reserved
+    ledger.commit(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_start_utc=_START.isoformat(),
+        lease_end_utc=end.isoformat(),
+    )
+    return reserved["capacity_reservation_id"]
 
 
-async def _register(client, escrow_uid: str, **overrides) -> dict:
-    reserved = _reserve(escrow_uid)
-    body = {
-        "resource_id": "compute-kvm1-001",
-        "capacity_reservation_id": reserved["capacity_reservation_id"],
-        "escrow_uid": escrow_uid,
-        "vm_host": "kvm1",
-        "vm_target": f"tenant-{escrow_uid[-4:]}",
-        "lease_end_utc": _future_dt(),
-    }
-    body.update(overrides)
-    return await client.register_lease(**body)
-
-
-def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: str | None = None) -> str:
-    """Persist a `SettlementRecord` in `active` state for a reservation.
-
-    VM release now begins durable fulfillment teardown rather than
-    submitting an Ansible job straight from the reservation's own
-    `vm_host`/`vm_target` — it needs a fulfillment aggregate to resolve a
-    `fulfillment_id` from. This file's tests exercise the lease API as an
-    opaque surface over the ledger (see module docstring), so this helper
-    fabricates the minimum aggregate release needs rather than running a
-    full schedule/begin-fulfillment flow.
-    """
-
-    from market_fulfillment import SettlementRecord, SettlementRecordState
-
-    fulfillment_id = fulfillment_id or f"fulfillment-{capacity_reservation_id[:8]}"
-    session_factory = _container_module.resolved_session_factory
-    with session_factory() as db:
+def _aggregate(
+    capacity_reservation_id: str,
+    state: str,
+    fulfillment_id: str,
+    *,
+    metadata: dict | None = None,
+) -> None:
+    """A fulfillment aggregate as convergence would leave it."""
+    with _container_module.resolved_session_factory() as db, db.begin():
         db.add(
             SettlementRecord(
                 capacity_reservation_id=capacity_reservation_id,
@@ -95,351 +90,248 @@ def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: 
                 market="vms",
                 scheduling_requirements={"resource_kind": "vm"},
                 settlement_resource_id="kvm1",
-                pool_id="pool-1",
+                pool_id="default",
                 provider="ansible",
-                resource_attributes={"vm_host": "kvm1"},
-                fulfillment_request={
-                    "kind": "vm.fulfillment.request",
-                    "schema_version": 1,
-                    "payload": {},
-                },
+                resource_host_id="kvm1",
+                resource_attributes={},
                 prepared_teardown_operation={
                     "kind": "vm.ansible.teardown.v1",
                     "schema_version": 1,
                     "payload": {},
                 },
-                provider_metadata={"current_job_id": "job-1"},
-                state=SettlementRecordState.active.value,
+                provider_metadata=metadata or {},
+                state=state,
             )
         )
-        db.commit()
-    return fulfillment_id
 
 
-def _converge_fulfillment_teardown(fulfillment_id: str, *, failed: bool = False) -> None:
-    """Simulate `FulfillmentConvergenceWatchdog` having confirmed teardown.
-
-    That worker (dispatch/retry/status convergence) has its own test
-    suite; these tests only need its end state.
-    """
-
-    from market_fulfillment import SettlementRecord, SettlementRecordState
-
-    session_factory = _container_module.resolved_session_factory
-    with session_factory() as db:
+def _set_aggregate(fulfillment_id: str, state: str) -> None:
+    with _container_module.resolved_session_factory() as db, db.begin():
         record = (
             db.query(SettlementRecord)
             .filter(SettlementRecord.fulfillment_id == fulfillment_id)
             .one()
         )
-        if failed:
-            record.state = SettlementRecordState.teardown_failed.value
-            record.failure_reason = "provider_reported_failure"
-            record.failure_message = "cleanup script missing"
-        else:
-            record.state = SettlementRecordState.torn_down.value
-        db.commit()
+        record.state = state
 
 
-class TestCreateLease:
-    async def test_create_attaches_to_the_reservation(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-attach-1")
-        assert lease["status"] == "active"
-        assert lease["escrow_uid"] == "escrow-attach-1"
-        assert lease["vm_host"] == "kvm1"
-
-        ledger = _container_module.resolved_capacity_ledger_service
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "leased"
-        assert reservation["vm_target"] == lease["vm_target"]
-        assert reservation["executor_kind"] == "vm"
-        assert reservation["executor_target"] == lease["vm_target"]
-        assert reservation["executor_ref"] == {"vm_host": "kvm1"}
-
-    async def test_create_unknown_reservation_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.register_lease(
-                resource_id="compute-kvm1-001",
-                capacity_reservation_id="not-a-ledger-reservation",
-                escrow_uid="escrow-ghost",
-                vm_host="kvm1",
-                vm_target="tenant-ghost",
-                lease_end_utc=_future_dt(),
-            )
-        assert exc_info.value.status_code == 404
+@pytest_asyncio.fixture
+async def seller(client_and_queue):
+    """The storefront's view: the family client signed as the seller."""
+    async with ComputeProvisioningClient(
+        "http://test",
+        signer=STOREFRONT_SIGNER,
+        caller_role="seller",
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=ASGITransport(app=app),
+    ) as client:
+        yield client
 
 
-class TestListLeases:
-    async def test_empty_returns_empty_list(self, client_and_queue):
-        client, _ = client_and_queue
-        result = await client.list_leases()
-        assert result["total"] == 0
-        assert result["leases"] == []
+class TestWrites:
+    def test_no_route_writes_a_lease(self):
+        """A lease's window is its commit's, moved only by the site's
+        truncation, and its target is recorded at activation."""
+        for method in ("POST", "PATCH"):
+            for path in ("/api/v1/contract/leases", "/api/v1/contract/leases/r-1"):
+                with pytest.raises(ValueError):
+                    provisioning_route_table.resolve(method, path, {})
 
-    async def test_lists_attached_leases_only(self, client_and_queue):
-        client, _ = client_and_queue
-        await _register(client, "escrow-list-1")
-        _reserve("escrow-no-lease")  # a bare hold has no lease tail
-        result = await client.list_leases()
-        assert result["total"] == 1
-        assert result["leases"][0]["escrow_uid"] == "escrow-list-1"
-
-    async def test_filter_by_escrow_uid(self, client_and_queue):
-        client, _ = client_and_queue
-        await _register(client, "escrow-filter-1")
-        await _register(client, "escrow-filter-2")
-        result = await client.list_leases(escrow_uid="escrow-filter-2")
-        assert result["total"] == 1
-        assert result["leases"][0]["escrow_uid"] == "escrow-filter-2"
-
-
-class TestGetLease:
-    async def test_get_by_id(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-get-1")
-        fetched = await client.get_lease(lease["id"])
-        assert fetched["escrow_uid"] == "escrow-get-1"
-        assert fetched["status"] == "active"
-
-    async def test_get_nonexistent_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease("missing-lease")
-        assert exc_info.value.status_code == 404
-
-    async def test_get_by_escrow(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-by-escrow-1")
-        fetched = await client.get_lease_by_escrow("escrow-by-escrow-1")
-        assert fetched["id"] == lease["id"]
-
-    async def test_get_by_escrow_nonexistent_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease_by_escrow("escrow-missing")
-        assert exc_info.value.status_code == 404
-
-
-class TestCheckLeasesEndpoint:
-    async def test_check_leases_releases_expired_ledger_lease(self, client_and_queue):
-        """The on-demand cycle submits release for an expired lease, and a
-        second cycle -- after the fulfillment aggregate converges to
-        `torn_down` (simulated here; `FulfillmentConvergenceWatchdog` is
-        covered by its own tests) -- releases it in the ledger and emits
-        the capacity event (deal notification is best-effort and the test
-        storefront is unreachable — that must not block the release)."""
-        client, _ = client_and_queue
-        lease = await _register(
-            client, "escrow-expired-1", lease_end_utc=_past_dt(),
-        )
-        fulfillment_id = _create_active_fulfillment(lease["capacity_reservation_id"])
-
-        first = await client.check_leases()
-        assert first.get("checked", 0) >= 1
-
-        _converge_fulfillment_teardown(fulfillment_id)
-        result = await client.check_leases()
-        assert result.get("released", 0) >= 1
-
-        ledger = _container_module.resolved_capacity_ledger_service
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "released"
-        events, _ = ledger.events_after(0)
-        assert events[-1]["kind"] == "released"
-
-
-class TestUpdateLease:
-    async def test_patch_lease_end_utc(self, client_and_queue):
-        """PATCH updates lease_end_utc without changing the reservation state."""
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-patch-1")
-        new_end = _future_dt(hours=4)
-
-        updated = await client.update_lease(lease["id"], lease_end_utc=new_end)
-
-        assert updated["id"] == lease["id"]
-        assert updated["status"] == "active"  # state unchanged
-        ledger = _container_module.resolved_capacity_ledger_service
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "leased"
-        # The new end time was stored (compare prefix to avoid TZ formatting differences)
-        assert reservation["lease_end_utc"].startswith(new_end[:19])
-
-    async def test_patch_vm_host_and_vm_target(self, client_and_queue):
-        """PATCH can update vm_host and vm_target for migrated VMs."""
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-patch-2")
-
-        updated = await client.update_lease(
-            lease["id"], vm_host="kvm2", vm_target="migrated-vm",
-        )
-
-        assert updated["vm_host"] == "kvm2"
-        assert updated["vm_target"] == "migrated-vm"
-        assert updated["status"] == "active"
-
-    async def test_patch_through_generic_executor_lease_service(
-        self, client_and_queue, monkeypatch,
+    async def test_a_lease_reports_the_target_its_activation_recorded(
+        self, client_and_queue, seller
     ):
-        """The VM controller can update through the executor-neutral service."""
-        from compute_provisioning.executor_leases import ExecutorLeaseService
-        from market_site.authority import LedgerSiteAuthority
+        reservation_id = _committed("0xactivated")
+        ledger = _container_module.resolved_capacity_ledger_service
+        with _container_module.resolved_session_factory() as db:
+            ledger.record_executor_target_in_session(db, reservation_id, "tenant-guest-1")
+            db.commit()
 
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-patch-generic")
-        generic_leases = ExecutorLeaseService(
-            LedgerSiteAuthority(_container_module.resolved_capacity_ledger_service),
-            executor_kind="vm",
-        )
-        monkeypatch.setattr(
-            _container_module,
-            "resolved_lease_lifecycle_service",
-            generic_leases,
+        lease = await seller.get_lease(reservation_id)
+
+        assert (lease.offering_mode, lease.status, lease.executor_target) == (
+            "vm",
+            LeaseState.ACTIVE,
+            "tenant-guest-1",
         )
 
-        updated = await client.update_lease(
-            lease["id"],
-            vm_host="kvm-generic",
-            vm_target="generic-migrated-vm",
+    async def test_a_hold_placed_before_the_escrow_is_found_by_it_once_committed(
+        self, client_and_queue
+    ):
+        """An acceptance hold is reserved before the deal has an escrow; the
+        commit that makes it the deal's lease records the escrow, so the
+        site's escrow filter finds it."""
+        clients, _ = client_and_queue
+        ledger = _seeded()
+        hold = ledger.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+            deal_ref={"listing_id": "listing-hold"},
+        )
+        reservation_id = hold["capacity_reservation_id"]
+
+        ledger.commit(
+            capacity_reservation_id=reservation_id,
+            lease_end_utc=_END.isoformat(),
+            deal_ref={"escrow_uid": "0xlate-escrow"},
         )
 
-        assert updated["vm_host"] == "kvm-generic"
-        assert updated["vm_target"] == "generic-migrated-vm"
+        found = await clients.site.list_reservations(escrow_uid="0xlate-escrow")
+        assert [row["capacity_reservation_id"] for row in found] == [reservation_id]
+
+    def test_there_is_no_lease_update_route(self):
+        """A lease's end moves only through the site's truncation, and its
+        executor identity and handles are fixed once recorded."""
+        for path in ("/api/v1/contract/leases/r-1", "/api/v1/leases/r-1"):
+            with pytest.raises(ValueError):
+                provisioning_route_table.resolve("PATCH", path, {})
 
 
-    async def test_patch_nonexistent_lease_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.update_lease("no-such-lease", lease_end_utc=_future_dt())
-        assert exc_info.value.status_code == 404
-
-    async def test_patch_backdated_lease_end_triggers_watchdog(self, client_and_queue):
-        """Setting lease_end_utc to the past causes the next watchdog cycle
-        to submit a vm_remove job (or, with no job_service wired, release
-        directly in test mode)."""
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-patch-backdate")
-        _create_active_fulfillment(lease["capacity_reservation_id"])
-
-        await client.update_lease(lease["id"], lease_end_utc=_past_dt())
-        result = await client.check_leases()
-
-        assert result.get("released", 0) + result.get("checked", 0) >= 1
+class TestReads:
+    async def test_a_lease_is_read_by_its_reservation_and_a_hold_is_not_a_lease(
+        self, client_and_queue, seller
+    ):
+        reservation_id = _committed("0xget")
         ledger = _container_module.resolved_capacity_ledger_service
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] in ("released", "releasing")
-        if reservation["state"] == "releasing":
-            assert reservation["release_job_id"] == reservation["vm_remove_job_id"]
-
-
-class TestReleaseOversight:
-    async def test_release_oversight_marks_unmanaged_without_releasing_capacity(self, client_and_queue):
-        """release-oversight marks unmanaged and leaves capacity held."""
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-unmanaged-1")
-
-        unmanaged = await client.release_lease_oversight(
-            lease["id"], reason="operator will manage manually",
+        hold = ledger.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+            deal_ref={"escrow_uid": "0xhold"},
         )
 
-        assert unmanaged["status"] == "unmanaged"
-        ledger = _container_module.resolved_capacity_ledger_service
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "unmanaged"
-        snapshot = ledger.snapshot()
-        resource = next(r for r in snapshot if r["resource_id"] == "compute-kvm1-001")
-        assert resource["available_units"] < resource["value"]
+        assert (await seller.get_lease(reservation_id)).capacity_reservation_id == reservation_id
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await seller.get_lease(hold["capacity_reservation_id"])
+        assert refused.value.status_code == 404
 
-    async def test_release_oversight_does_not_emit_capacity_event(self, client_and_queue):
-        client, _ = client_and_queue
-        ledger = _container_module.resolved_capacity_ledger_service
+    async def test_the_list_is_the_operator_s_and_filters_by_mode_and_status(
+        self, client_and_queue, seller
+    ):
+        clients, _ = client_and_queue
+        vm = _committed("0xlist-vm")
+        bare_metal = _committed("0xlist-bm", offering_mode="bare_metal")
 
-        lease = await _register(client, "escrow-unmanaged-event")
-        _, version_before = ledger.events_after(0)
+        everything = await clients.family.list_leases()
+        bare_metal_only = await clients.family.list_leases(offering_mode="bare_metal")
+        active = await clients.family.list_leases(status=LeaseState.ACTIVE)
 
-        await client.release_lease_oversight(lease["id"], reason="manual ops")
-
-        events, _ = ledger.events_after(version_before)
-        kinds = [e["kind"] for e in events]
-        assert "released" not in kinds
-
-    async def test_release_oversight_nonexistent_returns_404(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.release_lease_oversight("no-such-lease", reason="manual ops")
-        assert exc_info.value.status_code == 404
-
-    async def test_release_oversight_releasing_returns_409(self, client_and_queue):
-        """release-oversight on a releasing reservation returns 409."""
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-cancel-releasing", lease_end_utc=_past_dt())
-        ledger = _container_module.resolved_capacity_ledger_service
-        # Manually transition to releasing (simulating watchdog having fired)
-        ledger.begin_releasing(lease["capacity_reservation_id"], vm_remove_job_id="job-in-flight")
-
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.release_lease_oversight(lease["id"], reason="manual ops")
-        assert exc_info.value.status_code == 409
+        assert {vm, bare_metal} <= {lease.capacity_reservation_id for lease in everything.leases}
+        assert [lease.capacity_reservation_id for lease in bare_metal_only.leases] == [bare_metal]
+        assert all(lease.status == LeaseState.ACTIVE for lease in active.leases)
+        with pytest.raises(ComputeProvisioningAuthenticationError):
+            await seller.list_leases()
 
 
+class TestRelease:
+    async def test_a_storefront_terminates_its_lease_into_teardown(
+        self, client_and_queue, seller
+    ):
+        reservation_id = _committed("0xterm")
+        _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-term")
 
-class TestAdminLeaseRepair:
-    async def test_retry_release_moves_release_failed_back_to_releasing(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-retry-release", lease_end_utc=_past_dt())
-        fulfillment_id = _create_active_fulfillment(lease["capacity_reservation_id"])
-        ledger = _container_module.resolved_capacity_ledger_service
-        ledger.update_reservation_state(
-            lease["capacity_reservation_id"],
-            state="release_failed",
-            failure_reason="vm_remove_failed",
-            failure_message="cleanup script missing",
+        lease = await seller.terminate_lease(reservation_id, LeaseTermination())
+
+        assert (lease.status, lease.release_job_id) == (
+            LeaseState.RELEASING,
+            "fulfillment-term",
         )
 
-        retried = await client.retry_lease_release(lease["id"], reason="operator retry")
+    async def test_check_leases_releases_an_expired_lease_once_torn_down(
+        self, client_and_queue
+    ):
+        clients, _ = client_and_queue
+        reservation_id = _committed(
+            "0xexpire", end=datetime.now(timezone.utc) - timedelta(seconds=5)
+        )
+        _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-exp")
 
-        assert retried["status"] == "releasing"
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "releasing"
-        assert reservation["vm_remove_job_id"] == fulfillment_id
+        await clients.family.check_leases()
+        _set_aggregate("fulfillment-exp", SettlementRecordState.torn_down.value)
+        await clients.family.check_leases()
 
-    async def test_retry_release_non_failed_returns_409(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-retry-active")
+        assert (await clients.family.get_lease(reservation_id)).status == LeaseState.RELEASED
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.retry_lease_release(lease["id"], reason="operator retry")
-        assert exc_info.value.status_code == 409
+    async def test_release_oversight_hands_a_lease_to_the_operator(self, client_and_queue):
+        clients, _ = client_and_queue
+        reservation_id = _committed("0xoversight")
 
-    async def test_force_release_unmanaged_releases_capacity(self, client_and_queue):
-        client, _ = client_and_queue
-        lease = await _register(client, "escrow-force-unmanaged")
-        ledger = _container_module.resolved_capacity_ledger_service
-        await client.release_lease_oversight(lease["id"], reason="manual ops")
-        _, version_before = ledger.events_after(0)
-
-        released = await client.force_release_lease(
-            lease["id"], reason="host inspected", evidence="VM absent",
+        lease = await clients.family.release_lease_oversight(
+            reservation_id, LeaseReleaseOversight(reason="manual inspection")
         )
 
-        assert released["status"] == "force_released"
-        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "force_released"
-        assert reservation["failure_reason"] == "admin_force_release"
-        events, _ = ledger.events_after(version_before)
-        assert [event["kind"] for event in events] == ["released"]
-        snapshot = ledger.snapshot()
-        resource = next(r for r in snapshot if r["resource_id"] == "compute-kvm1-001")
-        assert resource["available_units"] == resource["value"]
+        assert lease.status == LeaseState.UNMANAGED
+        snapshot = _container_module.resolved_capacity_ledger_service.snapshot()
+        assert snapshot[0]["available_units"] < snapshot[0]["value"]
 
-    async def test_force_release_invalid_state_returns_409(self, client_and_queue):
-        client, _ = client_and_queue
-        reserved = _reserve("escrow-force-reserved")
+    async def test_release_oversight_of_a_releasing_lease_is_a_conflict(
+        self, client_and_queue
+    ):
+        clients, _ = client_and_queue
+        reservation_id = _committed("0xoversight-releasing")
+        _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-ov")
+        await clients.family.terminate_lease(reservation_id, LeaseTermination())
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.force_release_lease(
-                reserved["capacity_reservation_id"], reason="not a lease yet",
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await clients.family.release_lease_oversight(
+                reservation_id, LeaseReleaseOversight(reason="too late")
             )
-        assert exc_info.value.status_code == 409
+
+        assert refused.value.status_code == 409
+
+    async def test_retry_release_adopts_a_teardown_that_later_succeeded(
+        self, client_and_queue
+    ):
+        clients, _ = client_and_queue
+        reservation_id = _committed("0xretry")
+        _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-retry")
+        await clients.family.terminate_lease(reservation_id, LeaseTermination())
+        _set_aggregate("fulfillment-retry", SettlementRecordState.teardown_failed.value)
+        await clients.family.check_leases()
+        assert (await clients.family.get_lease(reservation_id)).status == (
+            LeaseState.RELEASE_FAILED
+        )
+
+        _set_aggregate("fulfillment-retry", SettlementRecordState.torn_down.value)
+        lease = await clients.family.retry_lease_release(reservation_id, LeaseRetryRelease())
+
+        assert lease.status == LeaseState.RELEASED
+
+    async def test_retry_release_of_a_lease_that_has_not_failed_is_a_conflict(
+        self, client_and_queue
+    ):
+        clients, _ = client_and_queue
+        reservation_id = _committed("0xretry-active")
+
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await clients.family.retry_lease_release(reservation_id, LeaseRetryRelease())
+
+        assert refused.value.status_code == 409
+
+    async def test_the_release_controls_are_the_operator_s(self, client_and_queue, seller):
+        reservation_id = _committed("0xcontrols")
+
+        for call in (
+            lambda: seller.retry_lease_release(reservation_id, LeaseRetryRelease()),
+            lambda: seller.force_release_lease(
+                reservation_id, LeaseForceRelease(reason="not mine")
+            ),
+            lambda: seller.release_lease_oversight(
+                reservation_id, LeaseReleaseOversight(reason="not mine")
+            ),
+        ):
+            with pytest.raises(ComputeProvisioningAuthenticationError):
+                await call()
+
+    async def test_force_release_frees_an_unmanaged_lease(self, client_and_queue):
+        clients, _ = client_and_queue
+        reservation_id = _committed("0xforce")
+        _aggregate(reservation_id, SettlementRecordState.active.value, "fulfillment-force")
+        await clients.family.release_lease_oversight(
+            reservation_id, LeaseReleaseOversight(reason="manual inspection")
+        )
+
+        lease = await clients.family.force_release_lease(
+            reservation_id, LeaseForceRelease(reason="host verified empty", evidence="console")
+        )
+
+        assert (lease.status, lease.failure_reason) == (
+            LeaseState.FORCE_RELEASED,
+            "admin_force_release",
+        )

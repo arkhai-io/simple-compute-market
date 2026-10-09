@@ -75,8 +75,9 @@
       every earlier run answered `401`. It did not, on its own, clear this
       refusal.
 - [ ] 3.2 Correct it here if it is a marketplace defect or another harness
-      omission; record it for `add-bare-metal-hosted-settlement` if it belongs to
-      the hosted matrix. A development run qualifies no lane either way.
+      omission. (`settle-through-arkhai-payments` removed hosted settlement on 2026-10-08, and
+      `add-bare-metal-hosted-settlement` was archived as superseded, so there is no
+      hosted matrix to record it for.) A development run qualifies no lane either way.
 
       The refusal is `buyer_auth._verify`: the request's already-authenticated
       principal is not the buyer the agreement records, or is not carrying the
@@ -100,10 +101,36 @@
       currently reach it. Suites: core buyer 115, storefront client 30, core
       storefront 148, e2e unit 97, VM buyer 196, VM storefront 941, bare-metal
       buyer 11, bare-metal storefront 122.
+- [ ] 4.2 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. This change has no row in
+      `openspec/changes/README.md`; add one under the campaign that owns it with its status
+      and acceptance boundary, or record here why it stands outside every campaign.
 
+- [ ] 4.3 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=name-unverifiable-responses` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 4.4 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 4.5 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
 | A fail-closed refusal names the status and whether the response was authenticated, and never the body | `openspec/specs/storefront-publication/spec.md` (promote at synchronization) |
-| A development run authenticates to the private registry it configures | `docs/development/HOSTED_CREDENTIAL_PAYLOAD.md` |
+| A development run authenticates to the private registry it configures | hosted credential payload guide (removed with hosted settlement by `settle-through-arkhai-payments`) |

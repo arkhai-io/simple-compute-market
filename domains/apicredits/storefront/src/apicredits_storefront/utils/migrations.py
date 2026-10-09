@@ -35,7 +35,7 @@ def _migrate_issuance_evidence(conn: sqlite3.Connection) -> None:
           mechanism TEXT NOT NULL,
           agreement_digest TEXT NOT NULL,
           settlement_ref TEXT UNIQUE,
-          status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed')),
+          status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed', 'refunding', 'refunded')),
           evidence TEXT NOT NULL
         )
     """)
@@ -48,6 +48,7 @@ def _migrate_issuance_evidence(conn: sqlite3.Connection) -> None:
           public_result TEXT NOT NULL DEFAULT '{}',
           credentials_ref TEXT,
           reason TEXT,
+          delivery_started_at TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )

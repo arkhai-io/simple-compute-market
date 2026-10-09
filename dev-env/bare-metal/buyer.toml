@@ -1,0 +1,3 @@
+# Present because the bare-metal stack's buyer service requires a config file.
+# The end-to-end lane drives the buyer through typed clients and never starts
+# that service, so this file configures nothing.

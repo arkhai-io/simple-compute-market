@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 from arkhai_vms import make_vm_provision_terms
 from fastapi import HTTPException
 from market_identity import Ed25519Signer
@@ -54,13 +55,11 @@ def _thread() -> dict:
     }
 
 
-def _body(*, buyer=_BUYER, ssh_public_key: str = _ACCEPTED_SSH) -> VmSettleRequest:
+def _body(*, buyer=_BUYER) -> VmSettleRequest:
     return VmSettleRequest(
         negotiation_id="neg-1",
         buyer_principal=buyer,
         buyer_evm_address="0x" + "33" * 20,
-        ssh_public_key=ssh_public_key,
-        chain_name="anvil",
     )
 
 
@@ -87,34 +86,25 @@ async def test_settlement_start_rejects_cross_buyer_substitution() -> None:
     db.load_escrow.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_settlement_start_rejects_ssh_key_substitution(monkeypatch) -> None:
-    db = SimpleNamespace(
-        load_negotiation_thread_row=AsyncMock(return_value=_thread()),
-        load_escrow=AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        buyer_auth,
-        "_verify",
-        AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
-    )
+@pytest.mark.parametrize(
+    "restated",
+    [
+        pytest.param({"ssh_public_key": "ssh-ed25519 AAAAsubstituted attacker@test"}, id="key"),
+        pytest.param({"chain_name": "mainnet"}, id="chain"),
+    ],
+)
+def test_settlement_cannot_restate_negotiated_terms(restated) -> None:
+    """The SSH key and chain are read from the accepted negotiation. A request
+    carrying either is refused before any lookup, whatever its value."""
+    body = {
+        "negotiation_id": "neg-1",
+        "buyer_principal": _BUYER.model_dump(mode="json"),
+        "buyer_evm_address": "0x" + "33" * 20,
+        **restated,
+    }
 
-    monkeypatch.setattr(
-        _container,
-        "resolved_settlement_composition",
-        SimpleNamespace(
-            seller_stages=build_vm_storefront_domain().settlement.seller_stages,
-        ),
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        await _controller(db).settle_escrow(
-            "escrow-1",
-            _body(ssh_public_key="ssh-ed25519 AAAAsubstituted attacker@test"),
-            _request(),
-        )
-
-    assert exc_info.value.status_code == 403
-    assert "accepted provision terms" in str(exc_info.value.detail)
+    with pytest.raises(ValidationError):
+        VmSettleRequest.model_validate(body)
 
 
 @pytest.mark.asyncio
@@ -144,7 +134,6 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
         coordinator=coordinator,
         seller_stages=build_vm_storefront_domain().settlement.seller_stages,
         mechanism_clients={"alkahest.v1": object()},
-        evidence_clients={"anvil": object()},
         local_principal=_SELLER,
     )
     monkeypatch.setattr(_container, "resolved_settlement_composition", composition)
@@ -155,7 +144,7 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
     coordinator.start.assert_awaited_once_with(
         escrow_uid="escrow-1",
         negotiation_id="neg-1",
-        mechanism_client=composition.evidence_clients["anvil"],
+        mechanism_client=composition.mechanism_clients["alkahest.v1"],
         chain_name="anvil",
         request=None,
     )

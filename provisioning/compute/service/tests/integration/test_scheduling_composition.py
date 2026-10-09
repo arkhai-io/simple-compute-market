@@ -19,8 +19,9 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.container import Container
 from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
-from market_resource_pools import PoolCreate
+from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
+from vm_provisioning_adapter.db import Base as VmBase
 from market_site.db import Base as SiteBase
 
 
@@ -28,7 +29,7 @@ def _build_container():
     """A fresh `Container` instance wired to an isolated in-memory database.
 
     `ACTIVE_PROFILES=mock` (set for this whole test run, see Makefile)
-    makes `build_vm_runtime` compose `ProgrammableMockAnsibleService`
+    makes `build_vm_runtime` compose the mock Ansible runner
     instead of a real Ansible client, so resolving the container's VM
     runtime -- required to resolve `resource_pool_service`'s Ansible pool
     config handler -- performs no real network I/O.
@@ -40,6 +41,7 @@ def _build_container():
     )
     Base.metadata.create_all(bind=engine)
     PoolsBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
@@ -67,16 +69,18 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
+    # The real container supplies the providers' host requirement, and the
+    # Ansible provider delivers through a host, so the declaration names one.
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-1", "market": "vms"},
     )
     assert reservation is not None
@@ -113,24 +117,24 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
     pool_service.create_pool(
         PoolCreate(
             id="pool-b", label="Pool B", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     ledger.register_resource(
         resource_id="r2", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-b",
+        total_units=10, enabled=True, pool_id="pool-b", host_id="kvm2",
     )
 
     # Schedule a first reservation for real (no injected failure) so the
@@ -142,7 +146,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     # real write, not a same-resource no-op, so its rollback is actually
     # exercised.
     first_reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-warmup", "market": "vms"},
     )
     assert first_reservation is not None
@@ -153,7 +157,7 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     )
 
     reservation = ledger.reserve(
-        claim={"executor_kind": "vm", "gpu_count": 1},
+        claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"agreement_id": "composition-rollback-1", "market": "vms"},
     )
     assert reservation is not None

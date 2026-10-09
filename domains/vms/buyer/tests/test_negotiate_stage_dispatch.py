@@ -8,8 +8,8 @@ from market_config.config_loader import ChainConfig
 from market_core.schemas import RateValue, derive_settlement_option_id
 from typer.testing import CliRunner
 
-from domains.vms.buyer.cli import app
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.cli import app
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 from identity_helpers import seller_principals
 from test_buy_resume_cli import _RESOLVED
 
@@ -17,14 +17,14 @@ from test_buy_resume_cli import _RESOLVED
 @pytest.fixture
 def negotiation(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_fresh_buyer_identity", lambda: _RESOLVED)
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_registry_authorities", lambda urls: {
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_fresh_buyer_identity", lambda: _RESOLVED)
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_registry_authorities", lambda urls: {
         url: RegistryAuthority(authority="registry", principals=seller_principals()) for url in urls
     })
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_indexer_urls_for_schema", lambda _schema, **kw: list(kw["registry_authorities"]))
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_registry_api_keys", lambda: {})
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_negotiation_config", lambda: (None, None))
-    monkeypatch.setattr("domains.vms.buyer.negotiate_cli.resolve_negotiation_config", lambda: (None, None))
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_indexer_urls_for_schema", lambda _schema, **kw: list(kw["registry_authorities"]))
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_registry_api_keys", lambda: {})
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_negotiation_config", lambda: (None, None))
+    monkeypatch.setattr("arkhai_vms_buyer.negotiate_cli.resolve_negotiation_config", lambda: (None, None))
     captured = {}
 
     def negotiate(**fields):
@@ -34,7 +34,7 @@ def negotiation(monkeypatch, tmp_path):
             reason="controlled stop after opening", rounds=0,
         )
 
-    monkeypatch.setattr("domains.vms.buyer.negotiate_cli.negotiate_with_seller", negotiate)
+    monkeypatch.setattr("arkhai_vms_buyer.negotiate_cli.negotiate_with_seller", negotiate)
     return captured
 
 
@@ -62,20 +62,20 @@ def _listing(mechanism):
 
 def _configure(monkeypatch, mechanism, wallet=True):
     listing = _listing(mechanism)
-    monkeypatch.setattr("domains.vms.buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: listing)
-    monkeypatch.setattr("domains.vms.buyer.settlement_composition.load_user_config", lambda: {
+    monkeypatch.setattr("arkhai_vms_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: listing)
+    monkeypatch.setattr("arkhai_vms_buyer.settlement_composition.load_user_config", lambda: {
         "Settlement": {
             "schema_version": 1, "priority": [mechanism],
             "alkahest": {"enabled": mechanism == "alkahest.v1"},
             "arkhai_payments": {"enabled": mechanism == "arkhai.payments.v1"},
         }
     })
-    monkeypatch.setattr("domains.vms.buyer.common.chain_by_name", lambda name: ChainConfig(
+    monkeypatch.setattr("arkhai_vms_buyer.common.chain_by_name", lambda name: ChainConfig(
         name=name, rpc_url="http://rpc", chain_id=31337,
     ))
-    monkeypatch.setattr("domains.vms.buyer.common.resolve_buyer_wallet", lambda: ("address", "key") if wallet else (None, None))
-    monkeypatch.setattr("domains.vms.buyer.settlement_stages.resolve_token", lambda *a, **kw: SimpleNamespace(decimals=2))
-    monkeypatch.setattr("domains.vms.buyer.arkhai_payments.load_user_config", lambda: {
+    monkeypatch.setattr("arkhai_vms_buyer.common.resolve_buyer_wallet", lambda: ("address", "key") if wallet else (None, None))
+    monkeypatch.setattr("arkhai_vms_buyer.settlement_stages.resolve_token", lambda *a, **kw: SimpleNamespace(decimals=2))
+    monkeypatch.setattr("arkhai_vms_buyer.arkhai_payments.load_user_config", lambda: {
         "vms": {"payer_account": "11111111-1111-4111-8111-111111111111"},
     })
     return listing

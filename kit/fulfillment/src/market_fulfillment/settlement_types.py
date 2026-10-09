@@ -57,7 +57,7 @@ class SettlementRequirement(BaseModel):
     ``dimensions`` At least one positive dimension is required.
     """
 
-    executor_kind: str = Field(
+    offering_mode: str = Field(
         min_length=1,
         description="Explicit offering mode requested by the capacity reservation.",
     )
@@ -94,12 +94,13 @@ class SettlementCandidate(BaseModel):
     enabled: bool = True
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
+    host_id: str | None = None
 
 
 class SettlementResource(BaseModel):
     """The selected physical resource in a Capacity Settlement Assignment."""
 
-    executor_kind: str = Field(
+    offering_mode: str = Field(
         min_length=1,
         description="Explicit offering mode authorized by the selected pool.",
     )
@@ -108,6 +109,10 @@ class SettlementResource(BaseModel):
     resource_kind: str
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
+    # The host the selected resource is delivered through, when it has one.
+    # A provider that executes on a host reads it here, never from
+    # ``attributes``: the declaration carries it as its own field.
+    host_id: str | None = None
     # The reservation's own committed dimensions (see SettlementRequirement
     # .dimensions), carried forward from scheduling so a provider can
     # derive request-shape fields (VM GPU/CPU/RAM/disk, for example) from

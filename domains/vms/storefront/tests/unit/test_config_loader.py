@@ -8,9 +8,12 @@ dicts or temp files.
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
+import tomllib
 from dynaconf import Dynaconf
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -43,6 +46,8 @@ def test_settings_toml_provides_baseline_defaults():
     ]
     assert s.pricing.publish_priceless is False
     assert list(s.pricing.settlements) == []
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert "storefront_domains" not in packaged
     # On by default -- the projection path has parity with the local-table
     # path it supersedes. A staged/canary rollout sets this false
     # explicitly rather than relying on a default that no longer matches.
@@ -300,10 +305,48 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Layered loading: settings.toml → storefront.toml → storefront.secrets.toml.
-# Tests build a fresh dynaconf instance pointing at a tmp XDG dir to verify
-# the overlay precedence end-to-end.
+# Layered loading: settings.toml → storefront.toml → storefront.json →
+# storefront.secrets.toml. Tests build a fresh dynaconf instance pointing at a
+# tmp XDG dir to verify the overlay precedence end-to-end.
 # ---------------------------------------------------------------------------
+
+
+def test_build_settings_reads_a_rendered_json_layer_under_the_overlay(
+    tmp_path, monkeypatch
+):
+    """The runtime path a chart deployment takes: no storefront.toml, a
+    rendered storefront.json, and the Secret overlay winning over it."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    address = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    (config_dir / "storefront.json").write_text(
+        json.dumps(
+            {
+                "port": 8001,
+                "log_level": "DEBUG",
+                "Wallet": {"address": address},
+                "Chains": {"anvil": {"chain_id": 31337, "rpc_url": "http://public:8545"}},
+            }
+        )
+    )
+    (config_dir / "storefront.secrets.toml").write_text(
+        '[chains.anvil]\nrpc_url = "http://credentialed:8545"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.port == 8001
+    assert s.log_level == "DEBUG"
+    assert agent_config.get_evm_wallet_address(s) == address
+    assert s.chains.anvil.chain_id == 31337
+    assert s.chains.anvil.rpc_url == "http://credentialed:8545"
+    # Untouched key still has its settings.toml default.
+    assert s.negotiation.policies == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
 
 
 def _build_isolated(tmp_path: Path, overlay_files: list[Path]) -> Dynaconf:
@@ -344,6 +387,35 @@ rpc_url = "http://localhost:8545"
     ]
 
 
+def test_storefront_domain_overlay_is_the_complete_explicit_selection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("STOREFRONT_STOREFRONT_DOMAINS")
+    overlay = tmp_path / "storefront.toml"
+    overlay.write_text(
+        """
+[[storefront_domains]]
+contribution = "vms"
+offering_mode = "vm"
+domain_identity = "compute.v1"
+contract_version = "1.0"
+
+[[storefront_domains]]
+contribution = "bare_metal"
+offering_mode = "bare_metal"
+domain_identity = "bare_metal.v1"
+contract_version = "1.0"
+"""
+    )
+
+    cfg = _build_isolated(tmp_path, [overlay])
+
+    assert [domain.contribution for domain in cfg.storefront_domains] == [
+        "vms",
+        "bare_metal",
+    ]
+
+
 def test_secrets_overlay_wins_over_storefront_toml(tmp_path):
     base = tmp_path / "storefront.toml"
     base.write_text("""
@@ -357,6 +429,24 @@ gemini_api_key = "secret-value"
 """)
     cfg = _build_isolated(tmp_path, [base, secret])
     assert cfg.integrations.gemini_api_key == "secret-value"
+
+
+def test_secrets_overlay_completes_public_chain_configuration(tmp_path):
+    base = tmp_path / "storefront.toml"
+    base.write_text("""
+[Chains.base_sepolia]
+chain_id = 84532
+""")
+    secret = tmp_path / "storefront.secrets.toml"
+    secret.write_text("""
+[chains.base_sepolia]
+rpc_url = "https://rpc.example.invalid"
+""")
+
+    cfg = _build_isolated(tmp_path, [base, secret])
+
+    assert cfg.chains.base_sepolia.chain_id == 84532
+    assert cfg.chains.base_sepolia.rpc_url == "https://rpc.example.invalid"
 
 
 def test_env_var_wins_over_overlay_files(tmp_path, monkeypatch):

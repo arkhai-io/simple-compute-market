@@ -51,25 +51,54 @@ Create an operator-owned inventory file outside the repository:
 host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu pool_id=whole-host-california
 ```
 
+The provisioning service registers every host entry in this file; the section
+name is yours to choose and means nothing to it. List only hosts to sell.
+
 Create a Resource Pool document outside the repository. The pool id must match
 the inventory host's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
+  - id: default
+    label: Inert default
+    provider: bare_metal.ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: []
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config: {}
   - id: whole-host-california
     label: Whole Host California
     provider: bare_metal.ansible
     enabled: true
     policy_tags:
       deliverable_modes: [bare_metal]
+      advertisable_modes: [bare_metal]
+      capacity_backing: backed
       region: California, US
     provider_config: {}
 ```
 
+The document is authoritative, and the service refuses one that does not name
+the `default` pool. Declaring it with no deliverable or advertisable mode keeps
+it inert: nothing is delivered from it or listed from it.
+
+Every pool must declare `advertisable_modes` — the offering modes its listings
+may name — and `capacity_backing`. A `backed` pool may advertise only modes it
+also delivers. The service refuses a pool document, and refuses to start, when
+an entry omits either declaration; nothing is defaulted.
+
 The bare-metal provider rejects pool-local playbook paths, inventory groups,
 credentials, and executor targets. The service-owned
-`bare_metal_playbook_path`, mounted inventory, and selected Physical Resource
-determine execution.
+`bare_metal_playbook_path`, the selected Physical Resource, and the registered
+host record it names determine execution.
+
+The mounted inventory seeds the host registry when the provisioning service
+starts with no hosts registered; it is not read at execution. A host added to it
+later must be imported (`POST /api/v1/hosts/import`) before work can be
+dispatched to it. A host's `public_host` is passed to the access playbook as a
+host variable.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver
@@ -115,8 +144,6 @@ export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
 export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
 export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
 export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
-export BARE_METAL_OFFER_EXPIRES_AT=<UTC-timestamp>
-export BARE_METAL_FULFILLMENT_DEADLINE=<UTC-timestamp>
 export BARE_METAL_MAX_DURATION_SECONDS=7200
 
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
@@ -151,39 +178,127 @@ administrator signer and exact provisioning-authority trust. The authenticated
 
 ```json
 {
-  "total_units": 1,
   "resource_type": "compute.bare-metal",
   "pool_id": "whole-host-california",
-  "capacity": {"units": 1},
+  "host_id": "host-ca-h200-01",
+  "capacity": {"units": 1, "gpu_count": 8, "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 7680},
   "attributes": {
-    "vm_host": "host-ca-h200-01",
+    "gpu_model": "H200",
+    "physical_host_id": "<provider-stable-host-id>",
+    "allocation_mode": "exclusive",
     "bare_metal_publication": {
       "enabled": true,
-      "physical_host_id": "<provider-stable-host-id>",
-      "machine_id": "host-ca-h200-01",
-      "allocation_mode": "exclusive",
-      "access_methods": ["ssh"],
-      "capabilities": {}
+      "access_methods": ["ssh"]
     }
   },
   "enabled": true
 }
 ```
 
-The URL path's Physical Resource id, `vm_host`, publication `machine_id`, and
-inventory alias are separate authority fields with the exact values shown by
-their roles; do not substitute the provider id or public IP for the inventory
-alias. Registration is independently idempotent and must complete before
-publication.
+The declaration is where the listing's hardware comes from. `capacity` holds
+exactly one `units`, which is the machine a buyer reserves, and the hardware that
+machine contains, under the compute family's names: `gpu_count`, `vcpu_count`,
+`ram_gb`, and `disk_gb`. `attributes.gpu_model` names its GPU. The listing
+publishes those values where the compute registry's filters read them, so a
+buyer asking for `gpu_model=H200 gpu_count>=8` finds it. `gpu_count` and
+`gpu_model` are required; the other quantities are optional. A capacity key
+outside those names, a `units` other than one, or a missing GPU count or model
+holds the machine's listing and is reported by name.
+
+The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
+separate fields with the exact values shown by their roles. `host_id` is the
+host's inventory alias, the first token of its line in the Ansible inventory;
+`physical_host_id` identifies the physical machine for cross-mode accounting.
+Do not substitute the provider id or public IP for the inventory alias.
+`physical_host_id` and `allocation_mode` belong at the top level of
+`attributes`, where the site authority's exclusive/shareable accounting reads
+them; `bare_metal_publication` carries only whether the machine is offered and
+how it is reached. Hardware stated anywhere else, such as a `capabilities` map
+inside `bare_metal_publication`, is not published, and the round reports it as
+ignored.
+Everything in `attributes` is published to storefronts. Registration is
+independently idempotent and must complete before publication.
 
 The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
-inspect the storefront health projection and stop if database, selected-site
-capacity, fulfillment, or the configured settlement mechanism is unavailable.
+inspect the storefront health projection and stop if database, fulfillment, or
+the configured settlement mechanism is unavailable. Each configured site is
+reported separately under `site_projections`, with its resource-pool projection
+`loaded` (with its revision and digest) or `unavailable` (with the error). A site
+that is down is reported there and does not mark the whole storefront degraded.
 
-The dedicated image includes the bare-metal publication command. Run one authenticated publication round with `bare-metal-storefront publish` after all configured sites report a fresh complete signed projection. It publishes independent typed settlement options and closes stale open listings through the common publication runner; it does not manufacture availability or substitute a different site/resource.
+The dedicated image includes the bare-metal publication command. Run one
+authenticated publication round with `bare-metal-storefront publish`, or ask the
+running storefront for one as its administrator: `POST
+/api/v1/admin/lifecycle/publication/run-cycle`, which the canonical storefront
+client calls as `admin_run_lifecycle_cycle("publication")`. Both run the same
+round and return the same report, and the storefront runs one round at a time.
+Each round:
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+- Reads every configured site's resource-pool projection through that site's
+  own trusted client, and derives one listing per Physical Resource from the
+  bare-metal view the site projects for it.
+- Lists a resource only if its pool advertises `bare_metal`, is enabled, and is
+  capacity-backed, as the Resource Pool document above declares. The listing's
+  region is the pool's `region`; a pool that states none is held and reported,
+  since the compute registry requires a region.
+- Publishes each machine's declared hardware as the listing's shape. A machine
+  whose declaration cannot be read as one is held and reported with the reason;
+  other machines in its pool are unaffected. Correcting a machine's declared
+  hardware closes its listing and publishes a successor under the new shape. A pool that
+  declares itself unbacked yields no bare-metal listing, and the round reports
+  it by name.
+- Closes a listing whose capacity declaration is disabled, or whose pool stops
+  advertising `bare_metal` or is disabled.
+- Closes a listing whose machine is leased, and reopens it once the machine is
+  free again.
+- Treats a Physical Resource moved to another pool as a new listing: the old
+  one closes and a new one is published under the new pool.
+- Leaves a listing its seller closed as it is.
+- Holds, without closing or refreshing, the listings of a site that cannot be
+  reached or whose projection is malformed, and of a pool whose declarations do
+  not resolve. The round reports each one; every other site is reconciled as
+  usual.
+- Writes every new listing locally before any registry is told of it, records
+  each registry's answer, and resends to any registry that missed a publish,
+  close, or reopen. A later round repairs a registry that was unreachable.
+
+The round prints a report of every publish, refresh, reopen, close (with its
+reason), hold, refusal, and registry repair. It publishes independent typed
+settlement options; it does not manufacture availability or substitute a
+different site or resource.
+
+`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Payments-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime registers the ready mechanisms and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+
+### Resetting the storefront database
+
+The bare-metal storefront refuses to start against a database written under a
+listing kind it can no longer decode, and names this section. Accepted
+bare-metal state is signed or pinned by content digest, so it is never rewritten
+in place, and no decoder for a retired listing kind is kept. The remedy is to
+remove the bare-metal deployment and install it fresh:
+
+1. Terminate every active bare-metal lease through the provisioning service's
+   lease API, force-releasing any whose teardown cannot complete after
+   verifying the node externally. The provisioning service outlives the reset,
+   so a lease left active there is orphaned rather than removed.
+2. `helm uninstall` the bare-metal release and delete its persistent volume
+   claims. Its registry listings go with it only if the registry belongs to
+   that release. A registry shared with other roles keeps them, and nothing in
+   a fresh storefront knows their listing ids; before uninstalling, disable the
+   bare-metal capacity declarations at the provisioning service and run one
+   `bare-metal-storefront publish` round, which closes every listing the
+   storefront tracks once its sites report no bare-metal resources.
+3. Deploy the upgrade. The provisioning service migrates its own database in
+   place. It is shared with VM fulfillment and is never reset.
+4. Install the bare-metal release fresh, re-enable its capacity declarations,
+   and publish.
+5. Discard bare-metal buyer run logs that reference deals made before the
+   reset; nothing can decode them afterwards.
+
+This applies only while bare metal is unreleased. A released deployment cannot
+drain long-running contracts to patch, so a retired kind must keep a read-only
+decoder until nothing references it.
 
 ## Release-qualified deal evidence
 

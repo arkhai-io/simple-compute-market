@@ -2,11 +2,15 @@
 
 ## 1. Verify the requested shape during negotiation
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that
-      `_place_capacity_hold` is still reached only on `decision.action == "accept"` and
-      that `probe()` still shares `_find_candidate` with `reserve()`.
+- [ ] 1.1 Re-verify `design.md`'s Context, particularly that
+      `_place_capacity_hold` is still reached only through the kit's `place_hold`
+      hook on acceptance and that `probe()` still shares `_find_candidate` with
+      `reserve()`.
 - [ ] 1.2 Call the existing non-consuming probe for the round's requested shape, before
-      the seller commits to terms.
+      the seller commits to terms, from inside the VM `evaluate_round` composition in
+      `negotiation_runtime.py`. **Decide and record** in `design.md` whether the probe
+      is a distinct `NegotiationDomainHooks` member (so the kit reports "not checked"
+      for a domain that composes none) or a step inside the domain's evaluation.
 - [ ] 1.3 Order the check after any available admissibility evaluation, so a shape the
       seller would never sell does not cause a site round trip. Degrade correctly when
       `capacity-shape-envelope` is absent.
@@ -49,7 +53,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       path's docstrings directly; several describe the site being consulted only at
       acceptance.
 - [ ] 5.2 **Import placement.** Review imports this change adds or touches;
-      `sync_negotiation.py` already uses function-level imports heavily, so check
+      `negotiation_runtime.py` already uses function-level imports heavily, so check
       whether the existing reason applies to any added here.
 - [ ] 5.3 **Documentation compliance.** Confirm the verification rule landed in
       `openspec/specs/negotiation-protocol/spec.md` and that `ARCHITECTURE.md` reflects
@@ -60,7 +64,34 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `docs/development/ROADMAP.md`. Note that this change is a shared prerequisite and
       does not belong exclusively to Goal 2.
 - [ ] 5.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 5.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
+- [ ] 5.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=negotiation-capacity-feasibility-probe` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 ## Design promotion record
 
 | Accepted decision | Permanent location |

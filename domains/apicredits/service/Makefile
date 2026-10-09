@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 .PHONY: help install reinit test serve build clean
 
 .DEFAULT_GOAL := help
@@ -7,21 +10,17 @@ help: ## Show available commands
 
 DIST_DIR ?= ../../../.dist
 
-install: ## Install dependencies using uv
+install: reinit ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
-	uv sync --dev --find-links $(DIST_DIR)
 
-reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first.
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
-		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain
+reinit: ## Sync this environment, refreshing the internal wheels its lock installs. Run make dist first.
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit ## Run the test suite
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests -q
+	uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the service locally (reload)
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) python src/main.py
+	uv run --find-links $(DIST_DIR) python -m apicredits_service.main
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)

@@ -12,7 +12,10 @@ from typing import Any
 
 from market_core import SettlementEvidence
 
-from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.services.vm_fulfillment_planner import (
+    VERIFIED_EVIDENCE_STATUSES,
+    build_vm_fulfillment_plan,
+)
 
 
 class VmSettlementEvidenceConflict(ValueError):
@@ -30,7 +33,8 @@ def add_vm_settlement_records(conn: Any) -> None:
             mechanism TEXT NOT NULL,
             agreement_sha256 TEXT NOT NULL,
             settlement_ref TEXT UNIQUE,
-            status TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'verified', 'refunding', 'refunded')),
             evidence_json TEXT NOT NULL
         )
     """)
@@ -67,6 +71,48 @@ def _now() -> str:
 class VmSettlementRepository:
     db_path: str
 
+    async def list_unsettled_payment_negotiations(
+        self, *, mechanism: str, limit: int
+    ) -> list[str]:
+        """Accepted deals of ``mechanism`` the seller has not carried to delivery, oldest first.
+
+        A deal qualifies when it has no delivery record and no refund, whether
+        its evidence is missing, pending, or verified without a delivery start,
+        or when a refund was left ``refunding``. A deal with a delivery record
+        belongs to the fulfillment resume sweep. The filter runs before the
+        limit, so completed deals never crowd out an unsettled one, and a
+        malformed Agreement is skipped rather than failing the query.
+        """
+
+        def load() -> list[str]:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT t.negotiation_id
+                    FROM negotiation_threads t
+                    LEFT JOIN vm_settlement_evidence e ON e.negotiation_id = t.negotiation_id
+                    LEFT JOIN vm_delivery_records d ON d.negotiation_id = t.negotiation_id
+                    WHERE t.terminal_state = 'success'
+                      AND t.agreement_bytes IS NOT NULL
+                      AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
+                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
+                          END = ?
+                      AND (
+                        e.status = 'refunding'
+                        OR (
+                          d.negotiation_id IS NULL
+                          AND (e.negotiation_id IS NULL OR e.status IN ('pending', 'verified'))
+                        )
+                      )
+                    ORDER BY t.created_at ASC, t.negotiation_id ASC
+                    LIMIT ?
+                    """,
+                    (mechanism, limit),
+                ).fetchall()
+            return [str(row[0]) for row in rows]
+
+        return await asyncio.to_thread(load)
+
     async def load_vm_settlement_evidence(
         self, *, negotiation_id: str
     ) -> SettlementEvidence | None:
@@ -87,6 +133,11 @@ class VmSettlementRepository:
         return await asyncio.to_thread(load)
 
     async def save_vm_settlement_evidence(self, evidence: SettlementEvidence) -> None:
+        """Record pending or verified evidence; refund states move only by transition."""
+        if evidence.status not in ("pending", "verified"):
+            raise ValueError(
+                "VM evidence is saved pending or verified; refund states are transitions"
+            )
         payload = dict(evidence.evidence)
         if payload.get("schema") != "vm.settlement-evidence.v1" or not payload.get(
             "agreement_sha256"
@@ -129,7 +180,7 @@ class VmSettlementRepository:
                             and current[2] != evidence.settlement_ref
                         )
                         or (
-                            current[3] == "verified"
+                            current[3] in VERIFIED_EVIDENCE_STATUSES
                             and (current[3] != evidence.status or current[4] != wire)
                         )
                     ):
@@ -159,6 +210,71 @@ class VmSettlementRepository:
                     )
 
         await asyncio.to_thread(save)
+
+    async def record_vm_refund_intent(self, *, negotiation_id: str) -> str:
+        """Move verified evidence to ``refunding`` before a reversal is requested.
+
+        Returns the status found. Intent is recorded only from ``verified``;
+        ``refunding`` and ``refunded`` are returned unchanged, so an interrupted
+        refund resumes and a completed one is never repeated. Any other state
+        raises, so an unpaid deal never acquires refund intent. This and the
+        delivery-record insert, which requires ``verified``, are each one
+        serialized write, so exactly one decides whether delivery precedes the
+        refund.
+        """
+
+        def record() -> str:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT status FROM vm_settlement_evidence WHERE negotiation_id=?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None or row[0] not in VERIFIED_EVIDENCE_STATUSES:
+                    raise ValueError("refund requires verified settlement evidence")
+                if row[0] == "verified":
+                    conn.execute(
+                        "UPDATE vm_settlement_evidence SET status='refunding' WHERE negotiation_id=?",
+                        (negotiation_id,),
+                    )
+                return str(row[0])
+
+        return await asyncio.to_thread(record)
+
+    async def abandon_vm_refund_intent(self, *, negotiation_id: str) -> None:
+        """Restore ``verified`` when a reversal proved impossible.
+
+        Only ``refunding`` is restored, and it is only ever entered from
+        ``verified``, so a deal with nothing to reverse is not left blocked.
+        """
+
+        def abandon() -> None:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "UPDATE vm_settlement_evidence SET status='verified' WHERE negotiation_id=? AND status='refunding'",
+                    (negotiation_id,),
+                )
+
+        await asyncio.to_thread(abandon)
+
+    async def complete_vm_refund(self, *, negotiation_id: str) -> None:
+        """Record the reversal; ``refunded`` is terminal and never overwritten."""
+
+        def complete() -> None:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT status FROM vm_settlement_evidence WHERE negotiation_id=?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None or row[0] not in ("refunding", "refunded"):
+                    raise ValueError("refund completion requires recorded refund intent")
+                conn.execute(
+                    "UPDATE vm_settlement_evidence SET status='refunded' WHERE negotiation_id=? AND status='refunding'",
+                    (negotiation_id,),
+                )
+
+        await asyncio.to_thread(complete)
 
     async def insert_vm_delivery(self, *, negotiation_id: str) -> bool:
         def insert():
@@ -312,6 +428,15 @@ class VmSettlementRepository:
             return {**row, "escrow_uid": reference}
         escrow = await self.load_escrow(escrow_uid=reference)
         if escrow is None:
-            return None
+            # A deal refunded before any delivery has no delivery record; its
+            # settlement evidence is the only state to report.
+            evidence = await self.load_vm_settlement_evidence(negotiation_id=reference)
+            if evidence is None or evidence.status not in ("refunding", "refunded"):
+                return None
+            return {
+                "negotiation_id": reference,
+                "escrow_uid": reference,
+                "status": evidence.status,
+            }
         delivery = await self.load_vm_delivery(negotiation_id=escrow["negotiation_id"])
         return {**escrow, **delivery} if delivery is not None else escrow

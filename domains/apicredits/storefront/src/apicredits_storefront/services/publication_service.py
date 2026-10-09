@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domains.apicredits.listings.reconciler import (
+from arkhai_apicredits.listings.reconciler import (
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
@@ -17,7 +17,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
-from apicredits_storefront.services.capacity_client import capacity_binding_from_offer
+from apicredits_storefront.services.capacity_client import capacity_binding_from_listing_resource
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     resolve_registry_authorities,
@@ -31,19 +31,21 @@ class ApiCreditPublicationHooks:
         self._db = db
 
     def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
-        offer = candidate.payload.get("offer_resource") or {}
-        if isinstance(offer, str):
+        listing_resource = candidate.payload.get("listing_resource") or {}
+        if isinstance(listing_resource, str):
             import json
-            offer = json.loads(offer)
-        if offer.get("offering_mode") != candidate.binding.offering_mode:
-            raise CapacityBindingError("API-credit offer mode differs from binding")
+            listing_resource = json.loads(listing_resource)
+        if listing_resource.get("offering_mode") != candidate.binding.offering_mode:
+            raise CapacityBindingError("API-credit listing_resource mode differs from binding")
 
-    async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
+    async def binding_for_listing(
+        self, listing_id: str
+    ) -> CapacityBinding | None:
         row = await self._db.load_listing(listing_id=listing_id)
         if row is None:
             return None
         try:
-            return capacity_binding_from_offer(row.get("offer_resource") or {})
+            return capacity_binding_from_listing_resource(row.get("listing_resource") or {})
         except (ValueError, TypeError):
             return None
 
@@ -94,7 +96,19 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     binding = await ApiCreditPublicationHooks(db).binding_for_listing(listing_id)
     if binding is None:
         raise CapacityBindingError("API-credit listing has no durable capacity binding")
-    return await build_publication_runtime(db).close(BoundListing(listing_id, binding))
+    return await build_publication_runtime(db).close(
+        BoundListing(listing_id, binding), closed_by="seller"
+    )
+
+
+async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
+    """Repair every registry that missed a publish, close, or reopen.
+
+    Run at the end of each capacity reconciliation, the storefront's recurring
+    publication pass; a registry still unreachable stays recorded as diverged
+    for the next one.
+    """
+    return await build_publication_runtime(db).converge()
 
 
 async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:

@@ -21,7 +21,7 @@ from storefront_client.auth import (
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
 )
-from storefront_client.client import StorefrontClient, SyncStorefrontClient
+from storefront_client.client import StorefrontClient, StorefrontClientError, SyncStorefrontClient
 
 _SIGNER = Ed25519Signer(bytes(range(32)))
 _PUBLISHER = Ed25519Signer(bytes(range(1, 33)))
@@ -163,3 +163,132 @@ def test_sync_client_rejects_legacy_or_incompatible_envelope_before_http(legacy)
                 provision_terms=legacy,
             )
     assert transport.requests == []
+
+
+_SELECTION = {"mechanism": "example.rated.v1", "option_id": "a" * 64, "expiration_unix": 2_000}
+
+
+def _selection_kwargs(envelope, **overrides):
+    return {
+        "listing_id": "listing-1",
+        "initial_amount": None,
+        "provision_terms": envelope,
+        "proposal_fields": {"amount": "180"},
+        "settlement_selection": _SELECTION,
+        "selection_only": True,
+        "request_id": "request-1",
+        **overrides,
+    }
+
+
+_ENVELOPE = {
+    "kind": "bare_metal.v2",
+    "version": 1,
+    "payload": {"duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 x"},
+}
+
+
+def test_a_selection_only_opening_carries_no_escrow_and_is_identical_in_both_clients(
+    monkeypatch,
+):
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    async_transport = _CapturingAsyncTransport()
+    sync_transport = _CapturingSyncTransport()
+    publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))
+
+    async def _run() -> None:
+        async with StorefrontClient(
+            "http://test", signer=_SIGNER, caller_role="buyer",
+            expected_publishers=publishers, transport=async_transport,
+        ) as client:
+            await client.negotiate_new(**_selection_kwargs(_ENVELOPE))
+
+    asyncio.run(_run())
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=publishers, transport=sync_transport,
+    ) as client:
+        client.negotiate_new(**_selection_kwargs(_ENVELOPE))
+
+    assert async_transport.requests[0].content == sync_transport.requests[0].content
+    body = json.loads(async_transport.requests[0].content)
+    assert body["proposal"] == {"fields": {"amount": "180"}}
+    assert body["settlement_selection"] == _SELECTION
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"settlement_selection": None}, id="no selection"),
+        pytest.param({"chain_name": "anvil"}, id="chain"),
+        pytest.param({"escrow_address": "0x" + "11" * 20}, id="escrow address"),
+        pytest.param({"token": "0x" + "22" * 20}, id="token"),
+        pytest.param({"literal_fields": {}}, id="literal fields"),
+        pytest.param({"rates": []}, id="rates"),
+    ],
+)
+def test_a_selection_only_opening_refuses_an_escrow_parameter(overrides):
+    transport = _CapturingSyncTransport()
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
+        transport=transport,
+    ) as client:
+        with pytest.raises(ValueError):
+            client.negotiate_new(**_selection_kwargs(_ENVELOPE, **overrides))
+
+    assert transport.requests == []
+
+
+def test_an_escrow_opening_with_a_selection_is_unchanged():
+    """Without ``selection_only``, a selection still rides beside the escrow
+    carrier, so existing callers send what they sent before."""
+    transport = _CapturingSyncTransport()
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
+        transport=transport,
+    ) as client:
+        client.negotiate_new(
+            **_selection_kwargs(_ENVELOPE, selection_only=False, chain_name="", literal_fields={})
+        )
+
+    body = json.loads(transport.requests[0].content)
+    assert body["proposal"]["chain_name"] == "anvil"
+    assert body["settlement_selection"] == _SELECTION
+
+
+def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(monkeypatch):
+    """Settlement names the accepted negotiation, the buyer, and the EVM
+    settlement-effect address. The SSH key and chain are negotiated terms."""
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    async_transport = _CapturingAsyncTransport()
+    sync_transport = _CapturingSyncTransport()
+    publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))
+    kwargs = {
+        "negotiation_id": "negotiation-1",
+        "buyer_evm_address": "0x" + "33" * 20,
+        "request_id": "request-1",
+    }
+
+    async def _run() -> None:
+        async with StorefrontClient(
+            "http://test", signer=_SIGNER, caller_role="buyer",
+            expected_publishers=publishers, transport=async_transport,
+        ) as client:
+            # The capturing double signs responses for negotiate_new only, so the
+            # settle response is refused after the request has been captured.
+            with pytest.raises(StorefrontClientError, match="response authentication"):
+                await client.settle_evm("0x" + "ab" * 32, **kwargs)
+
+    asyncio.run(_run())
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=publishers, transport=sync_transport,
+    ) as client:
+        with pytest.raises(StorefrontClientError, match="response authentication"):
+            client.settle_evm("0x" + "ab" * 32, **kwargs)
+
+    assert async_transport.requests[0].content == sync_transport.requests[0].content
+    body = json.loads(async_transport.requests[0].content)
+    assert set(body) == {"negotiation_id", "buyer_principal", "buyer_evm_address"}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator, Protocol
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from market_resource_pools import ResourcePoolService
 
 from .db import SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .provider import FulfillmentConflictError
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 
@@ -21,6 +22,9 @@ class FulfillmentAcceptanceDecision:
     record: Any
     newly_accepted: bool
     dispatch_required: bool
+
+
+logger = logging.getLogger(__name__)
 
 
 class FulfillmentTransaction(Protocol):
@@ -48,6 +52,12 @@ class FulfillmentTransaction(Protocol):
         provider_metadata: dict[str, Any],
     ) -> Any: ...
 
+    def attach_executor_job(
+        self,
+        capacity_reservation_id: str,
+        job_id: str,
+    ) -> None: ...
+
     def begin_teardown(
         self,
         fulfillment_id: str,
@@ -73,10 +83,64 @@ class SqlAlchemyFulfillmentTransaction:
         db: Session,
         pool_service: ResourcePoolService,
         repository: SettlementRepository,
+        capacity_ledger: Any | None = None,
     ) -> None:
         self.db = db
         self._pool_service = pool_service
         self._repository = repository
+        # Optional so a caller composing only the settlement-record half of
+        # this transaction keeps working; `attach_executor_job` is then a
+        # no-op rather than a failure, because a missing diagnostic handle
+        # must not fail a fulfillment that otherwise succeeded.
+        self._capacity_ledger = capacity_ledger
+
+    def attach_executor_job(
+        self,
+        capacity_reservation_id: str,
+        job_id: str,
+    ) -> None:
+        """Record the provider's create-job handle on the capacity reservation.
+
+        Written here because this is the first point where the handle is both
+        known and durable: the provider returns it from dispatch, and the
+        reservation is what an operator reads back as a lease. The storefront
+        registers the lease but never sees this value -- it belongs to the
+        service that dispatched the job -- which is why the field it fills
+        stayed null.
+
+        Written through ``self.db`` -- the session this transaction already
+        holds -- and not through a ledger call that opens its own. The caller
+        reaches this from inside a transaction that has already written, so it
+        holds SQLite's single writer slot; a second session cannot acquire
+        that slot while this one owns it, and would instead wait out the
+        engine's busy timeout and raise ``database is locked``. Because the
+        failure is swallowed below, that cost surfaces only as the dispatch
+        call returning one busy timeout later than it should. Using the
+        caller's session is also what makes the same-transaction guarantee in
+        ``FulfillmentOrchestrator.begin_fulfillment`` true rather than
+        intended.
+
+        Best-effort by construction. The fulfillment itself has already been
+        acknowledged; failing it here would trade a working VM for a missing
+        cross-reference. ``record_create_handle_in_session`` raises before any
+        write it makes, so a raise leaves this transaction's own writes intact
+        and committable.
+        """
+        if self._capacity_ledger is None:
+            return
+        try:
+            self._capacity_ledger.record_create_handle_in_session(
+                self.db,
+                capacity_reservation_id,
+                job_id,
+            )
+        except Exception:
+            logger.warning(
+                "Could not attach executor job %s to reservation %s",
+                job_id,
+                capacity_reservation_id,
+                exc_info=True,
+            )
 
     def accept(
         self,
@@ -104,7 +168,14 @@ class SqlAlchemyFulfillmentTransaction:
         )
 
     def get_pool(self, pool_id: str) -> Any | None:
-        return self._pool_service.get_pool_in_session(self.db, pool_id)
+        """Load the pool that will execute, with provider secrets resolved.
+
+        This is the dispatch path, so it takes the execution-scoped read: the
+        provider needs credentials the redacted read deliberately withholds.
+        What comes back must not be serialized into a response or a persisted
+        snapshot — see PoolConfigHandler for the two levels of disclosure.
+        """
+        return self._pool_service.get_pool_for_execution(self.db, pool_id)
 
     def persist_prepared_create(
         self,
@@ -191,6 +262,7 @@ class SqlAlchemyFulfillmentUnitOfWork:
         session_factory: Any,
         pool_service: ResourcePoolService,
         repository: SettlementRepository | None = None,
+        capacity_ledger: Any | None = None,
         transaction_type: type[SqlAlchemyFulfillmentTransaction] = (
             SqlAlchemyFulfillmentTransaction
         ),
@@ -198,6 +270,7 @@ class SqlAlchemyFulfillmentUnitOfWork:
         self.session_factory = session_factory
         self.pool_service = pool_service
         self.repository = repository or SettlementRepository()
+        self.capacity_ledger = capacity_ledger
         self.transaction_type = transaction_type
 
     @contextmanager
@@ -213,7 +286,9 @@ class SqlAlchemyFulfillmentUnitOfWork:
         ``BEGIN IMMEDIATE`` on the same session, which SQLite rejects.
         """
         with self.session_factory() as db:
-            tx = self.transaction_type(db, self.pool_service, self.repository)
+            tx = self.transaction_type(
+                db, self.pool_service, self.repository, self.capacity_ledger
+            )
             try:
                 yield tx
                 db.commit()
@@ -225,7 +300,9 @@ class SqlAlchemyFulfillmentUnitOfWork:
     def read_transaction(self) -> Iterator[FulfillmentTransaction]:
         """Provide consistent reads without reserving SQLite's writer slot."""
         with self.session_factory() as db:
-            tx = self.transaction_type(db, self.pool_service, self.repository)
+            tx = self.transaction_type(
+                db, self.pool_service, self.repository, self.capacity_ledger
+            )
             try:
                 yield tx
             finally:

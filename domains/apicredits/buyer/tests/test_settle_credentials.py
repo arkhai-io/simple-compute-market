@@ -16,11 +16,12 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+
+import arkhai_apicredits_buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
 from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
-import domains.apicredits.buyer.settle_cli as settle_cli
 
 _PROPOSAL = {
     "chain_name": "anvil",
@@ -128,7 +129,7 @@ def agreed_run(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_chain_config(monkeypatch):
-    import domains.apicredits.buyer.common as common
+    import arkhai_apicredits_buyer.common as common
 
     chain = SimpleNamespace(
         name="anvil",

@@ -250,6 +250,47 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 - **WHEN** a claimed row's claim has expired and no other claim has replaced it
 - **THEN** a subsequent claim attempt may claim it again
 
+### Requirement: Scheduling applies the pool provider's host requirement
+
+Settlement scheduling SHALL treat a candidate whose capacity declaration names no
+host as ineligible when the provider of the candidate's pool needs a host, and
+SHALL treat a provider identity absent from the supplied requirement as needing a
+host. Exclusion SHALL occur before policy selection, capacity rebinding, cursor
+advancement, or assignment. An explicit resource constraint naming such a
+candidate SHALL be rejected as having no eligible resource, without invoking
+policy or advancing cursors.
+
+An existing assignment SHALL keep the host it was placed on and SHALL NOT be
+re-placed. An existing assignment that records no host, in a pool whose provider
+needs one, SHALL be refused as having no eligible resource rather than returned;
+it remains assigned until its reservation is released or expires, which abandons
+it. Dispatch remains the final check that an assignment's host is registered.
+
+#### Scenario: Automatic selection encounters a candidate naming no host
+
+- **GIVEN** eligible candidates in a pool whose provider needs a host, one of
+  whose declarations names no host
+- **WHEN** scheduling selects automatically
+- **THEN** that candidate is never selected, and if no other candidate is
+  eligible, scheduling reports no eligible resource without rebinding capacity,
+  advancing the cursor, or creating an assignment
+
+#### Scenario: An explicit constraint names a candidate that names no host
+
+- **WHEN** a scheduling request constrains placement to a Physical Resource whose
+  declaration names no host, in a pool whose provider needs one
+- **THEN** scheduling rejects the request as having no eligible resource and no
+  provider is invoked
+
+#### Scenario: An existing assignment records no host
+
+- **GIVEN** an assignment, placed before placement refused declarations naming
+  no host, that records no host in a pool whose provider needs one
+- **WHEN** an equivalent scheduling request is retried
+- **THEN** scheduling reports no eligible resource instead of returning the
+  assignment
+- **AND** the assignment remains assigned until its reservation ends
+
 ### Requirement: Provider contract
 
 A `FulfillmentProvider` separates pure synchronous preparation from asynchronous side effects:
@@ -284,6 +325,33 @@ Prepared operations are immutable and persisted before dispatch. Dispatch comman
 
 - **WHEN** the same reservation is retried with different requirements or a different selected resource
 - **THEN** orchestration reports a fulfillment conflict
+
+### Requirement: A provider declares whether its delivery needs a host
+
+Every registered fulfillment provider SHALL declare whether its delivery needs a
+host. A provisioning composition SHALL collect those declarations, keyed by
+provider identity, into one host requirement and SHALL supply that same
+requirement to site admission and to settlement scheduling as plain data. A lower
+layer receiving it SHALL NOT import a provider to obtain it. Composition SHALL refuse
+to start when the supplied requirement does not name exactly its registered provider
+identities, or when a registered provider declares differently from it.
+
+#### Scenario: Composition collects every registered provider's declaration
+
+- **WHEN** a provisioning composition registers its fulfillment providers
+- **THEN** the host requirement it supplies names every registered provider
+  identity with that provider's declaration
+
+#### Scenario: The supplied requirement disagrees with a registered provider
+
+- **WHEN** the requirement supplied to composition omits a registered provider, names
+  an unregistered one, or states a different need than a registered provider declares
+- **THEN** composition refuses to start
+
+#### Scenario: A provider needs a host
+
+- **WHEN** a provider's delivery connects to a host
+- **THEN** it declares that it needs one
 
 ### Requirement: Versioned envelopes
 
@@ -427,6 +495,12 @@ The cutover SHALL NOT submit a replacement create operation merely because an ex
 - **WHEN** the cutover enumerates a population of nonterminal legacy leases and one candidate fails validation
 - **THEN** no candidate's settlement or provisioned-resource rows are committed, and a rerun against the same unmodified population is idempotent
 
+#### Scenario: Legacy lease table predates teardown-job tracking
+
+- **GIVEN** a legacy lease table has no teardown-job column
+- **WHEN** the fulfillment cutover runs
+- **THEN** the missing optional field is normalized as no known teardown operation before candidate enumeration, and the cutover continues under the same state-mapping and validation rules
+
 ### Requirement: Fulfillment teardown is available through the provisioning client
 
 The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfillment_id)` over `POST /fulfillment/{fulfillment_id}/begin-teardown`. Repeated requests for an already-started or completed teardown SHALL return the durable aggregate acceptance without creating a second teardown operation. Unknown identifiers and conflicting aggregate states SHALL retain the endpoint's documented HTTP error classification.
@@ -458,5 +532,4 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
 - Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
-
 

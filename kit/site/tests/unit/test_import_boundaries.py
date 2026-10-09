@@ -7,8 +7,8 @@ FORBIDDEN_PREFIXES = (
     "core_storefront",
     "services.async_job_queue",
     "services.job_service",
-    "domains.vms",
-    "domains.bare_metal",
+    "arkhai_vms_",
+    "arkhai_apicredits",
     "arkhai_bare_metal",
 )
 

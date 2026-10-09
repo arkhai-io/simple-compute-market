@@ -69,25 +69,25 @@ def _insert_host(engine, *, name="kvm1", pool_id="default"):
     with engine.begin() as connection:
         connection.execute(text(
             """
-            INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
+            INSERT INTO hosts (host_id, connection_kind, connection_version, connection_public, connection_protected,
                                 gpu_count, enabled, pool_id)
-            VALUES (:name, '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, :pool_id)
+            VALUES (:name, 'ssh', 1, '{"ssh_host": "10.0.0.1", "public_host": null, "ssh_port": 22, "ssh_user": "root", "key_path": "/keys/id_ed25519"}', '{}', 0, 1, :pool_id)
             """
         ), {"name": name, "pool_id": pool_id})
 
 
 def _insert_capacity_reservation(
-    engine, *, reservation_id, state="reserved", executor_kind=None
+    engine, *, reservation_id, state="reserved", offering_mode=None
 ):
     with engine.begin() as connection:
         connection.execute(text(
             "INSERT INTO capacity_reservations "
-            "(capacity_reservation_id, units, state, executor_kind) "
-            "VALUES (:id, 1, :state, :executor_kind)"
+            "(capacity_reservation_id, units, state, offering_mode) "
+            "VALUES (:id, 1, :state, :offering_mode)"
         ), {
             "id": reservation_id,
             "state": state,
-            "executor_kind": executor_kind,
+            "offering_mode": offering_mode,
         })
 
 
@@ -97,7 +97,7 @@ def _insert_vm_lease(
     lease_id,
     allocation_id,
     status,
-    vm_host="kvm1",
+    host_id="kvm1",
     vm_target=None,
     create_job_id=None,
     vm_remove_job_id=None,
@@ -111,7 +111,7 @@ def _insert_vm_lease(
                     :create_job_id, :vm_remove_job_id)
             """
         ), {
-            "id": lease_id, "allocation_id": allocation_id, "vm_host": vm_host,
+            "id": lease_id, "allocation_id": allocation_id, "vm_host": host_id,
             "vm_target": vm_target, "status": status,
             "create_job_id": create_job_id, "vm_remove_job_id": vm_remove_job_id,
         })
@@ -133,8 +133,8 @@ def _settlement_state(engine, reservation_id):
 def _executor_identities(engine, reservation_id):
     with engine.begin() as connection:
         row = connection.execute(text(
-            "SELECT cr.executor_kind AS reservation_kind, "
-            "json_extract(sr.scheduling_requirements, '$.executor_kind') "
+            "SELECT cr.offering_mode AS reservation_kind, "
+            "json_extract(sr.scheduling_requirements, '$.offering_mode') "
             "AS settlement_kind "
             "FROM capacity_reservations cr "
             "LEFT JOIN settlement_records sr "
@@ -200,13 +200,13 @@ def test_backfill_persists_vm_identity_on_reservation_and_settlement():
     assert _executor_identities(engine, "reservation-active") == ("vm", "vm")
 
 
-def test_conflicting_reservation_executor_identity_is_rejected():
+def test_conflicting_reservation_offering_mode_is_rejected():
     engine = _bootstrap_engine()
     _insert_host(engine)
     _insert_capacity_reservation(
         engine,
         reservation_id="reservation-active",
-        executor_kind="bare_metal",
+        offering_mode="bare_metal",
     )
     _insert_vm_lease(
         engine,
@@ -217,7 +217,7 @@ def test_conflicting_reservation_executor_identity_is_rejected():
         create_job_id="job-1",
     )
 
-    with pytest.raises(SchemaDriftError, match="conflicts with reservation executor"):
+    with pytest.raises(SchemaDriftError, match="conflicts with reservation offering mode"):
         _apply_backfill(engine)
 
     assert _executor_identities(engine, "reservation-active") == ("bare_metal", None)

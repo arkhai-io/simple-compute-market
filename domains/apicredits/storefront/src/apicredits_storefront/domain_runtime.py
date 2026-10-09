@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from typing import Any
+
 from market_settlement_runtime import derive_obligation_ref
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import (
@@ -21,6 +23,8 @@ from market_core import (
     validate_domain_contract,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _build_market_domain_contract() -> MarketDomainContract:
     """Build and validate the API-credit contract for the storefront role."""
@@ -30,8 +34,8 @@ def _build_market_domain_contract() -> MarketDomainContract:
     from apicredits_storefront.services.publication_service import (
         publish_order_to_registry,
     )
-    from domains.apicredits.domain_runtime import market_domain
-    from domains.apicredits.negotiation.storefront_round import (
+    from arkhai_apicredits.domain_runtime import market_domain
+    from arkhai_apicredits.negotiation.storefront_round import (
         default_seller_round_hook,
     )
 
@@ -154,11 +158,6 @@ async def persist_api_credit_settlement_outcome(
     outcome: Any,
 ) -> None:
     """Project generic completion into the unchanged settle-status row."""
-    if outcome.status != "fulfilled":
-        await sqlite_client.save_issuance_progress(
-            negotiation_id=prepared.agreement_ref, public_ref=prepared.mechanism_ref,
-            status="failed", reason=outcome.reason or "fulfillment failed",
-        )
     if outcome.status == "fulfilled":
         await sqlite_client.update_escrow(
             escrow_uid=prepared.mechanism_ref,
@@ -168,10 +167,27 @@ async def persist_api_credit_settlement_outcome(
             tenant_credentials=None,
         )
         return
+    reason = outcome.reason or "fulfillment failed"
+    # Logged as well as persisted. The reason reaches the buyer in the
+    # settle-status body, and nowhere else: a settlement that fails before
+    # its first call to the credits service left no trace in this
+    # storefront's own output, so an operator holding only the container
+    # log saw a `202` and then silence. `issuance_error:` prefixes carry a
+    # caught exception, which is the one case where the reason is the only
+    # record that it happened at all.
+    logger.warning(
+        "[SETTLE] settlement failed for %s: %s",
+        prepared.mechanism_ref,
+        reason,
+    )
+    await sqlite_client.save_issuance_progress(
+        negotiation_id=prepared.agreement_ref, public_ref=prepared.mechanism_ref,
+        status="failed", reason=reason,
+    )
     await sqlite_client.update_escrow(
         escrow_uid=prepared.mechanism_ref,
         status="failed",
-        reason=outcome.reason or "fulfillment failed",
+        reason=reason,
     )
 
 

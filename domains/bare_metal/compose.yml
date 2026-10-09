@@ -2,7 +2,9 @@
 #
 # This stack runs the dedicated wheel-only storefront, one compute-family
 # registry, and the ordinary selected-site provisioning authority. It never
-# enables the provisioning test controller or substitutes mock fulfillment.
+# enables the provisioning test controller or substitutes mock fulfillment;
+# only the end-to-end lane's development overlay, compose.bare-metal-local.yml,
+# does.
 # Deployment-specific principals and signer credentials are supplied by the
 # root compose.bare-metal.yml wrapper.
 
@@ -54,7 +56,7 @@ services:
       - PROVISIONING_INVENTORY_PATH=/run/config/bare-metal-hosts.ini
       - PROVISIONING_POOL_DEFINITIONS_PATH=/run/config/resource-pools.yaml
     volumes:
-      - ../vms/provisioning/iac:/opt/domains/vms/provisioning/iac:ro
+      - ./provisioning/iac:/opt/domains/bare_metal/provisioning/iac:ro
       - ${BARE_METAL_PROVISIONING_INVENTORY_FILE:?set selected-site host inventory file}:/run/config/bare-metal-hosts.ini:ro
       - ${BARE_METAL_POOL_DEFINITIONS_FILE:?set explicit resource-pool definitions file}:/run/config/resource-pools.yaml:ro
       - ${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?set provisioning SSH private key file}:/home/appuser/.ssh/id_ed25519:ro

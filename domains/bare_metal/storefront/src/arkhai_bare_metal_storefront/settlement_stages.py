@@ -3,20 +3,36 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
+    RefundSettlementResponse,
+)
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
-    Mandate,
+    MandatePolicyError,
+    NothingToReverse,
+    NotPaid,
+    PaymentsBlocked,
+    PaymentSellerStage,
+    PaymentSettlementData,
+    PaymentsUnavailable,
+    ReceiptBlocked,
+    ReceiptInvalid,
+    ReceiptPending,
+    ReceiptUnavailable,
+    RefundBlocked,
+    Refunded,
     SignedReceipt,
-    transaction_id,
 )
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
+from market_contact_exchange import SQLiteIntroductionStore
 from market_core import SettlementEvidence
 from market_core.schemas import (
     Agreement,
@@ -27,10 +43,11 @@ from market_core.schemas import (
 )
 from market_identity import Identity
 
-from .models import BareMetalSettlePendingResponse
 from .settlement_evidence import EvidencePayload
 
 ALKAHEST_MECHANISM = "alkahest.v1"
+
+logger = logging.getLogger(__name__)
 
 
 class SettlementRequestError(ValueError):
@@ -38,6 +55,73 @@ class SettlementRequestError(ValueError):
         super().__init__(detail)
         self.detail = detail
         self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class PaymentSettleResult:
+    """A payment settle or refund outcome: its status code and neutral payload."""
+
+    status_code: int
+    payload: dict[str, Any]
+
+
+def _accepted_payment(
+    service: Any,
+    *,
+    negotiation_id: str,
+    thread: Mapping[str, Any],
+    record: Mapping[str, Any] | None,
+    buyer_principal: Identity,
+) -> tuple[PaymentSellerStage, dict[str, Any], PaymentSettlementData]:
+    """The servicing stage plus the stored Agreement and settlement data it derives."""
+
+    stage = service.arkhai_payments_stage
+    if stage is None or record is None:
+        raise SettlementRequestError("Arkhai settlement is not configured")
+    agreement_bytes = thread.get("agreement_bytes")
+    if not isinstance(agreement_bytes, (bytes, bytearray)):
+        raise SettlementRequestError("accepted Agreement bytes are unavailable")
+    if record.get("agreement_sha256") != hashlib.sha256(bytes(agreement_bytes)).hexdigest():
+        raise SettlementRequestError("stored payment mandate is bound to another Agreement")
+    try:
+        agreement, data = stage.accepted(bytes(agreement_bytes), thread.get("settlement_data"))
+        accepted = Agreement.model_validate(agreement)
+        seller = Identity.model_validate(thread["seller_principal"])
+    except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
+        raise SettlementRequestError("accepted payment state is invalid") from exc
+    if (
+        agreement.get("negotiation_id") != negotiation_id
+        or agreement.get("listing_id") != thread.get("our_listing_id")
+        or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
+        or agreement.get("seller") != seller.model_dump(mode="json")
+        or accepted.amount != thread.get("agreed_price")
+        or agreement.get("duration_seconds") != thread.get("agreed_duration_seconds")
+    ):
+        raise SettlementRequestError("stored Agreement does not match the accepted negotiation")
+    return stage, agreement, data
+
+
+def _payment_payload(
+    *,
+    negotiation_id: str,
+    data: PaymentSettlementData,
+    status: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
+    retryable: bool = False,
+    lifecycle: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(lifecycle or {})
+    payload.update(
+        negotiation_id=negotiation_id,
+        escrow_uid=negotiation_id,
+        settlement_ref=data.transaction_id,
+        status=status,
+        retryable=retryable,
+        buyer_principal=buyer_principal.model_dump(mode="json"),
+        seller_principal=seller_principal.model_dump(mode="json"),
+    )
+    return payload
 
 
 async def verify_payment(
@@ -48,113 +132,210 @@ async def verify_payment(
     buyer_principal: Identity,
     escrow_uid: str,
     request: Any,
-) -> Any:
+) -> PaymentSettleResult:
     if escrow_uid != negotiation_id or request.buyer_evm_address is not None:
         raise SettlementRequestError(
             "Arkhai settlement is addressed by negotiation ID only", status_code=400
         )
+    return await settle_payment(
+        service,
+        negotiation_id=negotiation_id,
+        thread=thread,
+        buyer_principal=buyer_principal,
+    )
+
+
+async def settle_payment(
+    service: Any,
+    *,
+    negotiation_id: str,
+    thread: Mapping[str, Any],
+    buyer_principal: Identity,
+) -> PaymentSettleResult:
+    """Verify, record and deposit an accepted payment, then start its delivery.
+
+    Idempotent, so the buyer's retries and the seller's reconciliation pass
+    take the same path: a recorded receipt is re-checked rather than fetched,
+    and a refund left ``refunding`` is completed instead of delivering.
+    """
+
     await service.physical_terms(thread, negotiation_id)
-    stage = service.arkhai_payments_stage
-    agreement_bytes = thread.get("agreement_bytes")
     record = await service.db.load_bare_metal_settlement_record(
         negotiation_id=negotiation_id
     )
-    if stage is None or record is None:
-        raise SettlementRequestError("Arkhai settlement is not configured")
-    if not isinstance(agreement_bytes, (bytes, bytearray)):
-        raise SettlementRequestError("accepted Agreement bytes are unavailable")
-    agreement_sha256 = hashlib.sha256(bytes(agreement_bytes)).hexdigest()
-    if record.get("agreement_sha256") != agreement_sha256:
-        raise SettlementRequestError(
-            "stored payment mandate is bound to another Agreement"
-        )
-    try:
-        agreement = json.loads(agreement_bytes)
-        accepted = Agreement.model_validate(agreement)
-        if (
-            agreement.get("negotiation_id") != negotiation_id
-            or agreement.get("listing_id") != thread.get("our_listing_id")
-            or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
-            or agreement.get("seller")
-            != Identity.model_validate(thread["seller_principal"]).model_dump(
-                mode="json"
-            )
-            or accepted.amount != thread.get("agreed_price")
-            or agreement.get("duration_seconds")
-            != thread.get("agreed_duration_seconds")
-        ):
-            raise ValueError("stored Agreement does not match the accepted negotiation")
-        derived = stage.mandate_for_agreement(agreement)
-        if thread.get("settlement_data") != derived:
-            raise ValueError(
-                "stored payment mandate differs from the accepted Agreement"
-            )
-        mandate = Mandate.model_validate(derived)
-        settlement_ref = transaction_id(mandate)
-    except Exception as exc:
-        raise SettlementRequestError(
-            "payment mandate does not prove the accepted Agreement", status_code=400
-        ) from exc
+    stage, agreement, data = _accepted_payment(
+        service,
+        negotiation_id=negotiation_id,
+        thread=thread,
+        record=record,
+        buyer_principal=buyer_principal,
+    )
+    assert record is not None
+    seller = Identity.model_validate(thread["seller_principal"])
 
+    def result(status_code: int, status: str, **extra: Any) -> PaymentSettleResult:
+        return PaymentSettleResult(
+            status_code,
+            _payment_payload(
+                negotiation_id=negotiation_id,
+                data=data,
+                status=status,
+                buyer_principal=buyer_principal,
+                seller_principal=seller,
+                **extra,
+            ),
+        )
+
+    if record.get("status") in ("refunding", "refunded"):
+        if record.get("status") == "refunding":
+            await _complete_refund(service, negotiation_id, stage, agreement, data)
+        return result(200, "refunded")
     if record.get("status") == "settlement_verified":
         try:
             receipt = SignedReceipt.model_validate(
                 record["evidence"]["source"].get("receipt")
             )
-        except (TypeError, ValueError) as exc:
-            raise SettlementRequestError(
-                "stored payment receipt is invalid", status_code=400
-            ) from exc
-        if record.get("settlement_ref") != settlement_ref or not stage.receipt_matches(
-            receipt, agreement=agreement, mandate=mandate
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SettlementRequestError("stored payment receipt is invalid") from exc
+        if record.get("settlement_ref") != data.transaction_id or not stage.receipt_matches(
+            receipt, agreement, data
         ):
-            raise SettlementRequestError(
-                "stored payment receipt is invalid", status_code=400
+            logger.error("stored payment receipt for %s no longer verifies", negotiation_id)
+            raise SettlementRequestError("stored payment receipt does not prove this Agreement")
+    else:
+        outcome = await stage.check_receipt(agreement, data)
+        if isinstance(outcome, ReceiptPending):
+            return result(202, "pending", retryable=True)
+        if isinstance(outcome, ReceiptUnavailable):
+            raise SettlementRequestError("payments service is unavailable", status_code=503)
+        if isinstance(outcome, ReceiptBlocked):
+            logger.error(
+                "payment settlement for %s needs operator action: %s",
+                negotiation_id,
+                outcome.reason,
             )
-        return service._response(
-            escrow_uid=settlement_ref,
-            negotiation_id=negotiation_id,
-            buyer_principal=buyer_principal,
-            seller_principal=Identity.model_validate(thread["seller_principal"]),
-        )
+            raise SettlementRequestError(
+                "payments integration needs operator action", status_code=500
+            )
+        if isinstance(outcome, ReceiptInvalid):
+            logger.error(
+                "payment receipt for %s does not verify: %s", negotiation_id, outcome.reason
+            )
+            raise SettlementRequestError("payments receipt does not prove this Agreement")
+        try:
+            await service.persist_verified(
+                negotiation_id=negotiation_id,
+                settlement_ref=data.transaction_id,
+                mechanism=ARKHAI_PAYMENTS_MECHANISM,
+                agreement_sha256=record["agreement_sha256"],
+                source={
+                    "receipt": outcome.receipt.model_dump(
+                        mode="json", by_alias=True, exclude_none=True
+                    )
+                },
+                thread=thread,
+            )
+        except SettlementRequestError:
+            raise
+        except (RuntimeError, ValueError) as exc:
+            raise SettlementRequestError(
+                "payment settlement evidence conflicts with accepted state"
+            ) from exc
+    try:
+        await stage.deposit_if_advertised(agreement, data)
+    except PaymentsUnavailable as exc:
+        raise SettlementRequestError(
+            "payments Agreement deposit is unavailable", status_code=503
+        ) from exc
+    except PaymentsBlocked as exc:
+        logger.error("payment deposit for %s needs operator action: %s", negotiation_id, exc)
+        raise SettlementRequestError(
+            "payments integration needs operator action", status_code=500
+        ) from exc
+    lifecycle = await service.start_delivery(
+        negotiation_id=negotiation_id, buyer_principal=buyer_principal
+    )
+    settled = result(
+        200, str(lifecycle.get("state") or "fulfillment_started"), lifecycle=lifecycle
+    )
+    # The neutral fields are a cross-domain contract; refuse to emit a payload
+    # that would not parse as one.
+    AgreementSettleResponse.model_validate(settled.payload)
+    return settled
 
-    try:
-        signed_receipt = await stage.verify_receipt(
-            transaction=settlement_ref, agreement=agreement
-        )
-    except Exception as exc:
-        raise SettlementRequestError(
-            "payments receipt service is temporarily unavailable", status_code=503
-        ) from exc
-    if signed_receipt is None:
-        return BareMetalSettlePendingResponse(
-            negotiation_id=negotiation_id,
-            escrow_uid=settlement_ref,
-            buyer_principal=buyer_principal,
-            seller_principal=Identity.model_validate(thread["seller_principal"]),
-        )
-    try:
-        await service.persist_verified(
-            negotiation_id=negotiation_id,
-            settlement_ref=settlement_ref,
-            mechanism=ARKHAI_PAYMENTS_MECHANISM,
-            agreement_sha256=agreement_sha256,
-            source={
-                "receipt": signed_receipt.model_dump(
-                    mode="json", by_alias=True, exclude_none=True
-                )
-            },
-            thread=thread,
-        )
-    except Exception as exc:
-        raise SettlementRequestError(
-            "payment settlement evidence conflicts with accepted state"
-        ) from exc
-    return service._response(
-        escrow_uid=settlement_ref,
+
+async def refund_payment(
+    service: Any, *, negotiation_id: str, thread: Mapping[str, Any]
+) -> PaymentSettleResult:
+    """Reverse an accepted payment deal's held funds at the seller operator's request."""
+
+    record = await service.db.load_bare_metal_settlement_record(
+        negotiation_id=negotiation_id
+    )
+    stage, agreement, data = _accepted_payment(
+        service,
         negotiation_id=negotiation_id,
-        buyer_principal=buyer_principal,
-        seller_principal=Identity.model_validate(thread["seller_principal"]),
+        thread=thread,
+        record=record,
+        buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+    )
+    payload = {
+        "negotiation_id": negotiation_id,
+        "settlement_ref": data.transaction_id,
+        "status": "refunded",
+    }
+    assert record is not None
+    if record.get("status") not in ("refunding", "refunded"):
+        # Refuse before recording intent when there is no payment to reverse,
+        # so an unpaid deal is never left blocked by an abandoned refund.
+        current = await stage.check_receipt(agreement, data)
+        if isinstance(current, (ReceiptPending, ReceiptInvalid)):
+            raise SettlementRequestError("no verified payment exists to refund")
+        if isinstance(current, ReceiptUnavailable):
+            raise SettlementRequestError("payments service is unavailable", status_code=503)
+        if isinstance(current, ReceiptBlocked):
+            logger.error(
+                "refund for %s needs operator action: %s", negotiation_id, current.reason
+            )
+            raise SettlementRequestError(
+                "payments integration needs operator action", status_code=500
+            )
+    await _complete_refund(service, negotiation_id, stage, agreement, data)
+    RefundSettlementResponse.model_validate(payload)
+    return PaymentSettleResult(200, payload)
+
+
+async def _complete_refund(
+    service: Any,
+    negotiation_id: str,
+    stage: PaymentSellerStage,
+    agreement: Mapping[str, Any],
+    data: PaymentSettlementData,
+) -> None:
+    """Record intent, reverse, then record the refund; safe to repeat after a crash."""
+
+    intent = await service.db.record_bare_metal_refund_intent(negotiation_id=negotiation_id)
+    if intent["status"] == "refunded":
+        return
+    outcome = await stage.reverse(agreement, data)
+    if isinstance(outcome, (NotPaid, NothingToReverse)):
+        await service.db.abandon_bare_metal_refund_intent(
+            negotiation_id=negotiation_id, prior_status=intent["status"]
+        )
+        raise SettlementRequestError(
+            "no verified payment exists to refund"
+            if isinstance(outcome, NotPaid)
+            else "nothing left to reverse"
+        )
+    if isinstance(outcome, RefundBlocked):
+        logger.error("refund for %s needs operator action: %s", negotiation_id, outcome.reason)
+        raise SettlementRequestError(
+            "payments integration needs operator action", status_code=500
+        )
+    if not isinstance(outcome, Refunded):
+        raise SettlementRequestError("payments service is unavailable", status_code=503)
+    await service.db.mark_bare_metal_settlement_refunded(
+        negotiation_id=negotiation_id, settlement_ref=data.transaction_id
     )
 
 
@@ -369,17 +550,15 @@ async def revalidate_payment(
     if stage is None:
         raise SettlementRequestError("Arkhai settlement is not configured")
     try:
-        agreement = json.loads(thread["agreement_bytes"])
-        mandate = Mandate.model_validate(stage.mandate_for_agreement(agreement))
+        agreement, data = stage.accepted(
+            bytes(thread["agreement_bytes"]), thread.get("settlement_data")
+        )
         receipt = SignedReceipt.model_validate(record["evidence"]["source"]["receipt"])
-        if (
-            thread.get("settlement_data")
-            != mandate.model_dump(mode="json", by_alias=True, exclude_none=True)
-            or transaction_id(mandate) != record["settlement_ref"]
-            or not stage.receipt_matches(receipt, agreement=agreement, mandate=mandate)
+        if data.transaction_id != record["settlement_ref"] or not stage.receipt_matches(
+            receipt, agreement, data
         ):
             raise ValueError("stored payment receipt differs from accepted state")
-    except Exception as exc:
+    except (MandatePolicyError, KeyError, TypeError, ValueError) as exc:
         raise SettlementRequestError(
             "stored payment receipt is invalid", status_code=400
         ) from exc
@@ -452,8 +631,8 @@ async def revalidate_alkahest(
 async def revalidate_contact(
     service: Any, thread: Mapping[str, Any], record: Mapping[str, Any]
 ) -> None:
-    reveal = await service.db.load_contact_introduction(
-        obligation_ref=record["settlement_ref"]
+    reveal = await SQLiteIntroductionStore(service.db.db_path).load(
+        record["settlement_ref"]
     )
     if reveal is None or reveal.agreement_ref != record["negotiation_id"]:
         raise SettlementRequestError("introduction has not been revealed")
@@ -471,11 +650,23 @@ def alkahest_resources(
 
 @dataclass(frozen=True, slots=True)
 class SellerStage:
+    """One mechanism's seller entry: its verification, recovery gate and hooks.
+
+    ``physical`` declares whether the deal provisions the listed machine
+    through site capacity, so admission and evidence follow the entry rather
+    than a separate declaration. ``refund`` is the seller-initiated reversal
+    of an accepted deal and ``reconcile`` advances an accepted deal without
+    its buyer; an entry without them refunds or converges through its own
+    mechanism path.
+    """
+
     registration_factory: Callable[[], Any]
     verify: Callable[..., Any]
     revalidate: Callable[..., Any]
     physical: bool
     runtime_resources: Callable[..., Any] | None = None
+    refund: Callable[..., Any] | None = None
+    reconcile: Callable[..., Any] | None = None
 
     def accepted_data(
         self, agreement: Mapping[str, Any], payment_stage: Any
@@ -490,29 +681,27 @@ class PaymentStage(SellerStage):
     ) -> Mapping[str, Any]:
         if payment_stage is None:
             raise ValueError("Arkhai settlement is not configured")
-        return payment_stage.mandate_for_agreement(agreement)
+        return payment_stage.settlement_data(agreement).to_wire()
 
 
 @dataclass(frozen=True, slots=True)
 class ContactStage(SellerStage):
     @staticmethod
-    async def record_reveal(db: Any, agreement: Any) -> None:
-        thread = await db.load_negotiation_thread_row(
-            negotiation_id=agreement.agreement_ref
-        )
+    async def record_reveal(db: Any, *, negotiation_id: str, obligation_ref: str) -> None:
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
         if thread is None or not thread.get("agreement_bytes"):
             raise ValueError("accepted introduction Agreement is unavailable")
         await db.save_bare_metal_settlement_evidence(
             SettlementEvidence(
-                negotiation_id=agreement.agreement_ref,
+                negotiation_id=negotiation_id,
                 mechanism=CONTACT_MECHANISM,
-                settlement_ref=agreement.obligation_ref,
+                settlement_ref=obligation_ref,
                 status="settlement_verified",
                 evidence=EvidencePayload(
                     agreement_sha256=hashlib.sha256(
                         thread["agreement_bytes"]
                     ).hexdigest(),
-                    source={"obligation_ref": agreement.obligation_ref},
+                    source={"obligation_ref": obligation_ref},
                 ).model_dump(mode="json"),
             )
         )

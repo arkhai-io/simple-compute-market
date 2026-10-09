@@ -244,7 +244,7 @@ class MechanismRegistration:
     # exclude); the mechanism owns everything obligation-shaped.
     accepted_obligation_builder: AcceptedObligationBuilder | None = None
     # Mechanism-owned settlement verification: reads the mechanism's own
-    # truth source (chain, hosted authority) and asserts a claimed
+    # truth source (chain, payments service) and asserts a claimed
     # settlement matches the negotiated terms. The call signature is
     # mechanism-specific — callers reach it from the mechanism's own
     # surface — but its ownership lives here so domains resolve it from
@@ -1001,11 +1001,35 @@ def _field_is_secret(field_info: Any) -> bool:
     )
 
 
+def _field_is_never_published(field_info: Any) -> bool:
+    """A field any configuration layer may carry but no public output may show."""
+
+    extra = field_info.json_schema_extra
+    return isinstance(extra, Mapping) and extra.get("never_published") is True
+
+
+def _withheld_strings(value: Any) -> set[str]:
+    if isinstance(value, Mapping):
+        return {str(item) for item in value.values() if item is not None}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return {str(item) for item in value if item is not None}
+    return set()
+
+
 def _secret_values(model: BaseModel) -> set[str]:
+    """Every value public output must not contain: secret or never published.
+
+    A never-published value is configuration rather than a credential, so it
+    may arrive through any layer; a readiness projection that showed it would
+    still be a disclosure, so it is withheld exactly as a secret is. A mapping
+    or sequence value contributes each of its items, since an item can leak
+    alone.
+    """
+
     values: set[str] = set()
     for name, field_info in type(model).model_fields.items():
         value = getattr(model, name)
-        if _field_is_secret(field_info):
+        if _field_is_secret(field_info) or _field_is_never_published(field_info):
             revealed = (
                 value.get_secret_value()
                 if isinstance(value, (SecretStr, SecretBytes))
@@ -1015,6 +1039,7 @@ def _secret_values(model: BaseModel) -> set[str]:
                 values.add(revealed.decode("utf-8", errors="ignore"))
             elif revealed is not None:
                 values.add(str(revealed))
+                values.update(_withheld_strings(revealed))
         elif isinstance(value, BaseModel):
             values.update(_secret_values(value))
         elif isinstance(value, Mapping):

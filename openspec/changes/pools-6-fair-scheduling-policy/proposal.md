@@ -11,6 +11,9 @@ Deterministic round-robin is predictable but does not account for unequal pool c
 - Implement a second `SettlementSchedulingPolicy` beside deterministic round-robin only after those decisions are approved.
 - Add operator-safe policy explanations, metrics, and adversarial/concurrency/restart evidence.
 - Keep request, assignment, provider, and storefront contracts unchanged.
+- Refuse new admission and new placement against a disabled host, while dispatch still
+  honours an existing assignment and teardown still works. Both halves are owned here:
+  admission in `kit/site` and placement in `kit/fulfillment`.
 
 This change is design-gated and parked. Simulation and stakeholder decisions may proceed, but production implementation is blocked until POOLS-7 provides atomic durable assignment and transactional scheduling state.
 
@@ -28,6 +31,9 @@ None.
 
 - Archived POOLS-6 multidimensional admission provides hard-fit inputs and remains complete independently of this policy follow-on.
 - `pools-7-storefront-fulfillment-cutover` must provide durable Settlement Record, assignment, and transaction boundaries before a history-sensitive policy can be correct across restarts or replicas.
+- `project-capacity-resources-without-hosts` handed over the disabled-host rule above. It
+  deliberately leaves disabled-host semantics unchanged, so the resource-pool projection reports a
+  declaration's own `enabled` state until this change decides what disabling a host does.
 - The selected fairness subject may require a request-contract change because the current physical settlement request does not carry buyer, organization, queue, or workload-class identity. That decision remains design-gated.
 
 ## Non-Goals

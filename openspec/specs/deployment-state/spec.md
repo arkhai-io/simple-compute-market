@@ -22,6 +22,41 @@ Production topology MUST support independently operated registries, seller store
 - **WHEN** a provider deploys its node
 - **THEN** it can point at an externally operated registry instead of requiring a private registry instance
 
+### Requirement: Schema-isolated registry composition
+
+One Helm release MAY compose multiple registry instances by aliasing the same
+registry role. Each enabled instance MUST select exactly one filter
+specification and MUST have independent authority identity, credential Secret,
+descriptor, authentication, Service, persistence, and workload coordinates.
+Disabling an optional instance MUST emit no resource for that instance and MUST
+preserve the existing compute-registry render.
+
+The compute-family instance MUST select its filter specification by the schema
+identity naming the family rather than one domain within it, since that
+specification carries bare-metal, virtual-machine, and container listings alike. A
+deployment MUST NOT select the retired single-domain identity, and because buyer
+commands declare the schema identity they understand, a registry and the buyers
+querying it MUST move together.
+
+#### Scenario: Compute and API-credit registries are enabled
+
+- **WHEN** an operator enables compute and API-credit registry instances with
+  their respective filter specifications
+- **THEN** Helm renders two independently named registry workloads, Services,
+  PVCs, signer Secret references, descriptors, and schema paths
+
+#### Scenario: API-credit registry is disabled
+
+- **WHEN** an operator renders the default umbrella values
+- **THEN** only the existing compute registry resources are emitted and they
+  select the `compute.market` filter specification
+
+#### Scenario: Registry identities differ
+
+- **WHEN** two registry aliases configure different authority principals
+- **THEN** each registry process uses its own identity and credential Secret
+  without requiring either to equal an umbrella-global identity
+
 ### Requirement: Explicit persistence ownership
 Each service MUST own its database and migration history; cross-service identifiers MUST cross APIs/events rather than relational foreign keys between service databases.
 
@@ -47,6 +82,20 @@ Each stateful service MUST run and record its own ordered migration chain agains
 #### Scenario: A service has no separate deployment step for migrations
 - **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
 - **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+
+### Requirement: Shared Dynaconf bootstrap preserves consumer policy
+
+Compute provisioning and e2e MUST use the shared `arkhai-kit-config` bootstrap for profile parsing, base-then-profile include resolution, and Dynaconf construction. The shared bootstrap MUST receive configuration-directory and active-profile values explicitly from each composition root and MUST preserve consumer-owned settings-file, dotenv, secret-file, environment-prefix, nested-key, merge, and missing-include policy rather than imposing one common policy on those consumers.
+
+#### Scenario: Compute provisioning loads optional profiles
+
+- **WHEN** compute provisioning supplies no `CONFIG_DIRECTORY` override and selects one or more `ACTIVE_PROFILES`
+- **THEN** the shared bootstrap resolves the service-local config directory, orders `config.yml` before selected profile files, filters missing include files, and constructs Dynaconf with the provisioning settings file, `PROVISIONING` environment prefix, supported normal `.env` discovery, disabled Dynaconf environments, and merge enabled; it does not add `.env.local` loading
+
+#### Scenario: E2E loads profile and secret layers
+
+- **WHEN** e2e supplies a config-directory override and selects one or more active profiles
+- **THEN** the shared bootstrap orders `config.yml` before every requested profile path without filtering missing includes and constructs Dynaconf with project `settings.toml` followed by `.secrets.toml`, the project `.env` path, the `ARKHAI` environment prefix, disabled Dynaconf environments, and merge enabled; dotenv-sourced `ARKHAI_*` values participate at environment precedence without overwriting already-set process values
 
 ### Requirement: Installable package boundaries
 Published wheels MUST resolve internal runtime dependencies by distribution version or a supplied wheel directory and MUST NOT encode parent-directory monorepo paths in customer-facing lock metadata.
@@ -137,7 +186,7 @@ Private identity credentials MUST arrive through role-scoped Secret references a
 - **WHEN** a public ConfigMap contains the resolved payments API key
 - **THEN** validation fails before deployment
 
-#### Scenario: Fiat-only storefront is rendered
+#### Scenario: Payments-only storefront is rendered
 
 - **WHEN** a profile enables only Ed25519 marketplace identity and Arkhai payment settlement
 - **THEN** Helm/Compose rendering requires the identity Secret reference but no wallet, chain, RPC, deployed-address, or gas configuration
@@ -191,12 +240,188 @@ Migration tooling MUST be deployable before runtime rejection, and production cu
 
 ### Requirement: Generated configuration has one source of truth
 
-Typed configuration metadata MUST generate role-appropriate init templates, dotted-path editing validation, environment/Helm schema fragments, and reference tables. Generated outputs MUST be checked for drift in CI and MUST omit secret values and fields not applicable to the role.
+Typed configuration metadata MUST generate role-appropriate init templates, dotted-path
+editing validation, environment schema fragments, and reference tables. Generated
+outputs MUST be checked for drift in CI and MUST omit secret values and fields not
+applicable to the role.
+
+A chart that passes a service's configuration through MUST carry a values-schema
+fragment generated from that service's typed configuration models, refusing under the
+pass-through configuration every field the models mark secret or not applicable to the
+role, and every field a typed section's model does not have, each in every spelling
+the service's loader reads, and MUST accept every other typed field in every such
+spelling. The fragment MUST NOT carry defaults, MUST NOT require a field's presence,
+and MUST NOT constrain settings the service reads untyped. A secret the
+service reads without a typed model MUST be declared by the service with the same
+secret marker, so the generated fragment refuses it. A section that carries public
+identity MUST be declared closed to its public keys, so the generated fragment admits
+those keys and refuses every other.
 
 #### Scenario: Mechanism field changes
 
 - **WHEN** a mechanism's typed configuration adds or removes an operator field
-- **THEN** drift validation requires the applicable templates, schema, and reference output to change together
+- **THEN** drift validation requires the applicable templates, schema, reference
+  output, and generated values-schema fragment to change together
+
+#### Scenario: A secret is placed in pass-through configuration
+
+- **WHEN** a storefront agent's configuration values carry a secret-marked setting,
+  such as a wallet private key or a registry write token
+- **THEN** values-schema validation fails before render, naming the setting
+- **AND** no ConfigMap is produced
+
+#### Scenario: Private identity material is placed in pass-through configuration
+
+- **WHEN** a storefront agent's configuration values carry a key under `Identity`,
+  at any level, that the public identity declaration does not name
+- **THEN** values-schema validation fails before render, naming the key
+- **AND** no ConfigMap is produced
+
+#### Scenario: Payer data is placed in pass-through configuration
+
+- **WHEN** a storefront agent's configuration values declare a payer profile,
+  payment instrument, payment method, mandate, bank detail, or action URL in a
+  settlement section
+- **THEN** values-schema validation fails before render, naming the field
+
+#### Scenario: A typed field is spelled differently
+
+- **WHEN** a storefront agent's configuration values spell a typed field
+  differently from its model, such as `Settlement.Priority`
+- **THEN** values-schema validation accepts it, as the storefront's loader does
+- **AND** a secret-marked or retired key spelled differently is still refused,
+  naming the key
+
+#### Scenario: A typed section gains a field
+
+- **WHEN** a storefront's settlement mechanism adds a public operator field and the
+  fragment is regenerated
+- **THEN** the field passes through the chart with no template or hand-written schema
+  change
+
+### Requirement: A storefront chart passes service configuration through
+
+A storefront chart MUST render an agent's service configuration from its values
+without enumerating the service's keys, so a setting or settlement mechanism the
+storefront gains deploys through values alone with no template or hand-written schema
+change. The chart MUST NOT supply a default for a service setting and MUST NOT
+implement a service's semantic validation of its own configuration.
+
+The chart MAY add a value only the release knows: the agent's port, which MUST equal
+the port its container, probes, and Service use; the agent's Service URL as its public
+URL; the internal registry's and provisioning service's URLs; a `default` capacity
+site bound to the effective provisioning URL; and the database path under the
+persistence mount. Except for the port, it MUST add each only where the agent's
+configuration does not state it.
+
+A value whose position depends on a name only the release creates — trust for the
+internal registry, keyed by that registry's derived URL — MUST be stated by the
+operator as a chart-level agent value and written by the chart under the derived key.
+Trust MUST be stated by the operator and checked by the chart; the chart MUST NOT add
+a principal to a trust list.
+
+The chart MAY refuse a release whose parts disagree with each other: internal-registry
+trust whose authority or principals do not include the release's registry identity;
+provisioning trust, or a provisioning service peer for a site bound to the internal
+provisioning service, that does not include the release's provisioning principal; or a
+stated port that differs from the agent's. The chart MAY read the passed-through
+configuration to make a Kubernetes decision, such as waiting for a configured chain's
+RPC endpoint, or for the internal registry when the agent uses it, before the
+storefront starts. The chart MUST match every key it reads or writes as the
+storefront's loader matches it, without regard to case, and MUST refuse a
+configuration that states one key in two spellings at any depth.
+
+A values file using a retired values shape MUST be refused at render, naming the
+retired key, rather than passed through as keys the storefront ignores.
+
+#### Scenario: A storefront gains a settlement mechanism
+
+- **WHEN** an operator adds a mechanism's section and its priority entry to an agent's
+  configuration values
+- **THEN** the rendered storefront configuration carries the section exactly as
+  written
+- **AND** no chart template or hand-written values schema changed
+
+#### Scenario: Numbers and strings keep their type
+
+- **WHEN** an agent's configuration carries integers, including ones above a million,
+  fractional numbers, and an EVM address
+- **THEN** the storefront reads each integer as an integer, each fractional number as
+  a number, and the address as a string
+
+#### Scenario: An operator omits a mechanism setting
+
+- **WHEN** an agent's configuration omits a setting the storefront defaults
+- **THEN** the rendered configuration omits it and the storefront applies its own
+  default
+
+#### Scenario: A setting fails the storefront's semantic validation
+
+- **WHEN** an agent's configuration passes the values schema but carries a value the
+  storefront's typed configuration refuses
+- **THEN** the chart renders it unchanged and the storefront refuses it at startup
+
+#### Scenario: The release knows a value the agent omits
+
+- **WHEN** an agent's configuration names no registry, no provisioning URL, no
+  capacity sites, and no database path
+- **THEN** the rendered configuration carries the internal registry's URL with the
+  agent's internal-registry trust under it, the provisioning service's URL, a
+  `default` site bound to that URL, and a database path under the persistence mount
+- **AND** a value the agent states is rendered as stated
+
+#### Scenario: Release parts disagree
+
+- **WHEN** an agent's internal-registry trust or provisioning trust omits the
+  release's principal, or its stated port differs from the agent's port
+- **THEN** rendering fails with a message naming the disagreement
+
+#### Scenario: A key is stated in two spellings
+
+- **WHEN** an agent's configuration states both `Settlement` and `settlement`, or
+  one nested key in two spellings
+- **THEN** rendering fails naming both
+
+#### Scenario: A release-owned key is spelled differently
+
+- **WHEN** an agent's configuration states `Port` with a value other than the agent's
+  port
+- **THEN** rendering fails naming the disagreement
+
+#### Scenario: A values file uses the retired shape
+
+- **WHEN** an agent's values use a retired key such as `seller` or `storefrontDomains`
+- **THEN** rendering fails naming the key
+
+### Requirement: A storefront reads chart-rendered configuration between its file and its overlay
+
+A storefront MUST read its public configuration from `storefront.toml`, then
+`storefront.json`, then its Secret overlay `storefront.secrets.toml`, under its
+configuration directory, with a later file winning on a conflicting key. The rendered
+layer is JSON so that every string, including a 160-bit EVM address, is read back as a
+string. Its
+configuration-reporting commands MUST report the configuration the server loads,
+merged by the same rules, including when only the rendered files are present, and
+MUST NOT print the Secret overlay verbatim.
+
+#### Scenario: A chart-deployed storefront starts
+
+- **WHEN** the configuration directory holds a rendered `storefront.json` and a
+  `storefront.secrets.toml`, and no `storefront.toml`
+- **THEN** the storefront loads both, with the overlay's values winning
+- **AND** `market-storefront config show` reports the merged configuration
+
+#### Scenario: Two layers spell a section differently
+
+- **WHEN** one layer states `[Chains.anvil]` and a later layer states `[chains.anvil]`
+- **THEN** `market-storefront config show` reports one merged `chains` section, as the
+  server loads it
+
+#### Scenario: The raw layers are shown
+
+- **WHEN** an operator runs `market-storefront config show --raw`
+- **THEN** each public layer present is printed verbatim under its path, in load
+  order, and the Secret overlay is not printed
 
 ### Requirement: Buyer profile deployments separate XDG state and provider secrets
 
@@ -222,6 +447,10 @@ An operator MUST preview and explicitly import legacy buyer identity into one ex
 
 A compute-family storefront deployment MUST configure a non-empty public list of domain registrations, each naming one contribution, offering mode, exact domain identity, and supported contract version. The image MUST contain the shared shell and every enabled contribution as staged immutable wheels. Helm and Compose MUST run one process against one single-writer SQLite volume, render trusted sites independently, and keep signer credentials, provider settings, SSH material, and private results in Secret-only channels.
 
+Packaged storefront settings MUST NOT select a default registration. The
+operator-supplied list is the complete selection after configuration layering,
+not an extension of an image-owned domain choice.
+
 #### Scenario: Combined storefront is rendered
 
 - **WHEN** VM and bare-metal registrations are configured with complete trusted sites
@@ -231,6 +460,11 @@ A compute-family storefront deployment MUST configure a non-empty public list of
 
 - **WHEN** preflight cannot find a configured contribution or its complete exact contract
 - **THEN** activation remains quiesced and reports the missing contribution/mode/domain/version without serving new work
+
+#### Scenario: Operator config selects several domains
+
+- **WHEN** an operator overlay selects VM and bare-metal registrations
+- **THEN** the effective configuration contains exactly those two registrations, with no packaged registration appended by configuration merging
 
 ### Requirement: Legacy storefront domain migration is transactional
 
@@ -273,9 +507,333 @@ described as deployable.
 
 ### Requirement: Domain payment persistence is role-owned
 
-Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment/grant progress MUST remain under that storefront's ordered migrations. The payments service MUST own transaction, ledger, hold-release, fee, and dispute state. VM and bare-metal MUST retain selected-site authority bindings independently of payment trust. API credits MUST retain the separate registry, credits authority, gated application, storefront, and buyer roles.
+Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment or grant progress MUST stay under that storefront's ordered migrations. The payments service owns transaction, ledger, hold-release, fee, and dispute state. VM and bare metal MUST keep selected-site authority bindings independent of payment trust. API credits MUST keep its registry, credits authority, gated application, storefront, and buyer roles separate.
 
 #### Scenario: Seller restarts after payment approval
 
 - **WHEN** the storefront reloads an accepted payment negotiation
 - **THEN** it retrieves the same mandate and transaction ID from its negotiation state and resumes domain progress without migrating a Stripe profile, credential, or operation ID
+
+### Requirement: Externally produced dependencies resolve from a declared index
+
+A distribution this repository depends on but does not build MUST be declared as
+an ordinary dependency and resolved from a declared package index. It MUST NOT
+be obtained by copying a prebuilt artifact into the build output directory, and
+no build target may special-case its acquisition.
+
+The build output directory MUST contain only artifacts this repository builds.
+An externally produced distribution arriving there is indistinguishable from a
+locally built one, which is what allows a build to report success while
+producing nothing.
+
+Resolution MUST succeed from a clean checkout with no credential and no access
+to the repository that produced the distribution, including from a fork.
+
+#### Scenario: A consuming project is built
+
+- **WHEN** any project depending on an externally produced distribution is
+  initialized or tested
+- **THEN** the distribution resolves from the declared index, and no target
+  stages, copies, or verifies a release to make that possible
+
+#### Scenario: The wheelhouse is built
+
+- **WHEN** the repository builds its distributions
+- **THEN** the build output directory contains every distribution built here and
+  no distribution produced elsewhere
+
+#### Scenario: A fork builds the repository
+
+- **WHEN** a pull request from a fork builds and tests the repository
+- **THEN** it succeeds, because every dependency is publicly resolvable and none
+  requires a credential a fork is not given
+
+### Requirement: Release verification is a publication-time activity
+
+Verification of an externally produced signed release MUST NOT be a prerequisite
+of building, initializing, or testing. A signed release describes a deployed
+service; establishing what a build compiled against is the lockfile's
+responsibility, and establishing what a publication contains belongs to
+publication.
+
+The verifier itself MUST retain its behaviour. What changes is which targets
+invoke it.
+
+#### Scenario: A suite is run without a staged release
+
+- **WHEN** a project's tests are run and no release is staged
+- **THEN** the suite runs, because nothing on the path to it verifies a release
+
+#### Scenario: A dependency is modified locally
+
+- **WHEN** a developer builds and tests against a locally modified copy of an
+  external dependency
+- **THEN** the build and the suite proceed, and no published artifact results
+  from them
+
+### Requirement: Deployment documentation states how a dependency is obtained
+
+Deployment and release documentation MUST state, for every distribution this
+repository depends on and does not build, which index serves it and how a
+developer or a build obtains it.
+
+An undocumented acquisition path survives as folklore and is reconstructed
+incorrectly by the next reader, which is how a staging step with no documented
+owner came to be a prerequisite of running unit tests.
+
+#### Scenario: A contributor obtains an external dependency
+
+- **WHEN** a contributor needs to know where an externally produced distribution
+  comes from
+- **THEN** deployment documentation names the index and the resolution path
+  without requiring them to read the build system to infer it
+
+### Requirement: Internal distributions are consumed as wheels from the repository wheelhouse
+
+Internal Python distributions MUST be built into the repository wheelhouse (`.dist`)
+and consumed from it. A project MUST NOT resolve another repository distribution
+through a relative or editable source path, and MUST NOT declare the wheelhouse's
+location itself; the tool that syncs or locks the project supplies it. A Docker stage
+that resolves internal packages MUST copy the wheelhouse from the build context, so a
+wheel change invalidates that stage.
+
+#### Scenario: A consumer resolves a sibling distribution
+
+- **WHEN** a project that depends on another repository distribution is locked
+- **THEN** its lock records that distribution from the repository wheelhouse, not from
+  a source path or a package index
+
+#### Scenario: A repository distribution resolves from an index
+
+- **WHEN** any lock resolves a distribution that a repository project declares from a
+  package index, or from a local registry other than the repository wheelhouse
+- **THEN** the packaging check fails and names the lock and the distribution
+
+#### Scenario: A project declares a sibling source
+
+- **WHEN** a project's `pyproject.toml` names a repository distribution through a
+  relative source path, or declares a `find-links` location
+- **THEN** the packaging check fails and names the project
+
+### Requirement: Each distribution is one flat import package under src
+
+Each repository Python distribution MUST build its wheel from exactly one top-level
+import package located at `src/<package>` in its project, and its project environment
+MUST install it editable. A project MUST NOT map a directory onto a different import
+path, disable editable installation, or declare rebuild cache keys to compensate for
+either.
+
+#### Scenario: A module is edited
+
+- **WHEN** a developer edits a module of the project under test
+- **THEN** the next test run imports the edited module without a sync
+
+#### Scenario: A project maps its directory onto a nested import path
+
+- **WHEN** a wheel target includes files from outside `src/<package>` or places them
+  under another import path
+- **THEN** the packaging check fails and names the project
+
+### Requirement: A project environment refreshes exactly the internal packages its lock installs
+
+A rebuilt wheel keeps its version, so a sync keeps both an environment's installed copy
+and the lock's recorded dependencies for it unless told otherwise. A project's `reinit`
+MUST upgrade and reinstall every package its `uv.lock` resolves from the repository
+wheelhouse, and MUST derive that set from the lock when it runs rather than list it.
+Upgrading re-reads a same-version wheel's metadata and MAY rewrite the lock's recorded
+dependencies; reinstalling replaces its installed code. Packages resolved from an index
+or from source are not refreshed. If the set cannot be derived, the sync MUST NOT run.
+
+Every project with tests whose lock resolves a package from the repository wheelhouse MUST
+have a `reinit` target, and that target MUST delegate to the shared derivation without
+naming packages.
+
+#### Scenario: A rebuilt wheel gains a dependency without a version change
+
+- **GIVEN** an internal wheel rebuilt at the same version with new code and a new
+  dependency
+- **WHEN** a consumer's `reinit` runs
+- **THEN** the consumer environment has the new code and the new dependency, and its
+  lock records the dependency
+
+#### Scenario: A new internal dependency is refreshed without editing any list
+
+- **WHEN** a project's lock gains a package resolved from `.dist` and its `reinit` runs
+- **THEN** that package is upgraded and reinstalled with no edit to the project's
+  Makefile
+
+#### Scenario: The lock cannot be read
+
+- **WHEN** `reinit` runs and the project's lock is missing or unparseable
+- **THEN** it fails before syncing rather than syncing with no package refreshed
+
+#### Scenario: A hand-written list is refused
+
+- **WHEN** a `reinit` recipe, or a recipe it depends on in the same Makefile, names a
+  package in an upgrade, reinstall, or refresh flag, or syncs without the shared
+  derivation
+- **THEN** the packaging check fails and names the project
+
+### Requirement: An image installs the committed lock
+
+An image that installs a project's dependencies MUST install them from that project's
+committed lock, used unmodified, and MUST NOT relock: the build MUST fail rather than
+resolve when the lock does not match the project. It MUST derive the internal packages
+the same way the project's `reinit` does and MUST reinstall each, so a persistent
+package cache cannot supply a previous build of a same-version wheel. An image that
+installs the project's own distribution MUST install it from the wheelhouse alone, at
+the version the project declares, without a version literal in the image definition;
+every other repository distribution it contains MUST come from the lock. An image
+definition MUST NOT list internal packages or rewrite a lock.
+
+#### Scenario: A wheel is rebuilt without a version change
+
+- **GIVEN** a wheel in `.dist` rebuilt with new code at the same version, and an image
+  builder whose persistent cache holds the previous build
+- **WHEN** the image is built
+- **THEN** it contains the new code
+
+#### Scenario: The committed lock does not match its project
+
+- **WHEN** an image is built from a lock that no longer satisfies the project's
+  `pyproject.toml`
+- **THEN** the build fails rather than relocking
+
+#### Scenario: The project's own wheel is missing from the wheelhouse
+
+- **WHEN** an image installs its own distribution and `.dist` holds no wheel of the
+  declared version
+- **THEN** the build fails rather than installing from a package index
+
+#### Scenario: A project's version is bumped
+
+- **WHEN** a project's declared version changes and its image is rebuilt
+- **THEN** the image installs that version with no edit to the image definition
+
+#### Scenario: An image definition names packages
+
+- **WHEN** a Dockerfile that copies `.dist` names a package in a refresh, upgrade, or
+  reinstall flag, spells a repository distribution's version, rewrites a lock, or
+  installs from the wheelhouse other than through the shared derivation
+- **THEN** the packaging check fails and names the Dockerfile
+
+### Requirement: Locks are refreshed without installing
+
+The repository MUST provide one command that relocks projects against the current
+wheelhouse, upgrading every internal package each lock resolves from it, without
+creating or modifying any environment. Because `uv lock --check` alone cannot observe a
+same-version wheel's changed dependencies, the command MUST relock every project it is
+given rather than skipping those a check reports current.
+
+#### Scenario: A dependency is added to a torch-bearing project
+
+- **WHEN** a developer edits the project's dependencies and runs the lock command
+- **THEN** its lock is rewritten from package metadata and no dependency is downloaded
+  or installed
+
+#### Scenario: Locks are current
+
+- **WHEN** the lock command runs and nothing has changed
+- **THEN** no lock changes
+
+### Requirement: One Python version is declared for the repository
+
+The repository MUST declare one Python version for project environments and images in
+a single root declaration. Project environments MUST be created with it, and image
+definitions MUST default to it. No other declaration of a Python version for syncing or
+building MAY disagree with it.
+
+#### Scenario: A project environment is created on a host with a newer Python
+
+- **WHEN** `reinit` runs on a host whose default Python is newer than the declared one
+- **THEN** the environment uses the declared version
+
+#### Scenario: A target creates the environment without reinit
+
+- **WHEN** a project's test or service target runs uv and no project environment exists
+- **THEN** the environment it creates uses the declared version
+
+#### Scenario: A CI job checks out conditionally
+
+- **WHEN** a CI job's checkout runs only under a condition
+- **THEN** the step that reads the Python declaration runs under the same condition, and
+  the packaging check fails if it does not
+
+#### Scenario: An image default disagrees
+
+- **WHEN** a Dockerfile's Python version default, a Makefile's `--python` value, or a
+  project-level version file differs from the root declaration
+- **THEN** the packaging check fails and names the file
+
+### Requirement: Packaging conventions are checked mechanically
+
+One repository target MUST build the repository wheelhouse and then run every
+packaging check — environment setup, lock currency, Python version, and project layout —
+failing if any fails. Each check MUST also be runnable alone. The checks MUST read only
+the committed tree and the built wheelhouse, and MUST NOT resolve dependencies, relock,
+or contact a package index; building the wheelhouse retains whatever its isolated builds
+need.
+
+Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
+pins an internal package at a version the tree does not build; and on a lock whose
+record of an internal package disagrees with that package's wheel in the wheelhouse —
+a requirement added or removed, unconditionally or under an extra in use, or
+a locked dependency version the wheel's requirement no longer admits.
+
+#### Scenario: A lock pins a superseded internal version
+
+- **WHEN** an internal distribution's declared version is bumped and a consumer's lock
+  still pins the previous one
+- **THEN** the packaging check fails and names the consumer and the package
+
+#### Scenario: An empty extra a consumer requests gains a requirement
+
+- **GIVEN** a consumer that requests an extra of an internal wheel while that extra has no
+  requirements, and the wheel rebuilt at the same version with a requirement under it
+- **WHEN** the packaging check runs
+- **THEN** it fails and names the consumer, the package and extra, and the requirement
+
+#### Scenario: A same-version wheel gains a requirement
+
+- **GIVEN** an internal wheel rebuilt at the same version with a new requirement, and a
+  consumer lock not refreshed since
+- **WHEN** the packaging check runs
+- **THEN** it fails and names the consumer, the package, and the requirement
+
+#### Scenario: Every convention holds
+
+- **GIVEN** a tree that follows every convention and a built wheelhouse
+- **WHEN** the packaging checks run with no network access
+- **THEN** they succeed
+
+#### Scenario: An index the locks resolve from is unreachable
+
+- **WHEN** the packaging target runs where the PyTorch index cannot be reached
+- **THEN** its result is the same as where it can
+
+### Requirement: Aggregate kit tests cover every kit
+
+The aggregate kit test target MUST build prerequisite kit wheels and invoke every kit
+subproject's default test suite. Standalone targets MAY remain for focused development,
+but the aggregate MUST NOT silently omit a kit.
+
+#### Scenario: A kit is added
+
+- **WHEN** a kit subproject with a default test suite exists
+- **THEN** the aggregate kit test target runs that suite
+
+## Evidence
+
+- Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
+- Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/unit/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
+- Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
+- Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.
+- Packaging checks: `scripts/check_uv_setup.py`, `scripts/check_locks.py`, `scripts/check_python_version.py` and their tests under `scripts/tests/`; `make check-packaging`.
+- One project layout: `scripts/check_project_layout.py` and its tests; every project's `[tool.hatch.build.targets.wheel]`.
+- One Python version: the root `.python-version`, the `UV_PYTHON` export in each Makefile that runs uv, and the CI step that sets it.
+- Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
+- Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
+- Transactional legacy storefront migration, byte-stable refusal, restrictive backup, atomic replacement, and idempotency: `domains/vms/storefront/tests/unit/test_domain_migration.py`.
+- Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
+
+Repository-wide migration entrypoints and compatibility-preserving non-additive registry rollout remain proposed in `add-database-migration-commands` and `migrate-registry-to-postgres`.

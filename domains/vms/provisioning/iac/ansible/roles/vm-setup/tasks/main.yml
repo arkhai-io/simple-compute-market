@@ -29,6 +29,19 @@
     - host_setup
     - always
 
+- name: Include GPU passthrough viability audit
+  include_tasks:
+    file: passthrough-audit.yml
+    apply:
+      tags:
+        - passthrough_audit
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - passthrough_audit
+    - gpu_passthrough
+    - host_setup
+
 - name: Include GPU passthrough configuration
   include_tasks:
     file: gpu-passthrough.yml
@@ -37,6 +50,19 @@
         - gpu_passthrough
         - host_setup
   tags:
+    - gpu_passthrough
+    - host_setup
+
+- name: Include rescue boot entry installation
+  include_tasks:
+    file: rescue-boot-entry.yml
+    apply:
+      tags:
+        - rescue_boot
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - rescue_boot
     - gpu_passthrough
     - host_setup
 
@@ -86,13 +112,20 @@
     - security_hardening
     - host_setup
 
-- name: Include FRP client installation
+- name: Install the VM tunnel client when this host's pool uses a relay
+  # Conditional, not defaulted. A host with a public address and no relay
+  # serves VMs by direct NAT, which is a supported deployment — and the role
+  # now asserts an address and a token rather than falling back to a published
+  # literal, so including it unconditionally would fail initialization of every
+  # host that does not use a relay. The correct behaviour for an absent relay
+  # is that no VM tunnel client is installed at all.
   include_tasks:
     file: frp-client.yml
     apply:
       tags:
         - frp_client
         - host_setup
+  when: frp_server_addr is defined and frp_server_addr | length > 0
   tags:
     - frp_client
     - host_setup
@@ -136,6 +169,8 @@
   debug:
     msg:
       - "=== KVM Installation & Security Hardening Complete ==="
+      - "0. GPU passthrough was audited; only GPUs whose entire IOMMU group"
+      - "   belongs to the card were bound. See the audit report above."
       - "1. Users have been added to libvirt and kvm groups"
       - "2. Nested virtualization has been enabled (if supported)"
       - "3. Default libvirt network has been configured"
@@ -161,11 +196,13 @@
       - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
       - "  - All jails use iptables-allports (complete IP blocking)"
       - ""
-      - "FRP CLIENT:"
-      - "  - Config: /etc/frp/frpc.toml"
-      - "  - Logs: /var/log/frp/frpc.log"
-      - "  - Status: sudo systemctl status frpc"
-      - "  - View logs: sudo tail -f /var/log/frp/frpc.log"
+      - "VM TUNNEL CLIENT:"
+      - "  - Config: /etc/frp/frpc-vms.toml"
+      - "  - Logs: /var/log/frp/frpc-vms.log"
+      - "  - Status: sudo systemctl status frpc-vms"
+      - "  - View logs: sudo tail -f /var/log/frp/frpc-vms.log"
+      - "  - The host management tunnel is a separate unit, written when this"
+      - "    host was prepared. No VM operation touches it."
       - ""
       - "IMPORTANT: A reboot is recommended to ensure all changes take effect"
       - "After reboot, you can:"
@@ -191,9 +228,15 @@
 # Reboot System
 # ============================================
 
+# This reboot exists for the IOMMU kernel parameter and the initramfs rebuild,
+# neither of which binds a device, so it cannot remove the host's network path.
+# Device binding happens after it, in gpu-bind.yml, with this connection live.
+# vfio-bind.service is installed but disabled until a bind has been applied and
+# verified here, so no boot replays an unverified bind list. See
+# openspec/specs/physical-provisioning/architecture.md.
 - name: Reboot the system to apply all changes
   reboot:
-    msg: "Rebooting to apply KVM and security configuration changes"
+    msg: "Rebooting to apply KVM and IOMMU configuration changes"
     connect_timeout: 5
     reboot_timeout: 600
     pre_reboot_delay: 0
@@ -202,3 +245,25 @@
   tags:
     - reboot
     - always
+
+# ============================================
+# GPU passthrough, phase two
+# ============================================
+
+# After the reboot, not before. The IOMMU only exists on this side of it, so a
+# first preparation can classify groups here that it could not classify
+# earlier; and binding is applied while this connection is live, so a wrong
+# bind list fails a task on a reachable host instead of taking the network away
+# during a boot nobody is watching.
+- name: Include GPU passthrough binding
+  include_tasks:
+    file: gpu-bind.yml
+    apply:
+      tags:
+        - gpu_bind
+        - gpu_passthrough
+        - host_setup
+  tags:
+    - gpu_bind
+    - gpu_passthrough
+    - host_setup

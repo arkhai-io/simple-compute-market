@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from market_resource_pools import pool_delivers_offering_mode
+from market_resource_pools_contracts import pool_delivers_offering_mode
 
 from .db import SettlementRecord, SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
     CredentialFetchFailedError,
@@ -90,14 +90,15 @@ class FulfillmentOrchestrator:
         return SettlementResource(
             settlement_resource_id=record.settlement_resource_id,
             pool_id=record.pool_id,
-            executor_kind=(record.scheduling_requirements or {}).get(
-                "executor_kind"
+            offering_mode=(record.scheduling_requirements or {}).get(
+                "offering_mode"
             ),
             resource_kind=(record.scheduling_requirements or {}).get(
                 "resource_kind", "unknown"
             ),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),
+            host_id=record.resource_host_id,
             dimensions=dict(
                 (record.scheduling_requirements or {}).get("dimensions") or {}
             ),
@@ -116,15 +117,15 @@ class FulfillmentOrchestrator:
         pool = tx.get_pool(record.pool_id)
         if pool is None:
             raise LookupError(f"pool {record.pool_id!r} not found")
-        executor_kind = (record.scheduling_requirements or {}).get("executor_kind")
-        if not executor_kind:
+        offering_mode = (record.scheduling_requirements or {}).get("offering_mode")
+        if not offering_mode:
             raise FulfillmentConflictError(
-                "scheduled settlement has no explicit executor_kind"
+                "scheduled settlement has no explicit offering_mode"
             )
-        if not pool_delivers_offering_mode(pool.policy_tags, executor_kind):
+        if not pool_delivers_offering_mode(pool.policy_tags, offering_mode):
             raise FulfillmentConflictError(
                 f"pool {record.pool_id!r} does not declare offering mode "
-                f"{executor_kind!r}"
+                f"{offering_mode!r}"
             )
         return pool
 
@@ -136,7 +137,14 @@ class FulfillmentOrchestrator:
         market: str,
         fulfillment_request: VersionedEnvelope[Any],
         record: Any | None = None,
+        acquire: bool = True,
     ) -> PreparedFulfillment:
+        """Resolve and validate a fulfillment into a provider operation.
+
+        ``acquire=False`` asks the provider to prepare without taking anything
+        it would have to give back — the validation path, which answers a
+        question rather than making a commitment. Every rejection still runs.
+        """
         record = record or tx.db.get(SettlementRecord, capacity_reservation_id)
         if record is None:
             raise LookupError(f"no scheduled settlement for {capacity_reservation_id!r}")
@@ -152,6 +160,7 @@ class FulfillmentOrchestrator:
             request=fulfillment_request,
             resource=self._resource(record),
             pool_config=dict(pool.provider_config or {}),
+            allocate=acquire,
         )
         return PreparedFulfillment(record=record, provider=provider, prepared=prepared)
 
@@ -163,11 +172,16 @@ class FulfillmentOrchestrator:
     ) -> FulfillmentValidationResult:
         try:
             with self._uow.read_transaction() as tx:
+                # Validation answers whether this request would be accepted. It
+                # must not acquire anything on the way to the answer, or a
+                # caller checking repeatedly consumes resources it never asked
+                # for and never receives.
                 self._prepare_fulfillment(
                     tx,
                     capacity_reservation_id=capacity_reservation_id,
                     market=market,
                     fulfillment_request=fulfillment_request,
+                    acquire=False,
                 )
             return FulfillmentValidationResult()
         except Exception as exc:
@@ -237,6 +251,13 @@ class FulfillmentOrchestrator:
                 capacity_reservation_id,
                 result.provider_metadata,
             )
+            # Same transaction as the acknowledgement, so a reservation never
+            # references a create this row does not also record. The key is
+            # the provider's to name; this layer only forwards what it is
+            # handed and skips a provider that has no job handle.
+            job_id = provider.resolve_executor_job_id(result.provider_metadata)
+            if job_id:
+                tx.attach_executor_job(capacity_reservation_id, job_id)
             return self._view(acknowledged)
 
     async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptance:

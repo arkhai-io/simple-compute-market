@@ -104,13 +104,15 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch,
 ) -> None:
     signer = SimpleNamespace(identity=object())
-    capacity_runtime = SimpleNamespace(client=lambda: None)
+    capacity_runtime = SimpleNamespace(client=lambda: None, site_ids=("default",))
     built = {}
 
     def fake_sqlite_client(*, registry):
         sqlite_client = SimpleNamespace(
             db_path=f"/{id(registry)}.db",
             domain_registry=registry,
+            load_negotiation_thread_row=None,
+            load_thread_binding=None,
         )
         built["registry"] = registry
         built["sqlite_client"] = sqlite_client
@@ -166,6 +168,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
             accepted_obligation_dispatch=lambda: {},
             arkhai_payments_stage=None,
             payments_coordinator=None,
+            settlement_config=SimpleNamespace(priority=()),
+            repository=SimpleNamespace(load_settlement_obligation=None),
+            runtime=None,
         )
         built["settlement_composition"] = composition
         return composition
@@ -314,3 +319,17 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     assert container.resolved_alkahest_clients == {}
     assert container.resolved_system_service is None
     assert container.resolved_storefront_service is None
+
+def test_every_settlement_route_contract_is_mounted() -> None:
+    """The settle, status, and refund routes are mounted where the contract declares them."""
+    from storefront_client.settlement_routes import unmounted_settlement_routes
+
+    mounted = [
+        (method, route.path)
+        for route in server.app.routes
+        if getattr(route, "path", None)
+        for method in (getattr(route, "methods", None) or ())
+    ]
+
+    assert unmounted_settlement_routes(mounted) == []
+

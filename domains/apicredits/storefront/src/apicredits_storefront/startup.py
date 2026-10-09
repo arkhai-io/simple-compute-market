@@ -4,16 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 
-from apicredits_storefront.utils import config
-from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import stage_event
+from market_arkhai_payments import run_payment_reconciliation
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
     run_negotiation_watchdog,
 )
+
+from apicredits_storefront.lifecycle_steps import (
+    CAPACITY_EVENTS_POLLER,
+    NEGOTIATION_WATCHDOG,
+    PAYMENT_RECONCILIATION,
+    SETTLEMENT_SERVICING,
+    payment_reconciliation_service,
+)
+from apicredits_storefront.utils import config
+from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
 logging.basicConfig(
     level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
@@ -76,9 +87,10 @@ def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 
 async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     """Initialize background tasks for the exact app-selected domain."""
-    import apicredits_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
+
+    import apicredits_storefront.container as _container
 
     if _container.resolved_market_domain is not domain:
         raise RuntimeError(
@@ -96,14 +108,24 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
         storefront_url,
     )
 
+    loops = _container.resolved_loop_controller
+    if loops is None:
+        raise RuntimeError("loop controller is not initialized")
     watchdog_policy = _negotiation_watchdog_policy()
-    asyncio.create_task(
-        run_negotiation_watchdog(
-            _container.resolved_sqlite_client,
-            watchdog_policy,
-            emit_stage_event=stage_event,
-            logger=logger,
-        )
+    loops.start_loop(
+        StorefrontBackgroundTask(
+            name=NEGOTIATION_WATCHDOG,
+            task_factory=partial(
+                run_negotiation_watchdog,
+                _container.resolved_sqlite_client,
+                watchdog_policy,
+                emit_stage_event=stage_event,
+                logger=logger,
+                paused=loops.loop_gate(NEGOTIATION_WATCHDOG),
+                wait=loops.idle,
+            ),
+        ),
+        task_logger=logger,
     )
     logger.info(
         "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
@@ -128,11 +150,37 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     settlement_worker = _container.resolved_settlement_worker
     if settlement_worker is None:
         raise RuntimeError("settlement servicing worker is not initialized")
-    asyncio.create_task(settlement_worker.run())
+    loops.start_loop(
+        StorefrontBackgroundTask(
+            name=SETTLEMENT_SERVICING,
+            task_factory=partial(
+                settlement_worker.run,
+                paused=loops.loop_gate(SETTLEMENT_SERVICING),
+                wait=loops.idle,
+            ),
+        ),
+        task_logger=logger,
+    )
     logger.info(
         "[STARTUP] Settlement servicing worker started (interval=%ss)",
         settings.get("claims_sweep_interval", 30),
     )
+
+    if payment_reconciliation_service() is not None:
+        loops.start_loop(
+            StorefrontBackgroundTask(
+                name=PAYMENT_RECONCILIATION,
+                task_factory=partial(
+                    run_payment_reconciliation,
+                    lambda: payment_reconciliation_service().reconcile_once(),
+                    interval_seconds=float(settings.get("payment_reconciliation_interval", 30)),
+                    logger=logger,
+                    paused=loops.loop_gate(PAYMENT_RECONCILIATION),
+                    wait=loops.idle,
+                ),
+            ),
+            task_logger=logger,
+        )
 
     await _preflight_credits_service()
 
@@ -142,7 +190,13 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
         capacity_events_poller_loop,
     )
 
-    asyncio.create_task(capacity_events_poller_loop())
+    loops.start_loop(
+        StorefrontBackgroundTask(
+            name=CAPACITY_EVENTS_POLLER,
+            task_factory=partial(capacity_events_poller_loop, loops),
+        ),
+        task_logger=logger,
+    )
     logger.info("[STARTUP] Quota capacity event poller started")
 
 
@@ -160,6 +214,11 @@ def _capacity_authority_site():
     if len(sites) != 1:
         raise RuntimeError("capacity.seed_site is required with multiple sites")
     return next(iter(sites.values()))
+
+
+# The quota resource belongs to the credits authority's system-created default
+# pool; a declaration must name its pool explicitly.
+_QUOTA_POOL_ID = "default"
 
 
 async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
@@ -189,7 +248,8 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     try:
         await admin_client.register_resource(
             resource_id,
-            total_units=total_units,
+            pool_id=_QUOTA_POOL_ID,
+            capacity={"units": total_units},
             resource_type="api_credits",
         )
     except SiteCapacityAdminClientError as exc:
@@ -226,15 +286,15 @@ async def _seed_demo_listing() -> None:
         # Idempotent: skip if a listing already derives from this resource.
         existing = await db.list_listings(status="open", limit=500)
         for row in existing or []:
-            offer = row.get("offer_resource") or {}
-            if isinstance(offer, str):
+            listing_resource = row.get("listing_resource") or {}
+            if isinstance(listing_resource, str):
                 import json as _json
 
                 try:
-                    offer = _json.loads(offer)
+                    listing_resource = _json.loads(listing_resource)
                 except (ValueError, TypeError):
-                    offer = {}
-            if isinstance(offer, dict) and offer.get("resource_id") == resource_id:
+                    listing_resource = {}
+            if isinstance(listing_resource, dict) and listing_resource.get("resource_id") == resource_id:
                 logger.info(
                     "[STARTUP] Demo listing for resource %s already present; "
                     "skipping seed",

@@ -16,12 +16,14 @@ from .settlement_stages import (
     PaymentStage,
     SellerStage,
     alkahest_resources,
-    verify_alkahest,
+    refund_payment,
     revalidate_alkahest,
-    verify_payment,
-    revalidate_payment,
-    verify_contact,
     revalidate_contact,
+    revalidate_payment,
+    settle_payment,
+    verify_alkahest,
+    verify_contact,
+    verify_payment,
 )
 from market_alkahest import create_alkahest_registration
 from market_contact_exchange import (
@@ -38,12 +40,11 @@ from market_settlement_runtime import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
+    ClientForOwner,
+    PaymentSellerStage,
     create_arkhai_payments_registration,
-    ArkhaiPaymentsConfig,
+    servicing_stage,
 )
-
-from .arkhai_payments import BareMetalArkhaiPaymentsStage
-
 
 SELLER_STAGES = SettlementStageTable(
     {
@@ -59,6 +60,8 @@ SELLER_STAGES = SettlementStageTable(
             verify_payment,
             revalidate_payment,
             True,
+            refund=refund_payment,
+            reconcile=settle_payment,
         ),
         CONTACT_MECHANISM: ContactStage(
             create_contact_exchange_registration,
@@ -68,7 +71,6 @@ SELLER_STAGES = SettlementStageTable(
         ),
     }
 )
-
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
@@ -85,6 +87,8 @@ class BareMetalStorefrontSettlementComposition:
     registry: SettlementConfigurationRegistry
     config: SettlementConfig
     resources: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
+    payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
 
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES
 
@@ -95,6 +99,13 @@ class BareMetalStorefrontSettlementComposition:
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
+        # Accepted payment deals are serviced whether or not new payment options
+        # are published, so the stage follows the servicing fields, not `enabled`.
+        stage = servicing_stage(
+            self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY),
+            client_for_owner=self.payments_client_for_owner,
+        )
+        object.__setattr__(self, "payments_stage", stage)
 
     @classmethod
     def from_raw_config(
@@ -102,29 +113,27 @@ class BareMetalStorefrontSettlementComposition:
         raw_settlement: Mapping[str, Any],
         *,
         resources: Mapping[str, Any] | None = None,
+        payments_client_for_owner: ClientForOwner | None = None,
     ) -> "BareMetalStorefrontSettlementComposition":
         registry = build_bare_metal_settlement_registry()
         return cls(
             registry=registry,
             config=registry.resolve(raw_settlement, role="seller"),
             resources=resources or {},
+            payments_client_for_owner=payments_client_for_owner,
         )
 
     @property
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
 
-    def arkhai_payments_stage(self) -> BareMetalArkhaiPaymentsStage | None:
-        section = self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY)
-        if section is None:
-            return None
-        config = ArkhaiPaymentsConfig.model_validate(section)
-        return BareMetalArkhaiPaymentsStage(config=config)
+    def arkhai_payments_stage(self) -> PaymentSellerStage | None:
+        return self.payments_stage
 
     def settlement_data_dispatch(
         self,
     ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
-        payment_stage = self.arkhai_payments_stage()
+        payment_stage = self.payments_stage
         return {
             mechanism: lambda agreement, entry=entry: entry.accepted_data(
                 agreement, payment_stage
@@ -176,6 +185,10 @@ class BareMetalStorefrontSettlementComposition:
                     **self.resources,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
+                    # The site the listing binding records, so a mechanism
+                    # resolving anything per origin sees the value its
+                    # negotiation will later inherit.
+                    "origin": str(candidate["site_id"]),
                 },
             )
             if not isinstance(artifacts, Mapping):

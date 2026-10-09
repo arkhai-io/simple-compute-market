@@ -10,16 +10,19 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST = REPO_ROOT / "manifests" / "published-distributions.json"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
 
 
 def _packages() -> list[dict[str, object]]:
-    """The PACKAGES table the workflow heredocs into `packages.json`."""
+    """Every distribution this repository publishes.
 
-    text = WORKFLOW.read_text(encoding="utf-8")
-    body = re.search(r"cat > packages\.json <<'JSON'\n(.*?)\n\s*JSON\n", text, re.S)
-    assert body, "publish-pypi.yml no longer states its package table as a heredoc"
-    return json.loads(re.sub(r"^ {10}", "", body.group(1), flags=re.M))
+    Read from the manifest rather than from a workflow heredoc. The workflow
+    stated its own table and the Makefile stated another; the two disagreed in
+    both directions, which is what one declaration prevents.
+    """
+
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))["distributions"]
 
 
 def _escaping_force_includes(package: Path) -> list[str]:
@@ -76,42 +79,22 @@ def _find_links(package: Path) -> list[str]:
 
 
 @pytest.mark.parametrize("package", _packages(), ids=lambda entry: str(entry["key"]))
-def test_a_published_package_looks_for_local_wheels_only_in_dist(
+def test_a_published_package_names_no_local_wheel_directory(
     package: dict[str, object],
 ) -> None:
-    """The one local directory a publish build may consult is the one CI makes.
+    """A publish build resolves from PyPI and consults no local directory.
 
-    uv reads `find-links` even under `--no-sources`, so a directory named here
-    has to exist by the time the workflow builds -- and on a fresh checkout the
-    only one that does is the `.dist` the workflow creates. Four packages named
-    it and nothing created it, so their builds failed with an `os error 2`
-    naming a path that appears in no build command. A publish only ever
-    resolves from PyPI, so pointing anywhere else is the mistake, not the
-    missing directory.
+    uv reads `find-links` even under `--no-sources`, so a directory named in a
+    package's pyproject has to exist wherever that package is built, and on a
+    fresh publish checkout none does. Projects therefore never declare the
+    wheelhouse; the tools that sync and lock against it supply it.
     """
 
     directory = REPO_ROOT / str(package["path"])
     if not (directory / "pyproject.toml").is_file():
         pytest.skip(f"{package['path']} is not checked out here")
 
-    for entry in _find_links(directory):
-        resolved = (directory / entry).resolve()
-        assert resolved == (REPO_ROOT / ".dist").resolve(), (
-            f"{package['dist']} resolves find-links {entry!r} to {resolved}, which no "
-            "publish job creates; a publish build resolves from PyPI"
-        )
-
-
-def test_the_publish_job_creates_the_directory_those_packages_look_in() -> None:
-    """The other half of the pair above, which is otherwise only true by luck.
-
-    Requiring every `find-links` to point at `.dist` means nothing unless the
-    workflow actually makes `.dist`. It did not, which is the whole bug: the
-    hosted client job created it as a side effect of staging release assets,
-    so that one package built and the four that merely declared it did not.
-    """
-
-    text = WORKFLOW.read_text(encoding="utf-8")
-    creates = text.index("mkdir -p .dist\n      - name: Build distribution")
-
-    assert creates < text.index("run: |\n          if [ \"${{ matrix.wheel_only }}\" = \"true\" ]")
+    assert _find_links(directory) == [], (
+        f"{package['dist']} declares find-links {_find_links(directory)!r}; "
+        "a publish build resolves from PyPI"
+    )

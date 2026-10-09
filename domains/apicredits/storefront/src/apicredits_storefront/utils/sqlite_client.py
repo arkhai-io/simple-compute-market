@@ -54,7 +54,7 @@ class SQLiteClient(CoreSQLiteClient):
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
         for table, columns in {
             "api_credit_settlement_evidence": {"negotiation_id", "mechanism", "agreement_digest", "settlement_ref", "status", "evidence"},
-            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref"},
+            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref", "delivery_started_at"},
         }.items():
             actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
             if not columns <= actual:
@@ -71,6 +71,26 @@ class SQLiteClient(CoreSQLiteClient):
 
     async def save_issuance_progress(self, *, negotiation_id: str, **fields: Any) -> dict[str, Any]:
         return await asyncio.to_thread(SettlementRepository(self.db_path).checkpoint, negotiation_id, **fields)
+
+    async def claim_credit_delivery_start(self, *, negotiation_id: str) -> bool:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).claim_delivery_start, negotiation_id)
+
+    async def record_credit_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).record_refund_intent, negotiation_id)
+
+    async def abandon_credit_refund_intent(self, *, negotiation_id: str, prior_status: str) -> None:
+        await asyncio.to_thread(
+            SettlementRepository(self.db_path).abandon_refund_intent, negotiation_id, prior_status=prior_status,
+        )
+
+    async def complete_credit_refund(self, *, negotiation_id: str) -> None:
+        await asyncio.to_thread(SettlementRepository(self.db_path).complete_refund, negotiation_id)
+
+    async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
+        """Accepted deals of ``mechanism`` with no verified receipt, open credit issuance, or a refund left `refunding`."""
+        return await asyncio.to_thread(
+            SettlementRepository(self.db_path).unsettled_negotiations, mechanism=mechanism, limit=limit,
+        )
 
     async def save_credit_terms(
         self,

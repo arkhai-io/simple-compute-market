@@ -5,11 +5,19 @@ material that side already holds. Delivery is never authoritative: it cannot
 fail a deal, cannot slow a counterparty, and carries no payload into a log.
 """
 
-from .config import DeliveryConfig, load_delivery_config
+from .config import (
+    RESERVED_SECTION_KEYS,
+    SINK_KEY,
+    DeliveryConfig,
+    DeliveryRole,
+    load_delivery_config,
+    validate_delivery_origins,
+)
 from .discovery import (
     DeliverySinkSet,
     build_delivery_sinks,
     discover_sink_factories,
+    discover_sink_settings_models,
 )
 from .dispatch import DeliveryOutcome, deliver, deliver_async, describe_outcomes
 from .events import (
@@ -19,10 +27,12 @@ from .events import (
     canonical_principal,
     introduction_delivery_event,
 )
+from .seller import SellerIntroductionDelivery, build_seller_introduction_delivery
 from .sinks import (
     DEFAULT_TIMEOUT_SECONDS,
     SINK_ENTRY_POINT_GROUP,
     ConfiguredSink,
+    DeclaredSink,
     DeliveryConfigurationError,
     DeliveryError,
     DeliverySink,
@@ -33,24 +43,32 @@ from .sinks import (
 __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "INTRODUCTION_REVEALED",
+    "RESERVED_SECTION_KEYS",
     "SINK_ENTRY_POINT_GROUP",
+    "SINK_KEY",
     "ConfiguredSink",
+    "DeclaredSink",
     "DeliveryConfig",
     "DeliveryConfigurationError",
     "DeliveryError",
     "DeliveryEvent",
     "DeliveryOutcome",
+    "DeliveryRole",
     "DeliverySink",
     "DeliverySinkSet",
     "Role",
+    "SellerIntroductionDelivery",
     "SinkFactory",
     "SinkSettings",
     "build_delivery_sinks",
+    "build_seller_introduction_delivery",
     "canonical_principal",
     "deliver",
     "deliver_async",
     "describe_outcomes",
     "discover_sink_factories",
+    "discover_sink_settings_models",
     "introduction_delivery_event",
     "load_delivery_config",
+    "validate_delivery_origins",
 ]

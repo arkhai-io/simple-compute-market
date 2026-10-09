@@ -6,27 +6,29 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.settlement import (
+from arkhai_vms_listings import extract_compute_from_order
+from arkhai_vms_settlement import (
     encode_compute_lease,
     token_resource_from_accepted_escrow,
 )
-from domains.vms.settlement.fulfillment import reconcile_or_submit_compute_fulfillment
-from domains.vms.settlement.proposals import escrow_proposal_from_accepted_entry
+from arkhai_vms_settlement.fulfillment import reconcile_or_submit_compute_fulfillment
+from arkhai_vms_settlement.proposals import escrow_proposal_from_accepted_entry
 from core_storefront import build_domain_settlement_artifacts
+from core_storefront.models.settle_models import AgreementSettleResponse
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from market_arkhai_payments import (
-    Mandate,
+    MandatePolicyError,
+    PaymentSettlementData,
     SignedReceipt,
     duration_seconds,
-    transaction_id,
 )
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core import SettlementEvidence, SettlementStageTable
 from market_core.schemas import (
     EscrowProposal,
@@ -36,6 +38,7 @@ from market_identity import Identity
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
+    refund_escrow_listing,
 )
 from market_storefront.payment_repository import VmSettlementEvidenceConflict
 from market_storefront.models.settle_models import (
@@ -43,6 +46,9 @@ from market_storefront.models.settle_models import (
     VmSettleRequest,
 )
 from market_storefront.services.capacity_client import build_capacity_runtime
+from market_storefront.services.vm_fulfillment_planner import (
+    VERIFIED_EVIDENCE_STATUSES,
+)
 from market_storefront.services.vm_job_spec_service import (
     compute_capacity_claim_from_order,
 )
@@ -53,6 +59,23 @@ from market_storefront.utils.escrow_verification import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class PaymentSettlementError(RuntimeError):
+    """A settlement or refund refusal carrying the HTTP status the route returns."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class PaymentSettleResult:
+    """A settle or refund outcome: its status code and neutral payload fields."""
+
+    status_code: int
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -239,6 +262,12 @@ class VmAlkahestSellerStage:
             capacity=build_capacity_runtime(lambda: db),
         )
 
+    async def refund_failed_delivery(
+        self, *, db: Any, ctx: Any, listing_id: str | None, thread: dict, **_: Any
+    ) -> dict[str, Any]:
+        """The ``refund`` failure action: the escrow's token refund to the buyer."""
+        return await refund_escrow_listing(db, ctx, listing_id, thread)
+
     def accepted_data(
         self, agreement: Any, payments_stage: Any, *, artifacts: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -301,16 +330,10 @@ class VmAlkahestSellerStage:
                 status_code=409,
                 detail="accepted negotiation terms are invalid",
             ) from exc
-        accepted_ssh_public_key = provision.ssh_public_key
-        if not accepted_ssh_public_key.strip():
+        if not provision.ssh_public_key.strip():
             raise HTTPException(
                 status_code=409,
                 detail="accepted provision terms have no SSH public key",
-            )
-        if body.ssh_public_key != accepted_ssh_public_key:
-            raise HTTPException(
-                status_code=403,
-                detail="SSH public key does not match accepted provision terms",
             )
 
         try:
@@ -329,11 +352,6 @@ class VmAlkahestSellerStage:
             raise HTTPException(
                 status_code=409,
                 detail="accepted settlement terms have no chain",
-            )
-        if body.chain_name != accepted_chain:
-            raise HTTPException(
-                status_code=403,
-                detail="settlement chain does not match accepted terms",
             )
 
         if composition is None:
@@ -354,16 +372,11 @@ class VmAlkahestSellerStage:
                     f"available chains: {sorted(_container.configured_chain_names())}"
                 ),
             )
-        client = composition.evidence_clients.get(accepted_chain)
-        if client is None:
-            raise HTTPException(
-                status_code=503, detail="accepted chain client is unavailable"
-            )
         try:
             result = await composition.coordinator.start(
                 escrow_uid=escrow_uid,
                 negotiation_id=persisted_negotiation_id,
-                mechanism_client=client,
+                mechanism_client=mechanism_client,
                 chain_name=accepted_chain,
                 request=None,
             )
@@ -398,14 +411,17 @@ class VmPaymentsSellerStage:
     ) -> dict[str, Any]:
         if payments_stage is None:
             raise ValueError("payments_settlement_unavailable")
-        return {
-            "mandate": payments_stage.mandate_for_agreement(
-                agreement.model_dump(mode="json", exclude_none=True)
-            )
-        }
+        return payments_stage.settlement_data(
+            agreement.model_dump(mode="json", exclude_none=True)
+        ).to_wire()
 
     def verified_evidence(
-        self, *, raw: bytes, order: dict, receipt: Any, mandate: Any
+        self,
+        *,
+        raw: bytes,
+        order: dict,
+        receipt: Any,
+        data: PaymentSettlementData,
     ) -> SettlementEvidence:
         agreement = json.loads(raw)
         wire = receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -413,7 +429,7 @@ class VmPaymentsSellerStage:
             part.model_dump(mode="json", by_alias=True)["hold"]
             for part in receipt.receipt.parts
         ]
-        facts = delivery_facts(agreement, order, funding_expires=mandate.expires)
+        facts = delivery_facts(agreement, order, funding_expires=data.mandate.expires)
         facts["payload"]["payment_hold"] = holds
         facts["payload"]["hold_until_utc"] = [
             (
@@ -425,20 +441,15 @@ class VmPaymentsSellerStage:
             for hold in holds
         ]
         facts["payload"]["receipt_identity"] = {
-            "transaction_id": transaction_id(mandate),
+            "transaction_id": data.transaction_id,
             "approved_at": receipt.receipt.approvedAt,
             "deal": receipt.receipt.deal.root.root,
         }
         return vm_evidence(
             raw=raw,
             mechanism=self.mechanism,
-            reference=transaction_id(mandate),
-            source={
-                "receipt": wire,
-                "mandate": mandate.model_dump(
-                    mode="json", by_alias=True, exclude_none=True
-                ),
-            },
+            reference=data.transaction_id,
+            source={"receipt": wire, "mandate": data.to_wire()["mandate"]},
             facts=facts,
         )
 
@@ -481,25 +492,26 @@ class VmPaymentsSellerStage:
     def revalidate(
         self, *, evidence: SettlementEvidence, thread: Mapping[str, Any], verifier: Any
     ) -> None:
+        """Re-prove stored evidence against the exact Agreement before any effect.
+
+        The stored settlement data must be the one the Agreement binds, under the
+        policy recorded in its mandate, and the stored receipt must still verify
+        under the current receipt identity pin.
+        """
         validate_accepted_evidence(evidence, thread)
         raw = thread.get("agreement_bytes")
         if not isinstance(raw, bytes) or verifier is None:
             raise ValueError("accepted payment Agreement or verifier is unavailable")
-        agreement = json.loads(raw)
+        try:
+            agreement, data = verifier.accepted(raw, thread.get("settlement_data"))
+        except MandatePolicyError as exc:
+            raise ValueError("accepted payment settlement data is invalid") from exc
         source = evidence.evidence.get("source") or {}
-        mandate_wire = (thread.get("settlement_data") or {}).get("mandate")
-        mandate = Mandate.model_validate(mandate_wire)
         if (
-            evidence.status != "verified"
-            or evidence.evidence.get("agreement_sha256")
-            != hashlib.sha256(raw).hexdigest()
-            or evidence.settlement_ref != transaction_id(mandate)
-            or source.get("mandate") != mandate_wire
-            or mandate_wire != verifier.mandate_for_agreement(agreement)
+            evidence.settlement_ref != data.transaction_id
+            or source.get("mandate") != data.to_wire()["mandate"]
             or not verifier.receipt_matches(
-                SignedReceipt.model_validate(source.get("receipt")),
-                agreement=agreement,
-                mandate=mandate,
+                SignedReceipt.model_validate(source.get("receipt")), agreement, data
             )
         ):
             raise ValueError("payment evidence does not match accepted Agreement")
@@ -529,15 +541,63 @@ class VmPaymentsSellerStage:
             )
         if auth.exact_retry and auth.recorded_outcome is None:
             raise HTTPException(status_code=409, detail="request retry is pending")
-        try:
-            result = await coordinator.start(body.negotiation_id, thread)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
+        result = await self._call(coordinator.start(body.negotiation_id, thread))
+        # The settlement composition imports these entries to build its table,
+        # so its job projection is loaded here rather than at module scope.
+        from market_storefront.settlement_composition import serialize_settlement_job
+
+        payload = (
+            serialize_settlement_job(result.payload)
+            if "created_at" in result.payload
+            else dict(result.payload)
+        )
+        # Job serialization emits a fixed shape; the neutral settlement fields
+        # come from the coordinator's result.
+        payload.update(
+            {
+                key: result.payload[key]
+                for key in (
+                    "negotiation_id", "escrow_uid", "settlement_ref", "status", "retryable"
+                )
+                if key in result.payload
+            }
+        )
+        payload["buyer_principal"] = Identity.model_validate(
+            thread["buyer_principal"]
+        ).model_dump(mode="json")
+        payload["seller_principal"] = composition.local_principal.model_dump(mode="json")
+        # The neutral fields are a cross-domain contract; refuse to emit a
+        # payload that would not parse as one.
+        AgreementSettleResponse.model_validate(payload)
+        return JSONResponse(content=payload, status_code=result.status_code)
+
+    async def refund(
+        self, *, negotiation_id: str, thread: dict, composition: Any
+    ) -> tuple[int, dict[str, Any]]:
+        """Reverse the deal's held payment at the seller operator's request."""
+        coordinator = composition.payments_coordinator
+        if coordinator is None:
             raise HTTPException(
-                status_code=503, detail="payments service is unavailable"
-            ) from exc
-        return result, Identity.model_validate(thread["buyer_principal"])
+                status_code=503, detail="Arkhai settlement is unavailable"
+            )
+        result = await self._call(coordinator.refund(negotiation_id, thread))
+        return result.status_code, dict(result.payload)
+
+    async def refund_failed_delivery(
+        self, *, thread: dict, composition: Any, **_: Any
+    ) -> dict[str, Any]:
+        """The ``refund`` failure action: reverse the payment if nothing was delivered."""
+        coordinator = getattr(composition, "payments_coordinator", None)
+        if coordinator is None:
+            return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}
+        return await coordinator.refund_before_delivery(str(thread["negotiation_id"]))
+
+    @staticmethod
+    async def _call(pending: Any) -> Any:
+        try:
+            return await pending
+        except PaymentSettlementError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def validate_accepted_evidence(
@@ -548,7 +608,7 @@ def validate_accepted_evidence(
         raise ValueError("accepted Agreement bytes are unavailable")
     agreement = json.loads(raw)
     if (
-        evidence.status != "verified"
+        evidence.status not in VERIFIED_EVIDENCE_STATUSES
         or evidence.negotiation_id != agreement["negotiation_id"]
         or evidence.mechanism != agreement["settlement"]["mechanism"]
         or evidence.evidence.get("agreement_sha256") != hashlib.sha256(raw).hexdigest()
@@ -612,11 +672,44 @@ def vm_evidence(
     )
 
 
+@dataclass(frozen=True)
+class VmContactSellerStage:
+    """A contact exchange completes by the authenticated introduction reveal.
+
+    Its accepted plan comes from the registration, and the reveal is served by
+    the contact-exchange kit, so this entry publishes no chains and has no
+    settle, delivery or refund operation.
+    """
+
+    mechanism: str = CONTACT_MECHANISM
+
+    def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
+        return {}
+
+    def publication_chains(self, clauses: Any) -> set[str]:
+        return set()
+
+    def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
+        return build_selection()
+
+    def accepted_data(
+        self, agreement: Any, payments_stage: Any, *, artifacts: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {}
+
+    async def start(self, **_: Any) -> Any:
+        raise HTTPException(
+            status_code=409,
+            detail="a contact exchange completes by introduction, not settlement",
+        )
+
+
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
         {
             "alkahest.v1": VmAlkahestSellerStage(build_plan),
             "arkhai.payments.v1": VmPaymentsSellerStage(),
+            CONTACT_MECHANISM: VmContactSellerStage(),
         }
     )
 

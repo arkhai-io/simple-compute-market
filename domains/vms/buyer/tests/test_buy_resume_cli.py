@@ -26,9 +26,9 @@ from dataclasses import dataclass
 import pytest
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.registry_config import RegistryAuthority
-from domains.vms.buyer.buy_orchestrator import BuyResult
-from domains.vms.buyer.cli import app
-from domains.vms.buyer.run_log import RunLog, read_run
+from arkhai_vms_buyer.buy_orchestrator import BuyResult
+from arkhai_vms_buyer.cli import app
+from arkhai_vms_buyer.run_log import RunLog, read_run
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
@@ -60,11 +60,11 @@ def _isolated_runs_dir(tmp_path, monkeypatch):
     """Pin the run-log directory at tmp_path for hermetic tests."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_fresh_buyer_identity",
+        "arkhai_vms_buyer.common.resolve_fresh_buyer_identity",
         lambda: _RESOLVED,
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_recovery_buyer_identity",
+        "arkhai_vms_buyer.common.resolve_recovery_buyer_identity",
         lambda _run_id: ResolvedBuyerIdentity(
             profile_id=_PROFILE_ID,
             principal=BUYER_SIGNER.identity,
@@ -73,15 +73,15 @@ def _isolated_runs_dir(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_buyer_wallet",
+        "arkhai_vms_buyer.common.resolve_buyer_wallet",
         lambda **_kwargs: (_BUYER_ADDR, _BUYER_PK),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.deal_helpers._publisher_trust_refresh",
+        "arkhai_vms_buyer.deal_helpers._publisher_trust_refresh",
         lambda signer: lambda *_: seller_principals(),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_registry_authorities",
+        "arkhai_vms_buyer.common.resolve_registry_authorities",
         lambda urls: {
             url: RegistryAuthority(
                 authority="registry",
@@ -91,11 +91,11 @@ def _isolated_runs_dir(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_indexer_urls_for_schema",
+        "arkhai_vms_buyer.common.resolve_indexer_urls_for_schema",
         lambda _schema, **kwargs: list(kwargs["registry_authorities"]),
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.common.resolve_registry_api_keys",
+        "arkhai_vms_buyer.common.resolve_registry_api_keys",
         lambda: {},
     )
     yield
@@ -288,7 +288,7 @@ class TestNegotiateFrom:
         assert result.exit_code == 0, result.output
 
         # Find the new run-log (the one that wasn't `original_run`).
-        from domains.vms.buyer.run_log import list_runs
+        from arkhai_vms_buyer.run_log import list_runs
 
         new_runs = [r for r in list_runs() if r.run_id != original_run]
         assert len(new_runs) == 1
@@ -333,7 +333,7 @@ class TestBuyFrom:
             return {"status": "ready"}
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.run_settle_from_log",
+            "arkhai_vms_buyer.buy_cli.run_settle_from_log",
             _fake_settle,
         )
 
@@ -377,7 +377,7 @@ class TestBuyFrom:
 
         settle_calls: list[dict] = []
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.run_settle_from_log",
+            "arkhai_vms_buyer.buy_cli.run_settle_from_log",
             lambda **kw: settle_calls.append(kw) or {"status": "ready"},
         )
 
@@ -416,7 +416,7 @@ class TestBuyFrom:
             return {"status": "ready"}
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.run_settle_from_log",
+            "arkhai_vms_buyer.buy_cli.run_settle_from_log",
             _fake_settle,
         )
 
@@ -508,7 +508,7 @@ class TestBuyFrom:
         captured = {}
 
         monkeypatch.setattr(
-            "domains.vms.buyer.common.chain_by_name",
+            "arkhai_vms_buyer.common.chain_by_name",
             lambda name: ChainConfig(
                 name=name,
                 rpc_url="http://rpc",
@@ -517,7 +517,7 @@ class TestBuyFrom:
             ),
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.settlement_composition.load_user_config",
+            "arkhai_vms_buyer.settlement_composition.load_user_config",
             lambda: {
                 "Settlement": {
                     "schema_version": 1,
@@ -527,19 +527,19 @@ class TestBuyFrom:
             },
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.query_registry_for_matches_multi",
+            "arkhai_vms_buyer.buy_cli.query_registry_for_matches_multi",
             lambda *a, **kw: [listing],
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli._resolve_prices_from_matches",
+            "arkhai_vms_buyer.buy_cli._resolve_prices_from_matches",
             lambda **kw: (100, 150),
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
+            "arkhai_vms_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
             lambda **kw: lambda *a, **inner_kw: [],
         )
         monkeypatch.setattr(
-            "domains.vms.buyer.escrow_client.make_create_escrow_fn",
+            "arkhai_vms_buyer.escrow_client.make_create_escrow_fn",
             lambda **kw: lambda escrows: [],
         )
 
@@ -552,7 +552,7 @@ class TestBuyFrom:
             return _hook
 
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.make_legacy_negotiate_hook",
+            "arkhai_vms_buyer.buy_cli.make_legacy_negotiate_hook",
             fake_make_negotiate_hook,
         )
 
@@ -564,7 +564,7 @@ class TestBuyFrom:
             assert "build_escrow_proposal" not in kwargs
             return BuyResult(status="ready", negotiation_id="neg-1", rounds=1)
 
-        monkeypatch.setattr("domains.vms.buyer.buy_cli.run_buy", fake_run_buy)
+        monkeypatch.setattr("arkhai_vms_buyer.buy_cli.run_buy", fake_run_buy)
 
         result = runner.invoke(
             app,
@@ -592,7 +592,7 @@ class TestBuyFrom:
     ):
         run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
         monkeypatch.setattr(
-            "domains.vms.buyer.buy_cli.run_settle_from_log",
+            "arkhai_vms_buyer.buy_cli.run_settle_from_log",
             lambda **kw: pytest.fail("settle should not run when validation fails"),
         )
 

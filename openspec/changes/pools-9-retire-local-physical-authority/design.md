@@ -1,255 +1,338 @@
 # Design
 
-This document is written to stand on its own — `pools-8-capacity-projection-and-listing-hints`,
-where this scope was originally investigated, is expected to be archived
-(and its documents possibly eventually removed) once its own scope is
-complete, independent of when this change is picked up. Findings below
-were verified directly against the code during `pools-8`'s own Section 6
-work; re-verify anything load-bearing again before implementing, since the
-codebase will have moved on by the time this change actually starts.
+## Context
 
-## Retirement is column-level, not table-level, for two tables
+Verified against the tree at planning time; re-verify before implementing.
 
-`resources` and `compute_capacity_pools` each mix physical-identity
-columns (retirement candidates) with commercial columns that must survive
-(pricing, seller policy, accepted escrows) — this change cannot simply
-drop either table.
+**Two listing sources exist.** `available_compute_slices` in
+`domains/vms/listings/reconciler.py` reads the site projection when
+`use_site_projection_for_listings` is `true` (the default) and
+`_pool_rows_from_local_tables` otherwise. The flag is read in
+`services/capacity_client.py` and `services/listing_sources.py`; the
+storefront lifecycle loop derives from the same source selection, so retiring
+the local path retires it for the loop too.
 
-| Table | Physical columns (retirement candidate) | Commercial columns (must survive) |
+**The local tables mix physical and commercial columns.**
+
+| Table | Physical columns | Commercial columns |
 |---|---|---|
-| `resources` | `resource_type`, `resource_subtype`, `unit`, `value`, `state`, `attributes` | `min_price`, `token`, `max_duration_seconds`, `accepted_escrows` — confirmed **dead** in the current default code path as of `pools-8` (read only by the also-dead legacy-resources fallback, itself only reachable when `compute_capacity_pools`/`compute_pool_members` don't both exist — a state no migrated deployment can be in). Reclassified from "must survive" to "retirement candidate" alongside the physical columns; the confirming repo-wide grep for any other reader is this change's own task, not assumed complete from `pools-8`'s planning pass alone. |
-| `hosts` | all (pure physical validator input) | none |
-| `compute_pool_members` | all (pure physical membership) | none |
-| `compute_capacity_pools` | `total_gpu_count` only | `gpu_model` (soft/fallback-only — kept as a resilience fallback for a projection resource missing its own `attributes.gpu_model`; retiring it is optional, not required by this change), `region`/`sla` (**not** retirement candidates — see the correction below), `seller_id`, `pricing_policy_id`, `escrow_policy_id`, `allocation_policy`, `min_price`, `token`, `accepted_escrows`, `max_duration_seconds` |
-| `resource_transition_events` | all (audit trail of `resources`' physical-column mutations) | n/a — existing rows are history, not a live concern; must not be deleted even once new events stop |
+| `resources` | `resource_type`, `resource_subtype`, `unit`, `value`, `state`, `attributes` | `min_price`, `token`, `max_duration_seconds`, `accepted_escrows` — read only by a legacy-resources fallback that is reachable only when `compute_capacity_pools` and `compute_pool_members` are absent, a state no migrated deployment is in |
+| `hosts` | all | none; its marketing columns (`cpu_type`, `motherboard`, `host_ram_gb`, `datacenter_grade`, network fields) are unread by publication |
+| `compute_pool_members` | all | none |
+| `compute_capacity_pools` | `total_gpu_count` | `gpu_model`, `region`, `sla`, `min_price`, `token`, `accepted_escrows`, `settlements`, `max_duration_seconds`, `seller_id`, policy ids |
+| `resource_transition_events` | all (audit trail of `resources` mutations) | n/a; existing rows are history and are not deleted |
 
-`hosts`' marketing-only columns (`cpu_type`, `motherboard`, `host_ram_gb`,
-`datacenter_grade`, network fields) were checked against the real publish
-pipeline during `pools-8` and found already unread — this data was inert
-before this change touches anything, not something this change newly
-breaks.
+**The only writer of the local tables is CSV import.**
+`SQLiteClient.upsert_resource` → `_sync_compute_pool_for_resource` issues the
+one `INSERT … ON CONFLICT` that fills `compute_capacity_pools`, physical and
+commercial columns alike. It is reached from
+`POST /api/v1/admin/portfolio/resources/import`, the `portfolio import-csv`
+command, and startup seeding (`_seed_resources_if_empty` →
+`SystemService.seed_resources_if_empty`, sourced from `resources_csv_inline`,
+`resources_csv_path`, or `/app/resources.csv`). Helm (`_helpers.tpl`,
+`secrets.yaml`, `values.yaml`), compose (`compose/seller.yml`,
+`domains/vms/compose.yml`), and the seller quickstart carry that contract.
+Seeding silently skips when it finds no source, so an upgraded deployment
+with CSV configuration would start with no inventory and no error.
 
-### Correction (2026-08-06): why `region`/`sla` survive
+**Two storefront override tiers exist.** The site-scoped store
+(`kit/pool-overrides`, keyed by `(site_id, pool_id, offering_mode)`, with
+authenticated routes, typed clients, and `market-storefront pool-override
+set/show/list/delete`) is the top tier. Beneath it `_tier()` falls back to the
+home-site legacy record: `compute_capacity_pools`' commercial columns, read by
+`_local_pool_pricing`, keyed by `pool_id` alone. Each field a pool takes from
+the legacy record is reported in `legacy_overrides_in_effect` and on system
+status. Two legacy fields have no site-scoped equivalent: `region` (the store
+forbids it as a physical fact; the pool hint declares it) and
+`accepted_escrows` (superseded by `settlements` clauses). The `inactive`
+override state exists only for local-table derivation.
 
-The table above previously justified retaining `region`/`sla` on the grounds
-that "no projection equivalent exists for either." That is inaccurate as of
-`pools-8`. `kit/resource-pools/hints.py` defines `REGION_POLICY_TAG` and
-`SLA_POLICY_TAG` with `raw_region`/`sla_value` readers, projected through a
-pool's `policy_tags`, and `_projected_pool_rows` already resolves them as a
-tier.
+**Region, SLA, and pricing have projection equivalents.**
+`kit/resource-pools/hints.py` defines the region, SLA, and pricing policy tags,
+projected through a pool's `policy_tags` and resolved as a tier by
+`_projected_pool_rows`. The legacy record is not filling a projection gap; it
+is a second override tier with no write path once the import is gone.
 
-The accurate reason these columns survive is different and narrower: they are
-the **top-precedence storefront override tier** over a pool's own projected
-hint. A projection equivalent exists; the local row is what lets a seller
-disagree with it. Retaining them is a commercial-authority decision, not a
-gap in the projection.
+**One deployed storefront depends on the local path.**
+`domains/vms/storefront/storefront.alice.toml` sets
+`use_site_projection_for_listings = false` because provisioning trusts one
+storefront principal; the second storefront in the two-storefront e2e scenario
+can load no projection and derives from local tables, where every source is
+capacity-backed.
 
-This matters for implementation because the two justifications imply
-different work. "No projection equivalent" would suggest this change owes a
-new projection field. It does not — the field exists, and what this change
-owes is only the override write path already scoped below.
+**Multi-dimensional capacity is declarable at the site.** The registration API
+and capacity-definition documents accept every dimension a resource names, so
+the CSV path is not the only expression of it.
 
-## Why CSV-import removal needs a replacement write path first
+**Local inventory still has diagnostics and cleanup consumers.**
+`SystemService.get_health` reports `resource_count` through both health models.
+The "Operator-visible acceptance state" requirement in
+`openspec/specs/storefront-publication/spec.md` prescribes it, and the smoke
+test, both VM full-deal scenarios, `docs/seller-quickstart.md`, and
+`docs/development/VALIDATION_RUNBOOK.md` use it to diagnose CSV seeding.
+`release_reservations` normalizes local held resource rows beside its
+authoritative site-ledger release operation, and e2e cleanup calls that route.
+Those consumers retire with this change's local-inventory cutover.
 
-`SQLiteClient.upsert_resource`'s `_sync_compute_pool_for_resource` side
-effect is not just a physical-membership sync — the same
-`INSERT ... ON CONFLICT` statement it issues against
-`compute_capacity_pools` is the *only* place that currently writes
-`min_price`/`token`/`max_duration_seconds`/`accepted_escrows` (and
-`gpu_model`/`region`/`sla`) at the pool level, sourced from whatever a
-resource-level CSV row or admin `upsert_resource` call supplied.
-`admin_controller.py` has no other write path to this table. Removing CSV
-import without first building a direct replacement silently removes every
-operator's only way to set or change pool-level pricing at all — not a
-theoretical risk, a certain regression.
+## Goals / Non-Goals
 
-The natural shape for that replacement (not yet built, scoped by
-`pools-8`'s own task 6.2 but explicitly not implemented there): `PUT`/
-`PATCH` admin routes against `compute_capacity_pools`'s surviving columns,
-mirroring `kit/resource-pools`'s own `PoolReplace`/`PoolUpdate` shape (the
-individual-pool admin API `pools-8` built out in its own Section 5). One
-open scope question to resolve before implementing, not assumed either
-way: does an operator need to *create* a new `compute_capacity_pools` row
-through this endpoint, or only edit one that already exists structurally?
-Depends on whether anything still triggers row creation once
-`_sync_compute_pool_for_resource` (this endpoint's predecessor) is gone —
-check the projection's own pool-discovery behavior directly before
-assuming either answer.
+**Goals:** one listing source; no storefront physical authority; one storefront
+override tier; no operator contract that fills retired tables; a freeze an
+operator can roll back from by reverting code.
 
-## Freeze-then-redirect, not a `DROP`, in this change
+**Non-Goals:** a per-pool commercial write path (exists); carrying legacy
+values forward; dropping schema; the zero-caller surfaces and the provider
+rule (own changes); bare metal.
 
-A rollback path requires the previous reader's data to still exist. This
-change's own migration work should stop at freezing writes to the
-retiring physical columns/tables and redirecting reads to the projection,
-without dropping the underlying schema in the same migration — matching
-every other schema change in the POOLS campaign being additive-only. A
-genuine `DROP`/column removal belongs in a further follow-up after a full
-deployment cycle confirms the freeze itself was never rolled back.
+## Decisions
 
-Concretely: a rollback past this change means restoring the removed code
-paths from version control, not flipping a config value — this change's
-own local-table code deletion (not just the flag flip `pools-8` already
-did) is what makes rollback a code operation rather than a config one.
-Document this explicitly for operators (in whatever this repository's
-deployment documentation lives, or a new scenario on the
-`storefront-publication` requirement this change's own retirement
-promotes into) rather than leaving it implicit.
+### Freeze, then redirect; no `DROP`
 
-## Goal 1 sweep findings (2026-08-06)
+The migration stops creating and writing the retired tables, columns,
+triggers, and indexes and redirects every read to the projection. The schema
+stays so a code rollback or an operator seeding provisioning finds its data.
+Fresh databases omit the retired schema; upgraded databases preserve existing
+tables, columns, triggers, indexes, and rows unchanged. Current storefront code
+does not read or write that data for any purpose, including startup and status.
+A `DROP` is a later change, after a
+deployment cycle shows the freeze never needed reverting. This matches the
+additive-only posture of every other schema change in the campaign.
 
-A full inter-service sweep of the storefront's remaining physical-resource
-concerns was run as roadmap Goal 1 analysis. Findings below are recorded with
-their evidence because most are not obvious from reading any one file, and
-several contradict what the surrounding docstrings claim. Re-verify before
-implementing; the codebase will have moved on.
+Rollback past this change is a code operation, not a configuration flip;
+operator documentation says so explicitly. Retention preserves historical
+data, not a current inventory snapshot: once provisioning changes physical
+state, an operator must reconcile the retained data against current site state
+before resuming an older storefront version or using it to seed provisioning.
+Restoring stale inventory alone does not establish safe availability.
 
-### The open scope question from this document is now answered
+Retained rows can inform an operator's provisioning host inventory, pool
+definitions, and capacity declarations through the existing provisioning
+administration surfaces. This does not add an automatic transfer command or
+overwrite live site state. Commercial values still follow the independent
+override decision below; retaining mixed historical rows does not keep their
+commercial tier active.
 
-This design previously left open: does the pool-commercial-metadata admin
-endpoint need pool *creation*, or only editing an existing row? Resolved
-(repository owner, 2026-08-06) as neither exactly.
+The terminal contract prohibits active storefront physical authority, rather
+than requiring all historical physical records to be absent. Its fresh-boot
+and upgrade scenarios distinguish these database populations explicitly.
 
-The *table* is created at service initialization, as it already is. *Rows* are
-not created by anything once `_sync_compute_pool_for_resource` is gone, and
-many storefronts are expected to have none at all — a seller who accepts every
-site's projected hints never needs an override row. So the endpoint is an
-**upsert against a projected pool**: it creates or replaces an override row for
-a pool that already exists structurally in the projection. It never creates a
-pool.
+### The legacy override tier retires with the import, without carry-over
 
-That resolution removes work rather than adding it. The three-tier resolver in
-`domains/vms/listings/pricing_resolution.py` already treats an absent override
-row as "this tier has no opinion" and falls through per field, so the
-absent-row case needs no new handling — only tests proving it.
+The legacy record is written only by CSV import and read only by
+`_local_pool_pricing`. Retiring the import leaves it write-only-in-the-past,
+so it retires with the import. On upgrade a home-site pool that took a field
+from it resolves that field from the pool hint, then the configured default.
+The operator re-enters any value they want to keep through `pool-override set`
+before upgrading; the system-status report already enumerates the pools and
+fields.
 
-### `compute_allocations` is a dead execution ledger
+Alternatives:
 
-`kit/site`'s `CapacityReservation` model docstring states that it "merges the
-storefront's `compute_allocations` shape with the lease fields previously
-duplicated into `vm_leases`" and that on release the watchdog "updates *this*
-row locally and emits events, instead of PATCHing the storefront's resource
-table." The replacement is therefore already in production and self-documented.
+- *A gate in the freeze migration*, refusing to run while a legacy row carries
+  a non-null commercial column with no site-scoped override for the same pool
+  unless acknowledged. Rejected: machinery for a population the status report
+  already enumerates; the operator guidance carries the instruction.
+- *A preview-first `pool-override import-legacy --site <id>` command* on the
+  publication-pricing migration pattern. Rejected: one-shot code, dead after
+  it runs, copying a price the operator typed into a CSV once; and two of the
+  eight fields cannot be copied — `region` (the store forbids it) and
+  `accepted_escrows` (its only conversion is the clause interpretation the
+  pricing migration already refuses when ambiguous).
+- *Keeping the tier read-only beneath the store.* Rejected: with the write
+  path gone the rows can only decay, the physical/commercial mixed table
+  survives the change whose purpose is removing it, and `_tier()` keeps two
+  levels forever.
 
-The storefront side was never removed:
+Revisit trigger: a seller with many home-site pools reporting that re-entry
+through the CLI is impractical. That reopens the import command, not the gate.
 
-- No production code inserts into `compute_allocations`. The only `INSERT` in
-  the repository is in `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
-- The only production writer is a release-`UPDATE` inside
-  `SQLiteClient.apply_resource_transition`, reached when a resource transitions
-  to `available`.
-- Its readers, `held_gpu_counts` and `held_gpu_counts_by_resource` in
-  `domains/vms/listings/reconciler.py`, are exported from that package's
-  `__init__.py` and have no caller. `held_gpu_counts_by_resource` calls
-  `held_gpu_counts`, which nothing calls.
+Consequences the guidance must state: `region`'s legacy fallback disappears,
+so a home-site pool whose region came from the CSV needs `region` declared on
+its pool hint before upgrading; `accepted_escrows` has no equivalent other
+than a `settlements` clause list.
 
-So the table accumulates no rows, and the code that would read them cannot run.
-It retires as a unit with its trigger, its four indexes, and the columns
-`migrations.py` adds to it.
+### The cutover requires both storefronts to consume projections
 
-### Physical identity threaded across the service boundary is provably `None`
+Deleting the local path leaves Alice with no listing source until she has a
+working provisioning authority. `repair-multi-storefront-scenario` owns that
+prerequisite and uses separate provisioning services for Alice and Bob.
+Multiple storefronts per site are explicitly out of scope; this decision
+supersedes the earlier shared-authority requirement.
 
-`vm_fulfillment_service.py` reads `reserved_vm_host = reserved.get("vm_host")`
-immediately after a comment stating that `vm_host` "is unconditionally stripped
-from the reservation response (`kit/site`'s opaque-reservation boundary)" and
-that the value "is therefore always None." The comment then records why it was
-kept: removing it "from every call site is a larger signature change than
-stripping it from the API response requires."
+Keep that repair separate and complete it first. Acceptance must prove Alice
+derives from provisioning-seeded projections without her local-path opt-out,
+both storefronts use their respective authorities, and the two-storefront
+stages run and pass. Configuration edits or continued skips do not suffice.
 
-That larger signature change is this change's work. The parameter is threaded
-through `register_lease`, `schedule_shutdown`, `provision_vm`, `_do_provision`,
-and `_register_vm_lease_with_settings`, each of which documents it as an
-accepted-but-unused compatibility parameter.
+### Retire the local inventory contract in one coordinated cutover
 
-Note the boundary carefully: `vm_host` inside the provisioning adapter is
-legitimate and stays. It is the real execution target, read by
-`ansible_service.py` for SSH port and tenant-user extraction. What retires is
-the storefront's threading of a value it can never have.
+Local derivation, CSV import, startup seeding, deployment and CLI wiring,
+legacy overrides, local diagnostics and cleanup, and the fresh-schema freeze
+form one supported contract until their replacement is ready. Retire them
+together after the separate multi-storefront repair is complete. Existing
+task section numbers organize the work; they do not define independently
+deployable intermediate states.
 
-### Two admin endpoints have outlived their only caller
+The prior claim that CSV removal and the freeze can land first is superseded.
+While local derivation and its writers remain supported, fresh databases still
+need their schema. Removing its creation or its inventory-input contract in
+isolation would leave a supported configuration without a working inventory
+path. Updating source consumers, test seeding, and diagnostics belongs in the
+same cutover before it is offered for deployment.
 
-`GET` and `PATCH /api/v1/admin/portfolio/resources/{resource_id}` have no
-production caller anywhere; every reference outside the controller itself is a
-test. `PATCH`'s docstring names its primary use case as "the provisioning
-service's `LeaseWatchdog` calls this with `{"state": "available", ...}` when a
-VM has been cleaned up."
+Alternatives:
 
-That call no longer exists. The provisioning service's only reverse call to the
-storefront is `StorefrontLifecycleEventSink.deliver`, which handles exactly one
-event kind, `capacity_released`, and raises on anything else. The
-`CapacityReservation` docstring quoted above states the same fact from the
-other side.
+- *Fold multi-storefront support into this change.* Rejected: keep its trust
+  configuration design and acceptance boundary in the existing separate change.
+- *Ship the freeze or CSV removal before local derivation retires.* Rejected:
+  that intermediate state does not preserve the supported inventory contract.
 
-`release_reservations`' docstring repeats the same stale claim and points
-operators at `PATCH` as the "surgical" alternative. Its authoritative half
-(`_release_site_ledger_holds`) is already correct; only the local-row
-normalization loop after it retires.
+Read-only re-grounding, design, and planning can proceed beforehand. Independent
+zero-caller cleanup and pool-provider immutability remain separate changes.
 
-### CSV retirement is a deployment-contract break
+### Commercial rows are storefront-owned; the site-scoped store is where they live
 
-The original scope treated CSV import as code. It is also an operator contract
-with a startup path and deployment wiring the original scope did not name:
+`ARCHITECTURE.md`'s authority boundaries assign listing, negotiation, deal,
+and seller-policy state to the storefront and pool metadata and provider
+configuration to the resource-pool service. Per-pool commercial values are
+therefore correctly storefront-owned, and the site-scoped store is the
+architecturally right home. This bounds the change: the terminal state is no
+*physical* authority in the storefront, not no per-pool rows.
 
-- `startup.py`'s `_seed_resources_if_empty`, registered as the `seed_resources`
-  startup step, calling `SystemService.seed_resources_if_empty`.
-- Config keys `resources_csv_inline` and `resources_csv_path`, plus a
-  `_DEFAULT_CSV_PATH = "/app/resources.csv"` auto-discovery constant, documented
-  in `groups/config.py`.
-- Helm: `_helpers.tpl` renders both keys, `secrets.yaml` carries
-  `resourcesCsvInline`, `values.yaml` documents `--set-file`.
-- Compose: `compose/seller.yml` mounts `${SELLER_RESOURCES_CSV:-../resources.csv}`
-  at `/app/resources.csv`; `domains/vms/compose.yml` mounts a fixture there twice.
-- `docs/seller-quickstart.md` and `docs/bare-metal-seller-quickstart.md`
-  reference the CSV workflow.
+### The contract modification is a replacement, not an amendment
 
-An operator who upgrades past this change with a CSV-configured deployment gets
-a storefront with no inventory and no error, because seeding silently skips when
-it finds no source. That makes migration guidance part of the change, not a
-follow-up.
+The "Storefront pool overrides are site-scoped and durable" requirement loses
+its legacy-record paragraph, its `inactive` state, and two scenarios ("An
+override is deleted over a legacy value", "Listings derive from local
+tables"). A modified requirement cannot drop scenarios, so the delta removes
+it and adds "Storefront pool overrides are the only override tier", carrying
+every other paragraph and scenario forward and adding one for a home-site
+pool with no override.
 
-### Dead methods confirmed by exhaustive search
+### Independent work is not held behind the cutover
 
-`SQLiteClient.delete_resource` and `ensure_default_resources` have **zero**
-references in the repository, including tests. `host_capacity_remaining` is
-referenced only by `tests/unit/test_hosts.py`. The storefront's `list_hosts`
-has no production caller; every `list_hosts` hit outside it belongs to the
-provisioning adapter's own host service or its client.
+The cutover's start trigger is a repository-owner judgment with no fleet-wide
+signal to gate on. Work that lands alone — fixing a pool's provider at
+creation, and removing the storefront's zero-caller physical surfaces — is
+not held behind it; each is its own change.
 
-`host_capacity_remaining` is worth one note: it computes remaining host capacity
-across `gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb` by summing
-`resources` rows. It is the clearest surviving evidence that the storefront's
-retiring CSV path was the system's only multi-dimensional capacity expression —
-which is what makes `capacity-resource-administration` a prerequisite rather
-than a parallel improvement.
+### Local diagnostics and cleanup retire with the cutover
 
-### Scope boundary confirmed: commercial rows are not residue
+The design review of `remove-dead-storefront-physical-surfaces` transferred
+`resource_count` removal and the local-row half of `release_reservations`
+here. Both remain supported while the local listing path and CSV import
+remain supported. Their removal belongs to the same operator and test
+migration as their inventory source; the site-ledger release operation
+continues to own authoritative cleanup.
 
-`ARCHITECTURE.md`'s authority-boundaries table assigns listing, negotiation,
-deal, and seller policy state to the storefront, and resource-pool metadata and
-provider configuration to the resource-pool service. `compute_capacity_pools`'
-commercial columns are therefore correctly storefront-owned, and the admin
-endpoint this change builds is the architecturally right answer rather than a
-workaround for a missing projection field.
+Removing them in the independent cleanup change was rejected. The count is
+required by a current permanent scenario and read by running e2e checks,
+and removing the local cleanup loop while local derivation remains available
+would discard an existing recovery operation before its inventory retires.
 
-This bounds the change: Goal 1's terminal state for the storefront is no
-*physical* authority, not no per-pool rows.
+### Operator counts belong to each site's projection generation
 
-### Out of scope, recorded so it is not double-claimed
+Replace the storefront-local top-level `resource_count` with
+`site_projections[site_id][family].resource_count`, alongside that family's
+existing state, revision, digest, last error, and confirmation timestamp.
+Counts remain separate for every site and projection family; a storefront-wide
+total cannot replace them.
 
-`deal_event_sink.py`'s `executor_kind=str(reservation.get("executor_kind") or "vm")`
-is the implicit VM executor fallback `market-platform-compute-40-multi-domain-proof`
-requires removing. It sits near this change's surfaces; it belongs to that
-change.
+The current site projections already contain the necessary information:
 
-## Cross-references this change should re-establish, since they currently only exist in `pools-8`'s own documents
+- `resource_pool`: count the projected members across pools. This counts
+  capacity declarations, including disabled declarations, not distinct hosts
+  or physical machines.
+- `capacity_bucket`: sum the groups' existing `resource_count` values. The
+  producer groups enabled declarations only, including exhausted ones;
+  `available` describes each member's remaining quantities, not a group total.
+  Neither the number of groups nor the sum of dimension quantities is a
+  resource count. Pool enablement and offering-mode authorization are not
+  additional filters for this count.
 
-- The pricing-config family-grouped shape (`[pricing.defaults.gpu.<model>]`)
-  `pools-8` built mirrors `structured-capacity-requirements`'s own
-  family-grouped requirement shape. If this change's new admin endpoint
-  needs to extend pricing beyond the `gpu` family, that still depends on
-  `structured-capacity-requirements`'s own vocabulary having landed and
-  stabilized first — re-confirm this dependency is still recorded in that
-  change's own documents (not only here) before relying on it.
-- The six e2e scenario files' CSV dependency was confirmed by direct
-  search during `pools-8`'s own Section 6 design pass (2026-08-05); their
-  contents may have changed by the time this change starts — re-confirm
-  the same search rather than trusting this list unchanged.
+Compute each summary from the same cached family view whose identity and state
+are reported. Do not fetch a new generation just for status or consult local
+inventory. A held empty generation reports zero; a family with no generation
+held reports `null`; a retained stale generation reports its count with state
+`stale`. The two families can differ because their inclusion rules differ and
+their generations are independently versioned.
+
+Physical-resource projections also support pools that do not use capacity
+buckets; their eventual listing consumers must not make capacity buckets a
+universal inventory requirement. Count the current resource-pool projection's
+members independently of the capacity-bucket family. The per-site, per-family
+structure also accommodates any further physical-resource projection under
+its own count semantics when exposed through status. Defining a new projection
+protocol or changing which projection creates a listing is outside this
+diagnostic decision.
+
+A positive count proves projected inventory exists, not that its pool is
+enabled, its shapes are feasible, its provider can execute, or its commercial
+terms produce a listing. Publication diagnostics and catalogue checks remain
+the evidence for sellable supply. A known-empty generation cannot establish
+whether an operator intended it to be empty or an inventory import failed;
+import failures are diagnosed at provisioning, which owns the import.
+
+Alternatives:
+
+- *A projection-derived top-level total.* Rejected: the counts per site must
+  remain visible, and summing known sites would hide unavailable ones.
+- *Adding counts to the site projection protocol.* Unnecessary for the current
+  families: grouped capacity already carries multiplicity, and the
+  resource-pool projection already enumerates every member.
+- *Publication candidate counts as the inventory diagnostic.* Rejected as the
+  replacement: a populated projection may yield no candidate for several
+  independent reasons. Candidate or listing counts can be separate diagnostics.
+
+This replaces the current operator acceptance requirement's local-row scenario
+and its consumers. The response change removes the top-level field and adds
+counts beneath the existing projection status; it does not change liveness
+health or global negotiation-pause behavior. Permanent homes are
+`openspec/specs/storefront-publication/spec.md` for the observable status
+contract and its `architecture.md` companion for the interpretation of counts.
+
+## Risks / Trade-offs
+
+- **An operator upgrades with legacy values still in effect** → a silent
+  commercial change to the hint or configured default. Mitigated by the
+  status report and the guidance; accepted rather than gated (see above).
+- **An operator upgrades with CSV configuration** → no inventory, no error.
+  Mitigated by migration guidance that names the provisioning-side
+  declaration path and by the seeding stack's removal making the
+  configuration keys unknown.
+- **Retained inventory is mistaken for current supply** → an unsafe rollback
+  or provisioning seed. Guidance requires checking current site state before
+  using the historical records; current storefront code never consults them.
+- **The two-storefront scenario is repaired later than expected** → all local
+  inventory retirement waits, including the freeze and CSV removal; design and
+  read-only investigation can continue.
+
+## Migration Plan
+
+1. Complete `repair-multi-storefront-scenario` separately, including its
+   projection cutover and passing two-storefront evidence.
+2. Re-verify the confirming searches against that resulting tree
+   (legacy-resources fallback reachability and the remaining CSV consumers).
+   Reconcile any files or scenario stages the prerequisite already migrated.
+3. Prepare projection counts, provisioning-seeded tests, and operator guidance
+   together with retirement of local derivation, the flag, legacy overrides,
+   CSV import, startup seeding, deployment and CLI wiring, and local cleanup.
+4. Apply the fresh-schema freeze in the same coordinated cutover, preserving
+   existing historical data. No partial retirement is an independently
+   deployable outcome.
+5. Validate fresh and populated databases, the affected suites, packaging,
+   and the end-to-end pipeline; complete the planned closeout.
+
+Rollback requires earlier code and reconciliation of retained historical data
+with current site state before trading resumes; no `DROP` has happened.
+
+## Open Questions
+
+The resource-count diagnostic decision is resolved above. Further use of
+physical-resource projections for listing creation does not gate these
+summaries of existing projections.
+
+The repository work order is decided: complete the separate multi-storefront
+repair first, then the coordinated retirement. Each self-hosting operator
+still selects their deployment time after preparing site inventory and
+commercial overrides; there is no fleet-wide rollout signal to wait for.

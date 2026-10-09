@@ -1,100 +1,97 @@
-"""Executor adapter registration for opaque, domain-validated action payloads."""
+"""The job executors domains contribute, resolved by offering mode and action."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
-from .contracts import CredentialEnvelope, ExecutorActionEnvelope, ResultEnvelope
+from .jobs.executor import JobExecutor
 
 
 class UnsupportedExecutorActionError(LookupError):
-    """No registered adapter supports an executor/action pair."""
+    """No job executor is registered for an offering mode and action."""
 
 
-class ExecutorMismatchError(ValueError):
-    """The requested executor does not own the committed reservation."""
+class JobExecutorResolver(Protocol):
+    def resolve(self, offering_mode: str, action: str) -> JobExecutor:
+        """Return the executor that runs ``action`` for ``offering_mode``, or
+        raise ``UnsupportedExecutorActionError``."""
 
 
-class ExecutorAdapter(Protocol):
-    executor_kind: str
+class JobExecutorTable:
+    """The job executors adapter bundles contribute, keyed by offering mode and action.
 
-    def validate_parameters(self, action_kind: str, parameters: Mapping[str, Any]) -> Any:
-        """Validate opaque command parameters and return the adapter-owned value."""
+    Service composition fills the table once and freezes it before the service
+    accepts traffic; a job service holds the table from construction and resolves
+    through it at execution time. A key registered twice is a composition error,
+    and nothing resolves until the table is frozen, so a job can never run against
+    a partially composed set of executors.
+    """
 
-    async def submit(
-        self, envelope: ExecutorActionEnvelope, validated_parameters: Any
-    ) -> str:
-        """Submit executor work and return its durable job identifier."""
+    def __init__(self) -> None:
+        self._executors: dict[tuple[str, str], JobExecutor] = {}
+        self._frozen = False
 
-    def validate_result(self, action_kind: str, result: Mapping[str, Any]) -> ResultEnvelope:
-        """Validate and classify an executor-owned terminal result."""
+    def register(self, offering_mode: str, action: str, executor: JobExecutor) -> None:
+        if self._frozen:
+            raise RuntimeError("job executor table is frozen")
+        key = (offering_mode, action)
+        if key in self._executors:
+            raise ValueError(
+                f"duplicate job executor for {offering_mode!r}/{action!r}"
+            )
+        self._executors[key] = executor
 
-    def validate_credentials(
-        self, action_kind: str, credentials: list[Mapping[str, Any]]
-    ) -> list[CredentialEnvelope]:
-        """Validate and classify executor-owned credentials."""
+    def freeze(self) -> None:
+        self._frozen = True
 
+    @property
+    def frozen(self) -> bool:
+        return self._frozen
 
-@dataclass(frozen=True)
-class FunctionalExecutorAdapter:
-    """Small adapter implementation assembled from domain-owned callables."""
-
-    executor_kind: str
-    parameter_validators: Mapping[str, Callable[[Mapping[str, Any]], Any]]
-    submit_action: Callable[[ExecutorActionEnvelope, Any], Awaitable[str]]
-    result_validators: Mapping[str, Callable[[Mapping[str, Any]], ResultEnvelope]]
-    credential_validators: Mapping[
-        str, Callable[[list[Mapping[str, Any]]], list[CredentialEnvelope]]
-    ]
-
-    def validate_parameters(self, action_kind: str, parameters: Mapping[str, Any]) -> Any:
+    def resolve(self, offering_mode: str, action: str) -> JobExecutor:
+        if not self._frozen:
+            raise RuntimeError("job executor table has not been composed")
         try:
-            validator = self.parameter_validators[action_kind]
+            return self._executors[(offering_mode, action)]
         except KeyError as exc:
             raise UnsupportedExecutorActionError(
-                f"executor {self.executor_kind!r} does not support action {action_kind!r}"
-            ) from exc
-        return validator(parameters)
-
-    async def submit(
-        self, envelope: ExecutorActionEnvelope, validated_parameters: Any
-    ) -> str:
-        return await self.submit_action(envelope, validated_parameters)
-
-    def validate_result(self, action_kind: str, result: Mapping[str, Any]) -> ResultEnvelope:
-        try:
-            return self.result_validators[action_kind](result)
-        except KeyError as exc:
-            raise UnsupportedExecutorActionError(
-                f"executor {self.executor_kind!r} has no result codec for {action_kind!r}"
+                f"no job executor for offering mode {offering_mode!r} "
+                f"and action {action!r}"
             ) from exc
 
-    def validate_credentials(
-        self, action_kind: str, credentials: list[Mapping[str, Any]]
-    ) -> list[CredentialEnvelope]:
-        validator = self.credential_validators.get(action_kind)
-        return validator(credentials) if validator is not None else []
+    def mocked_by_offering_mode(self) -> dict[str, bool]:
+        """Whether each offering mode's executors are the mock.
 
+        A mode counts as mocked only when every executor registered for it
+        carries the compute mock mechanism's rules (``executor_is_mocked``).
+        """
+        from .jobs.executor_mock import executor_is_mocked
 
-class ExecutorAdapterRegistry:
-    """Select adapters strictly by declared executor identity."""
+        mocked: dict[str, bool] = {}
+        for (offering_mode, _action), executor in self._executors.items():
+            mocked[offering_mode] = mocked.get(offering_mode, True) and executor_is_mocked(
+                executor
+            )
+        return mocked
 
-    def __init__(self, adapters: list[ExecutorAdapter] | tuple[ExecutorAdapter, ...] = ()) -> None:
-        self._adapters: dict[str, ExecutorAdapter] = {}
-        for adapter in adapters:
-            self.register(adapter)
+    def executors_by_offering_mode(self) -> dict[str, tuple[JobExecutor, ...]]:
+        """Each offering mode's distinct executors, in registration order.
 
-    def register(self, adapter: ExecutorAdapter) -> None:
-        if adapter.executor_kind in self._adapters:
-            raise ValueError(f"duplicate executor adapter: {adapter.executor_kind}")
-        self._adapters[adapter.executor_kind] = adapter
+        An implementation reads this to report on the executors it built,
+        whichever domain contributed them.
+        """
+        grouped: dict[str, list[JobExecutor]] = {}
+        for (offering_mode, _action), executor in self._executors.items():
+            known = grouped.setdefault(offering_mode, [])
+            if not any(executor is seen for seen in known):
+                known.append(executor)
+        return {mode: tuple(executors) for mode, executors in grouped.items()}
 
-    def get(self, executor_kind: str) -> ExecutorAdapter:
-        try:
-            return self._adapters[executor_kind]
-        except KeyError as exc:
-            raise UnsupportedExecutorActionError(
-                f"unsupported executor kind: {executor_kind!r}"
-            ) from exc
+    def executors(self) -> tuple[JobExecutor, ...]:
+        """Each distinct executor once, in registration order."""
+
+        seen: list[JobExecutor] = []
+        for executor in self._executors.values():
+            if not any(executor is known for known in seen):
+                seen.append(executor)
+        return tuple(seen)

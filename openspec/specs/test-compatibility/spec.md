@@ -100,19 +100,33 @@ fulfillment result, private authority state, or teardown carrier.
 
 ### Requirement: Payment evidence is attributed at its owning boundary
 
-Credential-free SCM tests MUST prove generated wire contracts, JCS hashes, mandate policy, signed-receipt rejection, exact Agreement and settlement-data persistence, selected-mechanism dispatch, retryable pending, and idempotent domain delivery through deterministic ports. They MUST NOT claim live ledger or provider behavior. Payment-service ledger, hold release, fees, disputes, top-ups, payouts, and provider recovery remain producer-owned evidence. External qualification MUST identify the actual payments target and consumer revision, check readiness before mutations, and report unavailable prerequisites rather than substitute another mechanism.
+Credential-free SCM tests MUST prove generated wire contracts, JCS hashes, mandate policy, signed-receipt rejection, exact Agreement and settlement-data persistence, selected-mechanism dispatch, retryable pending, and idempotent domain delivery through deterministic ports. They MUST NOT claim live ledger or provider behavior, which remains producer-owned evidence.
 
 #### Scenario: Local payment smoke uses controlled collaborators
 
 - **WHEN** a local VM smoke drives pending to provisioning to ready with controlled HTTP and delivery
 - **THEN** its evidence establishes SCM receipt gating and one delivery, not live payment-service or hardware acceptance
 
+#### Scenario: API-credit payment is retried
+
+- **WHEN** seller progress is nonterminal after an issuance acknowledgement is lost
+- **THEN** focused domain tests use the same transaction and grant identity and assert no duplicate balance or quota mutation
+
+### Requirement: External payment qualification names its target
+
+External qualification MUST identify the actual payments target and consumer revision, check readiness before mutations, and report unavailable prerequisites rather than substitute another mechanism. Payment-service ledger, hold release, fees, disputes, top-ups, payouts, and provider recovery remain the payments service's evidence.
+
 #### Scenario: Bare-metal qualification lacks hardware
 
 - **WHEN** a disposable selected-site host is unavailable
 - **THEN** local deterministic tests do not claim authenticated access, revocation, or physical teardown
 
-#### Scenario: API-credit payment is retried
+### Requirement: Signed receipts in tests come from the kit fixture
 
-- **WHEN** seller progress is nonterminal after an issuance acknowledgement is lost
-- **THEN** focused domain tests use the same transaction and grant identity and assert no duplicate balance or quota mutation
+A test that needs a signed receipt over its own Agreement MUST sign it through the payments kit's receipt fixture with an injected signer. The fixture ships no key material, and a kit unit test reproduces the published receipt vector byte for byte.
+
+#### Scenario: A storefront test needs a verified receipt
+
+- **WHEN** an integration test settles a payments deal
+- **THEN** it builds the receipt with the kit's fixture and a test signer, and the vector test proves the fixture signs what the service signs
+

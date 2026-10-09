@@ -62,6 +62,19 @@ Dependency direction protects substitutability and testability:
 
 Type-only imports still couple packages and therefore obey the same direction.
 
+## The compute family vocabulary
+
+The VM and bare-metal domains sell the same kind of thing in different units: a slice of a host, or a whole one. What a buyer compares across them (GPU count and model, vCPUs, memory, storage) must therefore mean one thing in both. The compute-family capability schema lives once, in `domains/compute` (`arkhai_compute`), and both domains bind it, so a VM slice and a whole machine with the same hardware publish the same flat fields and one registry filter finds both.
+
+It has neither of the two obvious homes:
+
+- **Not the foundation kit.** `kit/capability-shape` is market-neutral: it validates, flattens, unflattens, and digests family-grouped shapes for any schema, and names no family. A compute vocabulary there would make every market's foundation know compute.
+- **Not core.** Core carries what every market shares, and GPU models are not that.
+
+It is also not either domain's, since a domain importing its sibling couples two markets that should vary independently. A family vocabulary package therefore sits between the kit and the domains, depends only on foundation kits, and is the one place a change to the compute family's spelling is made, for both domains at once.
+
+`unflatten_shape` is the exact inverse of `flatten_shape`, and it serves this sharing. A shape derived from a declaration's flat fields has the same digest as the same shape stated by hand, so asking rates, overrides, and derivation keys agree whether a shape was stated, generated, or derived.
+
 ## Settlement runtime composition
 
 `market_settlement_runtime` is a foundation kit because its obligation and

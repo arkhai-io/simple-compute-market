@@ -26,8 +26,12 @@ continue to work.
 {{- range $agent := $agents -}}
   {{- if eq $agent.name $provisioningTargetName -}}
     {{- $provisioningStorefrontFound = true -}}
+    {{- $agentIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($agent.config | default dict) "name" "identity") | fromJson -}}
+    {{- $agentPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $agentIdentity "name" "principal") | fromJson -}}
+    {{- $agentScheme := include "arkhai.storefrontConfigValue" (dict "doc" $agentPrincipal "name" "scheme") -}}
+    {{- $agentIdentifier := include "arkhai.storefrontConfigValue" (dict "doc" $agentPrincipal "name" "identifier") -}}
     {{- range $principal := ($.Values.provisioning.storefrontIdentity.principals | default list) -}}
-      {{- if and (eq $principal.scheme $agent.identity.principal.scheme) (eq $principal.identifier $agent.identity.principal.identifier) -}}
+      {{- if and (eq $principal.scheme $agentScheme) (eq $principal.identifier $agentIdentifier) -}}
         {{- $provisioningStorefrontTrusted = true -}}
       {{- end -}}
     {{- end -}}
@@ -55,15 +59,27 @@ continue to work.
   {{- end -}}
 {{- end -}}
 {{- $targetConfig := $targetAgent.config | default dict -}}
-{{- $registryAuthority := $targetConfig.registryAuthority | default dict -}}
-{{- $sellerConfig := $targetConfig.seller | default dict -}}
-{{- $settlementConfig := $targetConfig.settlement | default dict -}}
-{{- $alkahestConfig := $settlementConfig.alkahest | default dict -}}
+{{- /* Smoke tests talk to the registry the target storefront uses: its first
+configured URL and that URL's trust entry, or the internal registry and the
+agent's internalRegistryTrust. */ -}}
+{{- $targetRegistry := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "registry") | fromJson -}}
+{{- $targetUrlsKey := include "arkhai.storefrontConfigKey" (dict "doc" $targetRegistry "name" "urls") -}}
+{{- $registryURL := printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) -}}
+{{- $registryAuthority := $targetAgent.internalRegistryTrust | default dict -}}
+{{- if $targetUrlsKey -}}
+  {{- $registryURL = first (index $targetRegistry $targetUrlsKey) -}}
+  {{- $targetAuthorities := include "arkhai.storefrontConfigSection" (dict "doc" $targetRegistry "name" "authorities") | fromJson -}}
+  {{- $registryAuthority = index $targetAuthorities $registryURL | default dict -}}
+{{- end -}}
+{{- $settlementConfig := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "settlement") | fromJson -}}
+{{- $alkahestConfig := include "arkhai.storefrontConfigSection" (dict "doc" $settlementConfig "name" "alkahest") | fromJson -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $generated := dict -}}
+{{- $schemaVersionKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "schema_version") -}}
+{{- $priorityKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "priority") -}}
 {{- $_ := set $generated "settlement" (dict
-  "schema_version" ($settlementConfig.schema_version | default 1)
-  "priority" ($settlementConfig.priority | default list)
+  "schema_version" ((and $schemaVersionKey (index $settlementConfig $schemaVersionKey)) | default 1)
+  "priority" ((and $priorityKey (index $settlementConfig $priorityKey)) | default list)
 ) -}}
 {{- if $rpcUrl -}}
 {{- $rpcConfig := dict "url" $rpcUrl -}}
@@ -72,20 +88,19 @@ continue to work.
 {{- end -}}
 {{- $_ := set $generated "rpc" $rpcConfig -}}
 {{- end -}}
-{{- $registryURL := printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) -}}
 {{- $_ := set $generated "registry" (dict
   "api_url" $registryURL
   "authorities" (dict $registryURL (dict
-    "authority" (required "registry authority id is required" $registryAuthority.authority)
-    "principals" (required "registry authority principals are required" $registryAuthority.principals)
+    "authority" (required "storefront test target registry trust requires an authority" $registryAuthority.authority)
+    "principals" (required "storefront test target registry trust requires principals" $registryAuthority.principals)
   ))
 ) -}}
 {{- $_ := set $generated $component (dict
   "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
-  "base_url_override" ($sellerConfig.baseUrl | default "")
-  "agent_id" ($targetAgent.agentId | default "")
+  "base_url_override" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "base_url") | default "base_url")) | default "")
+  "agent_id" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "agent_id") | default "agent_id")) | default "")
 ) -}}
-{{- if and ($alkahestConfig.enabled | default false) $rpc.enabled $rpc.host $rpc.port -}}
+{{- if and (eq (include "arkhai.storefrontConfigValue" (dict "doc" $alkahestConfig "name" "enabled")) "true") $rpc.enabled $rpc.host $rpc.port -}}
 {{- $_ := set $generated "buyer" (dict
   "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
 ) -}}
@@ -109,5 +124,8 @@ data:
   {{- end }}
   {{- if and $config.profile (not (hasKey ($config.profileFiles | default dict) $config.profile)) }}
   config-{{ $config.profile }}.yml: |
-    {{- toYaml $rendered | nindent 4 }}
+    {{- /* JSON is valid YAML and keeps 0x-prefixed principals as strings;
+    Helm's YAML encoder leaves a 160-bit address bare, which a YAML loader
+    reads as an integer. */}}
+    {{- toPrettyJson $rendered | nindent 4 }}
   {{- end }}

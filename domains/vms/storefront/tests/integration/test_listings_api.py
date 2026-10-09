@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime
+from market_policy.listing_source import ListingSourceVerdict
+from market_core.schemas import RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -41,6 +43,12 @@ from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 from tests.listing_service_fixtures import vm_listing_collaborators
+
+_VM_PROVISION_TERMS = {
+    "kind": "compute.v1",
+    "version": 1,
+    "payload": {"duration_seconds": 3600, "ssh_public_key": ""},
+}
 
 _TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
 _TEST_ADMIN_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -88,21 +96,22 @@ async def _seed_listing(
     status: str = "open",
     *,
     valid_capacity_identity: bool = True,
+    settlement_options: list[dict] | None = None,
 ) -> None:
-    offer_resource = {
+    listing_resource = {
         "gpu_model": "H200",
         "gpu_count": 1,
         "sla": 99.9,
         "region": "California, US",
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     if valid_capacity_identity:
-        offer_resource["resource_id"] = f"res-{listing_id}"
+        listing_resource["resource_id"] = f"res-{listing_id}"
     listing_kwargs = {
         "status": status,
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
-        "offer_resource": offer_resource,
+        "listing_resource": listing_resource,
         "accepted_escrows": [
             {
                 "chain_name": "anvil",
@@ -117,16 +126,20 @@ async def _seed_listing(
         "max_duration_seconds": 7200,
         "storefront_url": "http://seller:8001",
         "seller_principal": _TEST_SELLER_PRINCIPAL,
+        "closed_by": "seller" if status == "closed" else None,
     }
+    if settlement_options is not None:
+        listing_kwargs["settlement_options"] = settlement_options
     if valid_capacity_identity:
         await db.upsert_listing_with_binding(
             binding=prepare_vm_listing_binding(
                 listing_id=listing_id,
                 candidate={
+                    "capacity_backing": "backed",
                     "site_id": _HOME_SITE,
                     "pool_id": "pool-vm",
                     "resource_id": f"res-{listing_id}",
-                    "gpu_count": 1,
+                    "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
                 },
             ),
             **listing_kwargs,
@@ -138,7 +151,7 @@ async def _seed_listing(
 def _vm_pool_projection_caches():
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
+        "pool_id": "pool-vm",
         "pool_metadata": {
             "policy_tags": {"deliverable_modes": ["vm"]},
         },
@@ -363,6 +376,34 @@ class TestResumeListing:
         result = await c.pause_listing("pause-no-registry")
         assert result.registry_status == ""
 
+    async def test_resume_reopens_a_listing_its_seller_closed(self, client):
+        c, db = client
+        await _seed_listing(db, "withdrawn", status="closed")
+
+        result = await c.resume_listing("withdrawn")
+
+        assert result.paused is False
+        assert (await db.load_listing(listing_id="withdrawn"))["status"] == "open"
+        assert (await db.load_listing(listing_id="withdrawn"))["closed_by"] is None
+
+    async def test_resume_refuses_a_listing_reconciliation_closed(self, client):
+        c, db = client
+        await _seed_listing(db, "no-source")
+        await db.update_listing(
+            listing_id="no-source", status="closed", closed_by="reconciliation"
+        )
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.resume_listing("no-source")
+
+        assert "409" in str(exc_info.value)
+        assert "listing_closed_by_reconciliation" in str(exc_info.value)
+        assert (await db.load_listing(listing_id="no-source"))["status"] == "closed"
+        assert (
+            (await db.load_listing(listing_id="no-source"))["closed_by"]
+            == "reconciliation"
+        )
+
     async def test_resume_unknown_listing_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
@@ -427,6 +468,27 @@ async def admin_client(
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
     _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
+    # Evaluate-negotiate previews the opening through the negotiation runtime,
+    # so the fixture composes the same runtime negotiate/new uses.
+    import market_storefront.negotiation_runtime as _negotiation_runtime
+
+    registration = db.domain_registry.resolve_mode("vm")
+
+    async def source_matches(_repository, _resolved):
+        # The listings here have no declared source; these tests preview the
+        # seller's policy, and the source check is tested on its own
+        # (tests/unit/test_listing_source_check.py, test_negotiate_controller.py).
+        return ListingSourceVerdict("matches")
+
+    _container.resolved_negotiation_runtime = (
+        _negotiation_runtime.build_vm_negotiation_runtime(
+            registration.contract,
+            registry=db.domain_registry,
+            binding=registration.binding,
+            capacity_runtime=collaborators.capacity_runtime,
+            listing_source_check=source_matches,
+        )
+    )
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -450,6 +512,7 @@ async def admin_client(
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
     _container.resolved_marketplace_signer = None
+    _container.resolved_negotiation_runtime = None
 
 
 @pytest_asyncio.fixture
@@ -504,12 +567,12 @@ _OFFER = {
     "gpu_count": 1,
     "sla": 99.0,
     "region": "California, US",
-    "virtualization_type": "vm",
+    "offering_mode": "vm",
 }
 _CAPACITY_SOURCE = {
     "site_id": _HOME_SITE,
     "resource_id": _OFFER["resource_id"],
-    "gpu_count": _OFFER["gpu_count"],
+    "listing_shape": {"gpu": {"count": _OFFER["gpu_count"], "model": _OFFER["gpu_model"]}},
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
@@ -537,7 +600,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-1")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -549,6 +612,7 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         assert isinstance(result.would_negotiate, bool)
 
@@ -557,7 +621,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-2")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -569,58 +633,75 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         assert result.decision in ("accept", "counter", "exit")
         assert result.direction == "maximize"
         assert result.our_reference_amount > 0
         assert result.strategy  # non-empty string
 
-    async def test_price_at_floor_does_not_exit(self, admin_client):
-        """Buyer price at or above the seller's floor should not produce exit."""
+    async def test_a_rated_selection_negotiates_from_its_own_rate(self, admin_client):
+        """On a listing offering Alkahest at 9000 and an option rated at 1500,
+        a buyer selecting that option is negotiated against 1500: the
+        rate of the option it selected, in that option's own asset."""
         c, db = admin_client
-        await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
+        rates = [RateValue(field="amount", per="hour", value=1500)]
+        rated = {
+            "mechanism": "example.rated.v1",
+            "asset": "usd",
+            "rates": [rate.model_dump(mode="json") for rate in rates],
+            "params": {},
+            "option_id": derive_settlement_option_id(
+                mechanism="example.rated.v1", asset="usd", rates=rates, params={}
+            ),
+        }
+        await _seed_listing(db, "neg-eval-rated", settlement_options=[rated])
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-floor",
+                "neg-eval-rated",
                 proposal={
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
-                    "fields": {"amount": 9000, "token": "0x" + "a" * 40},
-                    "expiration_unix": 2000000000,
+                    "settlement_selection": {
+                        "mechanism": rated["mechanism"],
+                        "option_id": rated["option_id"],
+                        "expiration_unix": 2000000000,
+                    },
+                    # Below that rate, so the strategy counters from
+                    # it: accepting would build a settlement plan,
+                    # which this fixture composes no mechanism for.
+                    "fields": {"amount": 1000},
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
-        # At exactly the floor price, bisection should accept or counter, not exit
-        assert result.would_negotiate is True, (
-            f"Strategy exited at floor price 9000. decision={result.decision!r} "
-            f"reason={result.decision_reason!r} our_price={result.our_reference_amount}"
-        )
+        assert result.our_reference_amount == 1500
 
-    async def test_unknown_listing_returns_404(self, admin_client):
-        """Non-existent listing_id returns 404."""
+    async def test_unknown_listing_is_reported_as_refused(self, admin_client):
+        """An opening for a listing that does not exist is refused, as
+        ``negotiate/new`` would refuse it."""
         c, _ = admin_client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_negotiate(
-                "ghost-listing",
-                proposal={
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
-                    "fields": {"amount": 1000, "token": "0x" + "a" * 40},
-                    "expiration_unix": 2000000000,
-                },
-                buyer_principal=_TEST_BUYER_SIGNER.identity,
-            )
-        assert "404" in str(exc_info.value)
+        result = await c.evaluate_negotiate(
+            "ghost-listing",
+            proposal={
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "0" * 40,
+                "fields": {"amount": 1000, "token": "0x" + "a" * 40},
+                "expiration_unix": 2000000000,
+            },
+            buyer_principal=_TEST_BUYER_SIGNER.identity,
+            provision_terms=_VM_PROVISION_TERMS,
+        )
+        assert result.refused is True
+        assert result.would_negotiate is False
 
     async def test_no_negotiation_thread_created(self, admin_client):
         """evaluate-negotiate creates no thread in the DB."""
         c, db = admin_client
         await _seed_listing(db, "neg-eval-no-thread")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             await c.evaluate_negotiate(
@@ -632,6 +713,7 @@ class TestEvaluateNegotiate:
                     "expiration_unix": 2000000000,
                 },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
+                provision_terms=_VM_PROVISION_TERMS,
             )
         threads = await db.get_active_negotiations_for_listing(
             listing_id="neg-eval-no-thread"
@@ -665,7 +747,7 @@ def _bisection_chain():
     Skips the guards so the test's seeded listings don't need to match
     an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
-    from domains.vms.negotiation.policies import bisection_middleware
+    from arkhai_vms_negotiation.policies import bisection_middleware
 
     return [bisection_middleware]
 
@@ -699,6 +781,36 @@ async def seller_auth_client(db):
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
     _container.resolved_marketplace_signer = None
+
+
+def _declared_pool_projection_caches(
+    *, resource_id: str = "res-test-1", capacity_backing: str = "backed"
+):
+    """A site projection whose pool declares both declarations explicitly."""
+    resource_pools = ProjectionCache(client=None)
+    resource_pools._value = [{
+        "pool_id": "pool-vm",
+        "pool_metadata": {
+            "enabled": True,
+            "policy_tags": {
+                "deliverable_modes": [] if capacity_backing == "unbacked" else ["vm"],
+                "advertisable_modes": ["vm"],
+                "capacity_backing": capacity_backing,
+            },
+        },
+        "resources": [{
+            "physical_resource_id": resource_id, "resource_type": "compute.gpu",
+            "enabled": True,
+            "capacity": {"gpu_count": 1},
+            "attributes": {"gpu_model": "H200", "region": "California, US"},
+        }],
+    }]
+    resource_pools._state = ProjectionState.loaded
+    resource_pools._identity = ProjectionIdentity(revision=1, digest="declared-pool")
+    return site_projection_cache.SiteProjectionCaches(
+        resource_pools=resource_pools,
+        capacity_buckets=ProjectionCache(client=None),
+    )
 
 
 @pytest_asyncio.fixture
@@ -736,14 +848,19 @@ async def seller_auth_full_client(db):
     app.middleware("http")(listing_lifecycle_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test",
-        signer=_TEST_MARKETPLACE_SIGNER,
-        caller_role="seller",
-        expected_publishers=_TEST_PUBLISHERS,
-        transport=transport,
-    ) as c:
-        yield c, db
+    with patch.dict(
+        site_projection_cache._caches,
+        {_HOME_SITE: _declared_pool_projection_caches()},
+        clear=True,
+    ):
+        async with StorefrontClient(
+            "http://test",
+            signer=_TEST_MARKETPLACE_SIGNER,
+            caller_role="seller",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as c:
+            yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
@@ -794,7 +911,7 @@ class TestCreateListing:
         """Valid request creates a listing and returns a listing_id."""
         c, db = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -816,7 +933,7 @@ class TestCreateListing:
         self,
         seller_auth_full_client,
     ):
-        """A compute offer with no pool_id and no resource_id can't be
+        """A compute listing_resource with no pool_id and no resource_id can't be
         reliably matched to inventory at reservation time and must be
         rejected at creation rather than published."""
         c, _ = seller_auth_full_client
@@ -825,7 +942,7 @@ class TestCreateListing:
         }
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
-                offer=offer_without_identity,
+                listing_resource=offer_without_identity,
                 capacity_source=_CAPACITY_SOURCE,
                 accepted_escrows=_ACCEPTED_ESCROWS,
                 paused=True,
@@ -833,12 +950,12 @@ class TestCreateListing:
         assert "400" in str(exc_info.value)
 
     async def test_resource_id_only_offer_succeeds(self, seller_auth_full_client):
-        """A resource_id-only offer (no pool_id) is a legitimate
+        """A resource_id-only listing_resource (no pool_id) is a legitimate
         specific-resource listing, not an error."""
         c, _ = seller_auth_full_client
         assert "pool_id" not in _OFFER  # confirms this case is what's exercised
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -855,7 +972,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
-                offer=_OFFER,
+                listing_resource=_OFFER,
                 capacity_source={
                     **_CAPACITY_SOURCE,
                     "resource_id": "other-resource",
@@ -864,7 +981,7 @@ class TestCreateListing:
                 paused=True,
             )
         assert "400" in str(exc_info.value)
-        assert "must match the offer resource" in str(exc_info.value)
+        assert "must match the listing_resource resource" in str(exc_info.value)
 
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
         """Created listing returns a non-None listing_id in the response.
@@ -876,7 +993,7 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -902,7 +1019,7 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -926,7 +1043,7 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         # If the double-wrap bug is present this raises StorefrontClientError with '500'
         result = await c.create_listing(
-            offer=_OFFER,
+            listing_resource=_OFFER,
             capacity_source=_CAPACITY_SOURCE,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,

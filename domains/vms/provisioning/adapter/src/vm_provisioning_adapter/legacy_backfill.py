@@ -1,7 +1,7 @@
 """Compiles one legacy VM lease row into a fulfillment backfill draft.
 
-Pure: no database session, no I/O beyond building the versioned provider
-envelope through the real Ansible provider contract. A migration is
+Pure: no database session and no I/O. A compiled record is in the compute
+family's job-backed shapes, its teardown prepared through VM's own plan. A migration is
 responsible for enumerating candidates, deduplicating identity/target
 across the whole population, comparing against already-persisted rows, and
 committing the batch atomically; this module only compiles one already-read
@@ -23,11 +23,12 @@ from market_fulfillment.ids import derive_provisioned_resource_id
 from market_fulfillment.provider import SettlementResult
 from market_fulfillment.settlement_types import SettlementResource
 
-from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-    AnsibleFulfillmentProvider,
-)
+from compute_provisioning.job_fulfillment import teardown_operation
 
-_LEGACY_EXECUTOR_KIND = "vm"
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
+
+_LEGACY_OFFERING_MODE = "vm"
 
 
 _STATE_BY_LEASE_STATUS = {
@@ -49,6 +50,8 @@ class LegacyVmLeaseCandidate:
     lease_id: str
     capacity_reservation_id: str
     status: str
+    # Named for the retired ``vm_leases`` column it is read from; it holds the
+    # host's identity and becomes ``host_id`` in everything compiled from it.
     vm_host: str | None
     pool_id: str | None
     provider: str | None
@@ -66,22 +69,27 @@ def prepare_historical_vm_teardown(
 ):
     """Prepare a teardown envelope for an existing VM during schema cutover.
 
-    Uses the same provider validation and envelope contract as normal
-    runtime teardown dispatch (``AnsibleFulfillmentProvider.prepare_teardown``)
-    rather than hand-assembling provider payload JSON, so a backfilled
-    teardown command is what normal dispatch would have produced.
+    Uses VM's plan and the family's teardown envelope, as a teardown prepared
+    at runtime is, rather than hand-assembling payload JSON. It reads no job:
+    VM's teardown takes its target from the fulfillment, its playbook from the
+    pool, and its relay from the lease, and a historical VM leased none through
+    this path.
     """
-
-    class _PreparationOnlyJobService:
-        @staticmethod
-        def reserved_var_keys(params):
-            return frozenset({"vm_host", "vm_action", "vm_target", "escrow_uid"})
-
-    provider = AnsibleFulfillmentProvider(
-        job_service=_PreparationOnlyJobService(),
-        job_queue_provider=lambda: None,
+    metadata = settlement_result.provider_metadata
+    plan = VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys)
+    prepared = plan.prepare_teardown(
+        capacity_reservation_id=settlement_result.capacity_reservation_id,
+        resource=settlement_result.resource,
+        host_id=metadata["host_id"],
+        executor_target=metadata["executor_target"],
+        create_parameters={},
+        pool_config=pool_config,
     )
-    return provider.prepare_teardown(settlement_result, pool_config)
+    return teardown_operation(
+        settlement_result.capacity_reservation_id,
+        prepared,
+        create_job_id=metadata["create_job_id"],
+    )
 
 
 def _derive_state(candidate: LegacyVmLeaseCandidate) -> str:
@@ -133,9 +141,9 @@ def compile_legacy_vm_fulfillment_backfill(
             f"legacy VM lease {candidate.lease_id} has no VM target"
         )
     if target and not candidate.create_job_id:
-        # AnsibleFulfillmentMetadata.create_job_id is required: a teardown
-        # envelope for this lease can only be prepared by recording which
-        # create job produced the resource being torn down. A row without
+        # The job-backed metadata requires its create job: a teardown for this
+        # lease is recorded against the create job that produced the resource
+        # being torn down. A row without
         # this identity cannot be backfilled as recovery-ready.
         raise LegacyBackfillValidationError(
             f"legacy VM lease {candidate.lease_id} has a live target with no known create job "
@@ -144,21 +152,25 @@ def compile_legacy_vm_fulfillment_backfill(
 
     state = _derive_state(candidate)
 
+    # A provisioning lease may name no target yet; the job-backed migration
+    # takes it from the lease's create job, which names the guest it creates.
     metadata = {
         "create_job_id": candidate.create_job_id,
+        "teardown_job_id": None,
         "current_job_id": candidate.create_job_id,
-        "vm_host": candidate.vm_host,
-        "vm_target": target or "",
         "operation": "create",
+        "host_id": candidate.vm_host,
+        "executor_target": target or "",
     }
     teardown_metadata = None
     if candidate.vm_remove_job_id:
         teardown_metadata = {
             "create_job_id": candidate.create_job_id,
+            "teardown_job_id": candidate.vm_remove_job_id,
             "current_job_id": candidate.vm_remove_job_id,
-            "vm_host": candidate.vm_host,
-            "vm_target": target or "",
             "operation": "teardown",
+            "host_id": candidate.vm_host,
+            "executor_target": target or "",
         }
 
     prepared_teardown = None
@@ -175,10 +187,10 @@ def compile_legacy_vm_fulfillment_backfill(
         resource = SettlementResource(
             settlement_resource_id=candidate.vm_host,
             pool_id=candidate.pool_id,
-            executor_kind=_LEGACY_EXECUTOR_KIND,
+            offering_mode=_LEGACY_OFFERING_MODE,
             resource_kind="vm",
             provider="ansible",
-            attributes={"vm_host": candidate.vm_host},
+            host_id=candidate.vm_host,
         )
         result = SettlementResult(
             capacity_reservation_id=candidate.capacity_reservation_id,
@@ -203,9 +215,10 @@ def compile_legacy_vm_fulfillment_backfill(
         state=state,
         settlement_resource_id=candidate.vm_host,
         pool_id=candidate.pool_id,
-        executor_kind=_LEGACY_EXECUTOR_KIND,
+        offering_mode=_LEGACY_OFFERING_MODE,
         provider="ansible",
-        resource_attributes={"vm_host": candidate.vm_host},
+        resource_attributes={},
+        resource_host_id=candidate.vm_host,
         provider_metadata=metadata,
         teardown_provider_metadata=teardown_metadata,
         prepared_teardown_operation=prepared_teardown,

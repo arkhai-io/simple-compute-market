@@ -20,7 +20,7 @@ from market_core.schemas import (
 )
 from registry_client import FilterSpecResponse
 
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
@@ -29,7 +29,7 @@ from domains.vms.buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 def _config(registry_url: str = "http://reg") -> BuyConfig:
@@ -621,3 +621,40 @@ class TestConfirmSettlementGate:
         )
         assert result.status == "exited"
         assert "confirm_settlement_callback_raised" in (result.reason or "")
+
+
+def test_pricing_uses_only_the_selected_option_rate():
+    """A listing's other alternatives never price the option the buyer selected."""
+    from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+
+    from arkhai_vms_buyer.negotiate_cli import _pricing_listing_for_selection
+
+    rates = [RateValue(field="amount", per="hour", value=125)]
+    params = {"payee_account": "22222222-2222-4222-8222-222222222222", "asset": "USD/2"}
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
+    legacy_alkahest_entry = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "aa" * 20,
+        "literal_fields": {"token": "0x" + "bb" * 20},
+        "rates": [{"field": "amount", "per": "hour", "value": "999000000"}],
+    }
+    listing = {
+        "accepted_escrows": [legacy_alkahest_entry],
+        "settlement_options": [option.model_dump(mode="json")],
+    }
+
+    pricing_listing = _pricing_listing_for_selection(
+        listing, SimpleNamespace(option=option), accepted_escrow=None
+    )
+
+    assert pricing_listing["accepted_escrows"] == []
+    assert extract_seller_min_price(pricing_listing) == 125
+

@@ -25,6 +25,10 @@ class _ServicingStepError(RuntimeError):
         self.operation = operation
 
 
+#: Cadence for re-checking a held gate; idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
 class SettlementServicingWorker:
     def __init__(
         self,
@@ -55,55 +59,106 @@ class SettlementServicingWorker:
             now_unix=now,
             limit=limit,
         )
-        processed = 0
         for row in rows:
-            record = SettlementObligationRecord.model_validate(row)
+            await self._service_record(
+                SettlementObligationRecord.model_validate(row), now
+            )
+        return len(rows)
+
+    async def service_obligation(self, obligation_ref: str) -> None:
+        """Service one obligation now, exactly as a ``run_once`` pass would.
+
+        For a caller that has just changed an obligation's state and should not
+        wait for the next pass. A failed step is scheduled for retry by the same
+        rules as in a pass, so the worker remains the only retry path. A
+        concurrent pass sees the obligation as busy rather than servicing it
+        twice because each step holds a runtime operation lease; for starting
+        fulfillment that lease is the one the ``on_ready`` hook takes through
+        ``SettlementRuntime.reserve_fulfillment``, so a hook must reserve before
+        it starts anything.
+        """
+
+        await self._service_record(await self._reload(obligation_ref), time.time())
+
+    async def _service_record(
+        self, record: SettlementObligationRecord, now: float
+    ) -> None:
+        try:
+            await self._service(record, now)
+        except _ServicingStepError as exc:
+            operation = exc.operation
             try:
-                await self._service(record, now)
-            except _ServicingStepError as exc:
-                operation = exc.operation
-                try:
-                    await self._schedule(
-                        record.obligation_ref,
-                        operation,
-                        now,
-                        f"{type(exc).__name__}: {exc}",
-                    )
-                except Exception:
-                    logger.exception(
-                        "could not schedule settlement retry for %s",
-                        record.obligation_ref,
-                    )
-                await self._emit(
-                    "settlement_retry",
-                    {
-                        "obligation_ref": record.obligation_ref,
-                        "operation": operation,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    },
-                )
-            except Exception as exc:
-                logger.exception(
-                    "settlement servicing rejected %s",
+                await self._schedule(
                     record.obligation_ref,
-                )
-                await self._terminal(
-                    record,
-                    "manual_required",
+                    operation,
+                    now,
                     f"{type(exc).__name__}: {exc}",
                 )
-            processed += 1
-        return processed
+            except Exception:
+                logger.exception(
+                    "could not schedule settlement retry for %s",
+                    record.obligation_ref,
+                )
+            await self._emit(
+                "settlement_retry",
+                {
+                    "obligation_ref": record.obligation_ref,
+                    "operation": operation,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "settlement servicing rejected %s",
+                record.obligation_ref,
+            )
+            await self._terminal(
+                record,
+                "manual_required",
+                f"{type(exc).__name__}: {exc}",
+            )
 
-    async def run(self) -> None:
+    async def run(
+        self,
+        *,
+        paused: Callable[[], bool] | None = None,
+        wait: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
+        """Sweep due obligations on an interval until cancelled.
+
+        Each cycle reads `paused`, sweeps if a sweep is due, then waits one
+        interval through `wait` -- a storefront's loop controller, which returns
+        early on a pause request -- or a plain sleep. `paused` holds the loop at
+        the top of a cycle without stopping it: nothing is torn down, no sweep is
+        cut part-way, and `run_once` stays callable so an operator or a scenario
+        can advance one cycle while the timer is held. It is read on entry, so a
+        pause is observable from the moment the loop starts, and immediately
+        before every sweep, so a pause requested during the wait is observed
+        before the next sweep. The first sweep comes one interval after start.
+        """
+        if paused is not None and wait is None:
+            # Gated but uninterruptible is the combination that lets a pause
+            # outlast its own bounded wait.
+            raise TypeError("a gated servicing loop requires an interruptible wait")
+        loop = asyncio.get_running_loop()
+        sweep_not_before = loop.time() + self._interval_seconds
         while True:
             try:
-                await asyncio.sleep(self._interval_seconds)
-                await self.run_once()
+                if paused is not None and paused():
+                    await asyncio.sleep(_PAUSED_POLL_SECONDS)
+                    continue
+                if loop.time() >= sweep_not_before:
+                    await self.run_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("settlement servicing sweep failed")
+            # Outside the sweep's handler so a failing sweep still waits its
+            # interval rather than retrying in a tight loop.
+            if wait is not None:
+                await wait(self._interval_seconds)
+            else:
+                await asyncio.sleep(self._interval_seconds)
 
     async def wake(self, obligation_ref: str) -> None:
         await self._repository.wake_settlement_obligation(obligation_ref)

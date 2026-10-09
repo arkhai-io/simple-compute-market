@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -36,17 +35,20 @@ def test_api_credit_state_uses_independent_named_volumes():
 def test_api_credit_storefront_runtime_uses_staged_wheel_only():
     """The image installs the wheel its own project declares, and only that.
 
-    The version is read rather than written down. A literal here asserts a
-    number the project has already moved past, and a guard that has to be
-    edited alongside the thing it guards eventually stops guarding it.
+    The version is not written in the image definition at all: the install
+    step reads it from the project's pyproject and refuses any package index,
+    so the image cannot install a release other than the one the tree builds.
     """
 
-    storefront = _REPO_ROOT / "domains/apicredits/storefront"
-    dockerfile = (storefront / "Dockerfile").read_text(encoding="utf-8")
-    declared = tomllib.loads((storefront / "pyproject.toml").read_text(encoding="utf-8"))
-    version = declared["project"]["version"]
+    dockerfile = (_REPO_ROOT / "domains/apicredits/storefront/Dockerfile").read_text(
+        encoding="utf-8"
+    )
 
-    assert f"arkhai-apicredits-storefront=={version}" in dockerfile
+    assert (
+        "uv_project.py install-wheel --project /repo/domains/apicredits/storefront"
+        in dockerfile
+    )
+    assert "arkhai-apicredits-storefront==" not in dockerfile
     assert "COPY domains/apicredits/storefront/src" not in dockerfile
     assert 'ENV PYTHONPATH="/app"' not in dockerfile
 

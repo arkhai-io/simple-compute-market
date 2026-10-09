@@ -71,6 +71,17 @@ boundary — a subprocess invocation, a call to a service this codebase
 doesn't own, a blockchain RPC call. Mock at the point this codebase's
 own code wraps that boundary, not deeper.
 
+**Library packages:** A kit library has no app. For a library, integration
+means its public service API against a real embedded database, the
+persistence boundary the library owns, with collaborators it does not own
+injected. Such tests live in the library's `tests/integration`. They prove
+durable behavior a unit test with mocked collaborators cannot: transaction
+boundaries, locking, and independent-session concurrency. They do not
+replace the in-process-app integration tests of a service that composes the
+library, which remain the tests of that service's wire contract. A library
+test that exercises a real database but still sits in `unit/` moves to
+`integration/` when it is next touched.
+
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport`
 against the real application instance, injected via the service's
 canonical typed-client constructor (`FooClient(transport=...)`).
@@ -133,6 +144,70 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
+**Leave nothing held:** a test that holds a job at a mock rule's gate
+(`pause_before_result`) ends that hold itself, by resuming the rule or by
+cancelling the job, so the test is idempotent: it leaves no execution
+parked for the next test, the next module, or a rerun, and holds no queue
+slot. A job's status is not the evidence: a cancelled job is terminal the
+moment the cancellation commits, while its execution may still be waiting.
+Wait on the execution instead — `MockRuleSet.wait_until_released` for the
+gate and `AsyncJobQueue.wait_until_idle` for the processing — and assert
+the rule's `waiting` count is zero. Cancelling a held job must end its
+execution without a resume; a mock whose cancellation leaves the run
+waiting is a defect in the mock, not something to resume around.
+
+**Pause the loop, then advance it explicitly:** the same discipline
+applies to a service's own background lifecycle loops, where the seam is
+an HTTP control rather than a callback. Each loop should offer a pause,
+and an explicit single-step that works *while* paused, so a scenario
+drives transitions instead of waiting for a timer:
+
+| Loop | Pause | Explicit step |
+|---|---|---|
+| Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
+| Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
+| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
+| Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../introduction-retention/dry-run` |
+| Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs |
+| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
+
+Every storefront composes its loops onto the one kit loop controller in
+`kit/storefront`, so the routes, response shapes, and the canonical
+`StorefrontClient` methods are the same for every storefront. The storefront
+loops hold no claim between cycles, so their `run-cycle` is a step: it runs
+exactly the cycle the timer runs, whether or not the loops are held.
+
+Traps this has already sprung, worth checking for a new loop:
+
+- **A loop with no pause is not paused.** Convergence ran a 30s timer
+  with no gate while the scenario around it believed everything was
+  stopped, so it claimed the same rows the test was explicitly
+  advancing. "Everything is mocked, so nothing can take wall time" is
+  true of the work and false of the coordination.
+- **A "run one cycle" endpoint is not necessarily a step.** Convergence
+  claims a row before polling its provider and, on a pending answer,
+  deliberately keeps that claim so the lease spaces the next poll. A
+  further cycle inside that lease reaches nothing, so any number of them
+  is still zero advances. `advance-cycle` releases the caller's own
+  claims first; `run-cycle` is the production cycle and does not. If a
+  test needs several steps to make one transition, suspect the step
+  rather than adding a sleep.
+- **A loop that sleeps its interval is held late.** A loop gated at the
+  top of each cycle but waiting with a plain sleep reaches its gate only
+  when the sleep ends, so a pause landing in a 30-second interval outlasts
+  the pause's 5-second bounded wait and reports the loop `pausing`. Every
+  loop waits through the controller's `idle`, which returns on a pause
+  request, and the kit runners refuse a gate without such a wait. Test it
+  with the real loop body and an interval far longer than the test waits.
+- **Scope the pause to the module that owns the advances.** A pause in
+  a shared `conftest.py` reaches every scenario in that directory, and a
+  scenario that legitimately relies on the timer — one that arms an
+  ungated provider rule and waits for the lease, say — is stalled rather
+  than made deterministic by it. Make the fixture opt-in and take it with
+  `pytest.mark.usefixtures` from the modules that drive the loop
+  themselves, and resume in a finaliser so a failing stage does not leave
+  the loop stopped for the next module.
+
 ### 3. Smoke Tests (Deployment Validation)
 
 **What they cover:** Stateless, idempotent verification that a deployed
@@ -187,6 +262,46 @@ The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
+
+The pipeline runs two lanes, as separate jobs so each failure's logs stand
+alone:
+
+- **VM lane** (`make -C e2e-tests test-e2e-vm`): the VM and API-credit markets
+  on one dev chain, with the VM site in the provisioning mock profile.
+- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site in the
+  provisioning mock profile, trusting the bare-metal storefront, a bare-metal
+  registry, and the dev chain. Its publication scenario declares pools and
+  whole-host capacity through the site's operator clients, steps publication,
+  and follows one listing through discovery, withdrawal, and reinstatement at
+  the registry.
+
+`make -C e2e-tests test-e2e` runs both in turn. A lane provides its own
+configuration, so a scenario that finds a lane setting missing fails rather
+than skipping. The release-qualified bare-metal deal needs a real whole host to
+reach and revoke access on, which the pipeline never has, so neither lane
+selects it; a mock-profile site proves the services compose, not real delivery.
+
+The VM multi-registry scenario seeds Bob's and Alice's separate provisioning
+authorities through typed administration clients and refreshes both site
+projections before listing creation. It checks Bob's publication to two
+registries, Alice's publication to one, production buyer discovery retaining
+one record per independent registry authority, ordinary discovery with an
+unavailable endpoint, and independent negotiations. Registry footprint checks
+use the typed registry client; the scenario does not establish that multiple
+storefronts can share a site authority. Resource-query and explain preparation
+have separate fail-closed behavior.
+
+To run both lanes in GitHub Actions, push the current branch and run
+`make run-e2e` with an authenticated `gh` CLI on PATH. Then run
+`make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
+diagnostics. Omitting the ID selects the current branch's latest run among the
+100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`actions.log`, `e2e-vm-logs/compose-logs.txt`, and
+`e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
+Each successful fetch also creates `<run-id>.zip` beside the run directory,
+containing that directory and its logs. Repeated fetches replace the ZIP.
+An unavailable artifact is reported without discarding other logs. A successful
+fetch means diagnostics were retrieved; it does not mean the tests passed.
 
 ## Coverage Contract Between Levels
 
@@ -259,9 +374,14 @@ it once the producer gains coverage.
 ## Test File Layout
 
 A service's tests split into `unit/` and `integration/` subdirectories
-under its own `tests/` root, matching the four-level hierarchy above.
+under its own `tests/` root, matching the four-level hierarchy above. A kit
+library splits the same way, and its test target runs both directories.
+Its `integration/` directory is a package, so a module there may share a
+basename with one in `unit/`.
 System-level tests live in the separate `e2e-tests` package, itself
-split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
+split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
+chart's render tests live in its own `tests/` directory (see "Chart Render
+Tests").
 
 ## Pool Offering-Mode Enforcement
 
@@ -283,6 +403,17 @@ proving that no execution layer relies on another layer's earlier decision:
   pool, exact derivation from provider/playbook/delegate configuration,
   idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
   backfill, conflicting proof, unproved active rows, and terminal rows.
+- Advertisement and backing declarations follow the same split.
+  `kit/resource-pools` unit tests own declaration shape, both cross-tag rules,
+  the pool models' refusal to build an invalid write, and the resolver's
+  distinction between an absent and a malformed declaration. Its library
+  integration suite owns identical validation across individual and bulk
+  administration, backing immutability, and the stored-declaration check.
+  Provisioning integration tests own server-side refusal through the typed
+  client — status and stored state only, per the rejection-path rule — plus the
+  upgrade migration, the startup refusal, and every projected pool carrying both
+  declarations. The API-credits service's integration suite owns its own
+  migration and startup refusal.
 - The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
   mode for a real matching capacity resource and observes HTTP 409 plus no
   reservation row. It stops at the reservation boundary by design: provider
@@ -294,6 +425,37 @@ site, storefront, and domain adapters for default arguments, `or` fallbacks,
 and attribute-based inference; a passing focused suite alone cannot prove their
 absence.
 
+## Host Requirement Enforcement
+
+The rule that a declaration naming no host cannot be admitted or placed where
+the pool's provider needs one is rechecked at each layer, and each layer
+proves its own check:
+
+- `kit/resource-pools` unit tests own the predicate:
+  - no requirement supplied;
+  - a declared need;
+  - a provider the requirement does not name;
+  - a value that is not a `bool`.
+- `kit/fulfillment` unit tests own the provider declaration, including a
+  registry that refuses a provider declaring none.
+- `kit/site` library integration tests own admission:
+  - refusal with fall-through to a declaration naming a host;
+  - no refusal without a requirement;
+  - resize;
+  - the assignment write.
+- `kit/fulfillment` library integration tests own placement:
+  - exclusion before policy, rebind, cursor, or assignment, on both the
+    automatic and the constrained path;
+  - refusal of an existing assignment that records no host.
+- Provisioning unit tests own composition's refusal of a requirement that
+  disagrees with the registered providers.
+- Provisioning integration tests prove the deployed surface through the typed
+  clients:
+  - admission and scheduling refusals with the executor boundary asserted
+    never reached;
+  - dispatch to an unregistered host failing before any playbook, even with a
+    configured inventory file naming the host.
+
 ## Multi-Domain Storefront Composition
 
 The common shell owns a boundary matrix rather than duplicating complete domain
@@ -304,7 +466,7 @@ scenarios at every level:
   bindings, lifecycle carriers, publication fan-out, and schema-opaque result
   dispatch;
 - VM storefront tests cover installed contribution wiring, exact public
-  `virtualization_type`, configured source selection, negotiation/settlement
+  `offering_mode`, configured source selection, negotiation/settlement
   adapters, selected-site capacity calls, restart recovery, and transactional
   legacy migration;
 - bare-metal domain/storefront tests own only bare-metal codecs, publication
@@ -368,10 +530,10 @@ manifest must fail startup rather than admit mixed identity precedence.
   selected EVM effect resolves and validates only its adapter-owned inputs.
 - Configuration and artifact tests use secret canaries to reject private
   material in public models, persistence, logs, rendered ConfigMaps,
-  arguments, images, wheels, manifests, and fixtures. Payment integration uses
-  generated wire models and shared conformance vectors through the installed
-  payments kit; service implementation imports and copied receipt signing
-  behavior are test failures.
+  arguments, images, wheels, manifests, and fixtures. Payment tests use the
+  installed payments kit's generated wire models and never import the
+  payments service implementation. "Payment Receipts in Tests" below covers
+  how they obtain signed receipts.
 - VM and API-credit plugin conformance uses the same selected-primary and
   retained-principal recovery fixtures. Discovery rejects any plugin missing
   `core.resolved-buyer-identity.v1` before command registration.
@@ -384,6 +546,51 @@ manifest must fail startup rather than admit mixed identity precedence.
   wallet. Local controlled smoke evidence does not establish live ledger or
   physical access. Check readiness before a live run and report unavailable
   service or credential prerequisites rather than run against a down target.
+
+## Payment Receipts in Tests
+
+A seller delivers only after verifying a receipt that the payments service
+signed for the exact mandate derived from the accepted Agreement. Proving that
+gate below the system level needs a receipt for each test's own Agreement. The
+published vectors cannot supply one: their receipt covers a fixed vector
+mandate that no accepted Agreement derives.
+
+Tests get receipts from the payments kit's fixture:
+
+```python
+receipt = build_signed_receipt(signer=SERVICE, mandate=accepted.mandate)
+```
+
+Tests and diagnostics never frame or sign a receipt themselves. Code like this
+is a second framing implementation that nothing checks against the service:
+
+```python
+signature = service.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receipt))))
+```
+
+The fixture is trustworthy because it uses the same framing function as the
+kit's verifier, and the kit's unit suite proves it reproduces the published
+vector exactly:
+
+```python
+assert receipt_message(vector_body).hex() == vectors["receipt"]["message"]
+assert sign_receipt(Ed25519Signer(vector_seed), vector_body) == vector_receipt
+```
+
+The fixture takes its signer as an argument and ships no key material.
+Integration tests replace `PaymentsClient`, the code that wraps the payments
+HTTP boundary, with a fake that serves fixture receipts. Each test varies one
+property:
+
+```python
+payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate))   # delivers
+payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate))  # 409, no delivery
+payments.serve(None)                                                              # 202 pending
+```
+
+A fake may give the surrounding transaction snapshot a placeholder proof,
+because sellers trust only the embedded receipt. A change that makes snapshot
+state authoritative must first add a snapshot vector and fixture.
 
 ## Boundary-Change Validation
 
@@ -401,6 +608,82 @@ relocated unit tests. Validate:
 - deterministic, idempotent retry behavior;
 - observable lifecycle events verified without arbitrary sleeps (see
   "Async test discipline" above).
+
+The Python CI matrix always creates `.dist`, including for projects with no
+internal dependencies. Jobs that consume repository-owned Python packages run
+`make dist-ci` so the Make dependency graph, rather than the workflow, owns the
+wheel inventory and build order.
+
+## Chart Render Tests
+
+A chart render test runs `helm template` against a chart with chosen values and
+asserts on the manifests it produces, or on its refusal to produce them. It is a
+static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
+checks: it needs Helm, not a cluster.
+
+**What they cover:** what a deployment's manifests contain for a given set of
+values — which documents render into a ConfigMap, which files mount, which
+settings the chart derives — and which values the chart's schema refuses. This
+is where a derived setting is checked against the thing it is derived from, so a
+document that renders and mounts while its path is unset is caught before any
+pod runs.
+
+**What they do not cover:** whether a cluster accepts the manifests, whether the
+service starts with them, or whether it then behaves. Deploying to the dev
+cluster and the smoke and end-to-end tiers remain the evidence for those; a
+passing render is not deployment evidence, just as it is not deal evidence.
+
+**Where they live and how they run:**
+
+- Umbrella-chart assertions are in `helm/scripts/test-render.sh`, run by
+  `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
+- A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
+  each from `test-render.sh` so that one target runs every render check; a test
+  reachable only through its chart's own Makefile is easily never run.
+- None of this is part of `make test`, and all of it needs `helm` on `PATH`.
+- `helm/charts/storefront/tests/test_render.py` also loads one rendered
+  `storefront.json` with the storefront's own configuration loader, through the
+  interpreter `STOREFRONT_PYTHON` names; `test-render.sh` sets it when the VM
+  storefront environment exists (`make init-storefront`). Without it the test
+  reports a skip. No CI job has both Helm and that environment, so in CI this
+  check does not run; run it locally before a change to the chart or the loader
+  is reviewed.
+
+**How to write one:**
+
+- Use the standard library only. `test-render.sh` runs a plain `python3`, so pass
+  values as a JSON file (JSON is YAML) and assert on the rendered text, rather
+  than depending on a YAML parser. A document the chart renders as JSON, such as
+  the storefront's `storefront.json`, can be read back with `json` and asserted
+  on structurally.
+- Assert related artifacts together. When the chart derives a setting from a
+  value, assert the rendered artifact, its mount, and the derived setting in one
+  helper, both present and all absent, so a test cannot pass with one of the
+  three missing.
+- For a schema refusal, assert a non-zero exit and that the error names the
+  offending key; a render that fails for an unrelated reason must not count.
+- Break the template once while writing the test (remove the mount, say) and
+  confirm the test fails, then restore it.
+- When the rendered artifact is a document a service parses, parse one rendered
+  instance with the service's own parser as well. The render test proves the
+  chart emits what it was given; only the parser proves the service accepts it.
+
+**A values schema generated from typed models.** The VM storefront chart's
+values schemas carry one definition generated from the storefront's typed
+configuration models (`make helm-values-schema`). Its drift test is a storefront
+unit test, `domains/vms/storefront/tests/unit/test_values_schema.py`, so `make
+test` fails when a model or settlement registration changes without
+regenerating; packaging checks cannot run it, because the generator imports the
+storefront's third-party dependencies. The render tests then assert what the
+schema refuses and accepts.
+
+**Obtaining Helm where its download host is unreachable.** Helm's official
+binaries are served from `get.helm.sh`. An environment that cannot reach it can
+use a redistribution such as the npm package `helm-binary-linux`, which ships
+one binary with no install scripts. Such a copy is unverified and may be an
+older release, so treat its results as a local check: inspect the package before
+running it, keep it out of the repository, and rely on the pinned Helm of the
+release environment for anything recorded as evidence.
 
 ## Cross-Language Contract Conformance
 
@@ -447,5 +730,5 @@ review environment can use the wheelhouse's declared Python version.
 **Current implementation:** `make review-wheelhouse` (scope preview via
 `make review-wheelhouse-scope`, controlled by `REVIEW_PROJECTS`,
 `REVIEW_SCOPE_FILE`, or `BASE_REF`), which rebuilds wheels, refreshes
-scoped lockfiles (`scripts/refresh-review-locks.py`), and bundles the
+scoped lockfiles (`scripts/uv_project.py lock`), and bundles the
 result via `scripts/package-review-wheelhouse.sh`.

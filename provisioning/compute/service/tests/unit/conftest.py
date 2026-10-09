@@ -21,13 +21,13 @@ def mock_settings():
         mock_settings.ansible_timeout_seconds = 60
     """
     settings = MagicMock()
-    settings.default_vm_host = "kvm1"
+    settings.default_host_id = "kvm1"
     settings.default_max_retries = 3
     settings.retry_backoff_initial_seconds = 60
     settings.retry_backoff_multiplier = 2.0
     settings.retry_backoff_max_seconds = 3600
     settings.ansible_timeout_seconds = 1800
-    settings.non_retryable_errors = [
+    settings.additional_non_retryable_errors = [
         "Invalid SSH key",
         "VM target not found",
         "Permission denied",

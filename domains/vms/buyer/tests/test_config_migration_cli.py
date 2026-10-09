@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 
 def _app() -> typer.Typer:
-    from domains.vms.buyer.config_cli import config_app
+    from arkhai_vms_buyer.config_cli import config_app
 
     app = typer.Typer()
     app.add_typer(config_app, name="config")
@@ -20,7 +20,7 @@ def _app() -> typer.Typer:
 
 
 def test_buyer_registers_settlement_migration_check(monkeypatch, tmp_path: Path) -> None:
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     path = tmp_path / "buyer.toml"
     path.write_text("[settlement]\nmechanism_priority = ['alkahest.v1']\n")
@@ -61,7 +61,7 @@ def test_buyer_registers_settlement_migration_check(monkeypatch, tmp_path: Path)
 def test_buyer_config_set_rejects_legacy_path_with_exact_command(
     monkeypatch,
 ) -> None:
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     monkeypatch.setattr(
         config_cli,
@@ -81,7 +81,7 @@ def test_buyer_config_set_rejects_legacy_path_with_exact_command(
 
 
 def test_buyer_config_rejects_removed_marketplace_identity(monkeypatch, tmp_path):
-    from domains.vms.buyer import config_cli
+    from arkhai_vms_buyer import config_cli
 
     path = tmp_path / "buyer.toml"
     path.write_text(

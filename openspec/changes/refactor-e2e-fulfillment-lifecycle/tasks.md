@@ -37,6 +37,14 @@ never silently broken so much as never actually executed at all.
 - [x] 2.2 Confirm `test_full_deal.py` stages 10a-11b match the proposed sequence.
 - [x] 2.3 Confirm `test_full_deal_buyer_cli.py`'s equivalent stages match (word-for-word identical to 2.2).
 - [x] 2.4 Trace why `pools-7` believed this was still deferred: `reserved_resource_id`'s `require_state` precondition was unsatisfiable before Section 1's fix, so these stages silently skipped rather than ran and failed -- explaining why nobody observed them passing.
+      *Evidence (2026-10-05, from `bare-metal-mock-provisioned-deal`):*
+      - End-to-end run 37298149909 passed stages 08a to 11b of both
+        `test_full_deal.py` and `test_full_deal_buyer_cli.py` against the
+        composed services, which satisfies 2.6 and the `test_full_deal*` part of 1.12.
+      - `test_non_erc20_settlement.py` did not run in that lane, so 1.12 still needs
+        it.
+      - Those stages now read and back-date the lease through the family and site
+        clients (see `design.md`).
 - [ ] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved, not deferred (pending an actual passing run -- see 1.12/2.6).
 - [ ] 2.6 Run stages 10a-11b against live services (blocked on the same live-service constraint as task 1.12) to confirm they now execute and pass, not just that they're syntactically present and internally consistent.
 
@@ -53,6 +61,38 @@ never silently broken so much as never actually executed at all.
 - [x] 4.1 Read `test_multi_registry.py` fully; no fulfillment-lifecycle vocabulary (legacy or current) anywhere in the file, and it doesn't import `DealState` -- confirmed independent of everything Sections 1-3 touched. No changes needed.
 - [x] 4.2 Read `test_buy_oneshot_buyer_cli.py` fully; no legacy vocabulary. It does import `DealState` and assigns `deal_state.reserved_resource_id` directly (`= BUY_RESOURCE_ID`), which remains a valid field after Sections 1-3's changes -- direct assignment, not dependent on how the *other* scenario files populate it. No changes needed.
 
+## 5. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
+- [ ] 5.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries no delta specs, so confirm every material decision has a permanent destination or an explicit temporary, superseded, or rejected classification.
+- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
+- [ ] 5.5 **Roadmap currency.** This change sits under the lesser goal “End-to-end harness determinism”, which has no roadmap goal behind it, so it most likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record the no-impact disposition explicitly rather than omitting the step.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [ ] 5.7 **Promotion.** Complete the design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/refactor-e2e-fulfillment-lifecycle`.
+
+- [ ] 5.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=refactor-e2e-fulfillment-lifecycle` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 ## Design-promotion record
 
 See `design.md`'s "Section 1 ... Design promotion record" table. Sections 2-4

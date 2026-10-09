@@ -7,11 +7,15 @@ from typing import Any
 
 from market_identity import (
     Identity as MarketplaceIdentity,
+)
+from market_identity import (
     IdentityScheme,
-    SignatureProof as MarketplaceSignatureProof,
+    frame_fields,
     get_identity_verifier,
 )
-from market_identity.canonical import _frame
+from market_identity import (
+    SignatureProof as MarketplaceSignatureProof,
+)
 from pydantic import BaseModel, ValidationError
 
 from market_arkhai_payments.canonical import agreement_hash, jcs_sha256
@@ -25,6 +29,17 @@ def transaction_id(mandate: Mandate | Mapping[str, Any]) -> str:
 
     parsed = Mandate.model_validate(mandate)
     return jcs_sha256(parsed)
+
+
+def receipt_message(receipt: Mapping[str, Any] | BaseModel) -> bytes:
+    """Return the exact bytes the payments service signs for one receipt."""
+
+    receipt_json = (
+        receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if isinstance(receipt, BaseModel)
+        else dict(receipt)
+    )
+    return frame_fields((RECEIPT_PROTOCOL, jcs_sha256(receipt_json)))
 
 
 def verify_receipt_signature(
@@ -46,11 +61,7 @@ def verify_receipt_signature(
         issuer = signed.receipt.issuer
         if issuer.scheme != trusted.scheme.value or issuer.identifier != trusted.identifier:
             return False
-        receipt_json = signed.receipt.model_dump(
-            mode="json", by_alias=True, exclude_none=True
-        )
-        digest = jcs_sha256(receipt_json)
-        message = _frame((RECEIPT_PROTOCOL, digest))
+        message = receipt_message(signed.receipt)
         proof = MarketplaceSignatureProof.model_validate(
             signed.proof.model_dump(mode="json", by_alias=True, exclude_none=True)
         )

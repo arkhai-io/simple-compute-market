@@ -31,7 +31,7 @@ class DealContext:
     seller_url: str
     listing_id: str
     negotiation_id: str
-    agreed_amount: float
+    agreed_amount: float | None
     escrow_uid: str | None = None
     settlement_ref: str | None = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
@@ -516,6 +516,14 @@ def load_deal_context(
                 except (TypeError, ValueError):
                     pass
 
+    amountless_plan = False
+    if settlement_plan is not None and settlement_selection is not None:
+        parsed_plan = SettlementPlan.model_validate(settlement_plan)
+        amountless_plan = (
+            len(parsed_plan.obligations) == 1
+            and parsed_plan.obligations[0].amount is None
+        )
+
     missing = [
         name
         for name, v in (
@@ -528,7 +536,7 @@ def load_deal_context(
             ("negotiation_id", negotiation_id),
             ("agreed_amount", agreed_amount),
         )
-        if not v
+        if not v and not (name == "agreed_amount" and amountless_plan)
     ]
     if missing:
         raise typer.BadParameter(

@@ -20,7 +20,7 @@ class VmPublicationSourceCallbacks:
     open_keys: Callable[[str], set[str]]
     close_stale: Callable[[str, str], list[str]]
     available_candidates: Callable[[str], list[dict[str, Any]]]
-    offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
+    listing_resource: Callable[[dict[str, Any]], dict[str, Any]]
     record_published: Callable[[str, dict[str, Any], str], None]
     reopen_existing: Callable[
         [
@@ -45,7 +45,7 @@ def build_vm_publication_source_kwargs(
         "open_keys": callbacks.open_keys,
         "close_stale": callbacks.close_stale,
         "available_candidates": callbacks.available_candidates,
-        "offer_resource": callbacks.offer_resource,
+        "listing_resource": callbacks.listing_resource,
         "record_published": callbacks.record_published,
         "reopen_existing": callbacks.reopen_existing,
     }
@@ -57,11 +57,17 @@ def build_vm_storefront_publication_selection(
     registry: StorefrontDomainRegistry,
     callbacks: VmPublicationSourceCallbacks,
 ) -> PublicationSourceSelection:
-    """Build the explicitly registered VM publication selection."""
+    """Build the VM source alone from the registry.
+
+    A storefront may also register bare metal, whose publication is an
+    operator command with its own arguments; the VM loop builds only its own.
+    """
+    contribution_id = registry.resolve_mode("vm").contribution_id
     return _build_core_publication_selection(
         registry,
+        contributions=(contribution_id,),
         source_kwargs_by_contribution={
-            "vms": build_vm_publication_source_kwargs(callbacks),
+            contribution_id: build_vm_publication_source_kwargs(callbacks),
         },
     )
 

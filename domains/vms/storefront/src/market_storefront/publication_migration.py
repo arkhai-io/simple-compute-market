@@ -173,17 +173,36 @@ def _legacy_context(
 def _per_model_legacy_conflicts(
     pricing: Mapping[str, Any],
 ) -> tuple[str, ...]:
+    """Per-model tables still stating legacy pricing, which need manual clauses.
+
+    Only a model table stating ``min_price`` or ``token`` is legacy; one stating
+    ``settlements`` or family ``rates`` is current configuration.
+    """
     defaults = _table(pricing, "Defaults")
     if defaults is None:
         return ()
     gpu = _table(defaults, "GPU")
     if not gpu:
         return ()
-    models = sorted(str(model) for model in gpu)
+    models = sorted(
+        str(model)
+        for model, fields in gpu.items()
+        if isinstance(fields, Mapping)
+        and any(_table_has(fields, key) for key in _LEGACY_MODEL_KEYS)
+    )
+    if not models:
+        return ()
     return (
         "per-model legacy pricing requires manual clauses: "
         + ", ".join(f"Pricing.defaults.gpu.{model}" for model in models),
     )
+
+
+_LEGACY_MODEL_KEYS = ("min_price", "token")
+
+
+def _table_has(table: Mapping[str, Any], canonical: str) -> bool:
+    return any(str(key).lower() == canonical for key in table)
 
 
 def _clause_for_legacy_price(

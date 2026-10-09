@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning import (
+from market_resource_pools_contracts import (
     PoolCreate,
     PoolImportRequest,
     PoolImportResponse,

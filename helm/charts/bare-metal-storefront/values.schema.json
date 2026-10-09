@@ -18,6 +18,7 @@
     "persistence"
   ],
   "properties": {
+    "enabled": {"type": "boolean"},
     "global": {
       "type": "object",
       "properties": {"imageRepository": {"type": "string"}},

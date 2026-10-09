@@ -1,6 +1,6 @@
 # Accepted-decision comparison
 
-Compared `openspec/changes/settle-through-arkhai-payments/design.md` with the permanent promotion at `e97b4b7a`, retained on verification base `5cfa48f1`.
+Compared `openspec/changes/archive/2026-10-08-settle-through-arkhai-payments/design.md` with the permanent promotion at `e97b4b7a`, retained on verification base `5cfa48f1`.
 
 | Accepted decision | Observed permanent coverage |
 |---|---|

@@ -11,10 +11,10 @@ from core_storefront.domain_registry import (
 )
 from market_capacity_publication import CapacityBinding
 from market_core import SettlementEvidence
+from market_core import VersionedEnvelope
 from market_fulfillment import (
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
-    VersionedEnvelope,
     build_fulfillment_result_envelope,
 )
 from market_identity import Ed25519Signer
@@ -23,7 +23,6 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
-from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 from market_storefront.utils.sqlite_client import SQLiteClient
 
@@ -67,32 +66,40 @@ async def make_vm_lifecycle_fixture(
         registry=build_vm_storefront_registry(domain),
     )
     registration = db.domain_registry.resolve_mode("vm")
-    listing_binding = prepare_vm_listing_binding(
+    listing_binding = StorefrontListingBinding.from_source_envelope(
         listing_id=listing_id,
-        candidate={
-            "site_id": site_id,
-            "pool_id": pool_id,
-            "gpu_count": (context_payload or {})
-            .get("order", {})
-            .get("offer_resource", {})
-            .get("gpu_count", 1),
+        site_id=site_id,
+        pool_id=pool_id,
+        physical_resource_id=None,
+        binding=registration.binding,
+        derivation_key=f"{site_id}:{pool_id}:vm:1",
+        source_envelope={
+            "kind": "vm.capacity-candidate.v1",
+            "schema_version": 1,
+            "payload": {
+                "site_id": site_id,
+                "pool_id": pool_id,
+                "offering_mode": "vm",
+            },
         },
+        last_reconciled_at="2026-01-01T00:00:00Z",
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,
         status="open",
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
-        offer_resource={
+        listing_resource={
             "pool_id": pool_id,
             "gpu_model": "A100",
             "gpu_count": 1,
             "sla": 99.0,
             "region": "test-region",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
             "interruptible": interruptible,
         }
-        | (context_payload or {}).get("order", {}).get("offer_resource", {}),
+        | (context_payload or {}).get("order", {}).get("listing_resource", {}),
         fulfillment_resource=None,
         max_duration_seconds=7_200,
         storefront_url="http://seller.test",
@@ -131,7 +138,7 @@ async def make_vm_lifecycle_fixture(
         "fulfillment_request": {
             "kind": "vm.fulfillment.request",
             "schema_version": 1,
-            "payload": {"vm_target": "tenant-abcd", "ssh_pubkey": "ssh-ed25519 test"},
+            "payload": {"ssh_pubkey": "ssh-ed25519 test"},
         },
         **dict(context_payload or {}),
     }
@@ -250,23 +257,24 @@ def vm_fulfillment_result(
     fulfillment_id: str = "fulfillment-1",
     capacity_reservation_id: str = "reservation-1",
     provisioned_resource_id: str = "resource-1",
-    connection_info: Mapping[str, Any] | None = None,
+    endpoint: Mapping[str, Any] | None = None,
     credentials: tuple[Mapping[str, Any], ...] = (),
+    ready_at: str = "2030-01-01T00:00:01+00:00",
 ) -> VersionedEnvelope[Any]:
-    """Build the authoritative generic result with a VM-domain envelope."""
+    """Build the authoritative generic result carrying the family's access delivery."""
 
     domain_result = VersionedEnvelope(
-        kind="vm.fulfillment.result.v1",
+        kind="compute.access-delivery",
         schema_version=1,
         payload={
-            "connection_info": dict(connection_info or {}),
-            "credentials": [dict(credential) for credential in credentials],
-            "provisioned_resources": [
-                {
-                    "provisioned_resource_id": provisioned_resource_id,
-                    "status": "active",
-                }
+            "endpoints": [
+                dict(
+                    endpoint
+                    or {"protocol": "ssh", "host": "203.0.113.10", "port": 2222, "user": "tenant1"}
+                )
             ],
+            "credentials": [dict(credential) for credential in credentials],
+            "ready_at": ready_at,
         },
     )
     return build_fulfillment_result_envelope(

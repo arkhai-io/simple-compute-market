@@ -27,7 +27,11 @@ from market_identity import (
     verify_response,
 )
 
-from market_site_client.models import ResourceRegistration
+from market_site_client.models import (
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
+    ResourceRegistration,
+)
 
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
@@ -171,6 +175,17 @@ CAPACITY_ROUTE_CONTRACTS = (
 )
 
 
+#: Capacity-definition import, which a site hosted inside another service may
+#: serve beside its capacity routes; only ``admin`` reaches it.
+CAPACITY_DEFINITION_ROUTE_CONTRACTS = (
+    CapacityRouteContract(
+        "POST",
+        re.compile(r"/api/v1/capacity/definitions/import"),
+        "provisioning_capacity_definitions_import",
+    ),
+)
+
+
 def resolve_capacity_route(
     method: str,
     path: str,
@@ -178,7 +193,7 @@ def resolve_capacity_route(
 ) -> tuple[str, str]:
     """Return the server-owned semantic operation and resource for a route."""
 
-    for contract in CAPACITY_ROUTE_CONTRACTS:
+    for contract in CAPACITY_ROUTE_CONTRACTS + CAPACITY_DEFINITION_ROUTE_CONTRACTS:
         resource = contract.match(method, path, body)
         if resource is not None:
             return contract.operation, resource
@@ -197,9 +212,12 @@ class _AuthenticatedSiteClient:
         timeout: float,
         transport: httpx.AsyncBaseTransport | None,
         max_timestamp_skew: int,
+        caller_role: str = "seller",
     ) -> None:
         if not isinstance(signer, Signer):
             raise TypeError("signer must implement market_identity.Signer")
+        if caller_role not in {"seller", "admin"}:
+            raise ValueError("caller_role must be 'seller' or 'admin'")
         if not isinstance(expected_authorities, TrustedIdentitySet):
             raise TypeError(
                 "expected_authorities must be a market_identity.TrustedIdentitySet"
@@ -212,6 +230,7 @@ class _AuthenticatedSiteClient:
         self._timeout = timeout
         self._transport = transport
         self._max_timestamp_skew = max_timestamp_skew
+        self._caller_role = caller_role
         self._request_contexts: dict[
             str, tuple[str, str, str, str]
         ] = {}
@@ -250,7 +269,7 @@ class _AuthenticatedSiteClient:
         authenticated = sign_request(
             signer=self._signer,
             envelope=RequestEnvelope(
-                role="seller",
+                role=self._caller_role,
                 principal=self._signer.identity,
                 method=method,
                 operation=operation,
@@ -417,6 +436,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         timeout: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_timestamp_skew: int = 300,
+        caller_role: str = "seller",
     ) -> None:
         super().__init__(
             base_url,
@@ -425,19 +445,21 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
             timeout=timeout,
             transport=transport,
             max_timestamp_skew=max_timestamp_skew,
+            caller_role=caller_role,
         )
 
     async def register_resource(
         self,
         resource_id: str,
         *,
-        total_units: int,
+        pool_id: str,
+        total_units: int | None = None,
         resource_type: str = "compute.gpu",
-        pool_id: str | None = None,
         resource_subtype: str | None = None,
         attributes: dict[str, Any] | None = None,
         capacity: dict[str, Any] | None = None,
         enabled: bool = True,
+        host_id: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         body = ResourceRegistration(
@@ -448,6 +470,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
             attributes=attributes or {},
             capacity=capacity,
             enabled=enabled,
+            host_id=host_id,
         )
         result = await self._request(
             "PUT",
@@ -465,6 +488,29 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         )
         return list(result.get("resources") or [])
 
+    async def import_capacity_definitions(
+        self,
+        yaml_text: str,
+        *,
+        validate_only: bool = False,
+        request_id: str | None = None,
+    ) -> CapacityDefinitionsImportResponse:
+        """Reconcile a capacity-definitions document; ``admin`` only.
+
+        A refused import raises with status 422, its message carrying every
+        problem; ``validate_only`` returns them as structured problems, with
+        the diff an import would produce.
+        """
+        result = await self._request(
+            "POST",
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
+            request_id=request_id,
+        )
+        return CapacityDefinitionsImportResponse.model_validate(result)
+
 
 class SiteCapacityClient(_AuthenticatedSiteClient):
     """Authenticated seller client for buyer-facing site capacity operations."""
@@ -478,6 +524,7 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_timestamp_skew: int = 300,
+        caller_role: str = "seller",
     ) -> None:
         super().__init__(
             base_url,
@@ -486,6 +533,7 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
             timeout=timeout,
             transport=transport,
             max_timestamp_skew=max_timestamp_skew,
+            caller_role=caller_role,
         )
 
     async def snapshot(
@@ -583,8 +631,16 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
         request_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        """Commit a reservation; the reservation as the site recorded it.
+
+        The site may record a window other than the one named: a repeat commit
+        leaves the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal; an escrow it names is recorded where the
+        reservation has none.
+        """
         if not capacity_reservation_id:
             raise ValueError(
                 "remote capacity commit requires the capacity_reservation_id the "
@@ -601,16 +657,18 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
                     str(lease_end_utc) if lease_end_utc is not None else None
                 ),
                 "idempotency_ref": idempotency_ref,
+                "deal_ref": dict(deal_ref) if deal_ref else None,
             }.items()
             if value is not None
         }
-        await self._request(
+        result = await self._request(
             "POST",
             "/api/v1/capacity/reservations/"
             f"{capacity_reservation_id}/commit",
             body,
             request_id=request_id,
         )
+        return result.get("reservation")
 
     async def release(
         self,

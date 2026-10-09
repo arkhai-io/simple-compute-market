@@ -17,10 +17,20 @@
       "type": "object",
       "properties": {
         "golden_root_ssh_password": false,
-        "frp_dashboard_password": false,
+        "relay_token": false,
         "ssh_decryption_key": false,
         "inventory_ini": false,
-        "storefront_admin_key": false
+        "storefront_admin_key": false,
+        "pool_definitions_path": false,
+        "capacity_definitions_path": false
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "properties": {
+        "relays": {"type": "object"},
+        "pools": {"type": "object"},
+        "capacity": {"type": "object"}
       }
     },
     "sshDecryptionKey": {"$ref": "#/definitions/secretReference"},
@@ -80,7 +90,7 @@
         "principals": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 2,
+          "maxItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/definitions/publicIdentity"}
         }

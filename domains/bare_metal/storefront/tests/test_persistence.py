@@ -8,15 +8,17 @@ import pytest
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
-    BareMetalAccessResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
+    BareMetalResult,
     BareMetalTerms,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_identity import Ed25519Signer
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from seeded_threads import seed_thread
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -32,7 +34,7 @@ def _artifacts():
             ssh_public_key="ssh-ed25519 buyer",
         ),
         "terms": BareMetalTerms(
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 buyer",
@@ -40,7 +42,7 @@ def _artifacts():
         ),
         "materialization": BareMetalMaterialization(
             escrow_uid="escrow-1",
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             lease_start_utc=NOW,
             lease_end_utc=LATER,
@@ -49,26 +51,26 @@ def _artifacts():
         ),
         "receipt": BareMetalReceipt(
             escrow_uid="escrow-1",
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             lease_start_utc=NOW,
             lease_end_utc=LATER,
             status="fulfilled",
             result_ref={"result_id": "result-1"},
         ),
-        "result": BareMetalAccessResult(
-            action="node_grant_access",
-            machine_id="machine-1",
-            physical_host_id="host-1",
+        "result": BareMetalResult(
             ssh_user="tenant-1",
-            status="success",
+            ready_at=NOW,
+            lease_end_utc=LATER,
         ),
     }
 
 
 async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
     listing = BareMetalListing(
-        machine_id="machine-1",
+        capacity_backing="backed",
+        **LISTING_HARDWARE,
+        host_id="machine-1",
         physical_host_id="host-1",
         min_duration_seconds=900,
         max_duration_seconds=7200,
@@ -96,21 +98,16 @@ async def _seed_opening(
     message: BareMetalMessage,
     terms: BareMetalTerms | None,
 ) -> None:
-    await client.persist_bare_metal_opening(
+    await seed_thread(
+        client,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
-        seller_principal=SELLER,
-        buyer_agent_id="https://buyer.example",
         buyer_principal=BUYER,
-        seller_reference_amount=100,
-        strategy="listed",
+        seller_principal=SELLER,
         message=message,
         proposal={"fields": {"amount": "100"}},
-        buyer_amount=100,
-        seller_action="accept" if terms is not None else "counter",
-        seller_amount=100,
+        amount=100,
         terms=terms,
-        agreed_amount=100 if terms is not None else None,
     )
 
 
@@ -150,9 +147,9 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
     restarted = SQLiteClient(str(path))
     persisted = await restarted.load_listing(listing_id="listing-1")
     assert persisted is not None
-    raw_offer = persisted["offer_resource"]
-    offer = json.loads(raw_offer) if isinstance(raw_offer, str) else raw_offer
-    assert offer["virtualization_type"] == "bare_metal"
+    raw_listing_resource = persisted["listing_resource"]
+    listing_resource = json.loads(raw_listing_resource) if isinstance(raw_listing_resource, str) else raw_listing_resource
+    assert listing_resource["offering_mode"] == "bare_metal"
 
 
     assert (
@@ -317,5 +314,23 @@ def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -
         "artifact_json",
         "created_at",
     }
-    forbidden = {"vm_host", "vm_target", "ssh_public_key", "machine_id"}
+    forbidden = {"vm_host", "vm_target", "ssh_public_key", "host_id"}
     assert columns.isdisjoint(forbidden)
+
+
+async def test_a_listing_is_bound_under_the_key_its_own_shape_implies(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    listing = await _seed_listing(client)
+
+    binding = await client.load_listing_binding(listing_id="listing-1")
+
+    assert binding is not None
+    assert binding.derivation_key == client.bare_metal_derivation_key(
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        shape_digest=listing.shape_digest,
+    )
+    envelope = json.loads(binding.source_envelope_json)
+    assert envelope["schema_version"] == 2
+    assert envelope["shape_digest"] == listing.shape_digest

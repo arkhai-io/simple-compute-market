@@ -2,25 +2,38 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `_place_capacity_hold` is called from three sites in `sync_negotiation.py`, each
-  guarded by `decision.action == "accept"`.
-- Its `deal_ref` carries `listing_id` and `negotiation_id` and no `escrow_uid`, so
-  `reserve()`'s idempotency branch never applies to it today.
+- Negotiation is `kit/negotiation-runtime`'s lifecycle; the VM storefront injects
+  `NegotiationDomainHooks` from `negotiation_runtime.py`. Hold placement is the
+  `place_hold` hook, called once on acceptance; `_place_capacity_hold` implements it
+  for VM and returns without holding under the shipped `hold_ttl_seconds = 0`. The
+  hooks have no release counterpart.
+- The stale-negotiation watchdog is `kit/storefront`'s `negotiation_watchdog`, which
+  marks threads abandoned after `negotiation_timeout_seconds` (default 1800) for
+  every domain; the thread record carries `their_agent_id` and `terminal_state`.
+- The hold's `deal_ref` carries `listing_id` and `negotiation_id` and no
+  `escrow_uid`, so `reserve()`'s idempotency branch never applies to it.
 - `resize_reservation` supersedes atomically and mints a new
-  `capacity_reservation_id`; it has no caller.
-- `negotiation_threads` records `their_agent_id` and `terminal_state`, and a watchdog
-  marks threads abandoned after `negotiation_timeout_seconds` (default 1800).
+  `capacity_reservation_id`. This change is its first caller: with no hold before
+  settlement there is nothing to resize until a hold is placed before the shape is
+  final, which is what this change does.
+- A round's `proposal` carries a negotiated amount today; it carries a revised
+  capacity shape once `negotiation-driven-capacity-resize` lands. A price-only
+  counter is therefore a differing-terms proposal already; a shape change is not
+  expressible until that change.
 - Every negotiation entry point verifies an EIP-191 signature over operation,
   resource id, and timestamp, so a counter-offer is authenticated and non-repudiable.
+- `billable-capacity-reservations` prices a hold at a posted hold rate, known at
+  placement without any agreed terms.
 
 ## Goals / Non-Goals
 
 **Goals:** close the race for capacity under active negotiation; keep inquiry free;
 keep one reservation per negotiation.
 
-**Non-Goals:** billing, the shape-change payload, settlement behavior, admission.
+**Non-Goals:** billing, the shape-change payload, settlement behavior, admission,
+hold placement for domains that compose no hold.
 
 ## Decisions
 
@@ -42,6 +55,16 @@ restates the listing's own terms is not a commitment to anything, and treating i
 would reopen inquiry-time holding through the back door. The signed round-trip is the
 cost that makes the trigger meaningful, and the definition should require the
 counterparty to have actually proposed different terms.
+
+### Placement and release are kit hooks
+
+The kit owns the round lifecycle and the watchdog, so the placement point and the
+release point are the kit's to call and the domain's to implement. Placement moves
+from the acceptance-only `place_hold` call to the kit's evaluation of a
+differing-terms proposal, through the existing hook; the kit adds a release hook that
+it calls on every terminal transition without agreement, including the watchdog's
+abandonment. A domain that composes no hold implements both as no-ops and negotiates
+unheld, as API credits does today.
 
 ### One reservation per negotiation, superseded rather than accumulated
 
@@ -96,7 +119,8 @@ full funded duration.
 2. Move placement to the first genuine counter-offer; keep the acceptance path
    idempotent so a negotiation that reaches acceptance without a counter-offer still
    holds before settlement.
-3. Supersede on requested-shape change.
+3. Supersede on requested-shape change (after `negotiation-driven-capacity-resize`
+   lets a round carry one).
 4. Release on terminal negotiation state, including watchdog abandonment.
 
 Step 2 is the behavioral boundary. Rollback is a code revert; holds placed early lapse

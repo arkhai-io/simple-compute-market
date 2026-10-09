@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable
@@ -117,14 +119,76 @@ def ordered_events(
     return ordered_event_groups(events, *((name,) for name in event_names))
 
 
+#: Credential-shaped runs masked out of any process output copied into test
+#: evidence: long hexadecimal (wallet keys, 0x-prefixed material) and long
+#: opaque base64url (issued API-credit secrets, ed25519 keys). Deliberately
+#: wider than the material actually expected — over-masking costs a reader
+#: nothing, under-masking writes a key into CI output forever.
+_CREDENTIAL_SHAPED = re.compile(
+    r"(0x)?[0-9a-fA-F]{32,}|[A-Za-z0-9_-]{32,}",
+)
+
+
+def _redacted(text: str, *, limit: int = 1200) -> str:
+    """Mask credential-shaped runs in process output, then tail it.
+
+    A command that refuses before writing its first run-log event leaves its
+    reason only on stderr, and withholding stderr entirely left three
+    consecutive runs unable to say which refusal fired. Masking is what makes
+    that output safe to quote; the refusals themselves name config keys and
+    mechanism IDs, which survive masking intact.
+    """
+    if not text:
+        return "<empty>"
+    return _CREDENTIAL_SHAPED.sub("<redacted>", text)[-limit:]
+
+
 def assert_market_run_succeeded(run: Any, *, command: str) -> None:
     """Report a bounded, secret-safe CLI failure without domain assumptions."""
 
     if run.returncode == 0:
         return
-    event_names = [event.get("event", "?") for event in run.read_events()]
+    events = run.events_or_empty()
+    if events:
+        detail = f"run events={[event.get('event', '?') for event in events]!r}"
+    else:
+        detail = (
+            "no run-log was written, so the command failed before emitting its "
+            "first event"
+        )
     raise AssertionError(
-        f"{command} failed rc={run.returncode}; run events={event_names!r}. "
-        "Inspect the role-scoped process output directly; it may contain a "
-        "transient domain credential and is not copied into test evidence."
+        f"{command} failed rc={run.returncode}; {detail}.\n"
+        f"{_terminal_event_detail(events)}"
+        f"stderr (redacted tail): {_redacted(run.stderr())}\n"
+        "Full role-scoped process output is not copied into test evidence: it "
+        "may contain a transient domain credential."
     )
+
+
+#: How many trailing run-log events to quote in full.
+_TERMINAL_EVENT_TAIL = 3
+
+
+def _terminal_event_detail(events: list[Any]) -> str:
+    """Quote the last few run-log events, not just their names.
+
+    The name list says which phase was reached and nothing about why it
+    stopped. Every field that answers "why" travels in the event *body*:
+    a `settlement_poll` carries the seller's terminal status, `run_ended`
+    carries the outcome and error, and a `*_failed` event carries its
+    reason. A poll that returns `failed` therefore looked identical in the
+    failure message to one that timed out, and identifying which cost a
+    run.
+
+    Deliberately domain-neutral -- no key is named, the trailing events are
+    quoted whatever they are -- and redacted on the same terms as stderr,
+    because a terminal settlement body can carry issued credentials.
+    """
+    if not events:
+        return ""
+    tail = events[-_TERMINAL_EVENT_TAIL:]
+    try:
+        rendered = json.dumps(tail, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        rendered = repr(tail)
+    return f"last events (redacted): {_redacted(rendered)}\n"

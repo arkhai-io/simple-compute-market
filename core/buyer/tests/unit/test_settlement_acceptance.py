@@ -19,6 +19,7 @@ from core_buyer.negotiation_client import (
 )
 from market_core.schemas import (
     Agreement,
+    RateValue,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -207,7 +208,7 @@ def test_accepts_seller_plan_with_domain_service_terms() -> None:
         service_terms={
             "vm.v1": {
                 "listing_id": "L-hosted",
-                "order": {"offer_resource": {"resource_id": "resource-hosted"}},
+                "order": {"listing_resource": {"resource_id": "resource-hosted"}},
                 "provision": {"ssh_public_key": "ssh-rsa AAAA"},
             }
         }
@@ -313,3 +314,73 @@ def test_rejects_tampered_params() -> None:
     tampered = plan.obligations[0].model_copy(update={"params": params})
     with pytest.raises(RuntimeError, match="params differ"):
         _validate(plan.model_copy(update={"obligations": [tampered]}))
+
+
+def _amountless_acceptance(raw_rates: list[dict]) -> None:
+    """Validate an amountless seller accept of an option carrying ``raw_rates``."""
+    rates = [RateValue.model_validate(rate) for rate in raw_rates]
+    params = {"claimant_principal": _SELLER.model_dump(mode="json")}
+    option_id = derive_settlement_option_id(
+        mechanism="example.v1", asset="introduction", rates=rates, params=params
+    )
+    option = SettlementOption(
+        option_id=option_id,
+        mechanism="example.v1",
+        asset="introduction",
+        rates=rates,
+        params=dict(params),
+    )
+    obligation_params = {
+        **params,
+        "payer_principal": _BUYER.model_dump(mode="json"),
+    }
+    plan = SettlementPlan(
+        buyer_principal=_BUYER.model_dump(mode="json"),
+        seller_principal=_SELLER.model_dump(mode="json"),
+        service_terms={"example.v1": {"option_id": option_id}},
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=_BUYER.model_dump(mode="json"),
+                claimant_principal=_SELLER.model_dump(mode="json"),
+                amount=None,
+                asset="introduction",
+                expiration_unix=_EXPIRATION,
+                conditions=[],
+                mechanism="example.v1",
+                params=obligation_params,
+            )
+        ],
+    )
+    selection = SettlementSelection(
+        mechanism="example.v1", option_id=option_id, expiration_unix=_EXPIRATION
+    )
+    _validate_settlement_acceptance(
+        agreement=_agreement(option, amount=0, listing_id="L-amountless"),
+        expected_listing_id="L-amountless",
+        reply={
+            "buyer_principal": _BUYER.model_dump(mode="json"),
+            "seller_principal": _SELLER.model_dump(mode="json"),
+        },
+        selection=selection,
+        plan=plan,
+        expected_selection=selection,
+        advertised_option=option,
+        agreed_amount=None,
+        expected_plan=None,
+        buyer_principal=_BUYER,
+        trusted_seller_principals=TrustedIdentitySet(identities=(_SELLER,)),
+        validate_advertised_plan=None,
+    )
+
+
+def test_accepts_amountless_plan_for_an_option_with_no_amount_rate() -> None:
+    """A rate on another field does not make an option bargain an amount, so
+    its acceptance carries none."""
+    _amountless_acceptance([{"field": "nativeAmount", "per": "hour", "value": "5"}])
+
+
+def test_rejects_amountless_plan_for_an_option_bargaining_an_amount() -> None:
+    with pytest.raises(RuntimeError, match="omitted the negotiated amount"):
+        _amountless_acceptance([{"field": "amount", "per": "hour", "value": "5"}])

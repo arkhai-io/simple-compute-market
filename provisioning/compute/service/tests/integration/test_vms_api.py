@@ -6,7 +6,7 @@ Coverage (per Architecture.md — Integration Tests jurisdiction):
   - Background job loop picks up the job (no sleeps — asyncio.Event seam)
   - AnsibleService.start_playbook called with correct host and action
   - Job transitions to succeeded in the DB
-  - ProvisioningClient.create_vm + poll_until_complete round-trips correctly
+  - ProvisioningClients.create_vm + poll_until_complete round-trips correctly
   - Client method signatures match the API contract end-to-end
 
 What is NOT covered here (unit test jurisdiction):
@@ -16,14 +16,18 @@ What is NOT covered here (unit test jurisdiction):
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
+from .conftest import ProvisioningClients
+from compute_provisioning_client import ComputeProvisioningError, ComputeProvisioningJobError
 import asyncio
 
 import pytest
 
-from vm_provisioning_operator import ProvisioningError
 from vm_provisioning_operator.models import CreateVmRequest
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning_contracts import HostCreate
+from compute_provisioning_service import container as _container_module
+from compute_provisioning.jobs.queue import AsyncJobQueue
 
 
 HOST = "kvm1"
@@ -59,7 +63,12 @@ class TestHttpValidation:
             )
         assert resp.status_code == 422
 
-    async def test_create_vm_frp_without_password_returns_422(self, client_and_queue):
+    async def test_create_vm_with_a_partial_relay_returns_422(self, client_and_queue):
+        """A relay reference with no leased port selects no access path.
+
+        Accepted, it would create a VM with no external route and report
+        success — the failure the relay work exists to remove.
+        """
         from httpx import ASGITransport, AsyncClient
         from compute_provisioning_service.main import app
         async with AsyncClient(
@@ -67,30 +76,40 @@ class TestHttpValidation:
         ) as http:
             resp = await http.post(
                 f"/api/v1/hosts/{HOST}/vms/",
-                json={"vm_target": VM_NAME, "frp_server_addr": "1.2.3.4"},
+                json={"vm_target": VM_NAME, "relay_id": "site-a"},
             )
         assert resp.status_code == 422
 
     async def test_get_job_returns_404_for_unknown_id(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_job("nonexistent-job-id")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.family.get_job("nonexistent-job-id")
         assert exc_info.value.status_code == 404
 
 
 class TestCreateVmViaClient:
-    """Round-trip tests using ProvisioningClient — verifies client ↔ API contract.
+    """Round-trip tests using ProvisioningClients — verifies client ↔ API contract.
 
-    All HTTP calls go through ProvisioningClient methods.  No route strings
+    All HTTP calls go through ProvisioningClients methods.  No route strings
     appear in test code.  The ``on_job_started`` seam synchronises tests
     against the background job loop without any sleeps.
     """
+
+    @pytest.fixture(autouse=True)
+    async def _registered_host(self, client_and_queue):
+        # A job runs only against a registered host record, which is also
+        # where the tenant-facing address in its result comes from.
+        client, _ = client_and_queue
+        await client.family.register_host(HostCreate(
+            host_id=HOST,
+            connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="/tmp/test-key"),
+        ))
 
     async def test_create_vm_returns_queued_job(self, client_and_queue):
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_vcpus=2))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_vcpus=2))
 
         assert submit.status == "queued"
         assert len(submit.job_id) > 0
@@ -101,10 +120,10 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
 
-        final = await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        final = await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         assert final.status == "succeeded"
         assert final.result is not None
@@ -113,27 +132,94 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        final = await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
-        result = final.result
-        assert result["vm_name"] == VM_NAME
-        assert result["tenant_user"] == "agentvm01"
-        assert result["ssh_port"] == "54321"
-        assert result["vm_host_ip"] == "10.0.0.1"
+        assert final.result.offering_mode == "vm"
+        assert final.result.result_kind == "compute.create-result.v1"
+        # An operator's create reports the same create result a fulfillment's
+        # does: how a buyer would connect, and the VM's details for operators.
+        created = final.result.value
+        assert created["detail"]["vm_name"] == VM_NAME
+        assert created["detail"]["host_ip"] == "10.0.0.1"
+        (endpoint,) = created["evidence"]["endpoints"]
+        assert (endpoint["host"], endpoint["port"], endpoint["user"]) == (
+            "10.0.0.1", 54321, "agentvm01",
+        )
 
     async def test_create_vm_ansible_called_with_correct_params(self, client_and_queue, fake_ansible):
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_ram=4096, vm_vcpus=4))
+        submit = await client.vm.create_vm(
+            HOST, CreateVmRequest(vm_target=VM_NAME, vm_ram=4096, vm_vcpus=4)
+        )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        await asyncio.sleep(0.1)
+        # Wait on the job reaching a terminal state, not on the clock. The
+        # dispatch seam fires when the job *starts*; a sleep here was racing
+        # the playbook call it then asserts on, and `TESTING.md` prohibits
+        # sleeps as background synchronisation for exactly that reason.
+        await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         fake_ansible.start_playbook.assert_called_once()
         call_kwargs = fake_ansible.start_playbook.call_args
         assert call_kwargs.kwargs.get("limit") == HOST or HOST in str(call_kwargs)
+
+    async def test_a_relay_bearing_request_reaches_the_service_intact(
+        self, client_and_queue, fake_ansible
+    ):
+        """What the client emits is what the service receives.
+
+        The only other relay request test is the deliberate raw-HTTP
+        malformed-body case, which proves rejection. This is the happy path:
+        the canonical client serializes the relay fields, and the extra-vars
+        the job is built from carry exactly them.
+        """
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.vm.create_vm(
+            HOST,
+            CreateVmRequest(
+                vm_target=VM_NAME,
+                relay_id="site-a",
+                vm_remote_port=6142,
+            ),
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.family.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert final.status == "succeeded"
+
+    async def test_a_relay_bearing_job_does_not_publish_its_token(
+        self, client_and_queue
+    ):
+        """The job endpoints are where the token used to be readable.
+
+        Asserted over the whole serialized status, not one field: the failure
+        was a credential surviving inside a parameters blob, which a field-by-
+        field check would have walked straight past.
+        """
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.vm.create_vm(
+            HOST,
+            CreateVmRequest(
+                vm_target=VM_NAME,
+                relay_id="site-a",
+                vm_remote_port=6142,
+            ),
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.family.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert "admission-token" not in final.model_dump_json()
 
     async def test_credentials_stored_and_returned_after_success(self, client_and_queue):
         """A successful create stores every role's credentials, retrievable by job_id.
@@ -144,12 +230,12 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
-        creds = await client.get_job_credentials(submit.job_id)
-        roles = {c.role for c in creds.credentials}
+        creds = await client.family.get_job_credentials(submit.job_id)
+        roles = {c.credential_kind for c in creds.credentials}
         assert roles == {"root", "tenant"}
 
     async def test_create_vm_full_request_body_accepted(self, client_and_queue):
@@ -157,7 +243,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(
             vm_target=VM_NAME,
             vm_ram=4096,
             vm_vcpus=4,
@@ -167,3 +253,64 @@ class TestCreateVmViaClient:
 
         assert submit.status == "queued"
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+
+
+
+class TestDispatchRequiresARegisteredHost:
+    async def test_a_job_for_an_unregistered_host_is_refused_before_it_is_recorded(
+        self, client_and_queue, fake_ansible, tmp_path, monkeypatch
+    ):
+        """Dispatch renders only from the host registry. A configured inventory
+        file naming the host changes nothing: it is a seed input, not an
+        execution source."""
+        inventory = tmp_path / "hosts"
+        inventory.write_text(
+            "[kvm_hosts]\n"
+            "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
+        )
+        from compute_provisioning_service.main import app
+
+        # Service-internal state setup: no API configures the inventory path.
+        monkeypatch.setattr(
+            app.container.vm_runtime().config,
+            "resolved_inventory_path",
+            inventory,
+        )
+        client, _ = client_and_queue
+
+        # Refused at submission: every job needs a registered host, so none is
+        # recorded or run for this one.
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.vm.create_vm("unregistered-kvm", CreateVmRequest(vm_target=VM_NAME))
+
+        assert refused.value.status_code == 404
+        assert "'unregistered-kvm' is not registered" in str(refused.value)
+        assert (await client.family.list_jobs()).total == 0
+        fake_ansible.start_playbook.assert_not_called()
+        fake_ansible.write_inventory.assert_not_called()
+
+    async def test_a_registered_host_job_renders_its_inventory_from_the_record(
+        self, client_and_queue, fake_ansible
+    ):
+        client, job_queue = client_and_queue
+        await client.family.register_host(HostCreate(
+            host_id="registered-kvm",
+            connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/tmp/test-key"),
+        ))
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.vm.create_vm(
+            "registered-kvm", CreateVmRequest(vm_target=VM_NAME)
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.family.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert final.status == "succeeded"
+        (rendered_hosts,), _ = fake_ansible.write_inventory.call_args
+        assert [host.host_id for host in rendered_hosts] == ["registered-kvm"]
+        start = fake_ansible.start_playbook.call_args.kwargs
+        assert start["inventory_path"] == fake_ansible.write_inventory.return_value.path
+        # No public address is configured, so tenants get the connection address.
+        assert final.result.value["detail"]["host_ip"] == "192.0.2.10"

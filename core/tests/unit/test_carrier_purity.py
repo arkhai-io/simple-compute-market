@@ -23,7 +23,8 @@ ALLOWED_TOP_LEVEL = {"pydantic", "typing", "market_core"}
 FORBIDDEN_PREFIXES = (
     "market_",   # kit + carrier siblings (market_identity, market_policy, …)
     "core_",     # role shells
-    "domains",   # domain packages
+    "arkhai_vms_",        # domain packages
+    "arkhai_apicredits",  # domain packages
     "registry_client",
     "storefront_client",
 )

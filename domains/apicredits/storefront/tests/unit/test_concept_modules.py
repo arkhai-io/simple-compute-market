@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 import pytest
+from apicredits_storefront import negotiation_runtime
+from market_core.schemas import RateValue, derive_settlement_option_id
+from market_negotiation_runtime import NegotiationTerms
 from market_identity import Ed25519Signer, Identity, IdentityScheme
 
-from domains.apicredits.listings.pricing import (
+from arkhai_apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
 )
-from domains.apicredits.listings.reconciler import (
+from arkhai_apicredits.listings.reconciler import (
     listing_quota_resource_id,
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
-from domains.apicredits.negotiation.policies import (
+from arkhai_apicredits.negotiation.storefront_round import _seller_reference_amount
+from arkhai_apicredits.negotiation.policies import (
     api_credits_round_zero_guard,
     key_owned_by_buyer_principal,
     credit_quota_guard,
 )
-from domains.apicredits.negotiation.terms import (
+from arkhai_apicredits.negotiation.terms import (
     make_api_credits_provision_terms,
     provision_key_id,
     provision_key_mode,
@@ -57,7 +61,7 @@ def _listing(resource_id="svc-quota", rate="100"):
     return {
         "listing_id": "L-tok",
         "status": "open",
-        "offer_resource": _offer(resource_id),
+        "listing_resource": _offer(resource_id),
         "accepted_escrows": [{
             "chain_name": "anvil",
             "escrow_address": _ESCROW,
@@ -140,7 +144,7 @@ def test_unit_price_hidden_reserve_falls_back_then_refuses():
 
 def test_strategy_is_maximize_for_token_offers():
     assert determine_strategy_from_order(_listing()) == "maximize"
-    assert determine_strategy_from_order({"offer_resource": {"gpu_model": "H200"}}) is None
+    assert determine_strategy_from_order({"listing_resource": {"gpu_model": "H200"}}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +155,8 @@ def test_reconciler_close_on_exhaustion_and_reopen():
     rows = [
         {**_listing("svc-a"), "listing_id": "L-a", "status": "open"},
         {**_listing("svc-b"), "listing_id": "L-b", "status": "open"},
-        {**_listing("svc-a"), "listing_id": "L-c", "status": "closed"},
+        {**_listing("svc-a"), "listing_id": "L-c", "status": "closed",
+         "closed_by": "reconciliation"},
     ]
     availability = {("tokens", "svc-a"): 0, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == ["L-a"]
@@ -160,6 +165,19 @@ def test_reconciler_close_on_exhaustion_and_reopen():
     availability = {("tokens", "svc-a"): 3, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == []
     assert reopenable_credit_listing_ids(rows, availability=availability) == ["L-c"]
+
+
+def test_reconciler_reopens_only_what_reconciliation_closed():
+    rows = [
+        {**_listing("svc-a"), "listing_id": "L-seller", "status": "closed",
+         "closed_by": "seller"},
+        {**_listing("svc-a"), "listing_id": "L-quota", "status": "closed",
+         "closed_by": "reconciliation"},
+    ]
+    availability = {("tokens", "svc-a"): 5}
+    assert reopenable_credit_listing_ids(rows, availability=availability) == [
+        "L-quota"
+    ]
 
 
 def test_reconciler_unknown_availability_is_conservative():
@@ -174,7 +192,7 @@ def test_reconciler_unknown_availability_is_conservative():
 def test_reconciler_ignores_non_token_listings():
     rows = [{
         "listing_id": "L-vm", "status": "open",
-        "offer_resource": {"gpu_model": "H200"},
+        "listing_resource": {"gpu_model": "H200"},
     }]
     assert stale_open_credit_listing_ids(rows, availability={}) == []
     assert listing_quota_resource_id(rows[0]) is None
@@ -269,7 +287,7 @@ def test_quota_guard_matches_by_resource_id():
 def test_quota_guard_ignores_non_token_listings():
     decision, _ = credit_quota_guard(
         _round0(_proposal()),
-        _context(listing={"offer_resource": {"gpu_model": "H200"}},
+        _context(listing={"listing_resource": {"gpu_model": "H200"}},
                  requested_quantity=3),
     )
     assert decision is None
@@ -384,3 +402,82 @@ def test_ownership_guard_rejects_cross_scheme_collision():
     )
     assert decision.action == "reject"
     assert decision.reason.startswith("key_not_owned")
+
+
+def test_round_reference_amount_is_exact_for_a_rational_floor_and_a_long_rate():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    assert _seller_reference_amount(hidden, 3, default_min_price="1.5") == 4
+
+    long_rate = "123456789012345678901234567"
+    assert _seller_reference_amount(_listing(rate=long_rate), 1000) == int(long_rate) * 1000
+
+
+def test_float_floor_is_refused():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    with pytest.raises(ValueError, match="decimal text"):
+        extract_unit_price_from_order(hidden, default_min_price=1.5)
+
+
+def _rated_option(rate=None):
+    rates = [RateValue(field="amount", per="credit", value=rate)] if rate else []
+    option = {
+        "mechanism": "example.rated.v1",
+        "asset": "usd",
+        "rates": [r.model_dump(mode="json") for r in rates],
+        "params": {},
+    }
+    option["option_id"] = derive_settlement_option_id(
+        mechanism="example.rated.v1", asset="usd", rates=rates, params={}
+    )
+    return option
+
+
+def _selecting(option):
+    return {"settlement_selection": {
+        "mechanism": option["mechanism"], "option_id": option["option_id"],
+        "expiration_unix": 2_000_000_000,
+    }}
+
+
+def test_a_selected_escrow_other_than_the_first_is_the_reference():
+    listing = _listing(rate="100")
+    second = dict(listing["accepted_escrows"][0])
+    second.update(
+        escrow_address="0x" + "22" * 20,
+        rates=[{"field": "amount", "per": "token", "value": "250"}],
+    )
+    listing["accepted_escrows"].append(second)
+    proposal = {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20}
+
+    assert _seller_reference_amount(listing, 2, proposal=proposal) == 500
+
+
+def test_a_selected_settlement_option_is_the_reference():
+    option = _rated_option(rate=40)
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+
+    assert _seller_reference_amount(listing, 3, proposal=_selecting(option)) == 120
+
+
+def test_a_selected_rateless_option_uses_the_floor():
+    option = _rated_option()
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+
+    assert _seller_reference_amount(
+        listing, 3, default_min_price="7", proposal=_selecting(option)
+    ) == 21
+
+
+def test_kit_reference_hook_reads_the_whole_pinned_proposal(monkeypatch):
+    monkeypatch.setattr(negotiation_runtime, "provision_quantity", lambda _decoded: 3)
+    monkeypatch.setattr(negotiation_runtime, "_default_min_price", lambda: None)
+    option = _rated_option(rate=40)
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+    terms = NegotiationTerms(decoded={}, wire=None)
+
+    assert negotiation_runtime._reference_amount(
+        listing, {}, terms, True, _selecting(option)
+    ) == 120
+    assert negotiation_runtime._reference_amount(listing, {}, terms, False, None) == 0

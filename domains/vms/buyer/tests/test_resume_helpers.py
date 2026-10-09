@@ -1,6 +1,6 @@
 """Unit tests for the run-log inspection helpers used by resume.
 
-Covers two pure-Python functions in ``domains.vms.buyer.deal_helpers``:
+Covers two pure-Python functions in ``arkhai_vms_buyer.deal_helpers``:
 
 - ``load_negotiation_resume_point(run_id)`` rebuilds the
   ``NegotiationResumePoint`` from a JSONL run-log: seller url, listing
@@ -24,8 +24,8 @@ import uuid
 import pytest
 import typer
 
-from domains.vms.buyer.run_log import RunLog
-from domains.vms.buyer.deal_helpers import (
+from arkhai_vms_buyer.run_log import RunLog
+from arkhai_vms_buyer.deal_helpers import (
     is_negotiation_complete,
     load_deal_context,
     load_negotiation_resume_point,
@@ -56,7 +56,7 @@ def _isolated_runs_dir(tmp_path, monkeypatch):
     """Pin the run-log directory at tmp_path for every test."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     monkeypatch.setattr(
-        "domains.vms.buyer.deal_helpers._publisher_trust_refresh",
+        "arkhai_vms_buyer.deal_helpers._publisher_trust_refresh",
         lambda signer: lambda *_: seller_principals(),
     )
     yield

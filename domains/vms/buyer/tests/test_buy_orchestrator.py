@@ -41,7 +41,7 @@ from market_core.schemas import (
     EscrowTerms,
 )
 
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     BuyResult,
@@ -51,12 +51,18 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
     submit_settlement_request,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome
-from domains.vms.buyer.escrow_client import looks_like_propagation_lag
-from domains.vms.buyer import arkhai_payments, common, deal_helpers, settlement_composition
-from domains.vms.buyer.run_log import RunLog
-from domains.vms.buyer.cli import app
-from market_arkhai_payments import MandatePolicy, PaymentsOptionParams, derive_mandate, transaction_id
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.escrow_client import looks_like_propagation_lag
+from arkhai_vms_buyer import arkhai_payments, common, deal_helpers, settlement_composition
+from arkhai_vms_buyer.run_log import RunLog
+from arkhai_vms_buyer.cli import app
+from market_arkhai_payments import (
+    MandatePolicy,
+    PaymentApproval,
+    PaymentsOptionParams,
+    derive_mandate,
+    transaction_id,
+)
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 
 _ESCROW_ADDR = "0x" + "cd" * 20
@@ -729,7 +735,10 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
         duration_seconds=agreement.duration_seconds, amount=agreement.amount, asset=agreement.asset,
         fee_bps=250, dispute_authority=payer,
     ))
-    data = {"mandate": mandate.model_dump(mode="json", by_alias=True, exclude_none=True)}
+    data = {
+        "mandate": mandate.model_dump(mode="json", by_alias=True, exclude_none=True),
+        "transaction_id": transaction_id(mandate),
+    }
     document = {
         "Settlement": {"schema_version": 1, "priority": ["arkhai.payments.v1"], "arkhai_payments": {
             "enabled": True, "service_url": "http://127.0.0.1",
@@ -742,14 +751,14 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
     monkeypatch.setattr(arkhai_payments, "load_user_config", lambda: document)
     approvals = []
 
-    def approve(_self, *, agreement, settlement_data, **_kwargs):
-        approvals.append((agreement, settlement_data))
+    def approve(_self, agreement_bytes, settlement_data, **_kwargs):
+        approvals.append((agreement_bytes, settlement_data))
         return transaction_id(mandate)
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("payment dispatch touched an Alkahest resource")
 
-    monkeypatch.setattr(arkhai_payments.VmArkhaiPaymentsBuyer, "approve", approve)
+    monkeypatch.setattr(PaymentApproval, "approve", approve)
     monkeypatch.setattr(arkhai_payments, "make_publisher_trust_resolver", lambda **_kw: seller_principals)
     monkeypatch.setattr(deal_helpers, "_publisher_trust_refresh", lambda _signer: lambda *_args: seller_principals())
     monkeypatch.setattr(common, "resolve_buyer_wallet", forbidden)
@@ -796,7 +805,7 @@ def test_payment_dispatch_and_run_recovery_ignore_stray_escrow(tmp_path, monkeyp
     assert result.status == "ready"
     assert resumed.exit_code == 0, resumed.output
     assert "ready" in resumed.output
-    assert approvals == [(raw, data["mandate"])] * 2
+    assert approvals == [(raw, data)] * 2
 
 
 def _settle_kwargs():
@@ -806,8 +815,6 @@ def _settle_kwargs():
         payload={
             "negotiation_id": "neg-1",
             "buyer_evm_address": _BUYER_ADDR,
-            "chain_name": "anvil",
-            "ssh_public_key": "ssh-rsa AAAA...",
         },
         principal=BUYER_SIGNER.identity,
         signer=BUYER_SIGNER,

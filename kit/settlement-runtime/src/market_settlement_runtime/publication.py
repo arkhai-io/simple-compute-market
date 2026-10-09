@@ -108,6 +108,40 @@ class SettlementPublicationClause(BaseModel):
         return self
 
 
+_UINT256_MAX = 2**256 - 1
+
+
+def decimal_rate_to_base_units(rate: str, exponent: int) -> int:
+    """Convert decimal rate text in an asset's display units to base units, exactly.
+
+    ``exponent`` is the asset's scale: 18 for an 18-decimal token, 2 for a
+    two-decimal currency. The conversion is integer arithmetic on the text's
+    digits, so it never rounds whatever the rate's number of significant digits;
+    a ``Decimal`` product under a precision context would round a rate longer
+    than the context and could make a non-exact rate look exact.
+
+    Raises ``ValueError`` when the text is not plain positive decimal text, when
+    the rate is not a whole number of base units, or when the result exceeds the
+    uint256 range on-chain amounts are limited to.
+    """
+    if not isinstance(rate, str) or not _DECIMAL_RATE.fullmatch(rate):
+        raise ValueError(f"rate {rate!r} is not plain decimal text")
+    if isinstance(exponent, bool) or not isinstance(exponent, int) or exponent < 0:
+        raise ValueError(f"asset exponent {exponent!r} is not a non-negative integer")
+    whole, _, fraction = rate.partition(".")
+    fraction = fraction.rstrip("0")
+    if len(fraction) > exponent:
+        raise ValueError(
+            f"rate {rate!r} has more than {exponent} decimal places"
+        )
+    units = int(whole + fraction.ljust(exponent, "0"))
+    if units <= 0:
+        raise ValueError(f"rate {rate!r} must be positive")
+    if units > _UINT256_MAX:
+        raise ValueError(f"rate {rate!r} exceeds the uint256 amount range")
+    return units
+
+
 def _parse_cli_clause(source: str) -> dict[str, Any]:
     try:
         tokens = shlex.split(source)
@@ -238,4 +272,5 @@ def compile_settlement_publication_clause(
 __all__ = [
     "SettlementPublicationClause",
     "compile_settlement_publication_clause",
+    "decimal_rate_to_base_units",
 ]

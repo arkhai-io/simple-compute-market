@@ -108,7 +108,12 @@ class SqlAlchemySchedulingUnitOfWork:
 
     @contextmanager
     def transaction(self) -> Iterator[SchedulingTransaction]:
-        with self.session_factory() as db:
+        # The ledger's serialization lock spans the whole transaction, taken
+        # before the session as every ledger operation takes it: assigning a
+        # settlement resource creates the live obligation a concurrent pool
+        # move checks for, so neither may commit between the other's check
+        # and its write.
+        with self.capacity_ledger.serialized(), self.session_factory() as db:
             begin_sqlite_write_transaction(db)
             tx = self.transaction_type(db, self.pool_service, self.capacity_ledger, self.repository)
             try:

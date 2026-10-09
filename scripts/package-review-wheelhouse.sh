@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTFILE="${1:-${ROOT_DIR}/.snapshot/review-wheelhouse.tar.gz}"
 PROJECTS="${REVIEW_PROJECTS:-}"
-REVIEW_PYTHON="${REVIEW_PYTHON:-3.13}"
+REVIEW_PYTHON="${REVIEW_PYTHON:-$(cat "${ROOT_DIR}/.python-version")}"
 MARKETPLACE_SOURCE_COMMIT="${REVIEW_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}"
-IDENTITY_WHEEL="arkhai_kit_identity-0.3.0-py3-none-any.whl"
+IDENTITY_WHEEL="arkhai_kit_identity-0.4.0-py3-none-any.whl"
 if [[ -z "${PROJECTS// }" ]]; then
   echo "REVIEW_PROJECTS must list one or more repository-relative Python projects" >&2
   exit 2
@@ -187,14 +187,14 @@ project_text = pyproject.read_text()
 project_name_match = re.search(r'(?m)^name = "([^"]+)"$', project_text)
 project_name = project_name_match.group(1) if project_name_match else None
 for name, version in (
-    ("arkhai-kit-identity", "0.3.0"),
+    ("arkhai-kit-identity", "0.4.0"),
 ):
     mentions = re.findall(rf'(?m)^\s*"{re.escape(name)}([^"]*)"', project_text)
     if mentions and any(value != f"=={version}" for value in mentions):
         raise SystemExit(f"{name} must be pinned exactly to {version}")
 
 for required_name, required_version in (
-    ("arkhai-kit-identity", "0.3.0"),
+    ("arkhai-kit-identity", "0.4.0"),
 ):
     if required_name == project_name:
         continue
@@ -251,7 +251,7 @@ import tomllib
 project = tomllib.loads(Path(sys.argv[1]).read_text())
 requirements = tuple(project.get("project", {}).get("dependencies", ()))
 for distribution, version, module in (
-    ("arkhai-kit-identity", "0.3.0", "market_identity"),
+    ("arkhai-kit-identity", "0.4.0", "market_identity"),
 ):
     if not any(value.startswith(distribution) for value in requirements):
         continue

@@ -220,6 +220,103 @@ concrete domain, or depend on a deployed service.
 - **THEN** the dependency is inverted through the validated contract or an
   explicit composition hook rather than a domain import
 
+### Requirement: Storefront timer loops are held and stepped through one kit controller
+
+Each storefront process MUST hold exactly one kit-owned loop controller and MUST
+register with it every timer-driven loop the process runs. A domain MUST NOT
+implement its own pause flag, gate, or loop-state reporting. A loop whose tasks are
+created by a kit runtime the storefront composes, such as a per-site fan-out, MUST be
+declared to the controller by name so that a pause waits for it.
+
+A registration MUST bind the loop's name to the step that runs exactly one cycle of
+it, and MAY bind a read-only preview of that cycle. The step MUST invoke the same
+operation the loop's timer invokes, so a manual cycle cannot exercise behaviour the
+timer does not. A loop with no timer MAY register a step alone.
+
+One pause MUST hold every registered loop at a cycle boundary without cancelling it:
+a cycle either completes or never starts, and loop-local state survives the pause.
+While held, every registered step MUST remain invocable. Resuming MUST return every
+held loop to work. Holding loops MUST NOT affect whether the storefront accepts new
+negotiations, which is a separate control.
+
+A loop body MUST read its gate when it starts, so a pause is observable from the
+moment the loop runs, and MUST read its gate immediately before doing any work. It
+MUST wait out its interval through the controller, which returns early when a pause
+is requested. A pause requested at any point in a loop's interval MUST therefore be
+observed before that loop's next cycle's work, independently of the interval's
+length.
+
+The loop pause MUST be process-local. A restarted storefront MUST resume its loops.
+
+#### Scenario: Every storefront loop is held by one pause
+
+- **WHEN** an operator pauses the lifecycle loops of a storefront
+- **THEN** every timer-driven loop that storefront runs, including loops created by a
+  composed kit runtime, stops at its next cycle boundary
+- **AND** the storefront continues to accept new negotiations
+
+#### Scenario: A held loop is stepped
+
+- **WHEN** the loops are held and an operator runs one cycle of a registered loop
+- **THEN** exactly the operation the loop's timer invokes runs once and its result is
+  returned
+- **AND** the loops remain held
+
+#### Scenario: A pause arrives during a long interval
+
+- **WHEN** a loop with a long interval is waiting between cycles and a pause is
+  requested
+- **THEN** the loop reaches its gate without waiting out the interval and performs no
+  further work until resumed or stepped
+
+#### Scenario: An unregistered loop is stepped
+
+- **WHEN** an operator runs one cycle of a name no loop registered
+- **THEN** the request is refused as not found and no work runs
+
+#### Scenario: A storefront restarts while paused
+
+- **WHEN** a storefront whose loops were held restarts
+- **THEN** its loops run on their timers until an operator pauses them again
+
+### Requirement: A loop's reported state is established by the loop
+
+A loop's reported state MUST be derived from what the loop has itself acknowledged
+at its gate, never from the existence of the task running it. The controller MUST
+report each registered or declared loop as one of:
+
+- `starting` — the loop has not yet reached its gate, and so cannot yet observe a
+  pause;
+- `running` — no pause is requested and the loop has reached its gate;
+- `pausing` — a pause is requested and the loop has not yet acknowledged it, so a
+  cycle that began before the request may still be writing;
+- `paused` — the loop has acknowledged the pause at its gate;
+- `exited` or `cancelled` — the loop's task has ended.
+
+A pause request MUST wait, within a bounded window, for every live loop to
+acknowledge and MUST then report each loop's state as it stands. A loop that has not
+acknowledged within the window MUST be reported `pausing` or `starting`, never
+`paused`. The controller MUST be able to name which loops are `starting` and which have
+`exited` or been `cancelled`, so a health surface can distinguish a loop that has not
+begun from one that has ended.
+
+#### Scenario: A loop is mid-cycle when a pause is requested
+
+- **WHEN** a pause is requested while a loop is part-way through a cycle
+- **THEN** that loop is reported `pausing` until it reaches its gate, and `paused`
+  only afterwards
+
+#### Scenario: A loop has not yet begun cycling
+
+- **WHEN** a pause is requested before a newly started loop has reached its gate
+- **THEN** that loop is reported `starting`, not `paused`
+
+#### Scenario: A loop ends on an exception
+
+- **WHEN** a registered loop's task ends on its own
+- **THEN** the loop is reported `exited` rather than `paused` or `running`
+- **AND** the controller names it among the loops that have ended
+
 ### Requirement: An extracted concern leaves no domain-local implementation
 
 When a storefront concern moves into kit, every domain that implemented it
@@ -381,6 +478,10 @@ Negotiation MUST pass its exact accepted Agreement to the domain's selected sett
 - **WHEN** the seller settles an accepted Agreement through `arkhai.payments.v1`
 - **THEN** VM, bare-metal or API-credit delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
 
+### Requirement: Domains compose only the stages they support
+
+A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
+
 #### Scenario: A domain composes two settlement mechanisms
 
 - **WHEN** a domain advertises both Alkahest and Arkhai payment options
@@ -398,12 +499,21 @@ Negotiation MUST pass its exact accepted Agreement to the domain's selected sett
 
 ### Requirement: Arkhai payments authority remains external
 
-`kit/arkhai-payments` MUST consume the published HTTP and JSON Schema contract from `arkhai-io/arkhai-payments` and MUST generate its Python wire models from that contract rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release, dispute attachment, and payment-provider operations. Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. The kit MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials for requests and verify service-signed receipts through the identity kit.
+`kit/arkhai-payments` MUST consume the published HTTP and JSON Schema contract from `arkhai-io/arkhai-payments` and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release, dispute attachment, and payment-provider operations.
 
 #### Scenario: Payments service owns the ledger
 
 - **WHEN** a marketplace domain composes `arkhai.payments.v1`
 - **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
+
+### Requirement: Marketplace roles hold no payment ledger
+
+Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. The kit MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit.
+
+#### Scenario: A headless caller checks a payment
+
+- **WHEN** a buyer or seller process checks a payment
+- **THEN** it supplies its owner-scoped credential for that request and verifies the service-signed receipt through the identity kit, keeping no servicing state between calls
 
 ### Requirement: Buyer dispatch preserves Agreement-only settlement
 
@@ -471,9 +581,92 @@ Mechanism-specific post-delivery attestation, claim binding, compensation and so
 - **WHEN** a domain composes a supporting stage whose first effect belongs to the seller
 - **THEN** core dispatches its role entry without requiring a prior buyer deposit, confirmation or escrow proposal
 
+### Requirement: Family-grouped capability shapes share one flattening contract
+
+A capability shape MUST be expressed in the family-grouped form: a mapping of family name to
+a mapping of field name to a scalar value. One shared utility in a foundation kit that imports
+only the standard library MUST validate that form's structure, flatten a shape into
+quantities and attributes, and compute a canonical digest of a shape. The utility is capacity
+vocabulary rather than part of the market core, because only markets that admit capacity
+against declared supply have shapes; the market core MUST NOT carry it.
+
+- **Schema.** Flattening MUST be driven by a schema the owning domain supplies. For each
+  family field the schema states whether it is a quantity or an attribute, whether it is
+  required, and its flat name. The utility MUST NOT contain any domain's family or field
+  names.
+- **Digest.** The canonical digest MUST be taken over the family-grouped form, so changing a
+  schema's flat names does not change a shape's digest.
+- **Refusals.** A shape naming a family or field its schema does not define, missing a
+  required field, or carrying a value of the wrong kind MUST be refused with the offending
+  path named.
+- **Inverse.** The utility MUST build a family-grouped shape from flat quantities and
+  attributes through a schema, as the exact inverse of flattening, refusing every flat name
+  the schema does not define and every problem flattening would refuse.
+- **One implementation.** Kit, role, and domain code that needs to validate, flatten,
+  unflatten, or digest a capability shape MUST use this utility rather than a local
+  implementation.
+
+#### Scenario: The VM domain flattens a shape
+
+- **WHEN** a VM shape `{gpu: {count: 1, model: H100}, memory: {gib: 64}}` is flattened with
+  the VM schema
+- **THEN** the result's quantities are `gpu_count: 1` and `ram_gb: 64` and its attributes
+  are `gpu_model: H100`
+
+#### Scenario: A schema renames a flat field
+
+- **WHEN** a domain's schema changes the flat name of a field
+- **THEN** the digest of every shape using that field is unchanged
+
+#### Scenario: A shape names an undefined field
+
+- **WHEN** a shape names a field the supplied schema does not define
+- **THEN** flattening refuses it and names the family and field
+
+#### Scenario: Structure is checked without a schema
+
+- **WHEN** a shared kit validates a shape's structure without a domain schema
+- **THEN** it accepts any well-formed family-grouped mapping and refuses only malformed
+  structure
+
+#### Scenario: A declaration is read back into a shape
+
+- **WHEN** flat quantities `gpu_count: 8`, `ram_gb: 2048` and attribute `gpu_model: H200` are
+  unflattened with the compute-family schema
+- **THEN** the shape is `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`, and flattening
+  it returns the same flat values
+
+#### Scenario: A flat name is outside the schema
+
+- **WHEN** a flat quantity the schema does not name is unflattened
+- **THEN** the utility refuses it, naming the flat field
+
+### Requirement: The compute family shares one capability schema
+
+The compute-family capability schema — the families `gpu`, `cpu`, `memory`, and `storage`,
+their fields, and each field's flat name — MUST be owned by one compute-family domain package
+that every compute domain binds. The VM and bare-metal domains MUST NOT each define a schema,
+and neither MUST obtain the schema by importing the other. The package MUST depend only on
+the standard library and the capability-shape foundation kit.
+
+#### Scenario: Two compute domains flatten one shape
+
+- **WHEN** the VM and bare-metal domains each flatten `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
+- **THEN** both produce `gpu_count: 8`, `ram_gb: 2048`, and `gpu_model: H200` through the
+  same schema object
+
+#### Scenario: The bare-metal storefront binds the schema
+
+- **WHEN** the bare-metal storefront's import boundary is checked
+- **THEN** it imports the compute-family package and no VM package
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
+
+- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py` and `test_import_boundary.py`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
+- The schema-driven inverse of flattening: `kit/capability-shape/tests/unit/test_capability_shape.py`.
+- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py` and `test_import_boundary.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and `domains/bare_metal/tests/test_import_boundary.py`.

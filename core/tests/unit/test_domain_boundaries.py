@@ -12,7 +12,7 @@ SOURCE_ROOTS = (
     CORE / "storefront" / "src" / "core_storefront",
 )
 CONCRETE_IMPORT_PREFIXES = (
-    "domains",
+    "arkhai_apicredits",
     "arkhai_vms",
     "arkhai_bare_metal",
     "apicredits_storefront",

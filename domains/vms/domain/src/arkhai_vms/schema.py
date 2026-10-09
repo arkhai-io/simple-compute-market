@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from market_core.schemas import SettlementOption, SettlementSelection
 
 from .provision_terms import VM_PROVISION_KIND, VmProvisionTerms
@@ -15,7 +15,7 @@ class VmListing(BaseModel):
     """VM-domain listing payload carried by a storefront/registry listing."""
 
     kind: Literal["compute.v1"] = VM_PROVISION_KIND
-    offer_resource: dict[str, Any] = Field(
+    listing_resource: dict[str, Any] = Field(
         description="Compute slice payload offered by the seller.",
     )
     accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
@@ -25,21 +25,21 @@ class VmListing(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_offer_resource_payload(cls, value: Any) -> Any:
+    def _accept_listing_resource_payload(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        if "offer_resource" in value:
+        if "listing_resource" in value:
             return value
-        return {"offer_resource": value}
+        return {"listing_resource": value}
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "VmListing":
-        if not self.offer_resource:
-            raise ValueError("offer_resource must be non-empty")
-        if "gpu_model" not in self.offer_resource:
-            raise ValueError("offer_resource must include gpu_model")
-        if "gpu_count" not in self.offer_resource:
-            raise ValueError("offer_resource must include gpu_count")
+        if not self.listing_resource:
+            raise ValueError("listing_resource must be non-empty")
+        if "gpu_model" not in self.listing_resource:
+            raise ValueError("listing_resource must include gpu_model")
+        if "gpu_count" not in self.listing_resource:
+            raise ValueError("listing_resource must include gpu_count")
         return self
 
 
@@ -149,6 +149,32 @@ class VmReceipt(BaseModel):
         ):
             raise ValueError("lease_start_utc must be before lease_end_utc")
         return self
+
+
+class VmConnectionDetails(BaseModel):
+    """How a buyer reaches a delivered VM, as its storefront records the deal.
+
+    The delivery's SSH endpoint (host, port, and tenant account), when access
+    became ready, and the provisioned resources' identities: nothing else, so no
+    guest name, host-internal address, or key path. A record from before
+    deliveries said where to connect may lack a field; it is omitted rather than
+    filled with an address that never granted access.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str | None = Field(default=None, min_length=1)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    user: str | None = Field(default=None, min_length=1)
+    ready_at: datetime | None = None
+    provisioned_resource_ids: tuple[str, ...] = ()
+
+    @property
+    def connect(self) -> str | None:
+        """The SSH command line, when the record names all three of its parts."""
+        if self.host and self.port and self.user:
+            return f"ssh -p {self.port} {self.user}@{self.host}"
+        return None
 
 
 class VmResult(BaseModel):

@@ -94,10 +94,22 @@ class HookHarness:
         self.proposal_key = proposal_key
         self.policy_calls: list[RoundRequest] = []
         self.events: list[tuple[str, str, dict[str, Any]]] = []
+        self.reference_calls: list[dict[str, Any] | None] = []
         self.next_decision = NegotiationDecision(
             action="counter",
             proposal={proposal_key: 12},
         )
+
+    def reference_amount(
+        self,
+        _listing: Any,
+        _record: Mapping[str, Any],
+        _terms: Any,
+        scalar: bool,
+        pinned: Mapping[str, Any] | None,
+    ) -> int:
+        self.reference_calls.append(dict(pinned) if pinned is not None else None)
+        return 15 if scalar else 0
 
     def amount(self, proposal: Mapping[str, Any] | None) -> int | None:
         if proposal is None or self.proposal_key not in proposal:
@@ -197,9 +209,7 @@ class HookHarness:
             validate_continuation=validate_continuation,
             evaluate_round=self.evaluate,
             determine_strategy=lambda _listing, _record: "domain-policy",
-            reference_amount=lambda _listing, _record, _terms, scalar: (
-                15 if scalar else 0
-            ),
+            reference_amount=self.reference_amount,
             amount_from_proposal=self.amount,
             proposal_from_amount=self.proposal_from_amount,
             agreement_terms=lambda _listing, _record, _terms: AgreementTerms(0),
@@ -372,6 +382,9 @@ async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects(
     assert response["agreement_bytes"] == base64.b64encode(b'{"accepted":true}').decode(
         "ascii"
     )
+    # The domain sees the buyer's pinned proposal, whose selected option it
+    # negotiates from.
+    assert harness.reference_calls == [{"price": 10}]
     assert repository.agreements[0]["agreed_price"] == 12
     assert repository.agreements[0]["agreement_bytes"] == b'{"accepted":true}'
     assert repository.agreements[0]["settlement_data"] == {"transaction_id": "a" * 64}
@@ -442,4 +455,278 @@ async def test_second_domain_owns_a_different_proposal_schema() -> None:
 
     assert response["accepted_artifact"]["amount"] == 44
     assert repository.agreements[0]["agreed_price"] == 44
-    assert repository.threads["neg-fixed"]["buyer_escrow_proposal"] == {"tokens": 41}
+    assert repository.threads["neg-fixed"]["buyer_escrow_proposal"] == {
+        "tokens": 41
+    }
+
+
+async def test_policy_rounds_receive_the_resolved_binding() -> None:
+    repository = RecordingRepository()
+    harness = HookHarness()
+    runtime = runtime_for(repository, harness)
+    await runtime.start(
+        repository=repository,
+        listing_id="listing-1",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        actor_principal=_BUYER,
+        proposal={"price": 10},
+        terms={"units": 2},
+        seller_agent_url="https://seller.example",
+        buyer_agent_url="https://buyer.example",
+    )
+    await runtime.continue_negotiation(
+        repository=repository,
+        negotiation_id="neg-fixed",
+        buyer_action="counter",
+        buyer_proposal={"price": 11},
+        buyer_reason=None,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
+        actor_role="buyer",
+    )
+
+    assert len(harness.policy_calls) == 2
+    assert [call.binding for call in harness.policy_calls] == [
+        "binding-1",
+        "binding-1",
+    ]
+
+
+class _LoggedEffects(list):
+    def __init__(self, log: list[str]) -> None:
+        super().__init__()
+        self._log = log
+
+    def append(self, item: Any) -> None:
+        self._log.append(item[0])
+        super().append(item)
+
+
+class OrderedRepository(RecordingRepository):
+    """Records every durable write in order, as a real repository would see them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.log: list[str] = []
+        self.effects = _LoggedEffects(self.log)
+
+    async def save_negotiation_message(self, **values: Any) -> int:
+        self.log.append(f"message:{values['action_taken']}")
+        return await super().save_negotiation_message(**values)
+
+    async def commit_agreed_terms(self, **values: Any) -> None:
+        self.log.append("agreed")
+        self.threads[values["negotiation_id"]]["agreed_at"] = "2026-08-15T00:00:00"
+        await super().commit_agreed_terms(**values)
+
+    async def update_negotiation_thread_terminal(
+        self, *, negotiation_id: str, terminal_state: str
+    ) -> None:
+        self.log.append(f"terminal:{terminal_state}")
+        await super().update_negotiation_thread_terminal(
+            negotiation_id=negotiation_id, terminal_state=terminal_state
+        )
+
+
+async def _open(
+    runtime: NegotiationRuntime, repository: RecordingRepository
+) -> dict[str, Any]:
+    return await runtime.start(
+        repository=repository,
+        listing_id="listing-1",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        actor_principal=_BUYER,
+        proposal={"price": 10},
+        terms={"units": 7},
+        seller_agent_url="https://seller.example",
+        buyer_agent_url="https://buyer.example",
+    )
+
+
+async def _continue(
+    runtime: NegotiationRuntime,
+    repository: RecordingRepository,
+    action: str,
+    proposal: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return await runtime.continue_negotiation(
+        repository=repository,
+        negotiation_id="neg-fixed",
+        buyer_action=action,  # type: ignore[arg-type]
+        buyer_proposal=proposal,
+        buyer_reason=None,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
+        actor_role="buyer",
+        seller_principal=_SELLER,
+    )
+
+
+_ACCEPTANCE_ORDER = ["agreed", "hold", "artifacts", "terminal:success"]
+
+
+@pytest.mark.asyncio
+async def test_an_accepting_opening_records_success_after_its_agreement() -> None:
+    repository = OrderedRepository()
+    harness = HookHarness()
+    harness.next_decision = NegotiationDecision(action="accept", proposal={"price": 15})
+    await _open(runtime_for(repository, harness), repository)
+
+    assert repository.log[-5:] == ["message:accept_offer", *_ACCEPTANCE_ORDER]
+
+
+@pytest.mark.asyncio
+async def test_a_counter_round_acceptance_records_success_after_its_agreement() -> None:
+    repository = OrderedRepository()
+    harness = HookHarness()
+    runtime = runtime_for(repository, harness)
+    await _open(runtime, repository)
+    harness.next_decision = NegotiationDecision(action="accept", proposal={"price": 14})
+    repository.log.clear()
+
+    await _continue(runtime, repository, "counter", {"price": 14})
+
+    assert repository.log == [
+        "message:counter_offer",
+        "message:accept_offer",
+        *_ACCEPTANCE_ORDER,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_buyer_accept_records_success_after_its_agreement() -> None:
+    repository = OrderedRepository()
+    runtime = runtime_for(repository, HookHarness())
+    await _open(runtime, repository)
+    repository.log.clear()
+
+    await _continue(runtime, repository, "accept")
+
+    assert repository.log == ["message:accept_offer", *_ACCEPTANCE_ORDER]
+
+
+@pytest.mark.asyncio
+async def test_an_administrative_accept_records_success_after_its_agreement() -> None:
+    repository = OrderedRepository()
+    runtime = runtime_for(repository, HookHarness())
+    await _open(runtime, repository)
+    repository.log.clear()
+
+    await runtime.accept_administratively(
+        repository=repository,
+        listing_id="listing-1",
+        negotiation_id="neg-fixed",
+        amount=13,
+        actor_principal=_OTHER_BUYER,
+    )
+
+    assert repository.log == ["message:accept_offer", *_ACCEPTANCE_ORDER]
+
+
+@pytest.mark.asyncio
+async def test_an_exit_records_its_terminal_state_with_its_message() -> None:
+    repository = OrderedRepository()
+    runtime = runtime_for(repository, HookHarness())
+    await _open(runtime, repository)
+    repository.log.clear()
+
+    await _continue(runtime, repository, "exit")
+
+    assert repository.log == ["message:exit_negotiation", "terminal:failure"]
+
+
+def _interrupt_with_agreement(repository: RecordingRepository) -> None:
+    repository.threads["neg-fixed"]["agreed_at"] = "2026-08-15T00:00:00"
+
+
+def _interrupt_with_plan(repository: RecordingRepository) -> None:
+    repository.threads["neg-fixed"]["settlement_plan"] = {"obligations": []}
+
+
+def _interrupt_with_accepted_message(repository: RecordingRepository) -> None:
+    rows = repository.messages["neg-fixed"]
+    rows.append(
+        {
+            **rows[-1],
+            "round": len(rows),
+            "sender_role": "buyer",
+            "sender_principal": _BUYER.model_dump(mode="json"),
+            "action_taken": "accept_offer",
+            "message_type": "accepted",
+        }
+    )
+
+
+def _interrupt_before_the_seller_opened(repository: RecordingRepository) -> None:
+    # The opening recorded the buyer's offer; the seller's decision never landed.
+    repository.messages["neg-fixed"].pop()
+
+
+def _interrupt_before_the_seller_answered(repository: RecordingRepository) -> None:
+    # A counter round recorded the buyer's counter; the seller's answer never landed.
+    rows = repository.messages["neg-fixed"]
+    rows.append(
+        {
+            **rows[-1],
+            "round": len(rows),
+            "sender_role": "buyer",
+            "sender_principal": _BUYER.model_dump(mode="json"),
+            "proposed_amount": 14,
+            "action_taken": "counter_offer",
+            "message_type": "counter_proposal",
+        }
+    )
+
+
+_INTERRUPTIONS = [
+    _interrupt_with_agreement,
+    _interrupt_with_plan,
+    _interrupt_with_accepted_message,
+    _interrupt_before_the_seller_opened,
+    _interrupt_before_the_seller_answered,
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupt", _INTERRUPTIONS)
+@pytest.mark.parametrize("action", ["counter", "accept", "force-accept"])
+async def test_an_interrupted_thread_is_not_resumed(interrupt, action) -> None:
+    repository = RecordingRepository()
+    harness = HookHarness()
+    runtime = runtime_for(repository, harness)
+    await _open(runtime, repository)
+    interrupt(repository)
+    messages_before = len(repository.messages["neg-fixed"])
+    effects_before = list(repository.effects)
+
+    with pytest.raises(NegotiationStateError, match="interrupted"):
+        if action == "force-accept":
+            await runtime.accept_administratively(
+                repository=repository,
+                listing_id="listing-1",
+                negotiation_id="neg-fixed",
+                amount=13,
+                actor_principal=_OTHER_BUYER,
+            )
+        else:
+            await _continue(runtime, repository, action, {"price": 14})
+
+    assert len(repository.messages["neg-fixed"]) == messages_before
+    assert repository.effects == effects_before
+    assert repository.threads["neg-fixed"]["terminal_state"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupt", _INTERRUPTIONS)
+async def test_a_buyer_may_exit_an_interrupted_thread(interrupt) -> None:
+    repository = RecordingRepository()
+    runtime = runtime_for(repository, HookHarness())
+    await _open(runtime, repository)
+    interrupt(repository)
+
+    response = await _continue(runtime, repository, "exit")
+
+    assert response["action"] == "exit"
+    assert repository.threads["neg-fixed"]["terminal_state"] == "failure"

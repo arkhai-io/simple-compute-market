@@ -28,8 +28,8 @@ def _identity_wheel() -> bytes:
         _write_wheel_member(archive, "market_identity/__init__.py", "")
         _write_wheel_member(
             archive,
-            "arkhai_kit_identity-0.3.0.dist-info/METADATA",
-            "Name: arkhai-kit-identity\nVersion: 0.3.0\n",
+            "arkhai_kit_identity-0.4.0.dist-info/METADATA",
+            "Name: arkhai-kit-identity\nVersion: 0.4.0\n",
         )
     return buffer.getvalue()
 
@@ -71,7 +71,7 @@ def _stage_root(
     (root / "project").mkdir()
     shutil.copy2(SCRIPT, root / "scripts" / SCRIPT.name)
 
-    (root / ".dist" / "arkhai_kit_identity-0.3.0-py3-none-any.whl").write_bytes(
+    (root / ".dist" / "arkhai_kit_identity-0.4.0-py3-none-any.whl").write_bytes(
         _identity_wheel()
     )
     (root / "project" / "pyproject.toml").write_text(
@@ -122,13 +122,13 @@ def _run(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 def test_wheelhouse_requires_exact_identity_release_filename(tmp_path: Path) -> None:
     root, env = _stage_root(tmp_path)
-    exact = root / ".dist" / "arkhai_kit_identity-0.3.0-py3-none-any.whl"
+    exact = root / ".dist" / "arkhai_kit_identity-0.4.0-py3-none-any.whl"
     exact.rename(root / ".dist" / "arkhai_kit_identity-0.1.0-py3-none-any.whl")
 
     result = _run(root, env)
 
     assert result.returncode == 2
-    assert "arkhai_kit_identity-0.3.0-py3-none-any.whl" in result.stderr
+    assert "arkhai_kit_identity-0.4.0-py3-none-any.whl" in result.stderr
 
 
 def test_wheelhouse_rejects_portable_lock_source_leakage(tmp_path: Path) -> None:
@@ -184,10 +184,10 @@ def test_wheelhouse_checks_identity_package_record_not_dependency_reference(
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../.dist" }
 wheels = [
-    { path = "../.dist/arkhai_kit_identity-0.3.0-py3-none-any.whl" },
+    { path = "../.dist/arkhai_kit_identity-0.4.0-py3-none-any.whl" },
 ]
 """,
     )

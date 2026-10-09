@@ -16,7 +16,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
 )
-from domains.vms.negotiation.storefront_round import default_seller_round_hook
+from arkhai_vms_negotiation.storefront_round import default_seller_round_hook
 from market_core import (
     DomainCapability,
     DomainContractValidationError,
@@ -85,12 +85,12 @@ async def _fulfill_vm_context(
     )
     result = dict(result or {})
     order = context.settlement_evidence.evidence["delivery"]["payload"]["order"]
-    offer_resource = order.get("offer_resource")
-    if not isinstance(offer_resource, Mapping):
-        offer_resource = {}
+    listing_resource = order.get("listing_resource")
+    if not isinstance(listing_resource, Mapping):
+        listing_resource = {}
     physical_resource_id = result.get("physical_resource_id")
     if physical_resource_id is None:
-        physical_resource_id = offer_resource.get("resource_id")
+        physical_resource_id = listing_resource.get("resource_id")
     return {
         "negotiation_id": context.negotiation_id,
         "settlement_ref": context.settlement_ref,

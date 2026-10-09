@@ -9,13 +9,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
 
 import market_storefront.container as _container
+from market_storefront.services.listing_identity_carryover import carryover_report
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -46,16 +48,50 @@ def _default_projection_status_provider() -> dict[str, Any]:
     return projection_status_summary()
 
 
-def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
-    """Real production source for per-site, per-pool listing_mode fallback
-    explanations. Same lazy-resolution and constructor-injection rationale
-    as `_default_projection_status_provider`, immediately above.
+def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
+    """Per-site report of what the latest derivation could not publish.
+
+    For each site: whether it was read under the compatibility rule for a
+    producer predating the pool declarations, which pools and members are
+    unresolvable and held, which members declare no GPU count or no resource
+    type, which pools state shapes the VM vocabulary cannot read, which stated
+    shapes no member is feasible for, which pools publish nothing because
+    their listings claim an attribute no member declares, and which fields
+    each pool still takes from its legacy storefront override row.
+    """
+    from arkhai_vms_listings.reconciler import derivation_reports
+
+    return derivation_reports()
+
+
+async def _default_pool_override_status_provider() -> list[dict[str, Any]] | None:
+    """Every stored storefront pool override and the one state it is in, or
+    ``None`` when no override service is composed."""
+    service = _container.resolved_pool_override_service
+    if service is None:
+        return None
+    return await service.statuses()
+
+
+def _default_listing_identity_carryover_provider() -> dict[str, Any]:
+    """Which pre-shape listings carried a seller's close or pause, and to which
+    shape-bearing successor: the listing a seller should reopen or resume."""
+    return carryover_report()
+
+
+def _default_listing_cardinality_mode_explanation_provider() -> (
+    dict[str, dict[str, str]]
+):
+    """Real production source for per-site, per-pool
+    listing_cardinality_mode operator notices. Same lazy-resolution and
+    constructor-injection rationale as `_default_projection_status_provider`,
+    immediately above.
     """
     from market_storefront.services.site_projection_cache import (
-        listing_mode_explanations,
+        listing_cardinality_mode_explanations,
     )
 
-    return listing_mode_explanations()
+    return listing_cardinality_mode_explanations()
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +109,16 @@ class SystemService:
         marketplace_signer: Signer,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
-        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
-        | None = None,
+        listing_cardinality_mode_explanation_provider: (
+            Callable[[], dict[str, dict[str, str]]] | None
+        ) = None,
+        publication_derivation_provider: (
+            Callable[[], dict[str, dict[str, Any]]] | None
+        ) = None,
+        listing_identity_carryover_provider: Callable[[], dict[str, Any]] | None = None,
+        pool_override_status_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -82,9 +126,19 @@ class SystemService:
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
         )
-        self._listing_mode_explanation_provider = (
-            listing_mode_explanation_provider
-            or _default_listing_mode_explanation_provider
+        self._listing_cardinality_mode_explanation_provider = (
+            listing_cardinality_mode_explanation_provider
+            or _default_listing_cardinality_mode_explanation_provider
+        )
+        self._publication_derivation_provider = (
+            publication_derivation_provider or _default_publication_derivation_provider
+        )
+        self._listing_identity_carryover_provider = (
+            listing_identity_carryover_provider
+            or _default_listing_identity_carryover_provider
+        )
+        self._pool_override_status_provider = (
+            pool_override_status_provider or _default_pool_override_status_provider
         )
 
     # ------------------------------------------------------------------
@@ -148,6 +202,14 @@ class SystemService:
         all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
 
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
+        # Public on both routes: a buyer reads these before handing over any
+        # data, so they cannot wait for an authenticated status call.
+        contact_exchange = _container.resolved_contact_exchange
+        disclosures = (
+            contact_exchange.disclosures() if contact_exchange is not None else {}
+        )
+        if disclosures:
+            result["disclosures"] = disclosures
 
         if include_registry:
             principal = self._marketplace_signer.identity
@@ -161,6 +223,20 @@ class SystemService:
                     "contract_version": item.contract_version,
                 }
                 for item in self._db.domain_registry.projection()
+            )
+            # The provisioning contract major this storefront *speaks*, taken
+            # from its own installed `compute_provisioning` wheel rather than
+            # from anything the peer reports. Two deployments can disagree
+            # only if their wheels differ, which is exactly the skew a
+            # cutover has to rule out before mutations resume -- and until
+            # both sides reported this there was no way to check it against a
+            # live fleet.
+            #
+            # Distinct from `storefront_domains[].contract_version` above,
+            # which is a domain contribution's own version and a different
+            # axis entirely.
+            result["provisioning_contract_version"] = (
+                COMPUTE_PROVISIONING_CONTRACT_VERSION
             )
             wallet = get_evm_wallet_address().lower() if CHAINS else ""
             result["evm_mechanisms"] = {
@@ -180,11 +256,27 @@ class SystemService:
             except Exception:
                 result["site_projections"] = None
             try:
-                result["listing_mode_explanations"] = (
-                    self._listing_mode_explanation_provider()
+                result["listing_cardinality_mode_explanations"] = (
+                    self._listing_cardinality_mode_explanation_provider()
                 )
             except Exception:
-                result["listing_mode_explanations"] = None
+                result["listing_cardinality_mode_explanations"] = None
+            try:
+                result["publication_derivation"] = (
+                    self._publication_derivation_provider()
+                )
+            except Exception:
+                result["publication_derivation"] = None
+            try:
+                result["listing_identity_carryover"] = (
+                    self._listing_identity_carryover_provider()
+                )
+            except Exception:
+                result["listing_identity_carryover"] = None
+            try:
+                result["pool_overrides"] = await self._pool_override_status_provider()
+            except Exception:
+                result["pool_overrides"] = None
 
         return result
 
@@ -330,6 +422,7 @@ class SystemService:
           'error: <msg>'                 — load or run failed
         """
         try:
+            from market_policy.listing_source import ListingSourceVerdict
             from market_policy.negotiation_middleware import (
                 NegotiationContext,
                 NegotiationRound,
@@ -359,7 +452,10 @@ class SystemService:
             ]
             context = NegotiationContext(
                 direction="maximize",
-                our_reference_amount=10_000.0,
+                our_reference_amount=10_000,
+                # The probe exercises the strategy, not a listing: no source is
+                # checked, so the inventory guard is given a matching verdict.
+                listing_source=ListingSourceVerdict("matches"),
             )
             probe = run_negotiation_chain(chain, history, context)
             if probe.action in ("exit", "reject"):

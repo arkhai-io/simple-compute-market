@@ -41,14 +41,22 @@ class BareMetalFulfillmentTransport:
             resolve_response_principals=self.resolve_seller_principals,
         )
 
-    def begin(self, negotiation_id: str) -> dict[str, Any]:
-        body = {
-            "negotiation_id": negotiation_id,
-            "buyer_principal": self.principal.model_dump(mode="json"),
-        }
+    def begin(self, negotiation_id: str, *, escrow_uid: str) -> dict[str, Any]:
+        """Begin fulfillment of an accepted deal whose Alkahest escrow is funded.
+
+        A standalone bare-metal storefront verifies an escrow without starting
+        fulfillment, so the buyer asks it to begin, naming the escrow and itself;
+        the storefront reserves the machine and returns the lifecycle projection.
+        A payment deal needs no call: its settlement begins fulfillment itself.
+        Idempotent for the same negotiation and escrow.
+        """
         return signed_storefront_json(
             self.seller_url.rstrip("/") + "/api/v1/fulfillments/begin",
-            body,
+            {
+                "negotiation_id": negotiation_id,
+                "escrow_uid": escrow_uid,
+                "buyer_principal": self.principal.model_dump(mode="json"),
+            },
             signer=self.signer,
             principal=self.principal,
             method="POST",

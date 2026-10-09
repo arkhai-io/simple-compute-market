@@ -14,16 +14,17 @@ import json
 
 import httpx
 import pytest
+from registry_client.models import ValidatePublishRequest
 
-from src.api.filter_spec import compute_etag, get_loaded_spec
-from src.db.models import Listing, OrderStatusEnum
-from src.main import app
+from core_registry.api.filter_spec import compute_etag, get_loaded_spec
+from core_registry.db.models import Listing, OrderStatusEnum
+from core_registry.main import app
 
 
 @pytest.fixture
 def _raw_client(db_session):
     """httpx.AsyncClient over the FastAPI app, sharing the test DB session."""
-    from src.db.database import get_db
+    from core_registry.db.database import get_db
 
     def _override_get_db():
         try:
@@ -41,7 +42,7 @@ def _raw_client(db_session):
 
 
 def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Listing:
-    offer = {
+    listing_resource = {
         "gpu_model": "A100",
         "region": "us-west",
         "gpu_count": 4,
@@ -51,7 +52,7 @@ def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Lis
     row = Listing(
         listing_id=listing_id,
         publisher_id=publisher.publisher_id,
-        offer_resource=offer,
+        listing_resource=listing_resource,
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -85,23 +86,23 @@ async def test_gpu_model_filter_narrows_results(
 
 
 @pytest.mark.asyncio
-async def test_filters_match_double_encoded_offer_resource(
+async def test_filters_match_double_encoded_listing_resource(
     _raw_client, db_session, maker_publisher
 ):
-    """A listing whose offer_resource/accepted_escrows were stored as JSON
+    """A listing whose listing_resource/accepted_escrows were stored as JSON
     *strings* (a publisher that double-encoded them) is still filterable and
     comes back decoded on the wire.
 
     Regression for a discovery break where the storefront forwarded its
-    stringified ``offer_resource`` SQLite column into the registry's JSON
-    column. The ``$.offer_resource.gpu_model`` predicate resolved to nothing,
+    stringified ``listing_resource`` SQLite column into the registry's JSON
+    column. The ``$.listing_resource.gpu_model`` predicate resolved to nothing,
     so ``on_missing: fail`` dropped every listing and
     ``market buy --resource gpu_model=A100`` matched no seller.
     """
     row = Listing(
-        listing_id="stringified-offer",
+        listing_id="stringified-listing_resource",
         publisher_id=maker_publisher.publisher_id,
-        offer_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
+        listing_resource=json.dumps({"gpu_model": "A100", "region": "us-west"}),
         accepted_escrows=json.dumps(
             [
                 {
@@ -121,11 +122,11 @@ async def test_filters_match_double_encoded_offer_resource(
         resp = await c.get("/listings", params={"gpu_model": "A100"})
     assert resp.status_code == 200
     items = {item["listing_id"]: item for item in resp.json()["items"]}
-    assert "stringified-offer" in items, (
-        "double-encoded offer_resource should still match the gpu_model filter"
+    assert "stringified-listing_resource" in items, (
+        "double-encoded listing_resource should still match the gpu_model filter"
     )
-    assert isinstance(items["stringified-offer"]["offer_resource"], dict), (
-        "offer_resource should be decoded to an object on the wire"
+    assert isinstance(items["stringified-listing_resource"]["listing_resource"], dict), (
+        "listing_resource should be decoded to an object on the wire"
     )
 
 
@@ -355,3 +356,49 @@ async def test_set_form_op_mismatch_returns_400(
         resp = await c.get("/listings", params={"gpu_model": "not_in:[H100]"})
     assert resp.status_code == 400
     assert "op=" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ram_gb_lower_bound_matches_at_and_below_a_shapes_value(
+    registry_client, db_session, maker_publisher
+):
+    # A listing whose shape declares memory publishes it; a default GPU-only
+    # shape publishes none and so is excluded by any memory filter.
+    _make_listing(db_session, maker_publisher, "shaped", gpu_count=1, ram_gb=32)
+    gpu_only = _make_listing(db_session, maker_publisher, "gpu-only", gpu_count=1)
+    gpu_only.listing_resource = {k: v for k, v in gpu_only.listing_resource.items()
+                                 if k != "ram_gb"}
+    db_session.commit()
+
+    async def matching(bound: int) -> list[str]:
+        page = await registry_client.list_listings(ram_gb_min=bound)
+        return [listing.id for listing in page.listings]
+
+    assert await matching(32) == ["shaped"]
+    assert await matching(1) == ["shaped"]
+    assert await matching(33) == []
+
+
+@pytest.mark.asyncio
+async def test_a_shaped_listing_validates_for_publication(registry_client):
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            listing_id="shaped",
+            storefront_url="http://seller",
+            listing_resource={
+                "pool_id": "gpu", "gpu_model": "H100", "gpu_count": 1,
+                "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100,
+                "region": "us-east", "sla": 99.0, "offering_mode": "vm",
+                "capacity_backing": "backed",
+            },
+            # A published listing offers at least one settlement route.
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "ab" * 20},
+            }],
+            max_duration_seconds=3600,
+        )
+    )
+
+    assert result.valid, result.errors

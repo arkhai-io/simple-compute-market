@@ -10,22 +10,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from arkhai_apicredits.settlement import fulfill_api_credits_obligation
 from core_storefront.stage_log import stage_event
-from domains.apicredits.settlement import fulfill_api_credits_obligation
-from domains.apicredits.settlement.fulfillment import credit_delivery
+from arkhai_apicredits.settlement.fulfillment import credit_delivery
 from market_core import SettlementEvidence
 from market_settlement_runtime import FailurePolicy
 
+import apicredits_storefront.container as _container
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
 from apicredits_storefront.services.capacity_client import (
     build_capacity_runtime,
-    capacity_binding_from_offer,
+    capacity_binding_from_listing_resource,
 )
 from apicredits_storefront.services.publication_service import (
     reopen_token_listings_after_capacity_change,
 )
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.settlement_stages import accepted_agreement
 from apicredits_storefront.utils.config import settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -47,7 +50,7 @@ async def _release_capacity_handler(
     row = await db.load_listing(listing_id=listing_id)
     if row is None:
         raise RuntimeError("capacity recovery requires a durable listing binding")
-    binding = capacity_binding_from_offer(row.get("offer_resource") or {})
+    binding = capacity_binding_from_listing_resource(row.get("listing_resource") or {})
     capacity = build_capacity_runtime(lambda: db)
     reservation = await capacity.release(
         binding,
@@ -111,6 +114,33 @@ async def _failure_webhook_handler(
     return {"status": "sent", "status_code": response.status_code}
 
 
+async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
+    """Refund the buyer when this storefront's own issuance failed; opt-in.
+
+    The accepted Agreement's seller stage decides: a stage with seller refunds
+    reverses only when nothing was issued, and any other stage records why it
+    skipped.
+    """
+    negotiation_id = str(context.get("negotiation_id") or context.get("escrow_uid") or "")
+    thread = (
+        await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        if negotiation_id
+        else None
+    )
+    try:
+        agreement, _raw = accepted_agreement(thread or {})
+    except (KeyError, TypeError, ValueError):
+        return {"action": "refund", "status": "skipped", "reason": "accepted_agreement_unavailable"}
+    stage = SELLER_STAGES.get(agreement.settlement.mechanism)
+    if stage is None:
+        return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
+    return await stage.refund_before_delivery(
+        db=db,
+        composition=_container.resolved_settlement_composition,
+        negotiation_id=negotiation_id,
+    )
+
+
 def build_api_credit_failure_policy() -> FailurePolicy:
     """Compose shared ordered dispatch with API-credit-owned effects."""
     return FailurePolicy(
@@ -119,6 +149,7 @@ def build_api_credit_failure_policy() -> FailurePolicy:
             "release_capacity": _release_capacity_handler,
             "emit_event": _emit_failure_event_handler,
             "webhook": _failure_webhook_handler,
+            "refund": _refund_handler,
         },
     )
 

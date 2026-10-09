@@ -1,0 +1,300 @@
+"""Versioned schema migrations for the API-credits service database.
+
+SQLAlchemy ``create_all`` creates missing tables but does not alter
+existing ones. This module tracks completed migrations in a
+``schema_migrations`` table so schema evolution can be applied exactly
+once, in order, idempotently, across restarts.
+
+Migrations run in-process at startup, before the app is ready to serve,
+via ``run_migrations`` in ``db/database.py``. ``check_schema_version``
+raises if the database is behind the migrations this module defines;
+nothing in this service's own startup path calls it today.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from typing import Callable
+
+from market_identity import Identity, IdentityScheme
+from market_resource_pools_contracts.hints import (
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    declared_deliverable_modes,
+)
+from apicredits_service.db.models import CreditGrant
+from sqlalchemy import Engine, inspect, text
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Migration:
+    id: str
+    apply: Callable[[Engine], None]
+
+
+class SchemaDriftError(RuntimeError):
+    """Raised when the DB schema is behind the code's expectations --
+    migrations were never run against this database."""
+
+
+def apply_schema_migrations(engine: Engine) -> None:
+    """Apply all known migrations once, tracking completion in the
+    database.
+
+    Idempotent: migrations already recorded in ``schema_migrations`` are
+    skipped, so this is safe to call on every startup.
+    """
+    _validate_grant_schema(engine)
+    _ensure_schema_migrations_table(engine)
+    applied = _applied_migration_ids(engine)
+
+    for migration in _MIGRATIONS:
+        if migration.id in applied:
+            continue
+        migration.apply(engine)
+        _record_migration(engine, migration.id)
+        logger.info("Applied migration: %s", migration.id)
+
+
+def check_schema_version(engine: Engine) -> None:
+    """Raise :class:`SchemaDriftError` if the DB schema is behind the
+    last known migration -- meaning migrations were never run, or the
+    code shipped in this image is ahead of what's been applied to this
+    database. This service's own startup applies migrations in-process
+    instead of calling this function (see ``db/database.py``'s
+    ``run_migrations``).
+    """
+    _validate_grant_schema(engine)
+    expected = _MIGRATIONS[-1].id if _MIGRATIONS else None
+    if expected is None:
+        return
+
+    if not _table_exists(engine, "schema_migrations"):
+        raise SchemaDriftError(
+            _drift_message(current="<no migrations table>", expected=expected)
+        )
+
+    applied = _applied_migration_ids(engine)
+    if expected not in applied:
+        current = sorted(applied)[-1] if applied else "<none>"
+        raise SchemaDriftError(_drift_message(current=current, expected=expected))
+
+
+def _drift_message(*, current: str, expected: str) -> str:
+    return (
+        f"API-credits database schema is at version {current}, service "
+        f"expects {expected}. Apply migrations before starting the "
+        "service (run_migrations)."
+    )
+
+
+def _ensure_schema_migrations_table(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id VARCHAR PRIMARY KEY,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+            )
+        )
+
+
+def _applied_migration_ids(engine: Engine) -> set[str]:
+    with engine.begin() as connection:
+        rows = connection.execute(text("SELECT id FROM schema_migrations")).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _record_migration(engine: Engine, migration_id: str) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO schema_migrations (id) VALUES (:id)"),
+            {"id": migration_id},
+        )
+
+
+def _table_exists(engine: Engine, table_name: str) -> bool:
+    return table_name in set(inspect(engine).get_table_names())
+
+
+def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
+    if not _table_exists(engine, table_name):
+        return False
+    return column_name in {
+        column["name"] for column in inspect(engine).get_columns(table_name)
+    }
+
+
+def _validate_grant_schema(engine: Engine) -> None:
+    """Reject incompatible grant schemas, including already-versioned databases."""
+
+    if not _table_exists(engine, "credit_grants"):
+        raise SchemaDriftError("API-credits grant schema is missing; run_migrations.")
+    actual = {
+        column["name"] for column in inspect(engine).get_columns("credit_grants")
+    }
+    expected = set(CreditGrant.__table__.columns.keys())
+    if actual != expected:
+        raise SchemaDriftError(
+            "API-credits grant schema is incompatible. Quiesce issuance and "
+            "explicitly reset the disposable database before startup; "
+            "grant payloads cannot be adopted."
+        )
+
+
+def _adopt_baseline_schema(engine: Engine) -> None:
+    """Adopt the existing API-credit and capacity tables into versioning."""
+    required = {
+        "api_keys",
+        "credit_grants",
+        "consumption_events",
+        "capacity_buckets",
+        "capacity_reservations",
+    }
+    missing = required - set(inspect(engine).get_table_names())
+    if missing:
+        raise SchemaDriftError(
+            f"API-credits baseline schema is missing tables: {sorted(missing)}"
+        )
+
+
+def _migrate_owner_principals(engine: Engine) -> None:
+    """Normalize legacy wallet owners to canonical marketplace principals."""
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text("SELECT key_id, owner_scheme, owner_id FROM api_keys"),
+        ).mappings()
+        for row in rows:
+            scheme = row["owner_scheme"]
+            identifier = row["owner_id"]
+            if scheme is None and identifier is None:
+                continue
+            if scheme is None or identifier is None:
+                raise SchemaDriftError(
+                    f"API key {row['key_id']!r} has an incomplete owner principal",
+                )
+            if scheme == "wallet":
+                scheme = IdentityScheme.EIP191
+            else:
+                try:
+                    scheme = IdentityScheme(str(scheme))
+                except ValueError as exc:
+                    raise SchemaDriftError(
+                        f"API key {row['key_id']!r} has unknown owner scheme "
+                        f"{row['owner_scheme']!r}",
+                    ) from exc
+            try:
+                principal = Identity(scheme=scheme, identifier=str(identifier))
+            except ValueError as exc:
+                raise SchemaDriftError(
+                    f"API key {row['key_id']!r} has a malformed owner principal",
+                ) from exc
+            connection.execute(
+                text(
+                    "UPDATE api_keys SET owner_scheme = :scheme, owner_id = :identifier "
+                    "WHERE key_id = :key_id",
+                ),
+                {
+                    "key_id": row["key_id"],
+                    "scheme": principal.scheme.value,
+                    "identifier": principal.identifier,
+                },
+            )
+
+
+def _migrate_fulfillment_grants(engine: Engine) -> None:
+    """Validate the neutral grant schema created by the database metadata."""
+
+    _validate_grant_schema(engine)
+
+
+def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
+    """Declare advertisement and backing on every existing Resource Pool.
+
+    Every pool this service holds is backed quota supply whose only mode
+    declaration was its deliverable set, so it advertises exactly what it
+    delivers and stays admissible. Any value already stored under either key
+    is overwritten: no consumer read one, and keeping it could leave a pool
+    the service refuses at load.
+    """
+    if not _table_exists(engine, "resource_pools"):
+        return
+    with engine.begin() as connection:
+        pools = connection.execute(
+            text("SELECT id, policy_tags FROM resource_pools ORDER BY id")
+        ).mappings().all()
+        for pool in pools:
+            raw = pool["policy_tags"]
+            policy_tags = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+            if not isinstance(policy_tags, dict):
+                raise SchemaDriftError(
+                    f"pool {pool['id']!r} policy_tags must be a JSON object"
+                )
+            try:
+                deliverable = declared_deliverable_modes(policy_tags)
+            except ValueError as exc:
+                raise SchemaDriftError(f"pool {pool['id']!r} policy_tags: {exc}") from exc
+            policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            connection.execute(
+                text("UPDATE resource_pools SET policy_tags=:policy_tags WHERE id=:pool_id"),
+                {"pool_id": pool["id"], "policy_tags": json.dumps(policy_tags, sort_keys=True)},
+            )
+            logger.info(
+                "[MIGRATION] Derived advertisement and backing for pool %s: "
+                "advertisable=%s backing=%s",
+                pool["id"],
+                ", ".join(sorted(deliverable)) or "none",
+                CAPACITY_BACKED,
+            )
+
+
+def _migrate_reservation_release_requested_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.release_requested_at``.
+
+    The site ledger this service composes records when a reservation began
+    releasing; existing rows have none.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if _column_exists(engine, "capacity_reservations", "release_requested_at"):
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE capacity_reservations "
+                "ADD COLUMN release_requested_at VARCHAR"
+            )
+        )
+
+
+_MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        "20260731_001_apicredits_schema_baseline",
+        _adopt_baseline_schema,
+    ),
+    Migration(
+        "20260811_002_canonical_owner_principals",
+        _migrate_owner_principals,
+    ),
+    Migration(
+        "20260815_003_fulfillment_grants",
+        _migrate_fulfillment_grants,
+    ),
+    Migration(
+        "20260922_004_pool_advertisement_and_backing",
+        _migrate_pool_advertisement_and_backing,
+    ),
+    Migration(
+        "20261005_005_reservation_release_requested_at",
+        _migrate_reservation_release_requested_at,
+    ),
+)

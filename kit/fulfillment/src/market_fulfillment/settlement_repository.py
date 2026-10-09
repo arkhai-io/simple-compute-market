@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
 from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
@@ -169,6 +169,7 @@ class SettlementRepository:
             pool_id=resource.pool_id,
             provider=resource.provider,
             resource_attributes=dict(resource.attributes),
+            resource_host_id=resource.host_id,
             state=SettlementRecordState.assigned.value,
         )
         try:
@@ -376,25 +377,33 @@ class SettlementRepository:
     # Abandonment hook
     # ------------------------------------------------------------------
 
-    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> None:
-        """Transition an ``assigned`` aggregate to ``abandoned``, or no-op.
+    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> bool:
+        """Transition an ``assigned`` aggregate to ``abandoned``; report whether it did.
 
-        This is the concrete implementation ``market_site.CapacityLedgerService``
-        invokes (through a ``Protocol`` it defines, referencing no
-        fulfillment types) whenever it reclaims capacity that might belong
-        to a reservation with a not-yet-dispatched settlement assignment --
-        a lapsed TTL hold, a terminal release, or a negotiation-driven
-        resize's supersede step. It is called unconditionally by those
-        callers; whether there is anything to abandon is entirely this
-        method's decision, not theirs.
+        A conditional update on the current state, so it holds across
+        sessions and processes: an aggregate that a concurrent ``begin``
+        moved past ``assigned`` is left as it is, and ``False`` says so. Once
+        abandoned, nothing can dispatch the aggregate. The caller owns the
+        transaction; capacity reclaim calls this through the site's release
+        guard, inside the transaction that frees the capacity.
         """
 
-        record = self.get(db, capacity_reservation_id)
-        if record is None or record.state != SettlementRecordState.assigned.value:
-            return
-        validate_transition(record.state, SettlementRecordState.abandoned.value)
-        record.state = SettlementRecordState.abandoned.value
+        validate_transition(
+            SettlementRecordState.assigned.value, SettlementRecordState.abandoned.value
+        )
+        changed = (
+            db.query(SettlementRecord)
+            .filter(
+                SettlementRecord.capacity_reservation_id == capacity_reservation_id,
+                SettlementRecord.state == SettlementRecordState.assigned.value,
+            )
+            .update(
+                {SettlementRecord.state: SettlementRecordState.abandoned.value},
+                synchronize_session="fetch",
+            )
+        )
         db.flush()
+        return bool(changed)
 
     # ------------------------------------------------------------------
     # Recovery claims
@@ -465,6 +474,31 @@ class SettlementRepository:
             db.refresh(record)
             db.expunge(record)
         return candidates
+
+    def release_worker_claims(self, db: Session, *, worker_id: str) -> int:
+        """Release every claim currently held by ``worker_id``.
+
+        The bulk form of ``clear_claim``, for a worker that wants its next
+        cycle to see rows it is itself holding under an unexpired lease.
+        Scoped to one worker on purpose: another worker's lease may be
+        covering a provider call still in flight, and clearing that would
+        let two cycles act on one operation.
+
+        Returns the number of claims released, so a caller can log whether
+        an explicit advance actually needed to reclaim anything.
+        """
+
+        begin_sqlite_write_transaction(db)
+        held = (
+            db.query(SettlementRecord)
+            .filter(SettlementRecord.claimed_by == worker_id)
+            .all()
+        )
+        for record in held:
+            record.claimed_by = None
+            record.claim_expires_at = None
+        db.flush()
+        return len(held)
 
     def clear_claim(
         self,

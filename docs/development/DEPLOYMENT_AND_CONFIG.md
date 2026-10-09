@@ -29,14 +29,31 @@ override.
 2. `config-<profile>.yml` files, one per entry in `ACTIVE_PROFILES`,
    applied in order.
 3. `config.yml` files, default values.
-3. `settings.toml` — Empty variable names.
+4. `settings.toml` — committed defaults.
 
 Each service picks its own `envvar_prefix` (for example, the compute
 provisioning service uses `PROVISIONING`; the API-credits storefront
-uses `APICREDITS_STOREFRONT`) and constructs its `Dynaconf` instance
-with `environments=False` — this repository uses named profiles
-instead of Dynaconf's built-in environment concept, layered through
-`includes=[...]`, `merge_enabled=True`.
+uses `APICREDITS_STOREFRONT`) and uses `environments=False` — this
+repository uses named profiles instead of Dynaconf's built-in environment
+concept, layered through `includes=[...]`, `merge_enabled=True`.
+
+For compute provisioning and e2e, deterministic profile parsing, ordered
+base/profile include resolution, and Dynaconf construction live in
+`arkhai-kit-config`. Their composition roots still read `CONFIG_DIRECTORY`
+and `ACTIVE_PROFILES` from the process environment and pass those values
+explicitly to the shared loader. They also retain role-specific policy: settings
+and secret files, environment prefix, dotenv location/discovery, missing-include
+handling, wrappers, validators, and exported helpers. This boundary is scoped
+to those migrated consumers; other services may still have separate loaders
+until an explicit change migrates them.
+
+Dynaconf dotenv loading contributes prefixed variables to the environment
+layer rather than creating a file layer below profile includes. An already-set
+process variable wins over the same dotenv key; otherwise a dotenv-sourced
+prefixed variable overrides settings, secrets, base config, and profiles just
+like any other environment value. E2e points Dynaconf at its project `.env`.
+Compute provisioning uses Dynaconf's normal `.env` discovery and does not add
+`.env.local` loading.
 
 **Why environment variables are not used for application config, beyond
 the escape hatch:** environment variables are the highest-priority
@@ -65,6 +82,11 @@ application Deployment and to Helm test pods.
   a ConfigMap, mounted at `CONFIG_DIRECTORY` as a `config-<profile>.yml`
   file. Adding a new non-secret key requires only a `values.yaml`
   change — no Deployment template change.
+  The provisioning chart and the umbrella's generated smoke-test profile
+  write JSON syntax into that YAML profile so 0x-prefixed EIP-191
+  identifiers remain strings when Dynaconf reads it: Helm's YAML encoder
+  leaves a 160-bit address unquoted, and a YAML loader reads it as an
+  integer.
 - Secret material (key material, credentials) that cannot go in a
   ConfigMap renders into a Kubernetes Secret whose data contains its own
   `config-<profile>.yml` key, mounted at the same `CONFIG_DIRECTORY`.
@@ -85,6 +107,81 @@ the same mechanism Helm test pods use to layer in test-only
 configuration: the shared non-secret values merge through one profile,
 and a pod needing secret material mounts an additional Secret-backed
 profile on top.
+
+### Storefront agents: pass-through configuration
+
+The VM storefront does not use profiles; it reads up to three files from
+`$XDG_CONFIG_HOME/arkhai/`, a later file winning on a conflicting key:
+`storefront.toml` (an operator's own file), `storefront.json` (the public
+document the chart renders), then `storefront.secrets.toml` (the Secret
+overlay). The chart mounts the last two at `/etc/arkhai/`.
+`market-storefront config show` reports the files merged as the server merges
+them; `--raw` prints each public file and never the overlay.
+
+Each entry of `storefront.agents` carries the storefront's own configuration
+in `config`, in the storefront's own key names, and the chart renders it
+unchanged into `storefront.json`. A setting or settlement mechanism the
+storefront gains deploys through values alone. Keys may be spelled in any case,
+as the storefront's loader reads them; a key stated in two spellings is refused
+at render. The chart adds only what the release knows, and except for the port
+only where `config` does not state it:
+
+| Setting | Derived from |
+|---|---|
+| `port` | the agent's `port`; always set, and a different stated value is refused |
+| `base_url` | the agent's Service |
+| `registry.urls`, `registry.authorities.<url>` | the internal registry's Service, with the agent's `internalRegistryTrust` written under its URL |
+| `provisioning.service_url` | the provisioning Service |
+| `capacity.sites` | `{default: <provisioning URL>}` |
+| `db_path` | `agent.db` under `persistence.mountPath` |
+
+`internalRegistryTrust` sits outside `config` because its key is the registry's
+release-derived URL; it is required while the agent uses the internal registry,
+and it must name `global.registryIdentity`'s authority and principal. When the
+agent uses the release's provisioning service, `config.provisioning.identity`
+and an `Identity.service_peers` entry for the site bound to it must include
+`global.provisioningIdentity`. Those checks relate the release's parts; the
+chart supplies no service default and does not validate the storefront's own
+settings. The storefront validates its typed sections at startup; untyped
+sections are not checked key by key (see below). Because the Deployment uses
+the `Recreate` strategy, a configuration the storefront refuses leaves no
+running pod; recover with `helm rollback`.
+
+`config` is public: it renders into a ConfigMap. The values schema carries one
+definition generated from the storefront's typed configuration models
+(`make helm-values-schema` regenerates it; a storefront unit test fails when it
+is stale). That definition refuses, in any spelling, every field a model marks
+secret or not applicable to the seller role, every field a typed section's
+model does not have, and every key in `Identity` other than its public
+principal, administrators, and service peers. So a wallet private key, a
+registry write token, private identity material, and payer data are
+refused before anything renders; they belong in the Secret overlay, or for the
+signer credential in `identity.credentialSecret`. Untyped sections such as
+`provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
+misspelled key there is ignored by the storefront. The schema also refuses the
+values shape of storefront chart releases before 0.2.0 — `seller`,
+`storefrontDomains`, `registryAuthority`, `registryUrl`, and `configMapName`
+under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
+`image.settlementConfigSchemaVersion` — naming the key.
+
+The generated definition also types `[Settlement.contact]` and `[Delivery]`. A
+seller's contact is public configuration, so it is accepted in `config`. Each
+`[Delivery]` instance is typed by the sink it uses, its `sink` value or its own
+name. The sinks typed are those installed in the storefront's image that declare
+their settings model, found by discovery when the schema is generated: their secret
+settings are refused wherever the instance is named, a table named for one of them
+may not state another, and an instance of any other sink stays open. `sink` must be
+spelled exactly so: the delivery kit reads no other spelling, and the schema refuses
+`Sink` or `SINK` rather than let such an instance escape the typing that keeps
+secret settings out of the ConfigMap.
+`helm/fixtures/contact-exchange-values.yaml`
+is a test overlay enabling contact exchange for Bob with SMTP delivery to the
+`dev-env` chart's optional Mailpit (`dev-env.mailpit.enabled`), which a scenario
+reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
+
+`storefront.json` is JSON so every string, including a 160-bit address, is read
+back as a string. Every number in a values file passes through a float on its
+way into Helm, so write an integer above 2^53 as a string.
 
 ## Marketplace identity configuration
 
@@ -110,6 +207,33 @@ separate mechanism resources and never determine profile selection. ConfigMaps,
 arguments, image layers, run logs, evidence, output, and examples contain no
 resolved signing value.
 
+## Registry descriptor configuration
+
+The registry is a Pydantic-settings service rather than a Dynaconf role. Its
+Helm and Compose surfaces set the public descriptor fields through
+`REGISTRY_DESCRIPTOR_BASE_URL`, `REGISTRY_DESCRIPTOR_DISPLAY_NAME`, and
+`REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY`. When
+`REGISTRY_REQUIRE_READ_API_KEY=true`, the deployment must also set
+`REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER`; a public registry must omit
+that pointer. Startup rejects missing fields and either posture mismatch.
+
+These values are public operator assertions. The service derives the
+descriptor's authority principal from the credential-backed active signer and
+derives its schema identity from the loaded filter specification. Helm keeps
+the descriptor values in ordinary values while mounting the signer credential
+from a Secret. Compose wrappers likewise carry public descriptor values beside
+public identity pins and keep signer credentials in role-owned file mounts.
+
+The umbrella chart enables the compute registry by default and keeps the
+`api-credits-registry` alias disabled. Enabling the alias instantiates the same
+schema-opaque registry chart a second time. The compute instance selects
+`/app/filter-spec.yaml` (`compute.market`); the API-credits instance selects
+`/app/filter-spec-apicredits.yaml` (`api_credits`). Both specifications are
+packaged in the registry image, but each process loads exactly one. Identity,
+credential Secret, descriptor, API-key Secret references, Service, and PVC
+values are instance-local. `global.registryIdentity` continues to configure
+the compute storefront's trust pin and does not constrain the alias signer.
+
 ## Per-domain stack composition
 
 Each domain stack owns its public topology while consuming shared core/kit
@@ -120,6 +244,20 @@ authorities:
   gated sample service, and API-credit storefront.
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
+
+The VM development stack runs Bob and Alice as separate storefronts with
+separate provisioning authorities. Each authority has its own service signer,
+storefront trust pin, callback destination, database, and process-local job
+queue. Both storefronts use the local site alias `default`, resolved against
+their respective authorities. The local identity overlay supplies deterministic
+development credentials.
+
+The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
+to merge role bindings with the domain topology, and declares the named volumes
+those services use. Service extension preserves the domain file's relative mount
+paths. An `include` cannot be used to import a service and redefine it in the same
+wrapper. The e2e lane adds `compose.dev.yml` and `compose.bare-metal-local.yml`
+with `-f` for its dev chain and provisioning mock profile.
 
 Storefront images install their distributions from the staged `.dist`
 wheelhouse; runtime images do not resolve editable sibling source. API-credit
@@ -150,6 +288,11 @@ single-writer model does not tolerate the overlapping old/new pod
 window a `RollingUpdate` strategy would otherwise produce against a
 shared volume.
 
+Registry and compute-provisioning runtime images create `/app/data` owned by
+their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
+so SQLite can create its database without a root startup process. Bind mounts
+and existing volumes must already provide write access to the runtime user.
+
 ### Combined compute-family storefront
 
 The storefront image installs the shared `arkhai-core-storefront` shell plus
@@ -158,7 +301,9 @@ configuration contains a non-empty `storefront_domains` list; every row names
 one contribution, exact offering mode, domain identity, and contract version.
 Trusted provisioning authorities remain separately configured site bindings.
 The Helm chart and Compose profile run one storefront process against one
-single-writer SQLite volume; they do not start one container per domain.
+single-writer SQLite volume; they do not start one container per domain. Under
+Helm the list is each agent's `config.storefront_domains`, passed through as
+written (see "Storefront agents: pass-through configuration").
 
 `storefront_domains` is public routing metadata only. Signing credentials,
 provider settings, SSH material, tenant credentials, payment-provider objects,
@@ -176,6 +321,192 @@ Mixed/ambiguous rows, missing site or pool/resource provenance, public-mode
 conflicts, orphan relationships, and derivation collisions fail without
 mutating the source. Once accepted effects use common bindings, rollback is
 forward recovery under those bindings, not restoration of an unbound schema.
+
+Each listing binding records its capacity backing, and each closed listing records
+whether its seller or reconciliation closed it. Both columns are enforced by
+triggers rather than by rebuilding the tables, so rolling the storefront back to
+code that predates them means dropping the triggers and leaving the columns, which
+the older code ignores: the required-backing insert trigger
+`storefront_listing_binding_backing_required`, and the two closure-reason triggers
+`listing_closed_by_consistent_insert` and `listing_closed_by_consistent_update`.
+Dropping the required-backing trigger is safe only while no unbacked listing has
+been published, because older code reads every listing as backed and would attempt
+reservations its site refuses. A registry that already publishes the backing field
+keeps it; an older reader ignores it.
+
+The storefront's VM publication runs on its own; bare-metal publication remains an
+operator-invoked command. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
+`[pricing.defaults.gpu.<model>].settlements`, `default_max_duration_seconds`, and
+the family rates `[pricing.defaults.gpu.<model>].rates` and
+`[pricing.defaults.<family>].rates` (see "Storefront listing shapes and pool
+overrides") — beneath each pool's own `pricing` declaration and the storefront's
+per-pool overrides. `[pricing].default_min_price` is the negotiation floor for a
+selected settlement option that advertises no rate, in base units per hour as
+decimal text; a fractional number is refused when a negotiation first needs it.
+The storefront refuses to start with a configured family rate it cannot read.
+`default_token_address` and per-model `min_price` and `token` configure nothing; the
+storefront names any it finds at startup. A change to any of them reaches open listings on the next publication
+cycle; `market-storefront publish` runs or previews that cycle and takes no terms
+of its own.
+
+## Definition documents
+
+A service may be given the path to a YAML document describing resources it
+should hold — relays, pools, capacity declarations. The document is mounted
+like any other configuration file and is not a Secret: it carries endpoints,
+windows, quantities, and the *names* of profile keys, never a credential.
+
+Three settings name such a document, all read by the provisioning service:
+`relay_definitions_path`, `pool_definitions_path`, and
+`capacity_definitions_path`. The provisioning chart derives each from the
+presence of its value under `definitions` (`relays`, `pools`, `capacity`) rather
+than configuring it beside the document, because two independent settings can
+disagree and the failure when they do is silent: the document renders, the
+volume mounts, and the service skips an unset path while everything looks
+configured. The chart's schema refuses the pool and capacity paths under
+`config` for that reason. Every value is empty by default, so a deployment that
+supplies none is managed entirely through the API.
+
+Startup imports them in dependency order: relays, then pools (which may name a
+relay), then host inventory, then capacity (whose declarations name a pool and
+may name a host). A capacity document naming a pool other than `default` needs
+that pool supplied beside it on a first boot.
+
+Every pool entry must declare `advertisable_modes` and `capacity_backing` in its
+`policy_tags`; nothing defaults either. A changed pool document with an entry
+lacking them is refused and nothing from it is applied. After the pool import,
+the service checks every stored pool and refuses to start, naming each pool, if
+any lacks valid declarations. An unchanged document is not re-applied, so it does
+not trip that refusal on its own; a pool rewritten by an older version is repaired
+by a changed document that declares it, which is imported before the check. The
+API-credits service seeds its own pool with both declarations and applies the same
+check at startup.
+
+A pool entry may also state, in `policy_tags`, the shapes its listings are sold
+in: `listing_shapes` maps an offering mode to a list of family-grouped shapes, as
+in `listing_shapes: {vm: [{gpu: {count: 1, model: H100}, memory: {gib: 32}}]}`.
+Structure is checked wherever the pool is written; whether a shape's families
+exist is judged by the storefront, which reports a shape it cannot read and holds
+that pool's listings. A pool that states no shapes publishes its domain's default
+shapes: for VM, one GPU-only shape per count, per GPU model. A shape is a
+commitment: the reservation holds every quantity it states. A dimension it omits
+is outside the listing's and the reservation's commitment: fulfillment may supply
+it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,
+`default_vm_disk_size`), where set, or leave it to the provisioning playbook.
+Keep enough capacity for every dimension a pool's shapes omit.
+
+Host inventory is not a definition document, and the digest reconciliation
+described below does not apply to it. The inventory (`inventory_ini`, or the file
+at `inventory_path`) seeds the host registry only when no host is registered yet,
+and is not read again. Execution renders its inventory from the registered host
+record the work names, never from the file. A host added to the file after first boot is
+therefore not registered, and dispatch to it is refused until it is imported
+through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
+
+### Reconciliation follows the document, not the process
+
+Import treats its document as authoritative. It overwrites entries that differ
+from what is stored and, for pools, disables entries the document does not
+name. That authority belongs to an operator submitting a document.
+
+**A process start is not a submission.** Import is idempotent with respect to
+the document, not the database: re-running it against state something else
+changed reverts that change, because a diff against the document is exactly what
+detects it. Applied on every startup it would silently undo administrative work
+on eviction, drain, and crash recovery.
+
+So a service records the digest of the document it last reconciled and applies a
+document only when the current one differs. The digest is written in the same
+transaction as the apply — recorded separately, a digest that committed after an
+already-committed apply is indistinguishable at the next startup from one
+recorded before a crash. An explicit import request reconciles regardless of the
+digest, because the operator has asked.
+
+The practical consequences for a deployment:
+
+- Editing a mounted document and rolling the deployment applies the edit.
+- Restarting against an unchanged document changes nothing, so anything set
+  through the API survives.
+- A failed apply records no digest, so the next start retries it.
+
+### What a document does to entries it stops naming
+
+A pool absent from the document is **disabled**: the document declares what the
+deployment offers, and a pool it does not name should not be scheduled.
+
+A relay absent from the document is **retained**. Disabling one would break
+every pool referencing it and every live tunnel on it, which is a far worse
+outcome than a stale row and is not what an operator editing an unrelated entry
+is asking for. A relay established from a document and then administered through
+the API is one relay, not two.
+
+A capacity declaration absent from the document is **retained**, as a relay is.
+An unnamed declaration may have been registered through the API, derived from a
+host's inventory, or be backing a live reservation, and none of those is what an
+operator editing an unrelated entry means to switch off. A capacity document
+therefore adds and updates declarations and never removes one; disabling is an
+explicit `enabled: false`, in the document or through the API.
+
+### Capacity definitions
+
+A capacity document holds a top-level `resources` list. Each entry is a whole
+declaration with the registration API's field names — `resource_id`, `pool_id`,
+`resource_type`, and a `capacity` map of at least one dimension, plus optional
+`resource_subtype`, `host_id`, `attributes`, and `enabled` — and applying it has
+exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
+
+- **An entry replaces the declaration it names.** A field it omits is cleared,
+  not kept, so an entry adopting a declaration derived from host inventory must
+  restate its `host_id`, and an omitted `enabled` re-enables one disabled through
+  the API.
+- **Entries equal to the stored declaration write nothing** and emit no capacity
+  event, so reapplying a document — or one changed only in comments or layout —
+  does not make storefronts republish.
+- **Any problem leaves the whole document unapplied.** Validation is strict (a
+  quoted number is an error) and happens in two stages. Every structural problem
+  is reported with its location, and a document with any is not checked further.
+  Only a structurally valid document is checked against stored state, and every
+  refusal that stage finds is reported together: an unknown pool, a host another
+  declaration already names, or a move between pools while the resource holds a
+  live reservation. These are the rules a single registration meets too. A refused
+  document at startup fails startup and records no digest.
+- **Exchanging hosts between two declarations takes two imports**, because
+  entries apply in order and the first would briefly name a host the second
+  still holds.
+- **Every declared attribute is published to storefronts.** Attributes are the
+  categorical facts claims match (`gpu_model`, `region`); none may repeat a
+  declaration field such as `host_id`.
+- **For VM, state a region twice: on the pool, which listings advertise, and on
+  its declarations, which reservations match.** A VM listing's claim requests the
+  region and model it publishes, so a pool whose listings claim a region or model
+  no member declares publishes nothing and is reported per pool; a region stated
+  only on the pool publishes nothing.
+- **A bare-metal declaration describes one whole machine.** Set
+  `capacity.units` to `1`, and state its hardware under the compute family's
+  capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and
+  `disk_gb`. Set `attributes.gpu_model`. `gpu_count` and `gpu_model` are required
+  for bare-metal publication, and the machine's pool must state a `region`. Do
+  not put authoritative hardware in `bare_metal_publication`. What a storefront
+  publishes and holds from these declarations is specified in the
+  [storefront publication specification](../../openspec/specs/storefront-publication/spec.md#requirement-a-bare-metal-listings-shape-is-derived-from-its-declaration).
+
+`POST /api/v1/capacity/definitions/import` submits a document: it always
+reconciles and records no startup digest. With `validate_only` it reports the
+problems and the planned creations, updates, and unchanged entries without
+applying anything.
+
+### Secrets are named, not carried
+
+A relay entry may name which key of the deployment's secrets profile holds its
+admission token. The service resolves that key **when the relay is created** and
+never re-reads it, so a token rotated through the API is not reverted by a later
+reconciliation of a document that still names the key holding the old value.
+
+An entry naming a key the profile does not carry fails the import, naming the
+key. Creating the resource with an empty credential instead would defer the
+failure to the point of use, where it appears as a remote service refusing a
+connection rather than as a configuration error where the configuration is
+wrong.
 
 ## Migrations at startup
 
@@ -213,6 +544,96 @@ against migrated state, operators recover by rolling forward from current
 identity history and operation journals rather than restoring stale state.
 
 
+## Storefront listing shapes and pool overrides
+
+A VM storefront publishes one listing per shape a pool offers. Beyond a pool's
+own `listing_shapes`, the storefront operator may state its own terms for one
+pool at one site, in one offering mode, through the administrator API or
+`market-storefront pool-override` (`set --file`, `get`, `list`, and `delete`,
+with `--mode` never defaulted). An override states listing shapes, settlement
+clauses, asking rates, and the market's terms (for VM: `sla`,
+`max_duration_seconds`, and `pricing` family rates); it cannot state region or
+capacity backing. A write stating the retired `min_price` or `token` is refused; a
+stored override that still carries them keeps applying its other terms, and
+system status names the retired keys.
+
+- **Family rates price a listing by its shape.** A rate is stated per capacity
+  family in the pricing hint's nesting —
+  `pricing: {gpu: {H100: {rates: [...]}}, cpu: {rates: [...]}, memory: {rates: [...]}, storage: {rates: [...]}}`
+  — each entry an `asset`, a positive decimal-text `rate` per unit of the family
+  (per card, vCPU, or GiB), and a time unit `per`. The same nesting serves a pool's
+  `pricing` hint, an override's `pricing` term, and the storefront's
+  `[pricing.defaults]`; each family resolves from its own highest tier, whose list
+  replaces lower tiers' whole. A listing for which any family resolves rates is
+  shape-priced: its settlement clauses state no `rate`, and each clause's rate is
+  the listing's shape priced at the family rates in that clause's asset. A family
+  without a rate is not charged, and system status lists it per asset; a listing
+  whose rate would be zero in a clause's asset is refused. Without family rates a
+  clause's own `rate` is the listing's rate, whatever its shape. The provisioning
+  service refuses a pool write whose rate lists are malformed; a rate the storefront
+  still cannot read holds the pool's listings at their last-published terms and is
+  named, with its tier and family, in system status.
+
+- **Asking rates are declared per shape.** A pool states them in its
+  `asking_rates` policy tag, keyed by offering mode, each entry naming the shape
+  it prices with an `amount` (positive decimal text, no exponent), an `asset`,
+  and a `period` (`hour`). A listing publishes the rate for its own shape, or
+  none. An override's `asking_rates` replace the pool's list whole; an empty list
+  withholds every rate. No storefront setting supplies a rate. A declaration or
+  override the storefront cannot read holds that pool's listings and is named in
+  system status, as is a rate for a shape the pool does not publish. A changed or
+  withdrawn rate refreshes the listing in place.
+
+- **A write needs its site reachable.** It is checked against the site's live
+  projection: a pool the site does not project is refused, an unreachable or
+  unverifiable site is refused as retryable, and a shape no member is feasible for
+  is accepted and reported, because it then publishes nothing.
+- **System status reports each override's state:** `applied`, `orphaned` while
+  its pool is absent, `unknown` while its site's projection is not loaded,
+  `site_unconfigured`, or `inactive`. Overrides are stored but have no effect
+  while listings derive from local tables
+  (`capacity.use_site_projection_for_listings = false`).
+- **The legacy per-pool terms** written by the local resource import remain the
+  tier below overrides, for the home site only. System status names each field a
+  legacy row still supplies; an override of that field supersedes it.
+- **A site whose projection is not loaded holds its listings.** They are neither
+  closed nor refreshed until it loads, so a storefront restarting while a site is
+  unreachable does not delist that site. A storefront configured to derive from
+  projections never derives from its local tables instead. A site decommissioned
+  without closing its listings leaves them advertised until an operator closes
+  them.
+
+Upgrading to listing shapes is fail-forward. Every VM listing's identity now
+includes its shape, so the first publication cycle after upgrade closes each
+listing and publishes its successor once; a seller's close and pause carry to the
+successor, and system status reports the carry-over.
+
+A bare-metal storefront serves the same administrator operations, through
+`bare-metal-storefront pool-override` (`set --file`, `get`, `list`, `delete`,
+with `--mode` never defaulted). The command calls the administrator API, never
+the database. It signs as the storefront itself, from
+`BARE_METAL_STOREFRONT_IDENTITY_SCHEME`, `BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER`,
+and `ARKHAI_IDENTITY_CREDENTIAL`, so that identity must be listed in
+`BARE_METAL_STOREFRONT_ADMIN_IDENTITIES`. It connects to `--storefront-url`, else
+`BARE_METAL_STOREFRONT_PUBLIC_URL`, else `http://localhost:8000`.
+
+- **A bare-metal override states no shapes.** It states settlement clauses, which
+  replace `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that pool whole;
+  asking rates; and the terms `min_duration_seconds` and `max_duration_seconds`.
+- **Each lease bound replaces its configured counterpart on its own.** The pair a
+  listing would publish must still be ordered: a minimum above the effective
+  maximum (the override's, else `BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS`) is
+  refused at the write. If configuration later falls below an accepted minimum,
+  the next publication run holds that pool as `pool_override_terms_conflict`
+  rather than publishing; raise the maximum or correct the override.
+- **A write takes effect at the next publication run,** from the server's
+  administrator step or `bare-metal-storefront publish`; bare metal has no
+  publication loop to wake.
+- **Status is judged against the last generation a run accepted.** Every run
+  records, per site, the pools it accepted, durably, so status survives restarts
+  and command-line runs. Before any run has accepted a site, its overrides read
+  `unknown`.
+
 ## Settlement consumer configuration and cutover
 
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
@@ -225,10 +646,22 @@ EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
+Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
+attaches the exact Agreement when it approves a payment; setting it in a seller
+configuration is a publication blocker. A seller that wants the Agreement on file sets
+`deposit_agreement` on its payment option, and attaches the Agreement itself after
+verifying the receipt and before delivering, whenever the buyer did not. The Agreement
+discloses both principals, the listing, amount, timing, and provision terms, so enable
+either only where that disclosure to the payments service is intended.
+
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
 
+The API-credit storefront and the credits service each own their own state: the
+credits service owns keys, request-digested grants, balances, quota, credentials,
+and its migration history. Restart either against its own volume. Never
+source-share a sibling package or mount one service's database into the other.
 
 For each buyer and storefront configuration overlay, use this production
 sequence:
@@ -272,6 +705,10 @@ sequence:
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
    schema check or image/config schema check fails.
+   `config migrate` reads: rendering applies the values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
 5. Quiesce publication, negotiation, settlement, and recovery automation.
    Deploy the coordinated marketplace configuration, wheels, image, Secret,
    and ConfigMap set. Keep automation quiesced while every storefront reports
@@ -287,6 +724,107 @@ sequence:
    artifacts together. After effects resume, recover forward from accepted
    settlement plans and operation identities; never change mechanism priority
    to redirect an accepted deal.
+
+### Contact-exchange contacts
+
+A storefront composing `contact-exchange.v1` (bare metal and VM) configures it in
+the peer `[Settlement.contact]` table: its `profiles`, the public terms an
+introduction option advertises, and the seller's contact in exactly one of two
+forms.
+
+```toml
+# One storefront, one origin site: the single form.
+[Settlement.contact]
+enabled = true
+contact_payload = { email = "sales@bob.example" }
+
+# One storefront, several seller sites: a contact per origin.
+[Settlement.contact.origins.dc-west]
+contact_payload = { email = "ops@west-seller.example" }
+
+[Settlement.contact.origins.dc-east]
+contact_payload = { email = "sales@east-seller.example" }
+```
+
+An origin is the site a listing's durable binding records; the storefront reads
+its configured sites (`[capacity.sites]` on VM, `BARE_METAL_STOREFRONT_SITES` on
+bare metal) as the known origins. The storefront refuses to start when both forms
+are set, when the single form is set while more than one site is configured, or
+when an `origins` key names no configured site. A site without an entry is legal:
+its listings publish no introduction option, and a reveal for an accepted deal whose
+origin has lost its entry is refused with `seller_contact_unavailable` before
+anything is stored. The contact is never substituted from another origin.
+
+Contacts are ordinary configuration, marked `never_published` rather than secret:
+they may sit in the public configuration (the Helm ConfigMap included) and still
+never appear in a listing, an option, readiness, or an obligation. Readiness stays
+storefront-wide: the mechanism is unready only with no profiles or no contact in
+either form.
+
+### Introduction delivery
+
+`[Delivery]` sends each revealed introduction to destinations the side's own
+operator configured; the seller's side carries the buyer's contact, the buyer's
+side the seller's. `enabled` names sink instances; an instance's table names the
+installed sink it uses with `sink`, and a table naming none uses the sink of its own
+name, so `[Delivery.file]` keeps its meaning.
+
+```toml
+[Delivery]
+enabled = ["west-hook", "east-mail", "audit"]
+
+[Delivery.west-hook]
+sink = "webhook"
+sign = true                         # signed with the storefront's marketplace signer
+
+[Delivery.east-mail]
+sink = "smtp"
+host = "mail.east-seller.example"
+sender = "storefront@example.com"
+recipients = ["sales@east-seller.example"]
+
+[Delivery.audit]
+sink = "file"
+path = "/var/log/introductions.jsonl"
+
+[Delivery.origins]                  # seller side only
+dc-west = ["west-hook", "audit"]
+dc-east = ["east-mail", "audit"]
+```
+
+A storefront with more than one origin must route: with sinks enabled and no
+`[Delivery.origins]`, it refuses to start, since broadcasting every reveal to every
+destination would hand one seller's buyers' contacts to another. Every routed name
+must be enabled, every enabled instance routed, and every origin the table names
+must be one of the storefront's sites; a site the table does not name receives no
+seller-side delivery. A buyer may not route. With
+`sign = true` a webhook request carries a v2 marketplace signature its receiver
+verifies against the storefront principal. The installable `apprise` sink
+(`arkhai-kit-delivery-apprise`, in both storefront images) reaches any service an
+Apprise URL names. Credentials — a webhook's `url` and `headers`, an SMTP
+`password`, Apprise `urls` — are secret settings: they belong in the secrets overlay,
+and the Helm values schema refuses them in an agent's `config`.
+
+Operators re-deliver a revealed introduction to its origin's instances with
+`market-storefront settlement contact redeliver --obligation-ref …` on VM and the
+bare-metal storefront's `redeliver-introduction` command. Delivery and re-delivery
+are specified in [introduction delivery](../../openspec/specs/introduction-delivery/spec.md).
+
+### Contact-exchange retention
+
+Two seller-only settings in `[Settlement.contact]` bound how long revealed contacts
+are kept:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `retention_seconds` | `2592000` (30 days) | How long both contact payloads of a revealed introduction are kept, counted from the reveal. A positive integer, or `"indefinite"` for no deletion. Zero and negative values are refused, so a typo cannot delete introductions moments after reveal. |
+| `retention_sweep_interval_seconds` | `3600` | How often the retention sweep runs. Positive. |
+
+The window is current policy, not a term of any deal: a storefront restarted with a
+shorter window deletes, on its next sweep, every introduction already past the new
+window, including those revealed under the longer one. The window is published to
+buyers; deletion and disclosure behaviour are specified in
+[contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md).
 
 
 ## Current limits

@@ -1445,10 +1445,19 @@ class SettlementSQLiteRepository:
                          AND o.collection_state!='succeeded'
                          THEN 'cleanup'
                        WHEN o.collection_state='succeeded' THEN 'status'
+                       WHEN o.mechanism_status='ready'
+                         AND o.fulfillment_ref IS NULL THEN 'fulfill'
                        WHEN o.condition_state='ready' THEN 'collect'
                        WHEN o.mechanism_status='ready' THEN 'check'
                        ELSE 'status' END
-                    WHERE o.fulfillment_ref IS NOT NULL
+                    -- A ready obligation whose fulfillment never started is
+                    -- due through its 'fulfill' operation, so the worker's
+                    -- ready hook starts it and its retry schedule governs
+                    -- every later attempt.
+                    WHERE (
+                        o.fulfillment_ref IS NOT NULL
+                        OR o.mechanism_status='ready'
+                      )
                       AND (
                         o.collection_state NOT IN ('succeeded','manual_required')
                         OR (

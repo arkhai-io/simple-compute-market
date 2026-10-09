@@ -187,7 +187,7 @@ class ListingRequest:
     at publish time, not here.
     """
 
-    offer: dict[str, Any]
+    listing_resource: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
     settlement_options: list[dict[str, Any]] = field(default_factory=list)
     demands: list[dict[str, Any]] = field(default_factory=list)
@@ -198,7 +198,7 @@ class ListingRequest:
     def to_dict(self) -> dict:
         return {
             "listing_id": self.listing_id,
-            "offer_resource": self.offer,
+            "listing_resource": self.listing_resource,
             "accepted_escrows": self.accepted_escrows,
             "settlement_options": self.settlement_options,
             "demands": self.demands,
@@ -221,7 +221,7 @@ class ListingSummary:
     publisher_id: int | None = None
     publisher_principals: TrustedIdentitySet | None = None
     storefront_url: str | None = None
-    offer: dict[str, Any] = field(default_factory=dict)
+    listing_resource: dict[str, Any] = field(default_factory=dict)
     accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
     settlement_options: list[dict[str, Any]] = field(default_factory=list)
     demands: list[dict[str, Any]] = field(default_factory=list)
@@ -238,7 +238,7 @@ class ListingSummary:
             "publisher_principals",
             "publisher_principal",
             "storefront_url",
-            "offer_resource",
+            "listing_resource",
             "accepted_escrows",
             "settlement_options",
             "max_duration_seconds",
@@ -247,12 +247,11 @@ class ListingSummary:
             "updated_at",
             "status",
             "id",
-            "offer",
             "maxDurationSeconds",
             "createdAt",
         }
         listing_id = d.get("listing_id") or d.get("id")
-        offer = d.get("offer") or d.get("offer_resource") or {}
+        listing_resource = d.get("listing_resource") or {}
         accepted_escrows = d.get("accepted_escrows") or []
         settlement_options = d.get("settlement_options") or []
         demands = d.get("demands") or []
@@ -269,7 +268,7 @@ class ListingSummary:
                 )
             ),
             storefront_url=d.get("storefront_url"),
-            offer=offer,
+            listing_resource=listing_resource,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
             demands=demands,
@@ -292,7 +291,7 @@ class ListingSummary:
                     else None
                 ),
                 "storefront_url": self.storefront_url,
-                "offer_resource": self.offer,
+                "listing_resource": self.listing_resource,
                 "accepted_escrows": self.accepted_escrows,
                 "settlement_options": self.settlement_options,
                 "demands": self.demands,
@@ -377,7 +376,7 @@ class ValidatePublishRequest:
     """Request body for POST /api/v1/listings/validate-publish."""
 
     listing_id: str
-    offer_resource: dict
+    listing_resource: dict
     accepted_escrows: list[dict]
     settlement_options: list[dict] = field(default_factory=list)
     max_duration_seconds: int | None = None
@@ -387,7 +386,7 @@ class ValidatePublishRequest:
         d: dict = {
             "listing_id": self.listing_id,
             "storefront_url": self.storefront_url,
-            "offer_resource": self.offer_resource,
+            "listing_resource": self.listing_resource,
             "accepted_escrows": self.accepted_escrows,
             "settlement_options": self.settlement_options,
         }
@@ -439,7 +438,6 @@ class ValidatePublishResponse:
 
     valid: bool
     listing_id: str
-    offer_resource_type: str | None = None
     accepted_escrows_count: int = 0
     settlement_options_count: int = 0
     errors: list = field(default_factory=list)
@@ -450,7 +448,6 @@ class ValidatePublishResponse:
         known = {
             "valid",
             "listing_id",
-            "offer_resource_type",
             "accepted_escrows_count",
             "settlement_options_count",
             "errors",
@@ -458,7 +455,6 @@ class ValidatePublishResponse:
         return cls(
             valid=bool(d.get("valid", False)),
             listing_id=d.get("listing_id", ""),
-            offer_resource_type=d.get("offer_resource_type"),
             accepted_escrows_count=int(d.get("accepted_escrows_count", 0)),
             settlement_options_count=int(d.get("settlement_options_count", 0)),
             errors=list(d.get("errors", [])),

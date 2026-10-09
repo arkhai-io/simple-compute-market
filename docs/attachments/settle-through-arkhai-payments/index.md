@@ -12,6 +12,8 @@ Base `5cfa48f1`; payment repairs `2a355383` (bare-metal typed amount comparison)
 
 These are seeded accepted-Agreement library diagnostics, not complete publication/discovery/signed-negotiation CLI journeys or permanent acceptance tests. Payments use the actual local HTTP service and Podman Formance ledger. VM and bare-metal physical authorities/providers are controlled; there is no live hardware access, revocation, or post-provider-acceptance VM/bare-metal crash claim. API credits uses the actual SCM credits HTTP app, migrations, quota ledger and issuance authority, not a mocked issuer. Credentials are asserted, never printed. Production WorkOS auth, cash-provider funding, hold release/fees/disputes, full-deal qualification and physical teardown remain producer/system-lane boundaries.
 
+The three diagnostic scripts now use the payments kit's `PaymentSellerStage`, `PaymentApproval`, and the API-credit payment settlement service, matching the review-round code. They were updated, not rerun: the outcomes above are the recorded runs against the earlier code, and no local payments ledger was available for a rerun. Bare-metal settlement now starts fulfillment itself, so its script asserts delivery through settlement rather than a separate `begin` call.
+
 ## Regression counts
 
 All below passed after `make dist`. Reproduce with plain bash `set -o pipefail; make -C <package> reinit test 2>&1 | tail -3`; VM unit count is in the full output before its integration summary.
@@ -90,11 +92,11 @@ After `make dist`, run bare metal from SCM root (preserve the same state between
 ```sh
 state=$(mktemp -d)
 uv run --project domains/bare_metal/storefront --find-links .dist \
-  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.1.4-py3-none-any.whl" \
+  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.5.0-py3-none-any.whl" \
   python docs/attachments/settle-through-arkhai-payments/bare_metal_smoke.py "$state" crash
 # Expected exit 75.
 uv run --project domains/bare_metal/storefront --find-links .dist \
-  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.1.4-py3-none-any.whl" \
+  --with "$PWD/.dist/arkhai_bare_metal_buyer-0.5.0-py3-none-any.whl" \
   python docs/attachments/settle-through-arkhai-payments/bare_metal_smoke.py "$state" resume
 rm -r "$state"
 ```
@@ -120,9 +122,9 @@ done
 rm -r "$state"
 ```
 
-The VM replay remains `vm_smoke.py` with the analogous crash/resume phases, `--project domains/vms/storefront --find-links .dist --with "$PWD/.dist/arkhai_vms_buyer-0.3.4-py3-none-any.whl"`. Diagnostic entries were opened/run here; state and generated credentials are reproducible, not inherited setup requirements.
+The VM replay remains `vm_smoke.py` with the analogous crash/resume phases, `--project domains/vms/storefront --find-links .dist --with "$PWD/.dist/arkhai_vms_buyer-0.7.0-py3-none-any.whl"`. Diagnostic entries were opened/run here; state and generated credentials are reproducible, not inherited setup requirements.
 
-Cleanup: stop both foreground services; `cd ~/dev/arkhai/arkhai-payments && FORMANCE_PORT=3168 scripts/ledger-local.sh down` stops only this checkout's containers and retains its named volume. The verification's services/containers and scratch baseline worktree are removed before handoff.
+Cleanup: stop both foreground services; `cd ~/dev/arkhai/arkhai-payments && FORMANCE_PORT=3168 ./scripts/ledger-local.sh down` stops only this checkout's containers and retains its named volume. The verification's services/containers and scratch baseline worktree are removed before handoff.
 
 ## Friction and failed attempts
 

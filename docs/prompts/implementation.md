@@ -1,10 +1,15 @@
 # Implementation session prompt
 
 This session we'll be working on the simple-compute-market project and
-implementing `<change or section>`. `AGENTS.md` and the documents it
-requires reading — `docs/development/ARCHITECTURE.md`,
-`docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
-and `openspec/README.md` — have very important context you should study.
+implementing `<change or section>`.
+
+## Required context documents
+
+AGENTS.md and the documents it requires reading have very important context you should study:
+* `docs/development/ARCHITECTURE.md`
+* `docs/development/TESTING.md`
+* `docs/development/DEPLOYMENT_AND_CONFIG.md`
+* `openspec/README.md`
 
 ## Documentation and implementation workflow
 
@@ -27,9 +32,11 @@ Use a discuss → plan → implement workflow:
 3. During implementation
    a. implement the plan.
    b. run tests covering all code changes.
-   c. pause for design review if the plan premise is invalidated by
+   c. once those tests pass, run `make check-packaging` and resolve every
+      failure it reports before returning a fileset.
+   d. pause for design review if the plan premise is invalidated by
       discovered code.
-   d. ensure production comments describe present intent, invariants,
+   e. ensure production comments describe present intent, invariants,
       and constraints and reference only stable permanent documentation
       when broader context is required.
 
@@ -43,13 +50,15 @@ belongs where.
 When returning implementation artifacts, include only updated files in
 a zip in the original directory structure of the provided repository.
 
+Return all files changed since the previous checkpoint even if they have
+already been returned by previous tool uses. The user will explicitly
+ask you to checkpoint filesets.
+
 Represent a file requiring deletion by replacing its entire contents
 with a single-line tombstone comment stating the reason, at the file's
 original path:
 
-```python
 # TOMBSTONE: delete this file — <one-sentence reason>
-```
 
 Do not create a separate deletion manifest or a suffixed copy alongside
 the original — one file, one mechanism. Tombstone references must not

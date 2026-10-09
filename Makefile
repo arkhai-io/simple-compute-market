@@ -1,19 +1,23 @@
 # PyPI intermittently serves 5xx where internal package names should
 # 404 (they resolve from .dist); back off through the flap instead of
 # failing after uv's default 3 tries.
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat .python-version 2>/dev/null),$(error .python-version not found))
+
 export UV_HTTP_RETRIES ?= 10
 
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
-IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-.PHONY:   review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits   dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image
-.PHONY:
-.PHONY: test-release-tooling test-deployment-packaging
+IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
+
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
+.PHONY: run-e2e fetch-e2e-logs
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -28,9 +32,15 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry  dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
+# The wheel set a publishing path builds; publishing workflows call this name.
+dist-release: ## Build the wheel set for a publishing path.
+	$(MAKE) dist
 
-dist-domains: dist-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
+
+dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
+
+dist-domains: dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
 
 dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
@@ -45,13 +55,31 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_kit_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-compute-provisioning: dist-kits ## Build arkhai-compute-provisioning wheel into .dist/
+dist-compute-provisioning-contracts: ## Build the compute provisioning family's wire-contract wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/contracts && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-contracts produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning-client: dist-compute-provisioning-contracts ## Build the compute provisioning family's client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-client produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning: dist-ci-kits dist-compute-provisioning-contracts ## Build arkhai-compute-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-compute-provisioning-service: dist-kits dist-compute-provisioning dist-domains ## Build the extracted compute service wheel.
+dist-compute-provisioning-ansible: dist-compute-provisioning ## Build the compute family kit's Ansible implementation wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning/compute/ansible && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute_provisioning_ansible-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute-provisioning-ansible produced a platform-specific wheel" && exit 1)
+
+dist-compute-provisioning-service: dist-ci-kits dist-compute-provisioning dist-domains ## Build the extracted compute service wheel.
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
@@ -95,14 +123,48 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits  ## Build the bare-metal buyer contribution wheel.
+dist-bare-metal-buyer: dist-core dist-arkhai-core-buyer dist-registry-client dist-kits ## Build the bare-metal buyer contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-buyer DIST_DIR=$(DIST_DIR)
 
 dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## Build the bare-metal storefront contribution wheel.
 	cd domains && $(MAKE) dist-bare-metal-storefront DIST_DIR=$(DIST_DIR)
 
-dist-kits:  ## Build kit-owned wheels into .dist/
+# API-credits wheels, forwarded to `domains/Makefile` the same way the
+# bare-metal ones above are. `dist-domains` already builds all of these
+# through the domain aggregate; these exist so one wheel can be rebuilt on
+# its own while iterating, which is what
+# `domains/apicredits/sample-app/Makefile` and
+# `domains/apicredits/middleware/python`'s workflow both tell you to do
+# from the repository root.
+#
+# Prerequisites are each wheel's own internal dependencies, so a target
+# invoked directly on a clean tree resolves instead of failing in
+# `uv build` on a missing `.dist` entry.
+dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-service DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-storefront: dist-apicredits-domain dist-arkhai-core-storefront dist-registry-client dist-ci-kits dist-config ## Build arkhai-apicredits-storefront wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-middleware: dist-identity ## Build arkhai-apicredits-middleware wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
+
+# Depends on the middleware wheel because the sample app requires it with
+# the `signed` extra, which resolves arkhai-kit-identity out of .dist/.
+dist-apicredits-sample-app: dist-apicredits-middleware ## Build arkhai-apicredits-sample-app wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
+
+dist-apicredits-buyer: dist-apicredits-domain dist-arkhai-core-buyer dist-ci-kits dist-config ## Build arkhai-apicredits-buyer wheel into .dist/
+	cd domains && $(MAKE) dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
+
+dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
+
+dist-ci-kits: ## Build kit-owned wheels that do not require separately released artifacts.
+	$(MAKE) -C kit dist-ci DIST_DIR=$(DIST_DIR)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -130,10 +192,22 @@ test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-kits test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits
+test: test-core test-kits test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-registry-client test-storefront test-provisioning-adapter test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-e2e-unit test-deployment-packaging ## Run every unit and integration suite; the docker-compose e2e scenarios and cluster `helm test` are separate
 
 test-core:
 	cd core && make test
+
+test-compute-provisioning-contracts:
+	cd provisioning/compute/contracts && $(MAKE) test
+
+test-compute-provisioning-client:
+	cd provisioning/compute/client && $(MAKE) test
+
+test-compute-provisioning:
+	cd provisioning/compute && make test
+
+test-compute-provisioning-ansible:
+	cd provisioning/compute/ansible && make test
 
 test-provisioning:
 	cd provisioning/compute/service && make test
@@ -144,8 +218,27 @@ test-provisioning-iac:
 test-registry:
 	cd core/registry && make reinit && make test
 
+test-registry-client:
+	cd core/registry-client && $(MAKE) test
+
+test-provisioning-adapter:
+	$(MAKE) -C domains test-provisioning-adapter
+
+# The e2e project's unit tests; its scenarios need the docker-compose stack.
+test-e2e-unit:
+	cd e2e-tests && $(MAKE) test-unit
+
 test-storefront:
 	$(MAKE) -C domains test-storefront
+
+test-bare-metal:
+	$(MAKE) -C domains test-bare-metal
+
+test-compute:
+	$(MAKE) -C domains test-compute
+
+test-vms-domain:
+	$(MAKE) -C domains test-vms-domain
 
 test-vms-buyer:
 	$(MAKE) -C domains test-vms-buyer
@@ -167,6 +260,136 @@ test-kits:
 build: init-prerequisites dist build-buyer
 	$(MAKE) -j4 build-registry build-storefront build-bare-metal-storefront build-provisioning
 	$(MAKE) -j3 build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+
+# ---------------------------------------------------------------------------
+# e2e-dev-identities — export the compose stack's signer, wallet, and buyer
+# paths from the committed development values in dev-env/identities.
+#
+# `docker-compose.yml`, `compose.vms.yml`, and `domains/apicredits/compose.yml`
+# guard every one of these mounts with `${VAR:?...}`, so `docker compose up`
+# refuses to start until all fifteen are set. Exporting them from committed
+# fixtures is what lets a contributor, a fork, or a CI job holding no
+# repository secrets run the stack. Every value is a well-known deterministic
+# development value; see dev-env/identities/README.md.
+#
+# Two forms, deliberately. `e2e-dev-identities` prints `export` lines for a
+# human to eval. `e2e-dev-identities-env` prints bare `VAR=value` lines for
+# `docker compose --env-file`, which is what the e2e target uses: compose reads
+# the file itself, so nothing has to survive a shell round-trip. Capturing a
+# sub-make's stdout is fragile — a recursive make implies `-w` and prints
+# `Entering directory` into the capture — so the recipe writes a file instead
+# of eval'ing, and both targets pass `--no-print-directory` when recursing.
+#
+#     eval "$(make -s --no-print-directory e2e-dev-identities)"
+# ---------------------------------------------------------------------------
+E2E_IDENTITY_DIR := $(CURDIR)/dev-env/identities
+E2E_BUYER_RUNTIME_DIR ?= $(CURDIR)/.e2e-buyer
+# Development bearer tokens for registry-b, which gates read and write.
+# Not secret; the same values are committed in the storefront secret
+# overlay and the buyer config, and all three must agree.
+E2E_REGISTRY_ADMIN_KEY ?= development-registry-admin-key
+E2E_REGISTRY_BOOTSTRAP_KEY ?= development-registry-bootstrap-key
+
+e2e-dev-identities: ## Print shell exports pointing compose at committed development identities
+	@$(MAKE) -s --no-print-directory e2e-dev-identities-env \
+		| sed 's/^/export /; s/=\(.*\)$$/="\1"/'
+
+e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
+	@mkdir -p "$(E2E_BUYER_RUNTIME_DIR)/profile" "$(E2E_BUYER_RUNTIME_DIR)/state"
+	@echo 'VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@echo 'VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-b.eip191'
+	@echo 'VMS_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'VMS_ALICE_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning-alice.identity.env'
+	@echo 'VMS_BOB_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'VMS_ALICE_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/alice.identity.env'
+	@echo 'VMS_BOB_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.bob.docker'
+	@echo 'VMS_ALICE_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.alice.docker'
+	@echo 'VMS_BUYER_CONFIG_PATH=$(E2E_IDENTITY_DIR)/buyer.config.toml'
+	@echo 'VMS_BUYER_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/buyer.eip191'
+	@echo 'VMS_BUYER_PROFILE_DIR=$(E2E_BUYER_RUNTIME_DIR)/profile'
+	@echo 'VMS_BUYER_STATE_DIR=$(E2E_BUYER_RUNTIME_DIR)/state'
+	@echo 'APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-registry.ed25519'
+	@echo 'APICREDITS_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.identity.env'
+	@echo 'APICREDITS_EVM_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/api-credits.wallet.env'
+	@echo 'APICREDITS_ADMIN_KEY_FILE=$(E2E_IDENTITY_DIR)/api-credits-admin-key'
+	@echo 'APICREDITS_SERVICE_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-service.ed25519'
+	@echo 'APICREDITS_GATED_APP_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/api-credits-gated-app.ed25519'
+	@echo 'VMS_BOB_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bob.storefront.secrets.toml'
+	@# registry-b gates read and write behind bearer tokens. The bootstrap
+	@# value must stay byte-equal to the [registry.auth] entries in
+	@# bob.storefront.secrets.toml and buyer.config.toml, so all three come
+	@# from this one constant.
+	@echo 'VMS_REGISTRY_ADMIN_API_KEY=$(E2E_REGISTRY_ADMIN_KEY)'
+	@echo 'VMS_REGISTRY_BOOTSTRAP_API_KEY=$(E2E_REGISTRY_BOOTSTRAP_KEY)'
+
+# ---------------------------------------------------------------------------
+# e2e-bare-metal-dev-env — the bare-metal end-to-end lane's `--env-file`
+# values: compose.bare-metal.yml, compose.dev.yml, and
+# compose.bare-metal-local.yml guard every one with `${VAR:?...}`.
+#
+# The lane is a separate stack on its own dev chain, so it reuses the committed
+# Anvil development credentials under the assignments recorded in
+# dev-env/identities/README.md ("The bare-metal lane"). The option expiry and
+# fulfillment deadline are absolute instants, so they are generated a week
+# ahead at each run rather than committed, where they would go stale.
+# ---------------------------------------------------------------------------
+E2E_BARE_METAL_DIR := $(CURDIR)/dev-env/bare-metal
+E2E_BARE_METAL_REGISTRY_ID := 0x90f79bf6eb2c4f870365e785982e1f101e93b906
+E2E_BARE_METAL_SITE_AUTHORITY_ID := 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+E2E_BARE_METAL_STOREFRONT_ID := 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
+E2E_BARE_METAL_STOREFRONT_ADMIN_ID := 0x976ea74026e726554db657fa54763abd0c3a0aa9
+E2E_BARE_METAL_SITE_ADMIN_ID := 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+E2E_BARE_METAL_SITE_ID := bare-metal-e2e
+# The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.
+E2E_BARE_METAL_ALKAHEST_ASSET := 0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0
+
+e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `docker compose --env-file`
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry'
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_SCHEME=eip191'
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=$(E2E_BARE_METAL_REGISTRY_ID)'
+	@echo 'BARE_METAL_REGISTRY_PUBLIC_URL=http://bare-metal-registry:8080'
+	@echo 'BARE_METAL_REGISTRY_DISPLAY_NAME=Local Bare Metal Compute Registry'
+	@echo 'BARE_METAL_OPERATOR_IDENTITY=Arkhai local development'
+	@echo 'BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@echo 'BARE_METAL_REGISTRY_PRINCIPALS_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_REGISTRY_ID)"}]'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
+	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_ADMIN_ID)'
+	@echo 'BARE_METAL_PROVISIONING_INVENTORY_FILE=$(E2E_BARE_METAL_DIR)/hosts.ini'
+	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
+	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
+	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_STOREFRONT_ID)'
+	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
+	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
+	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+	@# Anvil account 2's published development key, as bob.identity.env holds it.
+	@echo 'BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a'
+	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
+	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
+	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
+	@# Contact exchange is enabled so the introduction scenario can offer it through
+	@# a pool override; the configured clauses below stay Alkahest-only, so no other
+	@# listing changes. The seller contact is a development fixture on a reserved
+	@# domain, never to be used on a public network. A 5-second retention window lets
+	@# the scenario watch an introduction expire; the day-long sweep interval keeps
+	@# the timer out of the way of the steps the scenario takes itself.
+	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1","contact-exchange.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]},"contact":{"enabled":true,"contact_payload":{"email":"seller@bare-metal-e2e.invalid"},"profiles":{"default":{"channel":"email","terms":"Development introduction; no commercial terms."}},"retention_seconds":5,"retention_sweep_interval_seconds":86400}}'
+	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
+	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"100","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
+	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
+	@echo "BARE_METAL_OPTION_EXPIRES_AT=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+	@echo "BARE_METAL_FULFILLMENT_DEADLINE=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+	@echo 'BARE_METAL_MAX_DURATION_SECONDS=86400'
+	@# The buyer service is in the `buyer` profile and the lane never starts it,
+	@# but compose still requires its variables.
+	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
+	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
+	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
 
 build-dev: build build-dev-env build-test-image
 
@@ -193,7 +416,7 @@ build-buyer: init-prerequisites init-buyer
 # Runs through the storefront venv, which pins alkahest_py; the relative
 # --find-links keeps domains/vms/storefront/uv.lock paths portable.
 build-anvil-state:
-	cd domains/vms/storefront && uv run --find-links ../../../.dist python ../../../dev-env/generate_state.py
+	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
 	cd dev-env && make build
@@ -387,7 +610,7 @@ push-runtime-artifacts: push-images push-charts push-wheels push-cli
 push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
-	$(call push_image,provisioning,provisioning)
+	$(call push_image,provisioning,compute-provisioning)
 
 push-dev-images: _require-ar-project
 	$(call push_image,dev-env,dev-env)
@@ -397,10 +620,9 @@ push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
 	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
-push-wheels: _require-ar-project
-	$(call publish_python_wheel,arkhai-core-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
-	$(call publish_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
+push-wheels: _require-ar-project ## Publish every manifest distribution to the registry.
+	uv run --no-project python scripts/push-distributions.py \
+	  --dist-dir $(DIST_DIR) --registry $(PYTHON_REGISTRY)
 
 push-cli: _require-ar-project
 	gcloud artifacts generic upload \
@@ -419,7 +641,7 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments
+# check-comment-hygiene check-doc-citations — mechanical sweep for AGENTS.md's "Python comments
 # and docstrings" rule: change IDs, section/task numbers, and change-document
 # filenames must never appear in comments or docstrings outside openspec/.
 # This catches the reliably-mechanical subset of that rule (not the fuzzier
@@ -448,6 +670,81 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		exit 1; \
 	fi
 	@echo "OK: no change-ID/task-number references found outside openspec/."
+	@echo "Scanning for OpenSpec change directory names in code..."
+	@ids=$$(ls -d openspec/changes/*/ 2>/dev/null | grep -v archive | xargs -n1 basename; \
+		ls -d openspec/changes/archive/*/ 2>/dev/null | xargs -n1 basename \
+			| sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'); \
+	if [ -n "$$ids" ]; then \
+		matches=$$(echo "$$ids" | sort -u | grep -v '^$$' \
+			| grep -Ff /dev/stdin -rn \
+				--include="*.py" --include="*.toml" --include="*.yml" --include="*.yaml" \
+				--exclude-dir="openspec" --exclude-dir="docs" --exclude-dir=".git" \
+				--exclude-dir="__pycache__" --exclude-dir=".venv" --exclude-dir=".dist" \
+				--exclude-dir="node_modules" --exclude-dir="build" --exclude-dir=".claude" \
+				. 2>/dev/null || true); \
+		if [ -n "$$matches" ]; then \
+			echo "$$matches"; \
+			echo ""; \
+			echo "FAIL: code names an OpenSpec change. A comment must describe the"; \
+			echo "current system, not the change that produced it or the change that"; \
+			echo "will alter it next -- a reader of the code cannot see either, and"; \
+			echo "the name goes stale the moment the change is archived."; \
+			echo "docs/ is exempt: the roadmap's job is to name the change owning a gap."; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "OK: no OpenSpec change names found in code."
+
+# ---------------------------------------------------------------------------
+# check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
+# docs/, tools/, scripts/, and e2e-tests/ path cited by a document must
+# resolve on this branch, and an unresolvable one is a blocking defect rather
+# than a stale link.
+#
+# Rejects a tombstoned target as well as an absent one. The existence test
+# this replaces could not fail on a rename-to-tombstone -- the likeliest
+# broken citation in a renaming change -- because a tombstoned file still
+# exists on disk while its content is gone. The predicate is imported from
+# scripts/tombstones.py rather than reimplemented, so this check and the
+# prune utility cannot disagree about what a tombstone is.
+#
+# Archived changes are excluded: they record what was true when archived. A
+# change runs this during its own closeout, while its citations are still
+# expected to hold.
+# ---------------------------------------------------------------------------
+# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
+# is what a closeout gates on: a change owes the citations it wrote, and
+# gating it on the whole repository's documentation debt would let one stale
+# runbook block everyone else's archival.
+check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
+	@python3 scripts/check_doc_citations.py "$(CHANGE)"
+
+# The Helm values schemas carry one definition generated from the storefront's
+# typed configuration models; it keeps secret-marked fields out of an agent's
+# pass-through config. It runs in the storefront's own environment (make
+# init-storefront), and the storefront's unit suite fails when it is stale.
+STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
+
+helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
+
+lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	python3 scripts/uv_project.py lock $(PROJECTS)
+
+check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout
+
+check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
+	@python3 scripts/check_uv_setup.py
+
+check-locks: ## Fail if a lock is not current with its project, the wheels in .dist, or the repository (run make dist first)
+	@python3 scripts/check_locks.py
+
+check-python-version: ## Fail if anything selects a Python version other than .python-version
+	@python3 scripts/check_python_version.py
+
+check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
+	@python3 scripts/check_project_layout.py
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
@@ -480,17 +777,19 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse-prepare: ## Rebuild repository wheels and refresh selected locks.
+review-wheelhouse-prepare: ## Rebuild the wheelhouse from scratch, then refresh review locks.
+	@# Nothing needs preserving across the rebuild any more. This copied the
+	@# staged release inputs to a temporary directory and handed them back to
+	@# `dist`, because `dist-clean` would otherwise delete artifacts that were
+	@# received rather than built. `dist` builds every wheel it produces, so a
+	@# clean rebuild loses nothing.
 	$(MAKE) dist-clean
 	$(MAKE) dist
-	$(MAKE) review-locks
+	@$(MAKE) review-locks
 
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
-	@uv run python $(CURDIR)/scripts/refresh-review-locks.py \
-		--root "$(CURDIR)" \
-		--dist-dir "$(DIST_DIR)" \
-		--python "$${REVIEW_PYTHON:-3.13}" \
-		--projects $${REVIEW_PROJECTS}
+	@if [ -z "$${REVIEW_PROJECTS}" ]; then echo "REVIEW_PROJECTS names no projects" >&2; exit 1; fi
+	python3 scripts/uv_project.py lock $${REVIEW_PROJECTS}
 
 review-wheelhouse: ## Resolve scope, rebuild wheels, refresh locks, and bundle dependencies.
 	@projects="$${REVIEW_PROJECTS:-}"; \
@@ -508,3 +807,23 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
+
+run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
+	@branch="$$(git branch --show-current)"; \
+	if [ -z "$$branch" ]; then \
+		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
+		exit 1; \
+	fi; \
+	echo "Triggering E2E workflow on branch $$branch..."; \
+	gh workflow run e2e.yml --ref "$$branch"
+
+E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
+E2E_RUN_ID ?=
+
+fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
+	@$(CURDIR)/scripts/fetch-e2e-logs.py \
+		--output-dir "$(E2E_LOG_DIR)" \
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")
+
+prune-tombstones: ## Delete every file whose contents are a tombstone comment
+	@python3 scripts/prune_tombstones.py

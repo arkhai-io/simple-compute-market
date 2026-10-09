@@ -7,9 +7,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from arkhai_apicredits.settlement import CreditsServiceClient
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    ClientForOwner,
+    PaymentSellerStage,
+    servicing_stage,
+)
 from market_core import MarketDomainContract, SettlementStageTable
-from apicredits_storefront.settlement_stages import AlkahestSellerStage, PaymentSellerStage
-
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -26,12 +32,16 @@ from apicredits_storefront.services.issuance_evidence import (
     ApiCreditsIssuanceEvidenceService,
     IssuanceEvidenceRepository,
 )
+from apicredits_storefront.services.credits_service_client import get_credits_service_client
+from apicredits_storefront.services.payment_settlement_service import (
+    ApiCreditPaymentSettlementService,
+)
+from apicredits_storefront.settlement_stages import AlkahestSellerStage, ArkhaiPaymentsSellerStage
 from apicredits_storefront.utils import config as storefront_config
-from domains.apicredits.settlement import CreditsServiceClient
 
 SELLER_STAGES = SettlementStageTable({
     "alkahest.v1": AlkahestSellerStage(),
-    "arkhai.payments.v1": PaymentSellerStage(),
+    ARKHAI_PAYMENTS_MECHANISM: ArkhaiPaymentsSellerStage(),
 })
 
 logger = logging.getLogger(__name__)
@@ -65,10 +75,22 @@ class ApiCreditsSettlementComposition:
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
+    arkhai_payments_stage: PaymentSellerStage | None = None
 
     def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
         mechanism = agreement["settlement"]["mechanism"]
-        return SELLER_STAGES[mechanism].agreement_artifacts(agreement, self.settlement_config)
+        return SELLER_STAGES[mechanism].agreement_artifacts(agreement, self)
+
+    def payment_service(self, db: Any) -> Any:
+        """The deal-scoped payment settlement service, or None when payments is not serviced."""
+        if self.arkhai_payments_stage is None:
+            return None
+        return ApiCreditPaymentSettlementService(
+            db=db,
+            composition=self,
+            stage=self.arkhai_payments_stage,
+            mechanism=ARKHAI_PAYMENTS_MECHANISM,
+        )
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -205,6 +227,7 @@ def build_api_credit_settlement_composition(
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
     failure_policy: Any,
+    payments_client_for_owner: ClientForOwner | None = None,
 ) -> ApiCreditsSettlementComposition:
     """Build lazy mechanism clients and the shared servicing worker."""
     repository = SettlementSQLiteRepository(
@@ -236,10 +259,9 @@ def build_api_credit_settlement_composition(
                 mechanism_clients[registration.mechanism_id] = client
 
     runtime = SettlementRuntime(repository, mechanism_clients)
-    credits_client = CreditsServiceClient(
-        storefront_config.credits_service_url(),
-        storefront_config.credits_admin_key(),
-    )
+    # The process-wide client carries the storefront's signed authority
+    # configuration; every issuance and rollback goes through it.
+    credits_client = get_credits_service_client()
     evidence_service = ApiCreditsIssuanceEvidenceService(
         IssuanceEvidenceRepository(sqlite_client.db_path),
         signer=marketplace_signer,
@@ -268,5 +290,17 @@ def build_api_credit_settlement_composition(
         evidence_service=evidence_service,
         private_results=private_results,
         failure_policy=failure_policy,
+        arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
     )
     return composition
+
+
+def _payments_stage(
+    settlement_config: Any, client_for_owner: ClientForOwner | None
+) -> PaymentSellerStage | None:
+    # Accepted payment deals are serviced whether or not new payment options are
+    # published, so the stage follows the servicing fields, not `enabled`.
+    return servicing_stage(
+        settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY),
+        client_for_owner=client_for_owner,
+    )

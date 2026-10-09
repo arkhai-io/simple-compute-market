@@ -34,3 +34,24 @@ class PaymentsPollTimeout(PaymentsError, TimeoutError):
     def __init__(self, transaction: str) -> None:
         self.transaction = transaction
         super().__init__(f"timed out waiting for transaction {transaction}")
+
+
+class PaymentsUnavailable(PaymentsError):
+    """The payments service could not complete a call that a retry may complete."""
+
+
+class ReceiptVerificationError(PaymentsError, ValueError):
+    """A service receipt does not prove the accepted Agreement and mandate."""
+
+
+class PaymentApprovalDeclined(PaymentsError):
+    """The buyer declined a mandate that otherwise passed every check."""
+
+
+class PaymentsBlocked(PaymentsError):
+    """A payments call failed in a way only the seller's operator can repair.
+
+    Authentication, authorization, missing configuration, and responses outside
+    the published contract are not transient: retrying cannot succeed until the
+    integration is fixed.
+    """

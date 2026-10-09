@@ -42,22 +42,23 @@ def _record_bound_listing(
     resource_id: str | None,
     gpu_count: int,
 ) -> None:
-    offer = {
+    listing_resource = {
         "gpu_model": "H200",
         "gpu_count": gpu_count,
-        "virtualization_type": "vm",
+        "offering_mode": "vm",
     }
     if pool_id is not None:
-        offer["pool_id"] = pool_id
+        listing_resource["pool_id"] = pool_id
     if resource_id is not None:
-        offer["resource_id"] = resource_id
+        listing_resource["resource_id"] = resource_id
     binding = prepare_vm_listing_binding(
         listing_id=listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": site_id,
             "pool_id": pool_id,
             "resource_id": resource_id,
-            "gpu_count": gpu_count,
+            "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
         },
     )
     repository = SQLiteClient(db_path=db_path, registry=_VM_REGISTRY)
@@ -67,7 +68,7 @@ def _record_bound_listing(
             status="open",
             created_at="2026-08-15T00:00:00Z",
             updated_at="2026-08-15T00:00:00Z",
-            offer_resource=offer,
+            listing_resource=listing_resource,
             fulfillment_resource=None,
             max_duration_seconds=3600,
             storefront_url="http://storefront.test",
@@ -122,7 +123,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {
@@ -175,7 +176,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "a-different-pool",
+                    "pool_id": "a-different-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {"deliverable_modes": ["vm"]},
@@ -196,7 +197,7 @@ class TestLookupPoolPolicyTags:
         )
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
-                {"resource_pool_id": "gpu-pool", "resources": []},
+                {"pool_id": "gpu-pool", "resources": []},
             ]),
         })
         assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
@@ -217,7 +218,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {

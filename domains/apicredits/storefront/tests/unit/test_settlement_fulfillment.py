@@ -16,14 +16,14 @@ from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import ImmutableFulfillmentCapability, SettlementEvidence
 from market_identity import Ed25519Signer
 
-from domains.apicredits.settlement import fulfillment as fulfillment_module
-from domains.apicredits.settlement.credits_client import (
+from arkhai_apicredits.settlement import fulfillment as fulfillment_module
+from arkhai_apicredits.settlement.credits_client import (
     CreditIssuanceRequest,
     CreditIssuanceResult,
     CreditsServiceClient,
     CreditsServiceError,
 )
-from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
@@ -43,7 +43,7 @@ def _evidence(reference="neg-purchase", *, quantity=3, mechanism="opaque.future.
         {"kind": "api_credits.settlement-evidence.v1", "schema_version": 1,
          "agreement_digest": "a" * 64, "source": {"verified_source": "fixture", "funding_expiration_unix": 1_800_000_000, "obligation_ref": "accepted-obligation"},
          "delivery": {"owner": _BUYER_PRINCIPAL.model_dump(mode="json"),
-                      "offer_resource": dict(_OFFER if offer is None else offer),
+                      "listing_resource": dict(_OFFER if offer is None else offer),
                       "quantity": quantity, "key_mode": "new", "key_id": None, "listing_id": "L-tok"}},
     )
 
@@ -337,9 +337,9 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
 
     assert result["status"] == "fulfilled"
     delivery = fulfillment_module.credit_delivery(captured["evidence"])
-    assert delivery.offer_resource["kind"] == "api_credits.v1"
-    assert delivery.offer_resource["service_name"] == _OFFER["service_name"]
-    assert delivery.offer_resource["resource_id"] == _OFFER["resource_id"]
+    assert delivery.listing_resource["kind"] == "api_credits.v1"
+    assert delivery.listing_resource["service_name"] == _OFFER["service_name"]
+    assert delivery.listing_resource["resource_id"] == _OFFER["resource_id"]
 
 
 async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
@@ -437,8 +437,8 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     db = SQLiteClient(str(tmp_path / "failure.db"))
     now = datetime.now().isoformat()
     await db.upsert_listing(
-        listing_id="L-tok", status="closed", created_at=now, updated_at=now,
-        offer_resource=dict(_OFFER), fulfillment_resource=None, max_duration_seconds=None,
+        listing_id="L-tok", status="closed", closed_by="seller", created_at=now,
+        updated_at=now, listing_resource=dict(_OFFER), fulfillment_resource=None, max_duration_seconds=None,
         storefront_url="http://seller:8002", seller_principal=_SELLER_PRINCIPAL,
     )
     await db.save_capacity_hold(
@@ -548,7 +548,7 @@ async def settled_db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource=dict(_OFFER),
+        listing_resource=dict(_OFFER),
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -845,3 +845,79 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
             request=_settlement_request(neg_id),
         )
     assert await db.load_escrow(escrow_uid="0xbad") is None
+
+
+def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
+    """The fulfillment input carries a domain listing, not a database row.
+
+    `prepare` reads the seller's order with `load_listing`, which returns
+    this storefront's own row: the domain payload plus its bookkeeping
+    columns. That row then reaches the domain's `normalize_listing` hook,
+    and `ApiCreditsListing` sets `extra="forbid"` -- so issuance failed
+    with eleven `extra_forbidden` errors before making a single call to the
+    credits service, and the only record was the reason persisted on the
+    escrow row.
+
+    Both halves are asserted. The raw row must still be refused: that
+    strictness is the wire contract for a listing arriving from a
+    registry, and narrowing the model instead of the caller would have
+    traded this bug for a weaker guard on untrusted input.
+    """
+    from apicredits_storefront.settlement_stages import _domain_order
+    from arkhai_apicredits.domain_runtime import _normalize_listing
+    from arkhai_apicredits.schema import ApiCreditsListing
+    from pydantic import ValidationError
+
+    resource = {
+        "service_name": "weather-api",
+        "resource_id": "weather-quota",
+        "price_per_token": "1",
+        "token": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "chain": "anvil",
+        "base_url": "http://sample-app:8085",
+        "capacity_site_id": "default",
+    }
+    row = {
+        "kind": "api_credits.v1",
+        # Stored as JSON text, which the domain model's own before-validator
+        # already handles; this test is about the surrounding columns.
+        "listing_resource": json.dumps(resource),
+        "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0x1111"}],
+        "settlement_options": [],
+        "demands": [],
+        # The bookkeeping the model forbids, named by the e2e failure.
+        "listing_id": "d6f4e4dc-06de-4a2f-a4df-b2f1bf64abab",
+        "agent_url": "http://credits-storefront:8000/",
+        "oracle_address": None,
+        "paused": False,
+        "publication_clauses": None,
+        "seller_principal": {"scheme": "eip191", "identifier": "0x90f7"},
+        "status": "open",
+        "registry_status": "published",
+        "created_at": "2026-09-14T00:00:00+00:00",
+        "updated_at": "2026-09-14T00:00:00+00:00",
+        "max_duration_seconds": 3600,
+    }
+
+    with pytest.raises(ValidationError):
+        _normalize_listing(row)
+
+    projected = _domain_order(row)
+    assert set(projected) <= set(ApiCreditsListing.model_fields)
+
+    listing = _normalize_listing(projected)
+    assert listing.listing_resource.service_name == "weather-api"
+    assert listing.listing_resource.resource_id == "weather-quota"
+    # The payload the issuance call actually needs survives the projection.
+    assert listing.accepted_escrows == row["accepted_escrows"]
+
+
+async def test_a_stage_without_seller_refunds_refuses_the_route_and_skips_the_action():
+    from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
+
+    stage = AlkahestSellerStage()
+    with pytest.raises(SettlementRefusal) as refused:
+        await stage.refund(db=None, composition=None, negotiation_id="neg-alkahest")
+    assert refused.value.status_code == 409
+    skipped = await stage.refund_before_delivery(db=None, composition=None, negotiation_id="neg-alkahest")
+    assert skipped == {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}

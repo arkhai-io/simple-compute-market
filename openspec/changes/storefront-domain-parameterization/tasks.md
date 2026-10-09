@@ -23,7 +23,7 @@
 
 - [x] 4.1 Verify implementation changed no persistence or carrier contract: do not add or edit `domains/vms/storefront/src/market_storefront/utils/migrations.py`, `core/storefront/src/core_storefront/sqlite_migrations.py`, public request/response models, contract fixtures, database columns, migration version, or backfill. Record in `design.md` if implementation evidence overturns this decision before introducing any such change.
 - [x] 4.2 Verify no operator selection or package-topology input was introduced: leave `domains/vms/storefront/settings.toml`, `domains/vms/storefront/src/market_storefront/utils/config.py`, Compose files, `helm/`, `domains/vms/storefront/Dockerfile`, `pyproject.toml`, and `uv.lock` unchanged except an explicitly justified test-target inclusion. Confirm existing VM and Alkahest configuration, routes, default command, wheel dependencies, and deployment renders require no migration step.
-- [ ] 4.3 The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
+- [ ] 4.3 Re-run at closeout; any remaining failure belongs to the bare-metal contribution and is recorded against `bare-metal-and-credits-domain-stacks` 4a. The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
 
 ## 5. Repository closeout
 
@@ -33,3 +33,24 @@
 - [x] 5.4 **Narrative compression:** preserve all completed checkboxes, reduce completed-task notes to final behavior, material validation evidence, unresolved/deferred work, and permanent destinations, and move any durable alternative or review rationale into `design.md` before deleting duplicated narrative.
 - [x] 5.5 **Roadmap currency:** update `docs/development/ROADMAP.md` under the multi-domain storefront goal so current state says the VM and bare-metal roots both inject contracts and the remaining gap is explicit per-record domain/offering-mode selection and persistence owned by `multi-domain-storefront-composition`; keep the gap-to-change mapping current and record the exact roadmap destination in the design-promotion record.
 - [x] 5.6 **Promotion record and closeout evidence:** update `design.md#permanent-promotion-map` with every accepted decision's final permanent location or explicit temporary/rejected/superseded classification, verify no production source references `openspec/changes/storefront-domain-parameterization`, disclose every focused/integration/package/type check run or unrun, and confirm `multi-domain-storefront-composition` and `kit-storefront-composition-seam` consume this seam without a fallback before marking the change complete.
+- [ ] 5.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+- [ ] 5.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=storefront-domain-parameterization` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.

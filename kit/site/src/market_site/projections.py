@@ -122,7 +122,7 @@ def resource_pool_projection(
     result: list[dict[str, Any]] = []
     for pool_id in sorted(pools):
         inventory = sorted(pools[pool_id], key=lambda row: row["physical_resource_id"])
-        row: dict[str, Any] = {"resource_pool_id": pool_id, "resources": inventory}
+        row: dict[str, Any] = {"pool_id": pool_id, "resources": inventory}
         meta = (pool_metadata or {}).get(pool_id)
         if meta is not None:
             row["pool_metadata"] = _project_pool_metadata(meta)
@@ -133,7 +133,7 @@ def resource_pool_projection(
 def _grouping_attributes(resource: Mapping[str, Any]) -> dict[str, Any]:
     attrs = dict(resource.get("attributes") or {})
     # Identity and volatile operational details are intentionally excluded.
-    for key in ("resource_id", "physical_resource_id", "vm_host", "updated_at", "created_at"):
+    for key in ("resource_id", "physical_resource_id", "updated_at", "created_at"):
         attrs.pop(key, None)
     return attrs
 
@@ -145,7 +145,7 @@ def capacity_bucket_projection(resources: Iterable[Mapping[str, Any]]) -> list[d
         if not resource.get("enabled", True):
             continue
         criteria = {
-            "resource_pool_id": str(resource.get("pool_id") or resource["resource_id"]),
+            "pool_id": str(resource.get("pool_id") or resource["resource_id"]),
             "resource_type": resource.get("resource_type"),
             "resource_subtype": resource.get("resource_subtype"),
             "available": dict(resource.get("available") or {}),

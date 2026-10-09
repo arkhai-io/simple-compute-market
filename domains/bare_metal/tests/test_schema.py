@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
+from market_capability_shape import FieldKind, shape_digest
+from pydantic import ValidationError
+
 from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_PROVISION_VERSION,
@@ -11,9 +15,8 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     PHYSICAL_HOST_ID_REF_KEY,
     SSH_ACCESS_METHOD,
-    BareMetalAccessResult,
-    BareMetalLeaseCreate,
-    BareMetalLeaseView,
+    BareMetalResult,
+    BareMetalAccessGrant,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -22,24 +25,23 @@ from arkhai_bare_metal import (
     BareMetalTerms,
     bare_metal_executor_ref,
     make_bare_metal_provision_terms,
-    materialization_to_lease_create,
-    receipt_from_lease_view,
+    materialization_to_access_grant,
 )
-from pydantic import ValidationError
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def test_bare_metal_listing_is_domain_payload_not_registry_row():
     listing = BareMetalListing(
-        machine_id="bm-node-1",
+        capacity_backing="backed",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         min_duration_seconds=3600,
         max_duration_seconds=7200,
-        site={"region": "us-west"},
-        capabilities={"gpu_model": "L40S", "ram_gb": 256},
+        **LISTING_HARDWARE,
     )
 
     assert listing.kind == BARE_METAL_SCHEMA_KIND
-    assert listing.machine_id == "bm-node-1"
+    assert listing.host_id == "bm-node-1"
     assert listing.physical_host_id == "host-physical-1"
     assert listing.access_methods == [SSH_ACCESS_METHOD]
     assert "publisher" not in listing.model_dump()
@@ -48,21 +50,74 @@ def test_bare_metal_listing_is_domain_payload_not_registry_row():
 
 def test_bare_metal_listing_keeps_machine_and_physical_ids_separate():
     listing = BareMetalListing(
-        machine_id="executor-local-node",
+        capacity_backing="backed",
+        host_id="executor-local-node",
         physical_host_id="site-physical-host",
+        **LISTING_HARDWARE,
     )
 
-    assert listing.machine_id != listing.physical_host_id
+    assert listing.host_id != listing.physical_host_id
 
 
 def test_bare_metal_listing_rejects_invalid_duration_bounds():
     with pytest.raises(ValidationError):
         BareMetalListing(
-            machine_id="bm-node-1",
+            capacity_backing="backed",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             min_duration_seconds=7200,
             max_duration_seconds=3600,
+            **LISTING_HARDWARE,
         )
+
+
+def test_bare_metal_listing_publishes_exactly_the_compute_flat_names():
+    published = set(BareMetalListing.model_fields) - {
+        "kind", "offering_mode", "capacity_backing", "host_id", "physical_host_id",
+        "access_methods", "min_duration_seconds", "max_duration_seconds", "region",
+        "asking_rate",
+    }
+
+    assert published == set(COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY)) | set(
+        COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE)
+    )
+
+
+def test_bare_metal_listing_refuses_a_field_beside_its_shape():
+    with pytest.raises(ValidationError, match="capabilities"):
+        BareMetalListing(
+            capacity_backing="backed",
+            host_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            capabilities={"gpu_model": "H200"},
+            **LISTING_HARDWARE,
+        )
+
+
+@pytest.mark.parametrize("missing", ["region", "gpu_count", "gpu_model"])
+def test_bare_metal_listing_requires_region_and_gpu(missing):
+    fields = {key: value for key, value in LISTING_HARDWARE.items() if key != missing}
+    with pytest.raises(ValidationError, match=missing):
+        BareMetalListing(
+            capacity_backing="backed",
+            host_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            **fields,
+        )
+
+
+def test_a_listing_digests_as_the_shape_stated_by_hand():
+    listing = BareMetalListing(
+        capacity_backing="backed",
+        host_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        **LISTING_HARDWARE,
+    )
+
+    assert listing.shape == {"gpu": {"count": 8, "model": "H200"}, "memory": {"gib": 2048}}
+    assert listing.shape_digest == shape_digest(
+        {"memory": {"gib": 2048}, "gpu": {"model": "H200", "count": 8}}
+    )
 
 
 def test_bare_metal_message_requires_access_material_for_ssh():
@@ -99,43 +154,10 @@ def test_bare_metal_message_unwraps_versioned_provision_terms():
 @pytest.mark.parametrize(
     "value",
     [
-        {
-            "kind": "compute.v1",
-            "version": 1,
-            "payload": {
-                "duration_seconds": 1,
-                "access_method": "ssh",
-                "ssh_public_key": "key",
-            },
-        },
-        {
-            "kind": "bare_metal.v1",
-            "version": 2,
-            "payload": {
-                "duration_seconds": 1,
-                "access_method": "ssh",
-                "ssh_public_key": "key",
-            },
-        },
-        {
-            "kind": "bare_metal.v1",
-            "version": 1,
-            "payload": {
-                "duration_seconds": 1,
-                "access_method": "ssh",
-                "ssh_public_key": "key",
-                "unknown": True,
-            },
-        },
-        {
-            "kind": "bare_metal.v1",
-            "version": 1,
-            "payload": {
-                "duration_seconds": 1,
-                "access_method": "ssh",
-                "ssh_public_key": "   ",
-            },
-        },
+        {"kind": "compute.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v2", "version": 2, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v2", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key", "unknown": True}},
+        {"kind": "bare_metal.v2", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "   "}},
     ],
 )
 def test_bare_metal_provision_terms_reject_invalid_envelopes(value):
@@ -145,7 +167,7 @@ def test_bare_metal_provision_terms_reject_invalid_envelopes(value):
 
 def test_bare_metal_terms_are_canonical_negotiation_handoff():
     terms = BareMetalTerms(
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         duration_seconds=3600,
         ssh_public_key="ssh-ed25519 AAAA buyer",
@@ -162,7 +184,7 @@ def test_bare_metal_terms_are_canonical_negotiation_handoff():
 def test_bare_metal_materialization_is_settlement_handoff():
     materialization = BareMetalMaterialization(
         escrow_uid="0xbm",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         lease_start_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
         lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
@@ -181,7 +203,7 @@ def test_bare_metal_materialization_rejects_invalid_window():
     with pytest.raises(ValidationError):
         BareMetalMaterialization(
             escrow_uid="0xbm",
-            machine_id="bm-node-1",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             lease_start_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
@@ -189,17 +211,17 @@ def test_bare_metal_materialization_rejects_invalid_window():
         )
 
 
-def test_materialization_to_lease_create_adapts_current_api_request():
+def test_materialization_to_access_grant_adapts_current_api_request():
     materialization = BareMetalMaterialization(
         escrow_uid="0xbm",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
         ssh_public_key="ssh-ed25519 AAAA buyer",
         access_ref={"ssh_user": "tenant-a"},
     )
 
-    request = materialization_to_lease_create(
+    request = materialization_to_access_grant(
         materialization,
         capacity_reservation_id="alloc-1",
         create_job_id="job-1",
@@ -207,7 +229,7 @@ def test_materialization_to_lease_create_adapts_current_api_request():
 
     assert request.capacity_reservation_id == "alloc-1"
     assert request.escrow_uid == "0xbm"
-    assert request.machine_id == "bm-node-1"
+    assert request.host_id == "bm-node-1"
     assert request.physical_host_id == "host-physical-1"
     assert request.lease_end_utc == materialization.lease_end_utc
     assert request.create_job_id == "job-1"
@@ -221,7 +243,7 @@ def test_materialization_to_lease_create_adapts_current_api_request():
 def test_bare_metal_receipt_is_domain_view_not_executor_result():
     receipt = BareMetalReceipt(
         escrow_uid="0xbm",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         lease_start_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
         lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
@@ -235,46 +257,16 @@ def test_bare_metal_receipt_is_domain_view_not_executor_result():
     assert "executor_action" not in receipt.model_dump()
 
 
-def test_receipt_from_lease_view_adapts_current_api_view():
-    lease = BareMetalLeaseView(
-        capacity_reservation_id="alloc-1",
-        escrow_uid="0xbm",
-        machine_id="bm-node-1",
-        physical_host_id="host-physical-1",
-        lease_start_utc="2099-01-01T00:00:00+00:00",
-        lease_end_utc="2099-01-01T01:00:00+00:00",
-        state="leased",
-        release_job_id=None,
-        access_ref={"ssh_user": "tenant-a"},
-    )
-
-    receipt = receipt_from_lease_view(
-        lease,
-        result_ref={"capacity_reservation_id": "alloc-1"},
-    )
-
-    assert receipt.escrow_uid == "0xbm"
-    assert receipt.machine_id == "bm-node-1"
-    assert receipt.status == "leased"
-    assert receipt.lease_start_utc == datetime(
-        2099,
-        1,
-        1,
-        tzinfo=timezone.utc,
-    )
-    assert receipt.result_ref == {"capacity_reservation_id": "alloc-1"}
-
-
 def test_bare_metal_lease_create_keeps_machine_and_physical_ids_separate():
-    body = BareMetalLeaseCreate(
+    body = BareMetalAccessGrant(
         capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         lease_end_utc=datetime(2099, 1, 1, 1, 0, tzinfo=timezone.utc),
     )
 
-    assert body.machine_id == "bm-node-1"
+    assert body.host_id == "bm-node-1"
     assert body.physical_host_id == "host-physical-1"
 
 
@@ -292,9 +284,9 @@ def test_bare_metal_executor_ref_uses_reserved_physical_host_key():
 
 def test_bare_metal_lease_create_rejects_blank_identity_fields():
     with pytest.raises(ValidationError):
-        BareMetalLeaseCreate(
+        BareMetalAccessGrant(
             escrow_uid="0xbm",
-            machine_id=" ",
+            host_id=" ",
             physical_host_id="host-physical-1",
             lease_end_utc=datetime(2099, 1, 1, 1, 0, tzinfo=timezone.utc),
         )
@@ -307,23 +299,24 @@ def test_bare_metal_access_actions_are_domain_owned():
     )
 
 
-def test_bare_metal_access_result_accepts_contract_action():
-    result = BareMetalAccessResult(
-        action=NODE_GRANT_ACCESS_ACTION,
-        machine_id="bm-node-1",
-        physical_host_id="host-physical-1",
+def test_the_buyer_result_names_the_account_and_window_but_no_endpoint():
+    result = BareMetalResult(
         ssh_user="tenant-a",
-        escrow_uid="0xbm",
+        ready_at=datetime(2026, 10, 6, 12, tzinfo=timezone.utc),
+        lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
     )
 
-    assert result.action == NODE_GRANT_ACCESS_ACTION
-    assert result.machine_id == "bm-node-1"
-    assert result.status == "success"
-
-
-def test_bare_metal_access_result_rejects_unknown_action():
+    assert result.access_method == SSH_ACCESS_METHOD
     with pytest.raises(ValidationError):
-        BareMetalAccessResult(
-            action="delete_everything",
-            machine_id="bm-node-1",
+        BareMetalResult.model_validate(
+            {**result.model_dump(mode="json"), "host": "203.0.113.7", "port": 22}
+        )
+
+
+def test_the_buyer_result_refuses_naive_times():
+    with pytest.raises(ValidationError):
+        BareMetalResult(
+            ssh_user="tenant-a",
+            ready_at=datetime(2026, 10, 6, 12),
+            lease_end_utc=datetime(2026, 10, 6, 13, tzinfo=timezone.utc),
         )

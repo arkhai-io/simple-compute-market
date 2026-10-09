@@ -3,29 +3,48 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from market_arkhai_payments import (
+    PaymentSellerStage,
+    ReconciliationPass,
+    reconcile_accepted_payments,
+)
 from market_core import SettlementEvidence, SettlementStageTable
 from market_core.schemas import Agreement
 from market_identity import Identity
 from market_settlement_runtime import SettlementRuntime
 
-from .arkhai_payments import BareMetalArkhaiPaymentsStage
+from .fulfillment_service import BareMetalFulfillmentError
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
-    BareMetalSettlePendingResponse,
     BareMetalSettleStatusResponse,
 )
 from .settlement_evidence import DeliveryInput, EvidencePayload
-from .settlement_stages import SettlementRequestError
+from .settlement_stages import PaymentSettleResult, SettlementRequestError
 from .settlement_composition import SELLER_STAGES
 from .sqlite_client import SQLiteClient
 
+logger = logging.getLogger(__name__)
+
 VerifyEscrow = Callable[..., Awaitable[int]]
 PlanBuilder = Callable[..., dict[str, Any]]
+BeginFulfillment = Callable[..., Awaitable[dict[str, Any]]]
+
+# Evidence statuses a seller refund may move verified evidence through. The
+# verified facts stay unchanged; only delivery that had already started may
+# still be read under them.
+_REFUND_STATUSES = frozenset({"refunding", "refunded"})
+
+__all__ = [
+    "BareMetalSettlementService",
+    "PaymentSettleResult",
+    "SettlementRequestError",
+]
 
 
 @dataclass(frozen=True)
@@ -37,8 +56,9 @@ class BareMetalSettlementService:
     build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
     settlement_runtime: SettlementRuntime
-    arkhai_payments_stage: BareMetalArkhaiPaymentsStage | None = None
+    arkhai_payments_stage: PaymentSellerStage | None = None
     stages: SettlementStageTable[Any] = SELLER_STAGES
+    begin_fulfillment: BeginFulfillment | None = None
 
     @staticmethod
     def _response(
@@ -111,7 +131,7 @@ class BareMetalSettlementService:
                 "negotiated listing not found", status_code=404
             )
         if (
-            offer.machine_id != terms.machine_id
+            offer.host_id != terms.host_id
             or offer.physical_host_id != terms.physical_host_id
             or terms.listing_ref != thread["our_listing_id"]
         ):
@@ -174,8 +194,18 @@ class BareMetalSettlementService:
         return evidence
 
     async def verified_evidence(
-        self, *, negotiation_id: str, buyer_principal: Identity
+        self,
+        *,
+        negotiation_id: str,
+        buyer_principal: Identity,
+        include_refunds: bool = False,
     ) -> SettlementEvidence:
+        """Verified evidence for an accepted deal, after its entry's recovery gate.
+
+        ``include_refunds`` also admits evidence a seller refund has since moved
+        to ``refunding`` or ``refunded``; only reads of delivery that had already
+        started may ask for it, since a refund never undoes a started delivery.
+        """
         thread = await self._owned_thread(
             negotiation_id=negotiation_id, buyer_principal=buyer_principal
         )
@@ -183,9 +213,12 @@ class BareMetalSettlementService:
         record = await self.db.load_bare_metal_settlement_record(
             negotiation_id=negotiation_id
         )
+        admitted = {"settlement_verified"} | (
+            _REFUND_STATUSES if include_refunds else set()
+        )
         if (
             record is None
-            or record["status"] != "settlement_verified"
+            or record["status"] not in admitted
             or not record["settlement_ref"]
         ):
             raise SettlementRequestError(
@@ -216,13 +249,32 @@ class BareMetalSettlementService:
             evidence=record["evidence"],
         )
 
+    async def start_delivery(
+        self, *, negotiation_id: str, buyer_principal: Identity
+    ) -> dict[str, Any]:
+        """Start fulfillment for a deal whose settlement stage verifies and delivers.
+
+        Fulfillment re-reads the verified evidence and orders its start against
+        refund intent, so a deal refunded first is never delivered.
+        """
+        if self.begin_fulfillment is None:
+            raise SettlementRequestError(
+                "bare-metal fulfillment authorities are unavailable", status_code=503
+            )
+        try:
+            return await self.begin_fulfillment(
+                negotiation_id=negotiation_id, buyer_principal=buyer_principal
+            )
+        except BareMetalFulfillmentError as exc:
+            raise SettlementRequestError(exc.detail, status_code=exc.status_code) from exc
+
     async def verify(
         self,
         *,
         escrow_uid: str,
         request: BareMetalSettleRequest,
         buyer_principal: Identity,
-    ) -> BareMetalSettleResponse | BareMetalSettlePendingResponse:
+    ) -> BareMetalSettleResponse | PaymentSettleResult:
         thread = await self._owned_thread(
             negotiation_id=request.negotiation_id, buyer_principal=buyer_principal
         )
@@ -247,18 +299,78 @@ class BareMetalSettlementService:
             request=request,
         )
 
+    async def reconcile_payments_once(self, *, limit: int = 100) -> ReconciliationPass:
+        """Advance accepted deals their buyers have not settled, without the buyer.
+
+        Each seller entry that converges without its buyer selects its own
+        candidates: deals with no verified evidence, refunds left ``refunding``,
+        and verified deals whose delivery never started. The entry's settle path,
+        the one a buyer's call takes, advances each.
+        """
+        reconciling = {
+            mechanism: stage
+            for mechanism, stage in self.stages.items()
+            if stage.reconcile is not None
+        }
+        candidates: list[tuple[str, Any]] = []
+        for mechanism, stage in reconciling.items():
+            for negotiation_id in await self.db.list_unsettled_payment_negotiations(
+                mechanism=mechanism, limit=limit
+            ):
+                candidates.append((negotiation_id, stage))
+        by_negotiation = dict(candidates[:limit])
+
+        async def settle(negotiation_id: str) -> None:
+            thread = await self.db.load_negotiation_thread_row(
+                negotiation_id=negotiation_id
+            )
+            if thread is None:
+                raise SettlementRequestError("negotiation not found", status_code=404)
+            await by_negotiation[negotiation_id].reconcile(
+                self,
+                negotiation_id=negotiation_id,
+                thread=thread,
+                buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+            )
+
+        return await reconcile_accepted_payments(
+            list(by_negotiation), settle, logger=logger
+        )
+
+    async def refund(self, *, negotiation_id: str) -> PaymentSettleResult:
+        """Refund an accepted deal through its Agreement's seller entry.
+
+        An entry without a seller refund reverses through its own mechanism
+        path, so the request is refused rather than reinterpreted.
+        """
+        thread = await self.db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id
+        )
+        if thread is None or thread.get("terminal_state") != "success":
+            raise SettlementRequestError(
+                "accepted negotiation not found", status_code=404
+            )
+        stage = self.accepted_stage(thread, negotiation_id)
+        if stage.refund is None:
+            raise SettlementRequestError(
+                "this settlement mechanism refunds through its own path"
+            )
+        return await stage.refund(self, negotiation_id=negotiation_id, thread=thread)
+
     async def status(
         self, *, escrow_uid: str, buyer_principal: Identity
     ) -> BareMetalSettleStatusResponse:
         record = await self.db.load_bare_metal_settlement_record_by_ref(
             settlement_ref=escrow_uid
-        )
+        ) or await self.db.load_bare_metal_settlement_record(negotiation_id=escrow_uid)
         if record is None:
             raise SettlementRequestError(
                 "settlement evidence not found", status_code=404
             )
         evidence = await self.verified_evidence(
-            negotiation_id=record["negotiation_id"], buyer_principal=buyer_principal
+            negotiation_id=record["negotiation_id"],
+            buyer_principal=buyer_principal,
+            include_refunds=True,
         )
         thread = await self._owned_thread(
             negotiation_id=evidence.negotiation_id, buyer_principal=buyer_principal
@@ -270,5 +382,8 @@ class BareMetalSettlementService:
             seller_principal=Identity.model_validate(thread["seller_principal"]),
             status=evidence.status,
             obligation_ref=evidence.evidence["source"].get("obligation_ref"),
-            fulfillment_available=evidence.evidence["delivery"] is not None,
+            fulfillment_available=(
+                evidence.evidence["delivery"] is not None
+                and evidence.status == "settlement_verified"
+            ),
         )

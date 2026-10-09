@@ -21,16 +21,57 @@
 
 - name: Get total GPU count
   shell: |
-    # Count NVIDIA and AMD GPUs using lspci (only .0 functions to match allocation logic)
-    GPU_COUNT=$(lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:' | grep '\.0 ' | wc -l)
+    # Count GPUs that can actually be handed to a guest -- those bound to
+    # vfio-pci -- rather than every GPU present on the machine. A card whose
+    # IOMMU group contains a device the host needs is left on its normal
+    # driver and cannot be attached to a VM, so counting it would publish
+    # capacity that no create job can satisfy.
+    #
+    # Only .0 functions are counted, matching the allocation logic below: a
+    # card's audio and USB functions are bound alongside it but are not
+    # separately allocatable.
+    SYSFS="${SYSFS_ROOT:-/sys}"
+    GPU_COUNT=0
+    for dev in "$SYSFS"/bus/pci/devices/*; do
+      [ -d "$dev" ] || continue
+      addr=$(basename "$dev")
+      case "$addr" in *.0) ;; *) continue ;; esac
+      cls=$(cat "$dev/class" 2>/dev/null || echo "")
+      case "$cls" in 0x0300*|0x0302*) ;; *) continue ;; esac
+      vendor=$(cat "$dev/vendor" 2>/dev/null || echo "")
+      case "$vendor" in 0x10de|0x1002) ;; *) continue ;; esac
+      drv=""
+      if [ -L "$dev/driver" ]; then
+        drv=$(basename "$(readlink -f "$dev/driver")")
+      fi
+      if [ "$drv" = "vfio-pci" ]; then
+        GPU_COUNT=$((GPU_COUNT + 1))
+      fi
+    done
     echo "$GPU_COUNT"
   register: host_total_gpus
   delegate_to: "{{ target_host }}"
 
 - name: Get GPU details (model and brand)
   shell: |
-    # Get NVIDIA and AMD GPU details using lspci
-    lspci -nn | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:' | while read -r line; do
+    # Details for the same set the count reports: passthrough-capable cards
+    # only, so details and count cannot disagree about what this host offers.
+    SYSFS="${SYSFS_ROOT:-/sys}"
+    passthrough_addrs=""
+    for dev in "$SYSFS"/bus/pci/devices/*; do
+      [ -d "$dev" ] || continue
+      addr=$(basename "$dev")
+      case "$addr" in *.0) ;; *) continue ;; esac
+      drv=""
+      if [ -L "$dev/driver" ]; then
+        drv=$(basename "$(readlink -f "$dev/driver")")
+      fi
+      [ "$drv" = "vfio-pci" ] || continue
+      passthrough_addrs="$passthrough_addrs $addr"
+    done
+    for addr in $passthrough_addrs; do
+      line=$(lspci -Dnn -s "$addr" | grep -iE 'vga|3d|display' | grep -E '\[10de:|\[1002:') || continue
+      [ -n "$line" ] || continue
       # Determine brand
       if echo "$line" | grep -q '\[10de:'; then
         BRAND="NVIDIA"

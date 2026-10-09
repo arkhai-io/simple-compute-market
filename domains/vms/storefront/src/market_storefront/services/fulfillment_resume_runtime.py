@@ -18,26 +18,32 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
 
-from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
-from market_core import SettlementEvidence
+from compute_provisioning_contracts import (
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+)
+from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
-    VersionedEnvelope,
 )
 
-import market_storefront.container as _container
+from market_storefront import container as _container
+from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
 )
 from market_storefront.services.fulfillment_service import (
-    _fulfillment_result_to_legacy_shape,
-    _register_vm_lease_with_settings,
+    _fulfillment_result_to_connection,
 )
-from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+from market_storefront.services.vm_fulfillment_planner import (
+    VERIFIED_EVIDENCE_STATUSES,
+    build_vm_fulfillment_plan,
+)
 from market_storefront.services.vm_fulfillment_service import (
+    _lease_window_strings,
     persist_delivery_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -62,32 +68,38 @@ def _validated_context(raw: str | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-async def _refresh_capacity_lease(
+async def _commit_recovered_reservation(
     *,
     negotiation_id: str,
     reservation_id: str,
-    resource_id: str,
-    lease_start_utc: str,
-    lease_end_utc: str,
+    context: dict[str, Any],
     capacity_client: Any,
     site_id: str,
 ) -> None:
-    if capacity_client is None or not reservation_id or not resource_id:
+    """Commit the deal's reservation before its fulfillment begins.
+
+    A recovered deal's reservation may never have been committed: a fresh
+    recovery reserve is not, and the settlement path can stop between
+    reserving and committing. A lease with no negotiated start begins at
+    commit, so the deal's window starts here; a reservation already committed
+    keeps the window its first commit recorded, since a repeat commit leaves it
+    unchanged. The commit also names the deal. A failed commit raises, so the
+    pass stops before provisioning and the next one retries.
+    """
+    if capacity_client is None:
         return
-    try:
-        await capacity_client.commit(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            idempotency_ref=negotiation_id,
-            site_id=site_id,
-        )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Lease refresh failed for negotiation %s",
-            negotiation_id,
-        )
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=context.get("start_utc"),
+        duration_seconds=int(context.get("duration_seconds") or 3600),
+    )
+    await capacity_client.commit(
+        capacity_reservation_id=reservation_id,
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+        idempotency_ref=negotiation_id,
+        deal_ref={"negotiation_id": negotiation_id},
+        site_id=site_id,
+    )
 
 
 async def _store_fulfillment_credentials(
@@ -109,15 +121,9 @@ async def _store_fulfillment_credentials(
                 role=role,
                 granted_to="self",
                 password=data.get("password"),
-                ssh_commands=(
-                    json.dumps(data.get("ssh_commands"))
-                    if data.get("ssh_commands")
-                    else None
-                ),
-                ssh_key_path_host=(
-                    data.get("ssh_key_path_host") if role == "root" else None
-                ),
-                key_type=(data.get("key_type") if role == "tenant" else None),
+                # A delivery carries each credential's allowlisted fields only:
+                # no key path on a provisioner host, and no commands.
+                key_type=data.get("key_type"),
             )
         except Exception:
             logger.exception(
@@ -125,36 +131,6 @@ async def _store_fulfillment_credentials(
                 negotiation_id,
                 role,
             )
-
-
-async def _register_recovered_vm_lease(
-    *,
-    register_lease: Callable[..., Awaitable[Any]] | None,
-    negotiation_id: str,
-    reservation_id: str,
-    resource_id: str,
-    vm_host: Any,
-    vm_target: Any,
-    lease_start_utc: str,
-    lease_end_utc: str,
-) -> None:
-    if not (register_lease and reservation_id and vm_target):
-        return
-    try:
-        await register_lease(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            negotiation_id=negotiation_id,
-            vm_host=str(vm_host) if vm_host else None,
-            vm_target=str(vm_target),
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-        )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Provisioning lease registration failed for negotiation %s",
-            negotiation_id,
-        )
 
 
 async def _update_fulfilled_listing(
@@ -208,43 +184,21 @@ async def converge_post_physical_delivery(
     capacity_client: Any,
     connection_details: dict[str, Any],
     authentication: dict[str, Any] | None,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
-    evidence: SettlementEvidence,
     continuation: Callable[..., Awaitable[str]] | None = None,
-    site_id: str,
 ) -> bool:
-    """Converge the durable storefront effects after physical success."""
+    """Converge the durable storefront effects after physical success.
+
+    The lease needs nothing here: its window was recorded at commit, before
+    the fulfillment began, and provisioning recorded its target when the
+    fulfillment became active.
+    """
     negotiation_id = str(delivery["negotiation_id"])
-    reservation_id = str(delivery.get("capacity_reservation_id") or "")
-    resource_id = str(delivery.get("settlement_resource_id") or "")
     listing_id = context.get("listing_id")
-    request = (context.get("fulfillment_request") or {}).get("payload") or {}
-    plan = build_vm_fulfillment_plan(evidence=evidence)
-    lease_start_utc, lease_end_utc = plan.start_utc, plan.lease_end_utc
-    await _refresh_capacity_lease(
-        negotiation_id=negotiation_id,
-        reservation_id=reservation_id,
-        resource_id=resource_id,
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-        capacity_client=capacity_client,
-        site_id=site_id,
-    )
     await _store_fulfillment_credentials(
         sqlite_client=sqlite_client,
         negotiation_id=negotiation_id,
         credential_listing_id=context.get("seller_order_id") or listing_id,
         authentication=authentication,
-    )
-    await _register_recovered_vm_lease(
-        register_lease=register_lease,
-        negotiation_id=negotiation_id,
-        reservation_id=reservation_id,
-        resource_id=resource_id,
-        vm_host=connection_details.get("host"),
-        vm_target=request.get("vm_target"),
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
     )
     connection_json = json.dumps(connection_details, sort_keys=True)
     if continuation is None:
@@ -293,10 +247,10 @@ async def _ensure_recovery_capacity(
     if context.get("listing_id") not in (None, listing_id):
         raise RuntimeError("recovery context listing disagrees with accepted binding")
     claim = dict(context.get("required_attributes") or {})
-    claimed_mode = claim.get("executor_kind")
+    claimed_mode = claim.get("offering_mode")
     if claimed_mode not in (None, thread_binding.binding.offering_mode):
         raise RuntimeError("recovery context offering mode disagrees with binding")
-    claim["executor_kind"] = thread_binding.binding.offering_mode
+    claim["offering_mode"] = thread_binding.binding.offering_mode
     try:
         reserved = await capacity_client.reserve(
             claim=claim,
@@ -437,22 +391,14 @@ async def _load_active_physical_result(
         raise RuntimeError(
             "physical fulfillment result disagrees with active lifecycle"
         )
-    domain_result = result_payload.domain_result
-    if (
-        domain_result is None
-        or domain_result.kind != "vm.fulfillment.result.v1"
-        or domain_result.schema_version != 1
-        or not isinstance(domain_result.payload, dict)
-    ):
-        raise RuntimeError("physical fulfillment returned an unsupported VM result")
-    legacy = _fulfillment_result_to_legacy_shape(result_envelope)
-    authentication = legacy.pop("authentication", None)
+    connection = _fulfillment_result_to_connection(result_envelope)
+    authentication = connection.pop("authentication", None)
     checkpoint = await sqlite_client.load_vm_delivery(negotiation_id=negotiation_id)
     phase = checkpoint.get("fulfillment_phase")
     await persist_delivery_fields_with_retry(
         lambda: sqlite_client,
         negotiation_id=negotiation_id,
-        connection_details=json.dumps(legacy, sort_keys=True),
+        connection_details=json.dumps(connection, sort_keys=True),
         tenant_credentials=(
             json.dumps((authentication or {}).get("tenant") or {}, sort_keys=True)
             if authentication
@@ -464,7 +410,7 @@ async def _load_active_physical_result(
             else "physical_result_recorded"
         ),
     )
-    return legacy, authentication
+    return connection, authentication
 
 
 async def converge_delivery_once(
@@ -473,7 +419,6 @@ async def converge_delivery_once(
     sqlite_client: SQLiteClient,
     fulfillment_client: Any,
     capacity_client: Any | None = None,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
     evidence: SettlementEvidence,
     continuation: Callable[..., Awaitable[str]] | None = None,
     failure_policy: Callable[..., Awaitable[Any]] | None = None,
@@ -536,6 +481,14 @@ async def converge_delivery_once(
     )
     if not reservation_id:
         return False
+    if not delivery.get("fulfillment_id"):
+        await _commit_recovered_reservation(
+            negotiation_id=negotiation_id,
+            reservation_id=reservation_id,
+            context=context,
+            capacity_client=capacity_client,
+            site_id=site_id,
+        )
     fulfillment_id, resource_id = await _ensure_recovery_fulfillment_started(
         negotiation_id=negotiation_id,
         request_envelope=request_envelope or {},
@@ -585,10 +538,7 @@ async def converge_delivery_once(
         capacity_client=capacity_client,
         connection_details=connection_details,
         authentication=authentication,
-        register_lease=register_lease,
-        evidence=evidence,
         continuation=continuation,
-        site_id=site_id,
     )
 
 
@@ -600,7 +550,6 @@ async def resume_incomplete_fulfillments_once(
     limit: int = 50,
     owner: str | None = None,
     lease_seconds: int = 60,
-    register_lease: Callable[..., Awaitable[Any]] | None = None,
     composition: Any | None = None,
 ) -> int:
     """Reconstruct selected continuations, revalidate sources, and resume delivery."""
@@ -611,8 +560,6 @@ async def resume_incomplete_fulfillments_once(
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
-    if register_lease is None:
-        register_lease = _register_vm_lease_with_settings
     progressed = 0
     for delivery in await db.list_incomplete_vm_deliveries(limit=limit):
         negotiation_id = delivery["negotiation_id"]
@@ -630,7 +577,13 @@ async def resume_incomplete_fulfillments_once(
                 negotiation_id=negotiation_id
             )
             thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
-            if evidence is None or evidence.status != "verified" or thread is None:
+            # A delivery that started before a refund still completes; its
+            # evidence keeps the verified facts while the status records the refund.
+            if (
+                evidence is None
+                or evidence.status not in VERIFIED_EVIDENCE_STATUSES
+                or thread is None
+            ):
                 continue
             agreement = json.loads(thread["agreement_bytes"])
             stage = composition.seller_stages[agreement["settlement"]["mechanism"]]
@@ -651,7 +604,6 @@ async def resume_incomplete_fulfillments_once(
                 sqlite_client=db,
                 fulfillment_client=remote,
                 capacity_client=capacity,
-                register_lease=register_lease,
             ):
                 progressed += 1
         except asyncio.CancelledError:
@@ -665,6 +617,18 @@ async def resume_incomplete_fulfillments_once(
     return progressed
 
 
+#: Cadence for re-reading a held gate; idle work only.
+_PAUSED_POLL_SECONDS = 0.05
+
+
+async def _reconcile_payment_deals() -> None:
+    """Advance accepted payment deals a buyer has not settled (none without payments)."""
+    composition = _container.resolved_settlement_composition
+    coordinator = getattr(composition, "payments_coordinator", None)
+    if coordinator is not None:
+        await coordinator.reconcile_once()
+
+
 async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM deliveries."""
     from market_storefront.utils.config import settings
@@ -672,5 +636,25 @@ async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
     db = sqlite_client
     while True:
-        await resume_incomplete_fulfillments_once(sqlite_client=db)
-        await asyncio.sleep(interval)
+        try:
+            # Checked before the sweep, not during: a paused storefront must not
+            # be part-way through re-driving a delivery when a scenario reads
+            # its state.
+            if gate(FULFILLMENT_RESUME):
+                await asyncio.sleep(_PAUSED_POLL_SECONDS)
+                continue
+            await resume_incomplete_fulfillments_once(sqlite_client=db)
+            await _reconcile_payment_deals()
+        except asyncio.CancelledError:
+            logger.info("[FULFILLMENT_RESUME] cancelled, shutting down")
+            break
+        except Exception:
+            # A cycle that raises must not end the loop. The per-delivery handler
+            # inside the sweep contains its own failures; this catches the ones
+            # outside it -- listing the incomplete deliveries, or building a client
+            # -- which would otherwise stop the resume worker for the life of
+            # the process with no further sweep and no recovery.
+            logger.exception("[FULFILLMENT_RESUME] sweep failed; continuing")
+        # Through the controller, so a pause requested during the interval
+        # reaches the gate at once rather than after it.
+        await idle(interval)

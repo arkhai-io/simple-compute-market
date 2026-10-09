@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import StageEventRouteService
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from core_storefront.models.system_models import (
+    STAGE_EVENT_PAGE_CAP,
     HealthResponse,
-    StageEventResponse,
 )
-from market_storefront.server import is_globally_paused
+from market_storefront.models.system_status_models import VmSystemStatusResponse
+from market_storefront.lifecycle import trading_pause
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +50,13 @@ class SystemController:
 
     @router.get(
         "/api/v1/system/status",
-        response_model=HealthResponse,
+        response_model=VmSystemStatusResponse,
         summary="Full diagnostic status (includes registry + pause state)",
     )
-    async def system_status(self) -> HealthResponse:
+    async def system_status(self) -> VmSystemStatusResponse:
         body = await self._svc.get_health(include_registry=True)
-        body["paused"] = is_globally_paused()
-        return HealthResponse(**body)
+        body["paused"] = trading_pause().paused
+        return VmSystemStatusResponse(**body)
 
     @router.get(
         "/api/v1/system/events",
@@ -67,43 +67,22 @@ class SystemController:
         self,
         request: Request,
         since_id: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        limit: Annotated[int, Query(ge=1, le=STAGE_EVENT_PAGE_CAP)] = 100,
         stream: Annotated[bool, Query()] = False,
         stage: Annotated[str | None, Query()] = None,
         listing_id: Annotated[str | None, Query()] = None,
         negotiation_id: Annotated[str | None, Query()] = None,
     ):
-        last_event_id_hdr = request.headers.get("last-event-id")
-        if last_event_id_hdr:
-            try:
-                since_id = int(last_event_id_hdr)
-            except (ValueError, TypeError):
-                pass
-
+        events = StageEventRouteService(self._db)
+        since_id = events.resume_point(since_id, request.headers.get("last-event-id"))
+        filters = {
+            "stage": stage,
+            "listing_id": listing_id,
+            "negotiation_id": negotiation_id,
+        }
         if not stream:
-            rows = await self._db.list_stage_events(
-                after_id=since_id,
-                limit=limit,
-                stage=stage,
-                listing_id=listing_id,
-                negotiation_id=negotiation_id,
-            )
-            return StageEventResponse(events=rows, count=len(rows))
-
-        async def _generate():
-            cursor = since_id
-            while True:
-                rows = await self._db.list_stage_events(
-                    after_id=cursor,
-                    limit=50,
-                    stage=stage,
-                    listing_id=listing_id,
-                    negotiation_id=negotiation_id,
-                )
-                for row in rows:
-                    cursor = row["id"]
-                    yield f"id: {cursor}\ndata: {json.dumps(row, default=str)}\n\n"
-                if not rows:
-                    await asyncio.sleep(0.2)
-
-        return StreamingResponse(_generate(), media_type="text/event-stream")
+            return await events.page(since_id=since_id, limit=limit, **filters)
+        return StreamingResponse(
+            events.stream(since_id=since_id, **filters),
+            media_type="text/event-stream",
+        )

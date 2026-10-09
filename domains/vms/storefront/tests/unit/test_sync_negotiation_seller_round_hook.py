@@ -11,12 +11,22 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from domains.vms.negotiation.storefront_round import SellerRoundResult
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
-from market_core.schemas import EscrowProposal, ProvisionTerms, RateValue, SettlementOption, derive_settlement_option_id
+from market_capacity_publication import (
+    CapacityBinding,
+    CapacityRuntime,
+    CapacitySite,
+)
+from market_core.schemas import (
+    EscrowProposal,
+    ProvisionTerms,
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+)
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_policy.identity import Identity
+from market_policy.listing_source import ListingSourceVerdict
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
 
@@ -24,6 +34,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from arkhai_vms_negotiation.storefront_round import SellerRoundResult
 from market_storefront.negotiation_runtime import (
     _decode_vm_terms,
     _default_seller_round_hook,
@@ -83,6 +94,7 @@ def _listing_binding(db, listing_id: str) -> StorefrontListingBinding:
             "payload": {"pool_id": pool_id},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
 
 
@@ -143,13 +155,13 @@ async def db(tmp_path, monkeypatch):
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={
+        listing_resource={
             "gpu_model": "H200",
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
             "resource_id": "resource-hook",
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         settlement_options=[_option().model_dump(mode="json")],
         accepted_escrows=[
@@ -213,6 +225,11 @@ def _proposal(amount: int) -> EscrowProposal:
     )
 
 
+async def _source_matches(_repository, _resolved) -> ListingSourceVerdict:
+    """These tests exercise the policy hook; the source check has its own."""
+    return ListingSourceVerdict("matches")
+
+
 async def _start(
     *,
     sqlite_client,
@@ -225,6 +242,7 @@ async def _start(
     their_agent_url,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -233,6 +251,7 @@ async def _start(
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     proposal_wire = (
         proposal.model_dump(mode="json")
@@ -264,6 +283,7 @@ async def _continue(
     seller_principal=None,
     seller_round_hook=None,
     capacity_runtime=None,
+    listing_source_check=None,
 ):
     registration = sqlite_client.domain_registry.resolve_mode("vm")
     runtime = build_vm_negotiation_runtime(
@@ -272,6 +292,7 @@ async def _continue(
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
         seller_round_hook=seller_round_hook,
+        listing_source_check=listing_source_check or _source_matches,
     )
     return await runtime.continue_negotiation(
         repository=sqlite_client,
@@ -343,10 +364,12 @@ def test_default_policy_is_resolved_from_the_injected_contract(
             run_negotiation_policy=policy,
         ),
     )
-    capacity_runtime = _capacity_runtime()
-
-    assert _default_seller_round_hook(domain, capacity_runtime) is seller_hook
-    assert policy.call_args.args == (capacity_runtime.client(),)
+    assert _default_seller_round_hook(domain) is seller_hook
+    # The policy is given no source check and no capacity client: the
+    # runtime checks the listing against its source and hands each round
+    # the verdict.
+    assert policy.call_args.args == ()
+    assert "source_check" not in policy.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -385,6 +408,7 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
         seen["history"] = kwargs["history"]
         seen["has_policy_inputs"] = "policy_inputs" in kwargs
         seen["has_sqlite_client"] = "sqlite_client" in kwargs
+        seen["listing_source"] = kwargs.get("listing_source")
         return SellerRoundResult(
             our_amount=123,
             strategy_label="maximize",
@@ -420,6 +444,7 @@ async def test_negotiation_runtime_uses_injected_seller_round_hook(db):
     assert seen["history"][0].proposal["fields"]["amount"] == 50
     assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
+    assert seen["listing_source"] == ListingSourceVerdict("matches")
     listing_binding = await db.load_listing_binding(listing_id="L-hook")
     thread_binding = await db.load_thread_binding(
         negotiation_id=response["negotiation_id"]

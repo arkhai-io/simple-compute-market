@@ -2,15 +2,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from arkhai_bare_metal_buyer.cli import _json, _safe_projection
+import typer
+from arkhai_bare_metal_buyer import cli
+from arkhai_bare_metal_buyer.cli import (
+    _IntroductionContext,
+    _json,
+    _safe_projection,
+    bare_metal_app,
+    bare_metal_listing_params,
+    settlement_app,
+)
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
+from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_core import DomainCapability
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
+from registry_client import FilterSpecResponse
 
 PRINCIPAL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -130,76 +142,110 @@ def test_json_output_serializes_nested_wire_models(capsys) -> None:
     }
 
 
-def test_contact_entries_parse_as_bounded_pairs() -> None:
-    from arkhai_bare_metal_buyer.cli import _parse_contact
-
-    assert _parse_contact(["telegram=@buyer", "email= me@example.com "]) == {
-        "telegram": "@buyer",
-        "email": "me@example.com",
-    }
-    import typer
-
-    with pytest.raises(typer.BadParameter):
-        _parse_contact(["telegram"])
-    with pytest.raises(typer.BadParameter):
-        _parse_contact(["=value"])
-
 
 def test_introduction_commands_are_registered() -> None:
-    from arkhai_bare_metal_buyer.cli import bare_metal_app
 
     names = {command.name for command in bare_metal_app.registered_commands}
-    assert {"request-introduction", "buy", "introduce", "introduction"} <= names
+    # The payment purchase and the introduction request are top-level commands.
+    assert {"request-introduction", "buy"} <= names
+    (contact,) = [
+        group for group in settlement_app.registered_groups if group.name == "contact"
+    ]
+    commands = {command.name for command in contact.typer_instance.registered_commands}
+    assert commands == {"introduce", "introduction"}
 
 
-def test_the_reveal_is_printed_before_it_is_delivered(capsys, tmp_path) -> None:
-    """A slow sink must never delay or obscure the answer the buyer came for."""
-
-    from types import SimpleNamespace
-
-    from arkhai_bare_metal_buyer import cli
+def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> None:
+    """A misconfigured sink is refused before anything is revealed."""
 
     order: list[str] = []
-
-    class Sinks:
-        warnings = ()
-        sinks = ("one",)
-
-    def fake_deliver(projection, *, sinks, agreement_ref, counterparty):
-        order.append("delivered")
-        return ()
-
-    original_json = cli._json
-
-    def watching_json(value):
-        order.append("printed")
-        original_json(value)
-
-    monkey = pytest.MonkeyPatch()
-    monkey.setattr(cli, "_json", watching_json)
-    monkey.setattr(cli, "deliver_introduction", fake_deliver)
-    monkey.setattr(cli, "report_delivery", lambda *args, **kwargs: None)
-    try:
-        projection = {"obligation_ref": "a" * 64, "revealed": True}
-        cli._json(projection)
-        cli._deliver_locally(
-            projection,
-            SimpleNamespace(negotiation_id="neg-1", seller_principals=None),
-            Sinks(),
-            SimpleNamespace(event=lambda *args, **kwargs: None),
-        )
-    finally:
-        monkey.undo()
-
-    assert order == ["printed", "delivered"]
-
-
-def test_the_read_command_can_redeliver() -> None:
-    from arkhai_bare_metal_buyer.cli import bare_metal_app
-
-    command = next(
-        item
-        for item in bare_metal_app.registered_commands
-        if item.name == "introduction"
+    deal = SimpleNamespace(
+        negotiation_id="neg-1",
+        settlement_plan={"obligations": []},
+        seller_url="https://seller.invalid",
+        buyer_principal=None,
+        seller_principals=None,
     )
-    assert "deliver" in command.callback.__code__.co_varnames
+    identity = SimpleNamespace(signer=object(), profile_id="profile-1")
+
+    def sinks(config):
+        order.append("sinks")
+        return SimpleNamespace(sinks=(), warnings=())
+
+    def recovered(run_id, config):
+        order.append("deal")
+        return deal, identity, lambda: None
+
+    monkeypatch.setattr(cli, "load_buyer_delivery_sinks", sinks)
+    monkeypatch.setattr(cli, "_recovered_deal", recovered)
+    monkeypatch.setattr(cli, "IntroductionTransport", lambda **kwargs: SimpleNamespace(start=None, read=None))
+
+    run = cli._IntroductionContext().recover("run-1", None, deliver=True)
+    assert order == ["sinks", "deal"]
+    assert run.deliver is not None
+
+    order.clear()
+    quiet = cli._IntroductionContext().recover("run-1", None, deliver=False)
+    assert order == ["deal"]
+    assert quiet.deliver is None
+
+
+def test_the_deleted_outcome_is_the_transports() -> None:
+
+    assert _IntroductionContext.deleted_error is IntroductionPayloadsDeleted
+    deleted = IntroductionPayloadsDeleted(
+        obligation_ref="a" * 64, payloads_deleted_at="2026-10-01T12:00:00Z"
+    )
+    assert deleted.outcome()["payloads_deleted_at"] == "2026-10-01T12:00:00Z"
+
+
+# The two compute-schema filters these tests query, declared as a registry does.
+_FILTER_SPEC = FilterSpecResponse(
+    version=6,
+    etag="spec-etag-1",
+    listing_shape={},
+    filters=[
+        {"name": "gpu_model", "path": "$.listing_resource.gpu_model", "op": "in",
+         "value_type": "string", "on_missing": "fail"},
+        {"name": "gpu_count_min", "query_name": "gpu_count", "query_aliases": ["gpu_count_min"],
+         "path": "$.listing_resource.gpu_count", "op": "range", "value_type": "integer",
+         "alias_kind": "lower_bound", "on_missing": "fail"},
+    ],
+    schema_id="compute.market",
+    schema_version=2,
+)
+
+
+class _SpecClient:
+    def __init__(self) -> None:
+        self.spec_reads = 0
+
+    def get_filter_spec(self) -> FilterSpecResponse:
+        self.spec_reads += 1
+        return _FILTER_SPEC
+
+
+def test_a_listing_read_is_always_restricted_to_bare_metal() -> None:
+    client = _SpecClient()
+
+    assert bare_metal_listing_params(client, None, registry_url="https://registry") == {
+        "offering_mode": "bare_metal"
+    }
+    assert client.spec_reads == 0
+
+
+def test_a_resource_query_compiles_against_the_registry_and_carries_its_etag() -> None:
+    params = bare_metal_listing_params(
+        _SpecClient(), "gpu_model=H200 gpu_count>=8", registry_url="https://registry"
+    )
+
+    assert params["offering_mode"] == "bare_metal"
+    assert params["etag"] == "spec-etag-1"
+    assert {key for key in params} >= {"gpu_model", "gpu_count_min"}
+
+
+def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> None:
+    with pytest.raises(typer.BadParameter, match="--resource|region"):
+        bare_metal_listing_params(
+            _SpecClient(), "region=us-west", registry_url="https://registry"
+        )

@@ -200,6 +200,9 @@ def build_storefront_derivation_key(
     ).hexdigest()
 
 
+CAPACITY_BACKING_VALUES = frozenset({"backed", "unbacked"})
+
+
 @dataclass(frozen=True)
 class StorefrontListingBinding:
     """Trusted common publication mapping for one durable listing."""
@@ -210,12 +213,22 @@ class StorefrontListingBinding:
     derivation_key: str
     source_envelope_json: str
     last_reconciled_at: str
+    # Whether an admission authority stands behind the listing. ``site_id`` is
+    # the listing's origin, which every listing has; this says whether that
+    # origin admits reservations. Required with no default so no writer can
+    # leave a listing to be classified by omission, and immutable once bound.
+    capacity_backing: str
     pool_id: str | None = None
     physical_resource_id: str | None = None
 
     def __post_init__(self) -> None:
         _nonempty(self.listing_id, field="listing_id")
         _nonempty(self.site_id, field="site_id")
+        if self.capacity_backing not in CAPACITY_BACKING_VALUES:
+            raise StorefrontDomainRegistryError(
+                "capacity_backing must be one of "
+                f"{sorted(CAPACITY_BACKING_VALUES)}, not {self.capacity_backing!r}"
+            )
         _nonempty(self.derivation_key, field="derivation_key")
         _nonempty(self.last_reconciled_at, field="last_reconciled_at")
         if self.pool_id is not None:
@@ -244,6 +257,7 @@ class StorefrontListingBinding:
         derivation_key: str,
         source_envelope: Mapping[str, object],
         last_reconciled_at: str,
+        capacity_backing: str,
         pool_id: str | None = None,
         physical_resource_id: str | None = None,
     ) -> "StorefrontListingBinding":
@@ -254,6 +268,7 @@ class StorefrontListingBinding:
             derivation_key=derivation_key,
             source_envelope_json=canonical_source_envelope(source_envelope),
             last_reconciled_at=last_reconciled_at,
+            capacity_backing=capacity_backing,
             pool_id=pool_id,
             physical_resource_id=physical_resource_id,
         )
@@ -270,6 +285,7 @@ class StorefrontListingBinding:
             "derivation_key": self.derivation_key,
             "source_envelope_json": self.source_envelope_json,
             "last_reconciled_at": self.last_reconciled_at,
+            "capacity_backing": self.capacity_backing,
         }
 
 

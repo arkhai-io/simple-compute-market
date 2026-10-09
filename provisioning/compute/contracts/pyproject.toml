@@ -1,0 +1,33 @@
+[project]
+name = "arkhai-compute-provisioning-contracts"
+version = "0.9.1"
+license = "MIT"
+description = "Wire models and route contracts of the compute provisioning family, without its service code."
+requires-python = ">=3.12"
+# Models and route contracts only. The service never depends on its own
+# callers' packages, and a caller never installs the service's persistence.
+dependencies = [
+    # VersionedEnvelope.
+    "arkhai-core>=0.4.0",
+    # The empty-body sentinel the route contracts canonicalize with.
+    "arkhai-kit-identity==0.4.0",
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compute_provisioning_contracts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.23",
+]

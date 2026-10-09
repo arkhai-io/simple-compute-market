@@ -6,7 +6,7 @@ canonical marketplace identity, and optionally provision real KVM VMs.
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
-via wildcard subdomains instead of direct port-forward NAT, see
+through a tunnel relay when your host has no inbound route, see
 [`seller-frp-setup.md`](./seller-frp-setup.md). To sell whole-machine
 SSH access instead of VM slices, see
 [`bare-metal-seller-quickstart.md`](./bare-metal-seller-quickstart.md).
@@ -103,19 +103,52 @@ default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
 
+For payments-only publication, set priority to `["arkhai.payments.v1"]`,
+configure `[Settlement.arkhai_payments]`, omit wallet and chains, and publish a
+complete clause for each asset and rate you offer:
+
+```toml
+[Settlement]
+schema_version = 1
+priority = ["arkhai.payments.v1"]
+
+[Settlement.arkhai_payments]
+enabled = true
+service_url = "https://<PAYMENTS_SERVICE>"
+service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
+fee_bps = 250
+dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
+
+[pricing]
+settlements = [
+  { mechanism = "arkhai.payments.v1", asset = "USD/2", rate = "200", per = "hour", mechanism_input = { payee_account = "<YOUR_PAYEE_ACCOUNT>", asset = "USD/2" } },
+]
+```
+
+These clauses are the storefront-wide terms. A pool's own `pricing` declaration
+at its site, and the storefront's per-pool overrides, take precedence over them;
+there is no command-level override, because the storefront republishes on its
+own and must reach the same terms every cycle.
+
+The receipt-signing identity, fee policy, and dispute authority are trusted
+configuration that both settlement and refunds check against; the API key is
+read from the named environment variable and is never written to
+configuration.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
 
 ## 3. Commercial listing input and capacity identity
 
-Provisioning Host, Resource Pool, and capacity tables are authoritative for
-physical inventory. The storefront loads trusted `site_resource_pools` and
+Capacity declarations are authoritative for what a site sells; a provisioning
+Host record is only how the site reaches a machine. The storefront loads trusted `site_resource_pools` and
 `site_capacity_buckets` projections from each configured site. Commercial
 listing input may still be supplied through `resources.csv`, but each VM row
 must reference a projected `pool_id` or `resource_id` and declare its sellable
 shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
-`vm_host`, authority URLs, API keys, or internal capacity-bucket IDs.
+host identities (`host_id`), authority URLs, API keys, or internal
+capacity-bucket IDs.
 
 ```csv
 resource_id,resource_type,resource_subtype,unit,value,state,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
@@ -128,6 +161,43 @@ replaces command and config clauses in full. `min_price` remains only a
 negotiation-policy floor and never constructs a settlement option. Capacity
 admission, physical selection, prepared execution, and teardown are owned by
 the selected provisioning site rather than this CSV.
+
+### Declaring capacity
+
+A site sells what its capacity declarations say. A declaration names its Resource
+Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
+`ram_gb`, …), the categorical `attributes` claims match (`gpu_model`, `region`),
+and, when it is delivered through a host, that host's `host_id`. A host that no
+declaration names is not published.
+
+There are three ways to declare, and they describe the same declaration:
+
+- `PUT /api/v1/capacity/resources/{resource_id}` for one declaration.
+- A capacity-definitions document, submitted with
+  `POST /api/v1/capacity/definitions/import` (add `"validate_only": true` to
+  preview the changes), or mounted at startup through the chart's
+  `definitions.capacity` value:
+
+  ```yaml
+  resources:
+    - resource_id: compute-kvm1
+      pool_id: default
+      resource_type: compute.gpu
+      host_id: kvm1
+      capacity: {gpu_count: 8, vcpu_count: 192, ram_gb: 2048}
+      attributes: {gpu_model: H200, region: "California, US"}
+  ```
+
+- Host inventory, once: see step 3 of "Live KVM provisioning".
+
+Every entry replaces the whole declaration it names, so restate everything you
+want to keep. Declarations a document does not name are left as they are. Every
+declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
+"Capacity definitions" describes the document's rules in full.
+
+A declaration wins over any GPU count recorded on its host. That can be
+surprising: once a declaration names a host, editing the host's inventory no
+longer changes what is sold. Change the declaration instead.
 
 ## 4. Bring it up
 
@@ -168,16 +238,24 @@ market-storefront config migrate --scope publication \
   --inventory /app/resources.csv --write --backup
 ```
 
-Then publish through the mechanism-neutral storefront command:
+The storefront then publishes on its own. It derives listings from every
+advertisable pool its trusted sites project, publishes them, refreshes open
+listings when their terms change, and closes those whose source no longer
+supports them. To see what its next publication cycle would do, or to run one
+now rather than wait for the timer:
 
 ```bash
 docker compose -f compose/seller.yml exec seller-storefront \
-  market-storefront publish --inventory /app/resources.csv
+  market-storefront publish --dry-run
+docker compose -f compose/seller.yml exec seller-storefront \
+  market-storefront publish
 ```
 
-Repeat `--settlement '<complete clause>'` to override configured clauses in
-command order. Resource-row `settlements` still take highest whole-list
-precedence. Inspect readiness without publishing:
+`market-storefront publish --abort-all` closes every open listing as the seller.
+Publication never reopens a listing its seller closed; resume a listing to re-list
+it. The storefront's lifecycle pause (`POST /api/v1/admin/lifecycle/pause`) holds
+publication with its other loops without affecting trading, and a cycle can still
+be run or previewed while held. Inspect readiness without publishing:
 
 ```bash
 market-storefront settlement status --json
@@ -201,21 +279,24 @@ touching libvirt. To create real VMs:
 
    ```bash
    ssh-keygen -t ed25519 -N "" -f ./keys/id_ed25519
-   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<kvm_host>
+   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<ssh_host>
    chmod 600 ./keys/id_ed25519
    ```
 
-3. Customize your KVM inventory:
+3. List the hosts you sell:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
-   cp hosts.example hosts
-   # edit hosts with your real KVM host(s)
+   cp provisioning-hosts.example provisioning-hosts.ini
+   # edit provisioning-hosts.ini with your real KVM host(s)
    ```
 
-   The provisioning service imports these aliases into its authoritative Host
-   and Resource Pool tables. Storefront listings reference trusted projected
-   `pool_id`/`resource_id`; they do not carry `vm_host`. Each host line's
+   The provisioning service registers every host entry in this file into its
+   authoritative Host and Resource Pool tables, whatever section it is listed
+   under. List only hosts to sell: relay proxies and other infrastructure you
+   manage with the IaC playbooks go in `hosts` in the same directory
+   (`cp hosts.example hosts`), which the service is never given. Storefront listings reference trusted projected
+   `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
    `ansible_host` is how the provisioning service reaches the host over SSH.
    If buyers reach that host
    on a **different** address than the provisioner does (e.g. the provisioner
@@ -229,6 +310,24 @@ touching libvirt. To create real VMs:
    ```
 
    Without `public_host`, the connection details fall back to `ansible_host`.
+
+   `provisioning-hosts.ini` seeds the host registry when the provisioning service starts with
+   no hosts registered. Work then runs only against registered hosts, never
+   against the file. To add a host to a running deployment, import the file
+   again (`POST /api/v1/hosts/import`) or register the host (`POST
+   /api/v1/hosts`). A host that is only in the file is refused at dispatch.
+
+   An inventory line's `gpus=` and `gpu_model=` declare capacity **once**: when
+   the inventory is applied, a host with GPUs that no capacity declaration names
+   gets one (`resource_id` and `host_id` both the host's name, `capacity`
+   `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's pool).
+   After that, later values on the line are still stored on the host but no
+   longer affect capacity; change the declaration instead. Hosts added through
+   `POST /api/v1/hosts` never derive one. These inventory values are slated for
+   removal once every deployment declares capacity directly. Upgrading derives
+   declarations the same way for hosts that already exist. Rolling back past the
+   upgrade is a code rollback: the derived declarations remain, and stay
+   reservable.
    The provisioning image bakes the inventory in at build time — rebuild
    after edits:
 
@@ -257,7 +356,7 @@ touching libvirt. To create real VMs:
    ```bash
    docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
      seller-provisioning ansible \
-     -i /opt/domains/vms/provisioning/iac/ansible/inventory/hosts \
+     -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
      <your_host_alias> -m ping
    ```
 
@@ -287,7 +386,7 @@ touching libvirt. To create real VMs:
   supplies a settlement option's asset or rate. Put each decimal asset rate
   and unit in that resource's complete `settlements` clause list or in the
   selected command/config default list.
-- **Do not publish `vm_host`.** Listings use trusted projected `pool_id` or
+- **Do not publish a `host_id`.** Listings use trusted projected `pool_id` or
   `resource_id`; physical host selection is provisioning-owned. The admin
   settle evaluate endpoint validates canonical schedule/begin requests without
   reserving or probing a host.

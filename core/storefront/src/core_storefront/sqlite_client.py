@@ -42,6 +42,8 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     bind_fulfillment_context,
 )
+from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
+
 from .sqlite_migrations import (
     LegacyMigrationInputs,
     MigrationLike,
@@ -151,6 +153,166 @@ def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
         "status": status,
         "last_error": last_error,
     }
+
+
+
+LISTING_CLOSED_BY_VALUES = frozenset({"seller", "reconciliation"})
+
+
+class SellerClosedListingError(ValueError):
+    """A write would reopen a listing its seller closed, and the seller did not ask.
+
+    A seller's close is durable: capacity events, the publication loop, and
+    every other reconciliation path leave it closed, and only the seller's own
+    reopen clears it. The refusal is raised here, at the listing write every
+    reopen passes through, so no domain has to remember the rule.
+    """
+
+    def __init__(self, listing_id: str) -> None:
+        super().__init__(
+            f"listing {listing_id!r} was closed by its seller; only the seller "
+            "may reopen it"
+        )
+        self.listing_id = listing_id
+
+
+def _require_consistent_closure(status: str, closed_by: str | None) -> None:
+    """Refuse a close without a reason and a reason without a close.
+
+    The database triggers enforce the same rule; checking here first reports
+    the offending caller instead of a constraint failure.
+    """
+    if status == "closed":
+        if closed_by not in LISTING_CLOSED_BY_VALUES:
+            raise ValueError(
+                "closing a listing requires closed_by in "
+                f"{sorted(LISTING_CLOSED_BY_VALUES)}, not {closed_by!r}"
+            )
+    elif closed_by is not None:
+        raise ValueError(f"a listing with status {status!r} records no closed_by")
+
+
+def _stored_closed_by(conn: sqlite3.Connection, listing_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT closed_by FROM listings WHERE listing_id = ?", (listing_id,)
+    ).fetchone()
+    return str(row[0]) if row and row[0] is not None else None
+
+
+class _Unset:
+    """Marks a keyword argument the caller did not pass, where ``None`` means null."""
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET: Any = _Unset()
+
+
+def _deserialize_json_object(value: Any) -> Any:
+    """A JSON-text column read back as its value; ``None`` stays ``None``."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _serialize_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value)
+    except Exception:
+        return str(value)
+
+
+def write_listing_update(
+    conn: sqlite3.Connection,
+    *,
+    listing_id: str,
+    status: str | None = None,
+    updated_at: str | None = None,
+    listing_resource: Any | None = None,
+    fulfillment_resource: Any | None = None,
+    max_duration_seconds: int | None = None,
+    storefront_url: str | None = None,
+    seller_principal: Identity | None = None,
+    oracle_address: str | None = None,
+    accepted_escrows: Any | None = None,
+    settlement_options: Any | None = None,
+    publication_clauses: Any | None = None,
+    demands: Any | None = None,
+    closed_by: str | None = None,
+    reopened_by: str | None = None,
+    rate_structure: Any = UNSET,
+) -> None:
+    """Update the supplied listing columns inside the caller's transaction.
+
+    ``None`` on a column means "not supplied", except ``rate_structure``, which
+    is written whenever it is passed: a listing that stops recording a rate
+    structure must have it cleared, not kept.
+
+    A change to ``closed`` must name who closed the listing; any other status
+    change clears the reason. A change to ``open`` on a listing its seller
+    closed is refused unless ``reopened_by`` is ``seller``, and a
+    reconciliation close of a seller-closed listing keeps the seller's reason,
+    so no reconciliation path can turn a seller's close into one it may undo.
+    The closure reason is read and written in the caller's transaction, which
+    should be ``BEGIN IMMEDIATE`` so no other writer interleaves.
+    """
+    if status is not None:
+        _require_consistent_closure(status, closed_by)
+    elif closed_by is not None:
+        raise ValueError("closed_by is recorded only together with a close")
+    if reopened_by is not None:
+        if status != "open":
+            raise ValueError("reopened_by is recorded only together with a reopen")
+        if reopened_by not in LISTING_CLOSED_BY_VALUES:
+            raise ValueError(
+                f"reopened_by must be one of {sorted(LISTING_CLOSED_BY_VALUES)}, "
+                f"not {reopened_by!r}"
+            )
+    if status in ("open", "closed") and _stored_closed_by(conn, listing_id) == "seller":
+        if status == "open" and reopened_by != "seller":
+            raise SellerClosedListingError(listing_id)
+        if status == "closed":
+            closed_by = "seller"
+
+    updates: list[str] = []
+    values: list[Any] = []
+
+    def add(field: str, value: Any, *, serialize: bool = False) -> None:
+        if value is None:
+            return
+        updates.append(f"{field}=?")
+        values.append(_serialize_json(value) if serialize else value)
+
+    add("status", status)
+    if status is not None:
+        updates.append("closed_by=?")
+        values.append(closed_by)
+    add("updated_at", updated_at or datetime.now().isoformat())
+    add("listing_resource", listing_resource, serialize=True)
+    add("fulfillment_resource", fulfillment_resource, serialize=True)
+    add("max_duration_seconds", max_duration_seconds)
+    add("storefront_url", storefront_url)
+    if seller_principal is not None:
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        add("seller_scheme", seller_scheme)
+        add("seller_identifier", seller_identifier)
+    add("oracle_address", oracle_address)
+    add("accepted_escrows", accepted_escrows, serialize=True)
+    add("settlement_options", settlement_options, serialize=True)
+    add("publication_clauses", publication_clauses, serialize=True)
+    add("demands", demands, serialize=True)
+    if rate_structure is not UNSET:
+        updates.append("rate_structure=?")
+        values.append(None if rate_structure is None else _serialize_json(rate_structure))
+    conn.execute(
+        f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
+        (*values, listing_id),
+    )
 
 
 class SQLiteClient:
@@ -563,7 +725,7 @@ class SQLiteClient:
                   status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
-                  offer_resource TEXT NOT NULL,
+                  listing_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
@@ -982,14 +1144,7 @@ class SQLiteClient:
             conn.close()
 
     def _serialize_resource(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value
-        try:
-            return json.dumps(value)
-        except Exception:
-            return str(value)
+        return _serialize_json(value)
 
     def _deserialize_accepted_escrows(self, value: Any) -> list[dict[str, Any]] | None:
         """Return the ``accepted_escrows`` column as a Python list.
@@ -1032,8 +1187,8 @@ class SQLiteClient:
             return False
         try:
             # Strip None-valued fields so that a buyer's sparse demand
-            # (resource_id=None, vm_host=None) can match a seller's enriched
-            # offer that has those fields populated.  Every non-null field in
+            # (resource_id=None, host_id=None) can match a seller's enriched
+            # listing_resource that has those fields populated.  Every non-null field in
             # `a` must be present and equal in `b`; extra fields in `b` are
             # ignored.
             a_clean = {k: v for k, v in a_dict.items() if v is not None}
@@ -1153,7 +1308,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1164,7 +1319,17 @@ class SQLiteClient:
         settlement_options: Any | None,
         publication_clauses: Any | None,
         demands: Any | None,
+        closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
+        _require_consistent_closure(status, closed_by)
+        # An upsert names no reopener, so it may never overwrite a seller's
+        # close with another status, and a close over a seller's close keeps
+        # the seller's reason; a seller re-lists through their reopen.
+        if _stored_closed_by(conn, listing_id) == "seller":
+            if status != "closed":
+                raise SellerClosedListingError(listing_id)
+            closed_by = "seller"
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
         conn.execute(
             """
@@ -1173,7 +1338,7 @@ class SQLiteClient:
               status,
               created_at,
               updated_at,
-              offer_resource,
+              listing_resource,
               fulfillment_resource,
               max_duration_seconds,
               storefront_url,
@@ -1184,13 +1349,16 @@ class SQLiteClient:
               accepted_escrows,
               settlement_options,
               publication_clauses,
-              demands
+              demands,
+              closed_by,
+              rate_structure
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
+              closed_by=excluded.closed_by,
               updated_at=excluded.updated_at,
-              offer_resource=excluded.offer_resource,
+              listing_resource=excluded.listing_resource,
               fulfillment_resource=excluded.fulfillment_resource,
               max_duration_seconds=excluded.max_duration_seconds,
               storefront_url=excluded.storefront_url,
@@ -1201,14 +1369,15 @@ class SQLiteClient:
               accepted_escrows=excluded.accepted_escrows,
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
-              demands=excluded.demands
+              demands=excluded.demands,
+              rate_structure=excluded.rate_structure
             """,
             (
                 listing_id,
                 status,
                 created_at,
                 updated_at,
-                self._serialize_resource(offer_resource),
+                self._serialize_resource(listing_resource),
                 self._serialize_resource(fulfillment_resource),
                 max_duration_seconds,
                 storefront_url,
@@ -1220,6 +1389,8 @@ class SQLiteClient:
                 self._serialize_resource(settlement_options),
                 self._serialize_resource(publication_clauses),
                 self._serialize_resource(demands),
+                closed_by,
+                self._serialize_resource(rate_structure),
             ),
         )
 
@@ -1230,7 +1401,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1241,6 +1412,8 @@ class SQLiteClient:
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
         demands: Any | None = None,
+        closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -1250,7 +1423,7 @@ class SQLiteClient:
                     status=status,
                     created_at=created_at,
                     updated_at=updated_at,
-                    offer_resource=offer_resource,
+                    listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
                     storefront_url=storefront_url,
@@ -1261,6 +1434,8 @@ class SQLiteClient:
                     settlement_options=settlement_options,
                     publication_clauses=publication_clauses,
                     demands=demands,
+                    closed_by=closed_by,
+                    rate_structure=rate_structure,
                 )
 
         await asyncio.to_thread(_save)
@@ -1272,7 +1447,7 @@ class SQLiteClient:
         status: str,
         created_at: str,
         updated_at: str,
-        offer_resource: Any,
+        listing_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         storefront_url: str,
@@ -1283,16 +1458,18 @@ class SQLiteClient:
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
         demands: Any | None = None,
+        closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
-        normalized_offer = self._normalize_resource(offer_resource)
-        if normalized_offer is None:
-            raise ValueError("offer_resource must be a mapping")
-        public_mode = normalized_offer.get("virtualization_type")
+        normalized_listing_resource = self._normalize_resource(listing_resource)
+        if normalized_listing_resource is None:
+            raise ValueError("listing_resource must be a mapping")
+        public_mode = normalized_listing_resource.get("offering_mode")
         if public_mode != binding.binding.offering_mode:
             raise StorefrontDomainBindingError(
-                "offer_resource.virtualization_type must equal the durable "
+                "listing_resource.offering_mode must equal the durable "
                 f"offering mode {binding.binding.offering_mode!r}"
             )
 
@@ -1306,7 +1483,7 @@ class SQLiteClient:
                     status=status,
                     created_at=created_at,
                     updated_at=updated_at,
-                    offer_resource=offer_resource,
+                    listing_resource=listing_resource,
                     fulfillment_resource=fulfillment_resource,
                     max_duration_seconds=max_duration_seconds,
                     storefront_url=storefront_url,
@@ -1317,6 +1494,8 @@ class SQLiteClient:
                     settlement_options=settlement_options,
                     publication_clauses=publication_clauses,
                     demands=demands,
+                    closed_by=closed_by,
+                    rate_structure=rate_structure,
                 )
                 conn.execute(
                     """
@@ -1324,9 +1503,9 @@ class SQLiteClient:
                       listing_id, site_id, pool_id, physical_resource_id,
                       offering_mode, domain_identity, contract_major,
                       contract_minor, derivation_key, source_envelope_json,
-                      last_reconciled_at
+                      last_reconciled_at, capacity_backing
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       last_reconciled_at=excluded.last_reconciled_at
                     """,
@@ -1342,13 +1521,14 @@ class SQLiteClient:
                         binding.derivation_key,
                         binding.source_envelope_json,
                         binding.last_reconciled_at,
+                        binding.capacity_backing,
                     ),
                 )
                 stored = conn.execute(
                     """
                     SELECT site_id, pool_id, physical_resource_id, offering_mode,
                            domain_identity, contract_major, contract_minor,
-                           derivation_key, source_envelope_json
+                           derivation_key, source_envelope_json, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE listing_id=?
                     """,
@@ -1364,6 +1544,7 @@ class SQLiteClient:
                     binding.binding.contract_minor,
                     binding.derivation_key,
                     binding.source_envelope_json,
+                    binding.capacity_backing,
                 )
                 if stored != expected:
                     raise StorefrontDomainBindingError(
@@ -1393,18 +1574,21 @@ class SQLiteClient:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT offer_resource FROM listings WHERE listing_id=?",
+                    "SELECT listing_resource FROM listings WHERE listing_id=?",
                     (binding.listing_id,),
                 ).fetchone()
                 if row is None:
-                    raise KeyError(f"unknown listing {binding.listing_id!r}")
-                offer = self._normalize_resource(row[0])
+                    raise KeyError(
+                        f"unknown listing {binding.listing_id!r}"
+                    )
+                listing_resource = self._normalize_resource(row[0])
                 if (
-                    not isinstance(offer, dict)
-                    or offer.get("virtualization_type") != binding.binding.offering_mode
+                    not isinstance(listing_resource, dict)
+                    or listing_resource.get("offering_mode")
+                    != binding.binding.offering_mode
                 ):
                     raise StorefrontDomainBindingError(
-                        "persisted offer_resource mode disagrees with binding"
+                        "persisted listing_resource mode disagrees with binding"
                     )
                 values = binding.as_record()
                 conn.execute(
@@ -1413,8 +1597,8 @@ class SQLiteClient:
                       listing_id, site_id, pool_id, physical_resource_id,
                       offering_mode, domain_identity, contract_major,
                       contract_minor, derivation_key, source_envelope_json,
-                      last_reconciled_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      last_reconciled_at, capacity_backing
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       last_reconciled_at=excluded.last_reconciled_at
                     """,
@@ -1424,7 +1608,7 @@ class SQLiteClient:
                     """
                     SELECT site_id, pool_id, physical_resource_id, offering_mode,
                            domain_identity, contract_major, contract_minor,
-                           derivation_key, source_envelope_json
+                           derivation_key, source_envelope_json, capacity_backing
                     FROM storefront_listing_bindings WHERE listing_id=?
                     """,
                     (binding.listing_id,),
@@ -1439,6 +1623,7 @@ class SQLiteClient:
                     binding.binding.contract_minor,
                     binding.derivation_key,
                     binding.source_envelope_json,
+                    binding.capacity_backing,
                 )
                 if stored != expected:
                     raise StorefrontDomainBindingError(
@@ -1460,7 +1645,7 @@ class SQLiteClient:
         listing_id: str,
         status: str | None = None,
         updated_at: str | None = None,
-        offer_resource: Any | None = None,
+        listing_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
         storefront_url: str | None = None,
@@ -1469,50 +1654,57 @@ class SQLiteClient:
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
+        demands: Any | None = None,
+        closed_by: str | None = None,
+        reopened_by: str | None = None,
+        rate_structure: Any = UNSET,
     ) -> None:
+        """Update the supplied listing columns.
+
+        A change to ``closed`` must name who closed the listing; any other
+        status change clears the reason. Reopening a listing its seller closed
+        raises :class:`SellerClosedListingError` unless ``reopened_by`` is
+        ``seller``. See :func:`write_listing_update`.
+        """
+
         def _save() -> None:
-            updates: list[str] = []
-            values: list[Any] = []
-
-            def add(field: str, value: Any, *, serialize: bool = False) -> None:
-                if value is None:
-                    return
-                updates.append(f"{field}=?")
-                values.append(self._serialize_resource(value) if serialize else value)
-
-            add("status", status)
-            add("updated_at", updated_at or datetime.now().isoformat())
-            add("offer_resource", offer_resource, serialize=True)
-            add("fulfillment_resource", fulfillment_resource, serialize=True)
-            add("max_duration_seconds", max_duration_seconds)
-            add("storefront_url", storefront_url)
-            if seller_principal is not None:
-                seller_scheme, seller_identifier = _principal_columns(seller_principal)
-                add("seller_scheme", seller_scheme)
-                add("seller_identifier", seller_identifier)
-            add("oracle_address", oracle_address)
-            add("accepted_escrows", accepted_escrows, serialize=True)
-            add("settlement_options", settlement_options, serialize=True)
-            add("publication_clauses", publication_clauses, serialize=True)
-
-            if not updates:
-                return
-
             conn = sqlite3.connect(self.db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
-                    (*values, listing_id),
+                conn.execute("BEGIN IMMEDIATE")
+                write_listing_update(
+                    conn,
+                    listing_id=listing_id,
+                    status=status,
+                    updated_at=updated_at,
+                    listing_resource=listing_resource,
+                    fulfillment_resource=fulfillment_resource,
+                    max_duration_seconds=max_duration_seconds,
+                    storefront_url=storefront_url,
+                    seller_principal=seller_principal,
+                    oracle_address=oracle_address,
+                    accepted_escrows=accepted_escrows,
+                    settlement_options=settlement_options,
+                    publication_clauses=publication_clauses,
+                    demands=demands,
+                    closed_by=closed_by,
+                    reopened_by=reopened_by,
+                    rate_structure=rate_structure,
                 )
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
         await asyncio.to_thread(_save)
 
     async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None:
-        """Return a single order by listing_id, or None if not found."""
+        """Return a single order by listing_id, or None if not found.
+
+        ``closed_by`` names who closed a closed listing and is ``None`` for
+        every other status.
+        """
 
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
@@ -1521,14 +1713,16 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, fulfillment_resource,
+                           listing_resource, fulfillment_resource,
                            max_duration_seconds, storefront_url,
                            seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
                            publication_clauses,
-                           demands
+                           demands,
+                           closed_by,
+                           rate_structure
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1541,7 +1735,7 @@ class SQLiteClient:
                     "status",
                     "created_at",
                     "updated_at",
-                    "offer_resource",
+                    "listing_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
                     "storefront_url",
@@ -1553,6 +1747,8 @@ class SQLiteClient:
                     "settlement_options",
                     "publication_clauses",
                     "demands",
+                    "closed_by",
+                    "rate_structure",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -1573,7 +1769,37 @@ class SQLiteClient:
                 d["demands"] = self._deserialize_accepted_escrows(
                     d.get("demands"),
                 )
+                d["rate_structure"] = _deserialize_json_object(d.get("rate_structure"))
                 return d
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def listing_id_for_derivation_key(
+        self, derivation_key: str
+    ) -> str | None:
+        """The listing already bound to this publication source, if any.
+
+        `derivation_key` is unique across bindings, so at most one listing can
+        hold a given source. Reported so a refused publication can name the
+        listing that owns the source rather than the column that rejected it:
+        a caller told "UNIQUE constraint failed" learns which index complained,
+        not which of its own listings it is colliding with.
+        """
+
+        def _load() -> str | None:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT listing_id
+                    FROM storefront_listing_bindings
+                    WHERE derivation_key=?
+                    """,
+                    (derivation_key,),
+                ).fetchone()
+                return str(row[0]) if row else None
             finally:
                 conn.close()
 
@@ -1595,6 +1821,7 @@ class SQLiteClient:
             derivation_key=str(row[8]),
             source_envelope_json=str(row[9]),
             last_reconciled_at=str(row[10]),
+            capacity_backing=str(row[11]),
         )
 
     @staticmethod
@@ -1627,7 +1854,7 @@ class SQLiteClient:
                     SELECT listing_id, site_id, pool_id, physical_resource_id,
                            offering_mode, domain_identity, contract_major,
                            contract_minor, derivation_key, source_envelope_json,
-                           last_reconciled_at
+                           last_reconciled_at, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE listing_id=?
                     """,
@@ -1649,7 +1876,7 @@ class SQLiteClient:
                     SELECT listing_id, site_id, pool_id, physical_resource_id,
                            offering_mode, domain_identity, contract_major,
                            contract_minor, derivation_key, source_envelope_json,
-                           last_reconciled_at
+                           last_reconciled_at, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE derivation_key=?
                     """,
@@ -2463,7 +2690,7 @@ class SQLiteClient:
         seller_principal: Identity | None = None,
         matched_offer_id: str | None = None,
     ) -> None:
-        """Bind exact negotiation parties and the selected offer."""
+        """Bind exact negotiation parties and the selected listing_resource."""
 
         def _save() -> None:
             updates: list[str] = []
@@ -2880,6 +3107,107 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_insert)
 
+    async def claim_delivery_start(self, *, escrow_uid: str) -> bool:
+        """Claim the right to start delivery for a deal, before any external effect.
+
+        Succeeds only while the row is ``provisioning``, so once refund intent is
+        recorded no delivery can start. Claiming again for a delivery already
+        under way succeeds, which lets an interrupted delivery resume. This and
+        ``record_refund_intent`` are each one serialized write, so exactly one
+        of them decides whether delivery precedes a refund.
+        """
+
+        def _claim() -> bool:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    cursor = conn.execute(
+                        "UPDATE escrows SET fulfillment_phase = "
+                        "COALESCE(fulfillment_phase, 'delivery_started'), updated_at = ? "
+                        "WHERE escrow_uid = ? AND status = 'provisioning'",
+                        (datetime.now().isoformat(), escrow_uid),
+                    )
+                return cursor.rowcount == 1
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_claim)
+
+    async def record_refund_intent(
+        self, *, escrow_uid: str, negotiation_id: str
+    ) -> dict[str, Any]:
+        """Record that a refund is under way, before the reversal is requested.
+
+        Returns the prior ``status`` (``None`` when no row existed) and whether
+        delivery had already started. A deal already ``refunded`` is left as is.
+        """
+
+        def _record() -> dict[str, Any]:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute(
+                        "SELECT status, fulfillment_phase FROM escrows WHERE escrow_uid = ?",
+                        (escrow_uid,),
+                    ).fetchone()
+                    if row is None:
+                        conn.execute(
+                            "INSERT INTO escrows (escrow_uid, negotiation_id, status, "
+                            "is_primary, created_at, updated_at) "
+                            "VALUES (?, ?, 'refunding', 1, ?, ?)",
+                            (escrow_uid, negotiation_id, now, now),
+                        )
+                        conn.execute("COMMIT")
+                        return {"status": None, "delivery_started": False}
+                    status, phase = row
+                    started = phase is not None or status == "ready"
+                    if status != "refunded":
+                        conn.execute(
+                            "UPDATE escrows SET status = 'refunding', updated_at = ? "
+                            "WHERE escrow_uid = ?",
+                            (now, escrow_uid),
+                        )
+                    conn.execute("COMMIT")
+                    return {"status": status, "delivery_started": started}
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_record)
+
+    async def abandon_refund_intent(
+        self, *, escrow_uid: str, prior_status: str | None
+    ) -> None:
+        """Undo refund intent when the reversal proved impossible.
+
+        Restores the status recorded before the intent, or removes the row the
+        intent created, so a deal with nothing to reverse is not left blocked.
+        """
+
+        def _abandon() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    if prior_status is None:
+                        conn.execute(
+                            "DELETE FROM escrows WHERE escrow_uid = ? AND status = 'refunding'",
+                            (escrow_uid,),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE escrows SET status = ?, updated_at = ? "
+                            "WHERE escrow_uid = ? AND status = 'refunding'",
+                            (prior_status, datetime.now().isoformat(), escrow_uid),
+                        )
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_abandon)
+
     async def update_escrow(
         self,
         *,
@@ -3244,6 +3572,49 @@ class SQLiteClient:
                 return [_publication_row_to_dict(r) for r in rows]
             finally:
                 conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_publication_divergence(
+        self, *, registry_urls: Sequence[str]
+    ) -> list[dict[str, Any]]:
+        """Registry records that disagree with their listing's local status.
+
+        An open listing should be ``published`` at every registry that records
+        it and a closed one ``unpublished``; any other record there — a failed
+        publish, close, or reopen — is a registry that has not converged. Only
+        the given (configured) registries and open or closed listings are read.
+        Returns ``listing_id``, ``listing_status``, and ``registry_url`` rows
+        ordered by listing and registry.
+        """
+        urls = list(registry_urls)
+        if not urls:
+            return []
+
+        def _load() -> list[dict[str, Any]]:
+            placeholders = ", ".join("?" for _ in urls)
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT p.listing_id, l.status, p.registry_url
+                    FROM publications p
+                    JOIN listings l ON l.listing_id = p.listing_id
+                    WHERE p.registry_url IN ({placeholders})
+                      AND (
+                        (l.status = 'open' AND p.status != 'published')
+                        OR (l.status = 'closed' AND p.status != 'unpublished')
+                      )
+                    ORDER BY p.listing_id, p.registry_url
+                    """,
+                    urls,
+                ).fetchall()
+            finally:
+                conn.close()
+            return [
+                {"listing_id": row[0], "listing_status": row[1], "registry_url": row[2]}
+                for row in rows
+            ]
 
         return await asyncio.to_thread(_load)
 
@@ -4129,7 +4500,10 @@ class SQLiteClient:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Return a paginated list of orders with optional filters."""
+        """Return a paginated list of orders with optional filters.
+
+        Each row carries ``closed_by`` as :meth:`load_listing` does.
+        """
 
         def _list() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
@@ -4147,14 +4521,16 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, fulfillment_resource,
+                           listing_resource, fulfillment_resource,
                            max_duration_seconds, storefront_url,
                            seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
                            publication_clauses,
-                           demands
+                           demands,
+                           closed_by,
+                           rate_structure
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -4166,7 +4542,7 @@ class SQLiteClient:
                     "status",
                     "created_at",
                     "updated_at",
-                    "offer_resource",
+                    "listing_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
                     "storefront_url",
@@ -4178,6 +4554,8 @@ class SQLiteClient:
                     "settlement_options",
                     "publication_clauses",
                     "demands",
+                    "closed_by",
+                    "rate_structure",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -4200,6 +4578,9 @@ class SQLiteClient:
                     )
                     d["demands"] = self._deserialize_accepted_escrows(
                         d.get("demands"),
+                    )
+                    d["rate_structure"] = _deserialize_json_object(
+                        d.get("rate_structure")
                     )
                     result.append(d)
                 return result
@@ -4521,12 +4902,17 @@ class SQLiteClient:
     ) -> list[dict]:
         """Query stage_events rows with optional filters.
 
+        The rows only. Callers that need to know whether the log continued
+        past the page -- anything that filters the result and then draws a
+        conclusion about the whole log -- want
+        :meth:`list_stage_events_page` instead.
+
         Parameters
         ----------
         after_id:
             Return only rows with id > after_id (for SSE cursor-based tailing).
         limit:
-            Maximum rows to return (capped at 500).
+            Maximum rows to return (capped at ``STAGE_EVENT_PAGE_CAP``).
         stage:
             Filter by stage column (e.g. 'discovery', 'negotiation').
         listing_id:
@@ -4534,11 +4920,44 @@ class SQLiteClient:
         negotiation_id:
             Filter by negotiation_id column.
         """
+        rows, _ = await self.list_stage_events_page(
+            after_id=after_id,
+            limit=limit,
+            stage=stage,
+            listing_id=listing_id,
+            negotiation_id=negotiation_id,
+        )
+        return rows
+
+    async def list_stage_events_page(
+        self,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> tuple[list[dict], bool]:
+        """One page of stage_events rows, and whether more matched beyond it.
+
+        Truncation is reported here rather than inferred by the caller because
+        this is the only layer that knows both numbers: the caller's requested
+        ``limit`` and the ``STAGE_EVENT_PAGE_CAP`` that may have lowered it.
+        ``len(rows) == limit`` is not the same question -- a log ending exactly
+        on the boundary and a log continuing past it produce identical pages.
+
+        Answered by selecting one row past the page and reporting its presence
+        as a boolean instead of returning it, so the flag is exact at every
+        page size including the cap itself. Over-fetching inside the clamp is
+        what makes that work; asking the store for ``limit + 1`` from outside
+        would be clamped straight back to the cap and read "not truncated" for
+        precisely the full log a reader most needs warning about.
+        """
         import json as _json
 
-        limit = min(limit, 500)
+        page_size = max(1, min(limit, STAGE_EVENT_PAGE_CAP))
 
-        def _query() -> list[dict]:
+        def _query() -> tuple[list[dict], bool]:
             conn = sqlite3.connect(self.db_path, timeout=2)
             try:
                 conditions = ["id > ?"]
@@ -4553,7 +4972,7 @@ class SQLiteClient:
                     conditions.append("negotiation_id = ?")
                     params.append(negotiation_id)
                 where = " AND ".join(conditions)
-                params.append(limit)
+                params.append(page_size + 1)
                 cur = conn.execute(
                     f"SELECT id, ts, stage, event, negotiation_id, listing_id, escrow_uid, data "
                     f"FROM stage_events WHERE {where} ORDER BY id ASC LIMIT ?",
@@ -4578,7 +4997,7 @@ class SQLiteClient:
                             "data": data,
                         }
                     )
-                return rows
+                return rows[:page_size], len(rows) > page_size
             finally:
                 conn.close()
 

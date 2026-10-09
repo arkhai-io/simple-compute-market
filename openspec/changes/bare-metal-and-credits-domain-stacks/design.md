@@ -2,24 +2,53 @@
 
 ## Context
 
-Verified 2026-08-06; re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `domains/vms/compose.yml` and `domains/apicredits/compose.yml` exist;
-  `domains/bare_metal/` has no compose file.
-- No file under `e2e-tests/` references bare metal or API credits. Every e2e scenario is
-  a VM deal.
-- `test-compatibility`'s architecture already distinguishes contract and conformance
-  fixtures from implementation tests, and names the API-credits middleware conformance
-  session as the model for independent implementations agreeing on one observable
-  protocol.
-- API credits currently reimplements eight storefront concerns the kit extractions take
-  over.
+- **Stacks.** `domains/vms/compose.yml`, `domains/apicredits/compose.yml`, and
+  `domains/bare_metal/compose.yml` exist; `compose.bare-metal.yml`,
+  `compose.bare-metal-local.yml`, and `dev-env/bare-metal/` stand up the bare-metal
+  end-to-end lane (one mock-profile site, a bare-metal storefront, a registry, a dev
+  chain), which runs in the pipeline and proves publication. Bare metal has a
+  Dockerfile, a Helm chart with render tests, and `dist-bare-metal-storefront` /
+  `dist-bare-metal-buyer` targets.
+- **Buyer.** `domains/bare_metal/buyer/` contributes `bare_metal.v1` through
+  `market.buyer_domains`, with `list/show/buy/start/complete/status/result/access/
+  teardown/reclaim` and the introduction commands, a plugin declaring
+  `DomainCapability.BUYER`, and composition tests.
+- **Seller.** The bare-metal storefront starts through the shared
+  `StorefrontAppConfig`, contributes `bare_metal` through
+  `market.storefront_contributions`, and composes kit publication
+  (`publication_composition.py` over `market_capacity_publication`).
+- **What bare metal still copies.** Negotiation is the one extracted concern with a
+  bare-metal-local implementation: `negotiation_service.py`
+  (`BareMetalNegotiationService.open`, `_open_exact_selection`,
+  `_validate_physical_selection`, `_build_accepted_obligation`), `negotiation.py`
+  (`BareMetalSellerRoundHook`), the `/api/v1/negotiate/new` and
+  `/api/v1/negotiate/{id}` routes in `api.py`, and their thread persistence in
+  `sqlite_client.py` reimplement what `kit/negotiation-runtime` owns for VM and API
+  credits: round ordering, canonical-principal binding, acceptance, hold placement,
+  and artifact construction. The kit exposes schema-opaque resolvers and
+  `NegotiationDomainHooks` for exactly this consumer. The listing routes in `api.py`
+  are a second, smaller copy; the shared shell's listing routes read the common
+  binding that bare-metal publication writes.
+- **Scenarios.** `scenarios/bare_metal/test_bare_metal_deal.py` (real host; protected
+  lane) and `test_bare_metal_publication.py` (pipeline) exist, as does the API-credits
+  deal path. The mock-provisioned bare-metal deal that runs on every pipeline run is
+  `bare-metal-mock-provisioned-deal`'s.
+- **API credits** still carries local implementations of concerns the kit
+  extractions own.
+- `test-compatibility`'s architecture distinguishes contract and conformance fixtures
+  from implementation tests, and names the API-credits middleware conformance session
+  as the model for independent implementations agreeing on one observable protocol.
 
 ## Goals / Non-Goals
 
-**Goals:** two domains that deploy and prove a full deal; the goal's completion test met.
+**Goals:** two domains that deploy and prove a full deal with no domain-local copy of
+an extracted concern; the goal's completion test met.
 
-**Non-Goals:** further extraction, new domains, buyer work, layout churn, VM changes.
+**Non-Goals:** further extraction, new domains, building the bare-metal buyer or the
+mock and lifecycle controls (`bare-metal-mock-provisioned-deal`), layout churn, VM
+changes.
 
 ## Decisions
 
@@ -54,12 +83,37 @@ would satisfy the letter of the completion test and none of its value.
 
 ### Whether bare metal stands alone or composes into a shared storefront is deferred
 
-`multi-domain-storefront-composition` may make bare metal a second contract in the VM
-storefront process rather than its own service. Either satisfies this change: what it
-proves is a working deal path, not a deployment topology.
+The shared shell can host bare metal as a second contract in the VM storefront
+process rather than as its own service; the bare-metal lane runs it standalone. Either
+satisfies this change: what it proves is a working deal path, not a deployment
+topology. The stack definition is written so the answer can change without rewriting
+the scenarios.
 
-Deferring keeps this change independent of Goal 3's sequencing. The stack definition
-should be written so the answer can change without rewriting the scenarios.
+### Composing bare metal onto the kit is this change's, not an extraction
+
+The kit negotiation runtime exists and bare metal is the last domain not composed onto
+it. The work is a `NegotiationDomainHooks` implementation — opening validation of the
+closed `bare_metal.v1` demand, physical selection, exact settlement option, hosted
+binding, accepted-artifact construction — and the deletion of the parallel service,
+routes, and persistence, the same shape the VM and API-credit compositions took. No
+new concern is extracted; the non-goal against further extraction stands.
+
+Bare metal carries no legacy listing population to migrate: it is not deployed and
+its common binding is the only listing mapping, so no `legacy_migration` adapter is
+owed.
+
+`bare-metal-listing-shapes`, which lands first, adds a seller inventory guard to bare
+metal's current opening path. Its substance is a pure domain function in
+`arkhai_bare_metal` that rechecks a listing's shape and region against its site's
+projection. The storefront only fetches the projection and maps the outcome to a
+status. `validate_opening` calls the same function, so the move carries the fetch and
+the mapping, not the check.
+
+Amended 2026-10-01: the hooks implementation and the deletion of the parallel service,
+hook class, and thread persistence moved to `bare-metal-mock-provisioned-deal`, which
+serves bare metal's existing negotiate routes over the kit runtime so its pipeline deal
+reaches parity with VM's. What stays here is moving those routes, and the listing
+routes, onto the shell's shared routes (4a.3–4a.6).
 
 ### Teardown is domain-defined, and bare metal proves access revocation
 
@@ -69,6 +123,11 @@ Bare metal requests teardown through the authenticated storefront, waits for the
 selected-site lease-release result, and then proves the previously working SSH
 access no longer works. Whole-host release is therefore not modeled as VM
 destruction, and neither scenario reads a provisioning authority directly.
+
+That SSH proof needs a real host, which the end-to-end pipeline never has. The
+bare-metal deal that runs in the pipeline is mock-provisioned and owned by
+`bare-metal-mock-provisioned-deal`; it observes teardown as far as the site's
+returned capacity, and the SSH proof stays the protected lane's.
 
 ## Risks / Trade-offs
 
@@ -102,3 +161,17 @@ Rollback is per step; nothing here changes persisted state or wire contracts.
   three separate suites?** Attractive — it would make "can this domain trade" a fixture a
   new domain runs. Deferrable: it is better designed against two real domains than
   predicted from one.
+
+## Requirement ownership
+
+The bare-metal buyer and seller requirements this change verifies (Section 4b) and
+those `bare-metal-mock-provisioned-deal` verifies are split by where the behavior is
+proven: negotiation ownership and resume, the clean wheel, independent authorities,
+the package boundary, and the `market bare-metal` command's demand, route refusal,
+strict decoding, and teardown semantics here, where the installed buyer is exercised;
+the storefront half of idempotent teardown, and restart recovery, in
+`bare-metal-mock-provisioned-deal`, whose pipeline deal drives typed clients and whose
+storefront integration tests rebuild the application. The command's requirements
+moved here from that change on 2026-10-01. Requirements already stated generically for
+every buyer domain — plugin composition, the shared conformance suite, profile-bound
+recovery, secret-free configuration — are not restated per domain.

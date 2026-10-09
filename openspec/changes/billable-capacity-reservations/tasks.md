@@ -5,17 +5,34 @@ boundary described in `design.md`.
 
 ## 1. Reservation carries a rate and a funded bound
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that
-      `CapacityReservation` still carries no rate or funding reference and that
-      `capped_hold_seconds` still caps a configured TTL.
+- [ ] 1.1 Re-verify `design.md`'s Context, particularly that `CapacityReservation`
+      still carries no rate or funding reference, that `capped_hold_seconds` still
+      caps a configured TTL, and that hold placement is still the kit's `place_hold`
+      hook.
 - [ ] 1.2 Add the burn rate and funded bound to the reservation, both nullable and
       unused at this stage.
-- [ ] 1.3 Derive the burn rate from `capacity-shape-pricing`'s rate structure through
-      its aggregation interface. Do not add a separate hold price and do not
-      reconstruct a total from individual dimension rates — that change's spec forbids
-      the shortcut and it would drift from consumption pricing.
-- [ ] 1.4 Focused tests: burn rate derived for a multi-dimension shape; a rate change
-      moves holding and consumption together.
+- [ ] 1.3 Add the hold rate beside the lease rate in each resolution tier —
+      `kit/pool-overrides`' VM terms contract, the pool pricing hint, and
+      `[pricing.defaults.<family>]` — in the same family-grouped form, and resolve it
+      through the same tiers, falling back to the lease rate at any tier that states
+      no hold rate.
+- [ ] 1.3a Derive the burn rate by evaluating the hold rate structure against the held
+      shape through `capacity-shape-pricing`'s aggregation interface, in exact integer
+      arithmetic with upward rounding; refuse a burn rate the asset's amount type
+      cannot represent. Do not reconstruct a total from individual dimension rates.
+      The negotiated lease multiplier is not an input.
+- [ ] 1.3b **Decision gate.** Decide where a buyer reads the posted hold rate before
+      a hold is placed, per `design.md`'s "Where a buyer reads the hold rate is a
+      decision gate", taking `store-registry-listings-as-published`'s accepted
+      carrier policy and `negotiation-driven-capacity-resize`'s rate-structure
+      carrier as inputs, and record the decision and reasoning in `design.md`. If
+      it needs the registry to keep a listing-level field, record the dependency here
+      and in the campaign index before any task relying on it starts.
+- [ ] 1.4 Focused tests: burn rate derived for a multi-dimension shape; a stated hold
+      rate wins over the lease rate at its tier; an unstated hold rate falls back to
+      the lease rate at that tier; a lease-rate change moves an unstated hold rate
+      with it and leaves a stated one alone; a base-unit amount above 2^63 survives
+      derivation.
 
 ## 2. Hold obligation lifecycle
 
@@ -53,7 +70,7 @@ placed.
       justification comment with one describing the new posture. The restoration is
       safe only because holding now costs the holder; state that in the comment rather
       than silently raising the value.
-- [ ] 3.5 Focused tests: funded bound governs below the ceiling; ceiling governs above
+- [ ] 3.6 Focused tests: funded bound governs below the ceiling; ceiling governs above
       it; exhaustion lapses the hold normally.
 
 ## 4. Supersede repricing
@@ -108,7 +125,34 @@ Per `openspec/README.md#plan-closeout-requirements`.
       has been recorded as a roadmap goal by then, update its current state; otherwise
       record explicitly that no goal's current state changes.
 - [ ] 7.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 7.7 **Campaign index currency** (part seven, added when
+      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
+      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
+      rather than replace implementation history. Update this change's row, and its
+      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
+      completion, or record the disposition here if its status and campaign placement are
+      both unchanged.
 
+- [ ] 7.8 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=billable-capacity-reservations` and resolve every match.
+      An unresolvable citation is a blocking defect under `AGENTS.md`'s
+      cross-reference rule, and the target also rejects a citation whose
+      target is a *tombstone*: a tombstoned file still exists on disk while
+      its content is gone, so a plain existence test cannot fail on a
+      rename-to-tombstone.
+- [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      record the evidence: the run, its result, and the scenarios that
+      exercise this change's behaviour. Green unit and integration suites do
+      not substitute -- this is the tier that catches a wire contract whose
+      two sides disagree, a service that starts cleanly and cannot settle,
+      and a configuration gap no in-process test can see. If the pipeline
+      cannot run for a reason unrelated to this change, record that as an
+      explicit blocker naming the cause and the change that owns it, and
+      treat the validations it gates as unrun rather than passed.
+- [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 ## Design promotion record
 
 | Accepted decision | Permanent location |

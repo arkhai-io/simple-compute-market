@@ -27,27 +27,27 @@ from vm_provisioning_adapter.models.vm_request_model import build_create_params,
 # CreateVmRequest — FRP cross-field validation
 # ---------------------------------------------------------------------------
 
-class TestCreateVmFrpValidation:
-    def test_frp_server_addr_without_password_raises(self):
-        with pytest.raises(ValidationError, match="frp_dashboard_password"):
+class TestCreateVmRelayValidation:
+    def test_relay_id_without_a_leased_port_raises(self):
+        with pytest.raises(ValidationError, match="vm_remote_port"):
             CreateVmRequest(
                 vm_target="test-vm",
-                frp_server_addr="1.2.3.4",
-                frp_dashboard_password=None,
+                relay_id="site-a",
+                vm_remote_port=None,
             )
 
-    def test_frp_server_addr_with_password_valid(self):
+    def test_relay_id_with_a_leased_port_is_valid(self):
         req = CreateVmRequest(
             vm_target="test-vm",
-            frp_server_addr="1.2.3.4",
-            frp_dashboard_password="secret",
+            relay_id="site-a",
+            vm_remote_port=6100,
         )
-        assert req.frp_server_addr == "1.2.3.4"
+        assert req.relay_id == "site-a"
 
-    def test_no_frp_server_addr_no_password_required(self):
+    def test_no_relay_id_needs_no_port(self):
         req = CreateVmRequest(vm_target="test-vm")
-        assert req.frp_server_addr is None
-        assert req.frp_dashboard_password is None
+        assert req.relay_id is None
+        assert req.vm_remote_port is None
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ class TestCreateVmDefaults:
         assert req.vm_ram is None
         assert req.ssh_pubkey is None
         assert req.gpu_provisioned is None
-        assert req.frp_server_addr is None
+        assert req.relay_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ class TestCreateVmToParams:
     def test_host_comes_from_argument_not_body(self):
         req = CreateVmRequest(vm_target="my-vm")
         params = build_create_params("kvm1", req)
-        assert params.vm_host == "kvm1"
+        assert params.host_id == "kvm1"
         assert params.vm_target == "my-vm"
         assert params.vm_action == "create"
 
@@ -143,17 +143,19 @@ class TestCreateVmToParams:
         assert p.vm_disk_size == "40G"
         assert p.vm_os_variant == "ubuntu22.04"
 
-    def test_frp_fields_propagated(self):
+    def test_relay_fields_propagated(self):
         req = CreateVmRequest(
             vm_target="t",
-            frp_server_addr="1.2.3.4",
-            frp_domain="example.com",
-            frp_dashboard_password="secret",
+            relay_id="site-a",
+            vm_remote_port=6100,
         )
         p = build_create_params("kvm1", req)
-        assert p.frp_server_addr == "1.2.3.4"
-        assert p.frp_domain == "example.com"
-        assert p.frp_dashboard_password == "secret"
+        assert p.relay_id == "site-a"
+        assert p.vm_remote_port == 6100
+        # The endpoint and token are absent by construction: this object is
+        # serialized into the job's persisted parameters.
+        assert p.relay_addr is None
+        assert p.relay_token is None
 
     def test_gpu_fields_propagated(self):
         req = CreateVmRequest(
@@ -211,7 +213,7 @@ class TestBuildSimpleParams:
         body = VmActionRequest(max_retries=1)
         p = build_simple_params(action, "kvm1", body, "my-vm")
         assert p.vm_action == action
-        assert p.vm_host == "kvm1"
+        assert p.host_id == "kvm1"
         assert p.vm_target == "my-vm"
         assert p.max_retries == 1
 
@@ -220,5 +222,5 @@ class TestBuildSimpleParams:
         body = VmActionRequest()
         p = build_simple_params(action, "kvm1", body)
         assert p.vm_action == action
-        assert p.vm_host == "kvm1"
+        assert p.host_id == "kvm1"
         assert p.vm_target is None

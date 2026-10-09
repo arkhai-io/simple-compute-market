@@ -26,7 +26,7 @@ _COLLABORATORS = vm_listing_collaborators(
 _CAPACITY_SOURCE = {
     "site_id": "site-test",
     "resource_id": "resource-1",
-    "gpu_count": 1,
+    "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
 }
 
 
@@ -41,7 +41,7 @@ def _repository(**values):
 def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
     with pytest.raises(ValidationError, match="settlement_config"):
         VmCreateListingRequest(
-            offer={"virtualization_type": "vm"},
+            listing_resource={"offering_mode": "vm"},
             settlement_config={
                 "account_ref": "acct-seller",
                 "currency": "usd",
@@ -53,14 +53,14 @@ def test_vm_listing_request_rejects_removed_scalar_hosted_config() -> None:
 
 def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[
@@ -88,7 +88,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         settlement_composition_provider=lambda: object(),
     )
 
-    _offer, accepted, options, _demands = service._parse_offer_and_escrows(request)
+    _offer, accepted, options, _demands = service._parse_listing_resource_and_escrows(request)
 
     assert accepted == []
     assert options == []
@@ -131,6 +131,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        source_backing_resolver=lambda **_source: "backed",
     )
     monkeypatch.setattr(
         service,
@@ -142,14 +143,14 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         AsyncMock(return_value={"status": "published"}),
     )
     request = VmCreateListingRequest(
-        offer={
+        listing_resource={
             "resource_type": "compute",
             "resource_id": "resource-1",
             "gpu_model": "H200",
             "gpu_count": 1,
             "region": "California, US",
             "sla": 99.0,
-            "virtualization_type": "vm",
+            "offering_mode": "vm",
         },
         capacity_source=_CAPACITY_SOURCE,
         settlements=[clause],
@@ -162,6 +163,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": _CAPACITY_SOURCE["site_id"],
         },
         clauses=[clause],
     )
@@ -183,7 +185,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
         settlement_composition_provider=lambda: object(),
     )
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlement_options=[
             {
@@ -197,7 +199,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="derived from installed"):
-        await service._derive_settlement_artifacts(request)
+        await service._derive_settlement_artifacts(request, origin="default")
 
 
 @pytest.mark.asyncio
@@ -239,7 +241,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
         )
     ]
     request = VmCreateListingRequest(
-        offer={"virtualization_type": "vm"},
+        listing_resource={"offering_mode": "vm"},
         capacity_source=_CAPACITY_SOURCE,
         settlements=clauses,
     )
@@ -247,6 +249,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
     accepted, options = await service._derive_settlement_artifacts(
         request,
         clauses=tuple(clauses),
+        origin="default",
     )
 
     assert accepted == []
@@ -255,6 +258,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": "default",
         },
         clauses=clauses,
     )

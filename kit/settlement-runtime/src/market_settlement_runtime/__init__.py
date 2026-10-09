@@ -41,6 +41,13 @@ from .jobs import (
     PreparedSettlement,
     SettlementJobCoordinator,
 )
+from .admin_routes import (
+    EscrowVerifyHook,
+    FulfillmentPreviewHook,
+    MAX_WAIT_SECONDS,
+    SettlementAdminRouteError,
+    SettlementAdminRouteService,
+)
 from .models import (
     ConditionDecision,
     ConditionOutcome,
@@ -84,6 +91,9 @@ from .runtime import (
     SettlementRuntime,
     settlement_operation_ref,
 )
+from .publication import (
+    decimal_rate_to_base_units,
+)
 from .servicing import (
     EventCallback,
     SettlementServicingWorker,
@@ -99,6 +109,11 @@ from .sqlite_repository import (
 )
 
 __all__ = [
+    "EscrowVerifyHook",
+    "FulfillmentPreviewHook",
+    "MAX_WAIT_SECONDS",
+    "SettlementAdminRouteError",
+    "SettlementAdminRouteService",
     "SETTLEMENT_CONFIG_SCHEMA_VERSION",
     "AcceptedObligationArtifacts",
     "AcceptedObligationBuilder",
@@ -169,6 +184,7 @@ __all__ = [
     "settlement_migrations",
     "settlement_operation_ref",
     "compile_settlement_publication_clause",
+    "decimal_rate_to_base_units",
     "compile_settlement_clause",
     "select_settlement_candidates",
     "settlement_clause_descriptors",

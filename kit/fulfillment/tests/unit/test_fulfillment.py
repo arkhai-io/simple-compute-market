@@ -17,8 +17,8 @@ from market_fulfillment import (
     ProviderRegistry,
     SettlementEntityNotFoundError,
     SettlementRecordState,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.fulfillment_persistence import FulfillmentAcceptanceDecision
 
 
@@ -39,8 +39,9 @@ def _record(**overrides):
         "pool_id": "pool-1",
         "provider": "ansible",
         "settlement_resource_id": "resource-1",
-        "resource_attributes": {"vm_host": "host-1"},
-        "scheduling_requirements": {"executor_kind": "vm", "resource_kind": "vm"},
+        "resource_attributes": {},
+        "resource_host_id": "host-1",
+        "scheduling_requirements": {"offering_mode": "vm", "resource_kind": "vm"},
         "prepared_create_operation": None,
         "prepared_teardown_operation": None,
         "provider_metadata": {},
@@ -58,11 +59,12 @@ class FakeTransaction:
         self.db.get.return_value = record
         self.pool = SimpleNamespace(
             provider_config={"playbook_path": "playbook.yml"},
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         )
         self.dispatch_required = dispatch_required
         self.persisted = []
         self.acknowledged = []
+        self.attached_jobs = []
         self.provisioned_resources = provisioned_resources or []
 
     def accept(self, **kwargs):
@@ -85,6 +87,9 @@ class FakeTransaction:
         self.record.provider_metadata = provider_metadata
         self.record.state = SettlementRecordState.dispatching.value
         return self.record
+
+    def attach_executor_job(self, capacity_reservation_id, job_id):
+        self.attached_jobs.append((capacity_reservation_id, job_id))
 
     def begin_teardown(self, fulfillment_id, prepared):
         self.teardown_prepared = prepared
@@ -125,8 +130,19 @@ class FakeUnitOfWork:
             self.read_transaction_open = False
 
 
+class _ProviderMock(MagicMock):
+    """A mock provider that, like every real one, declares its host need."""
+
+    needs_host = True
+
+
 def _provider():
-    provider = MagicMock()
+    provider = _ProviderMock()
+    # Explicit, because a bare MagicMock returns a truthy Mock for any
+    # attribute: the orchestrator would then try to attach that object as a
+    # job id. Providers without an addressable job handle return None, and
+    # that is the default this fake should represent.
+    provider.resolve_executor_job_id.return_value = None
     provider.prepare_create.return_value = VersionedEnvelope(
         kind="vm.ansible.create.v1",
         schema_version=1,
@@ -767,7 +783,8 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         SettlementRequirement,
         SettlementResource,
     )
-    from market_resource_pools import PoolCreate, ResourcePoolService
+    from market_resource_pools import ResourcePoolService
+    from market_resource_pools_contracts import PoolCreate
     from market_resource_pools.db import Base as PoolsBase
 
     class _Handler:
@@ -781,6 +798,12 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
 
         def read_config(self, db, pool_id):
             return {}
+
+        def read_config_for_execution(self, db, pool_id):
+            # Dispatch reads through this one; a handler that omits it fails
+            # loudly here rather than returning configuration with its secrets
+            # silently missing.
+            return self.read_config(db, pool_id)
 
         def replace_config(self, db, pool_id, config):
             pass
@@ -802,7 +825,7 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
             id="pool-a",
             label="pool-a",
             provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={},
         )
     )
@@ -815,12 +838,12 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
                 capacity_reservation_id=capacity_reservation_id,
                 market="vms",
                 scheduling_requirements=SettlementRequirement(
-                    executor_kind="vm",
+                    offering_mode="vm",
                     resource_kind="vm", dimensions={"gpu_count": 1}
                 ),
                 resource=SettlementResource(
                     settlement_resource_id=resource_id,
-                    executor_kind="vm",
+                    offering_mode="vm",
                     pool_id="pool-a",
                     resource_kind="vm",
                     provider="ansible",
@@ -930,7 +953,8 @@ async def test_fresh_service_composition_reads_status_and_result_from_same_file_
                 settlement_resource_id="host-1",
                 pool_id="pool-1",
                 provider="ansible",
-                resource_attributes={"vm_host": "host-1"},
+                resource_attributes={},
+                resource_host_id="host-1",
                 fulfillment_request=_request().model_dump(mode="json"),
                 provider_metadata={"current_job_id": "job-restart-1"},
                 state=SettlementRecordState.active.value,
@@ -973,3 +997,57 @@ async def test_fresh_service_composition_reads_status_and_result_from_same_file_
     ]
     provider.fetch_credentials.assert_awaited_once()
     second_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# The provider's create-job handle reaches the reservation
+#
+# The field was plumbed end to end with a `None` default at every hop and no
+# VM supplier, so the VM path left it null while bare metal filled it -- a
+# parameter with a default and no caller is invisible to tests of either side.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_attaches_the_providers_create_job_handle():
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
+    provider = _provider()
+    provider.resolve_executor_job_id.return_value = "ansible-job-7"
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    # Same transaction as the acknowledgement: a reservation must not
+    # reference a create the settlement row does not also record.
+    assert acknowledgement_tx.attached_jobs == [
+        ("reservation-1", "ansible-job-7")
+    ]
+    # Resolved from the metadata the provider returned at dispatch.
+    provider.resolve_executor_job_id.assert_called_once_with(
+        acknowledgement_tx.acknowledged[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_provider_without_a_job_handle_attaches_nothing():
+    """`None` is a legitimate answer, not a missing implementation.
+
+    Asserted so the orchestrator never attaches a falsy placeholder: a
+    reservation carrying an empty job reference is worse than one carrying
+    none, because it reads as a handle an operator can look up.
+    """
+    acceptance_tx = FakeTransaction(_record())
+    acknowledgement_tx = FakeTransaction(acceptance_tx.record)
+    provider = _provider()
+    provider.resolve_executor_job_id.return_value = None
+
+    await _orchestrator(
+        FakeUnitOfWork(acceptance_tx, acknowledgement_tx), provider
+    ).begin_fulfillment("reservation-1", "compute", _request())
+
+    assert acknowledgement_tx.acknowledged, (
+        "dispatch did not complete, so this proves nothing"
+    )
+    assert acknowledgement_tx.attached_jobs == []

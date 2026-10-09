@@ -157,8 +157,15 @@ class SiteCapacityAuthority(Protocol):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
-    ) -> None:
-        """Confirm a reservation into an active lease.
+        deal_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Confirm a reservation into an active lease; the reservation as recorded.
+
+        The returned reservation carries the window the authority recorded,
+        which is not always the one named: a repeat commit leaves the window
+        the first one recorded. ``deal_ref`` correlates the reservation with
+        its deal; an escrow it names is recorded where the reservation has
+        none.
 
         ``resource_id`` is optional: the opaque capacity-reservation
         boundary does not guarantee a caller has one (``reserve()``'s

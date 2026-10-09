@@ -28,6 +28,7 @@ from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_capacity_publication import CapacityRuntime
 from market_core import MarketDomainContract
 from market_negotiation_runtime import NegotiationRuntime
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -39,6 +40,10 @@ from market_storefront_kit import (
 )
 
 import market_storefront.container as _container
+from market_storefront.contact_exchange import (
+    build_vm_contact_exchange,
+    build_vm_introduction_delivery,
+)
 from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
@@ -61,23 +66,16 @@ from market_storefront.utils.config import (
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
+from market_storefront.services.capacity_client import listing_source_projection
+from market_storefront.services.vm_pool_override_contribution import (
+    VmPoolOverrideContribution,
+)
+from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.services.publication_terms import compile_publication_clauses
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.services.site_projection_cache import refresh_site_resource_pools
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Global pause flag
-# ---------------------------------------------------------------------------
-
-_GLOBALLY_PAUSED: bool = False
-
-
-def is_globally_paused() -> bool:
-    return _GLOBALLY_PAUSED
-
-
-def _set_globally_paused(value: bool) -> None:
-    global _GLOBALLY_PAUSED
-    _GLOBALLY_PAUSED = value
-
 
 # ---------------------------------------------------------------------------
 def run_serve(
@@ -170,6 +168,37 @@ def _build_system_service(**kwargs):
     return SystemService(agent_id=AGENT_ID, **kwargs)
 
 
+def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) -> Any:
+    """Compose the pool-override kit's service over this storefront's effects.
+
+    The VM market contributes the ``vm`` offering mode. A write is checked
+    against the named site through the capacity runtime's signed client,
+    refreshes only that site's resource-pool cache, and wakes the publication
+    loop; status is judged against the source publication derives from. The
+    lifespan and the publication test harness compose it identically.
+    """
+    def home_site() -> str | None:
+        # The VM storefront's home site is its first configured capacity site.
+        sites = capacity_runtime.site_ids if capacity_runtime is not None else ()
+        return next(iter(sites), None)
+
+    contribution = VmPoolOverrideContribution(
+        db_path=sqlite_client.db_path,
+        shape_feasible=vm_shape_feasibility(),
+        home_site=home_site,
+    )
+    return PoolOverrideService(
+        store=SQLitePoolOverrideStore(sqlite_client.db_path),
+        site_ids=lambda: capacity_runtime.site_ids if capacity_runtime is not None else (),
+        site_client=lambda site_id: capacity_runtime.site_client(site_id),
+        contributions={contribution.offering_mode: contribution},
+        compile_clauses=compile_publication_clauses,
+        projection_source=listing_source_projection,
+        refresh_site=refresh_site_resource_pools,
+        wake_publication=wake_publication_loop,
+    )
+
+
 def _build_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -202,7 +231,10 @@ class VmStorefrontServices:
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
     system_service: Any
+    pool_override_service: Any
     settlement_composition: Any
+    contact_exchange: Any
+    introduction_delivery: Any
 
 
 def _build_vm_services(
@@ -260,6 +292,21 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
     )
+    pool_override_service = build_pool_override_service(
+        sqlite_client=sqlite_client,
+        capacity_runtime=capacity_runtime,
+    )
+    known_origins = capacity_runtime.site_ids
+    introduction_delivery = build_vm_introduction_delivery(
+        known_origins=known_origins,
+        signer=marketplace_signer,
+    )
+    contact_exchange = build_vm_contact_exchange(
+        sqlite_client=sqlite_client,
+        settlement_composition=settlement_composition,
+        known_origins=known_origins,
+        delivery=introduction_delivery,
+    )
     return VmStorefrontServices(
         registry=registry,
         binding=binding,
@@ -272,7 +319,10 @@ def _build_vm_services(
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
         system_service=system_service,
+        pool_override_service=pool_override_service,
         settlement_composition=settlement_composition,
+        contact_exchange=contact_exchange,
+        introduction_delivery=introduction_delivery,
     )
 
 async def _start_vm_services(services: VmStorefrontServices) -> None:
@@ -298,7 +348,10 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service
         _container.resolved_system_service = services.system_service
+        _container.resolved_pool_override_service = services.pool_override_service
         _container.resolved_settlement_composition = services.settlement_composition
+        _container.resolved_contact_exchange = services.contact_exchange
+        _container.resolved_introduction_delivery = services.introduction_delivery
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,
@@ -340,6 +393,9 @@ from market_storefront.controllers.admin_controller import (  # noqa: E402
 )
 from market_storefront.controllers.deals_controller import (  # noqa: E402
     router as deals_router,
+)
+from market_storefront.controllers.introductions_controller import (  # noqa: E402
+    router as introductions_router,
 )
 from market_storefront.controllers.listings_controller import (  # noqa: E402
     admin_router as admin_listings_router,
@@ -408,6 +464,7 @@ def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
                     settlements_router,
                     deals_router,
                     admin_settle_router,
+                    introductions_router,
                 ),
                 middleware=(
                     listing_lifecycle_middleware,

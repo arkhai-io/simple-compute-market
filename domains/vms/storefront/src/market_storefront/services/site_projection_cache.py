@@ -14,6 +14,8 @@ from core_storefront.site_projections import (
 )
 from market_capacity_publication import remote_site_clients
 from market_storefront.services.capacity_client import build_capacity_client
+from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate, idle
 
 logger = logging.getLogger(__name__)
 
@@ -83,21 +85,29 @@ def _view_summary(view: ProjectionCacheView[list[dict[str, Any]]]) -> dict[str, 
     }
 
 
-def listing_mode_explanations() -> dict[str, dict[str, str]]:
-    """Per-site, per-pool operator-visible explanation for any pool whose
-    projected `listing_mode` fell back to the VM domain's structural
-    default because the raw tag was present but unrecognized.
+def listing_cardinality_mode_explanations() -> dict[str, dict[str, str]]:
+    """Per-site, per-pool operator-visible notice for any pool whose
+    projected `listing_cardinality_mode` needs one.
 
-    A pool's absence from this mapping means no explanation is owed --
-    either the tag is absent (ordinary default, nothing to explain) or it
-    resolved to a recognized value -- not that its site hasn't loaded;
+    Two distinct notices share this mapping, and a pool earns an entry for
+    either: its supplied value was unrecognized and the VM domain's
+    structural default was substituted, or its value was honored but
+    arrived under the deprecated ingestion key. Both are things an operator
+    must act on, and both name what to change; a pool carrying both
+    conditions reports them together.
+
+    A pool's absence from this mapping means nothing is owed -- the tag is
+    absent under either spelling (ordinary default, nothing to explain) and
+    it resolved to a recognized value -- not that its site hasn't loaded;
     a site whose resource-pool projection hasn't loaded yet simply
     contributes no pools to walk, the same as it contributing none to
     `projection_caches()` more generally. Cheap and independent of full
     publication candidate generation: this only needs each pool's
     projected `policy_tags`, not pricing or availability.
     """
-    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+    from arkhai_vms_listings.listing_cardinality_mode import (
+        resolve_vm_listing_cardinality_mode,
+    )
 
     result: dict[str, dict[str, str]] = {}
     for site, caches in projection_caches().items():
@@ -106,16 +116,16 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
             continue
         site_explanations: dict[str, str] = {}
         for pool in pools:
-            pool_id = str(pool.get("resource_pool_id") or "")
+            pool_id = str(pool.get("pool_id") or "")
             if not pool_id:
                 continue
             policy_tags = (pool.get("pool_metadata") or {}).get("policy_tags") or {}
             # Same structural-default rule `_projected_pool_rows` uses
             # (member_count == 1 -> specific_resource, backward
-            # compatibility for an untagged pool) -- an explanation is
-            # only owed when the raw tag was present but unrecognized,
-            # so the actual default value only matters for the message
-            # text, not for whether one is produced.
+            # compatibility for an untagged pool). The default value only
+            # affects a fallback message's text, not whether a notice is
+            # produced, so it does not need to agree with what publication
+            # would compute from live availability.
             enabled_member_count = sum(
                 1
                 for resource in pool.get("resources") or []
@@ -124,12 +134,20 @@ def listing_mode_explanations() -> dict[str, dict[str, str]]:
             structural_default = (
                 "specific_resource" if enabled_member_count == 1 else "fungible"
             )
-            _, explanation = resolve_vm_listing_mode(
+            cardinality = resolve_vm_listing_cardinality_mode(
                 policy_tags,
                 structural_default=structural_default,
             )
-            if explanation:
-                site_explanations[pool_id] = explanation
+            notices = [
+                notice
+                for notice in (
+                    cardinality.fallback_explanation,
+                    cardinality.deprecated_key_notice,
+                )
+                if notice
+            ]
+            if notices:
+                site_explanations[pool_id] = "; ".join(notices)
         if site_explanations:
             result[site] = site_explanations
     return result
@@ -163,6 +181,47 @@ async def load_site_projections(sqlite_client: Any) -> None:
     _caches.update(replacements)
 
 
+async def refresh_site_resource_pools(site_id: str) -> None:
+    """Re-fetch one site's resource-pool projection into its existing cache.
+
+    Refreshes in place, through the cache's own client, and leaves every other
+    site and family alone. A site with no cache yet is left to the poller's
+    first load. A failed fetch is recorded on the cache, as a failed poll is,
+    and never raised.
+    """
+    caches = _caches.get(site_id)
+    if caches is None:
+        return
+    await caches.resource_pools.refresh(force=True)
+
+
+async def refresh_site_projections(site_id: str) -> None:
+    """Re-fetch both of one site's projections into its existing caches.
+
+    For an operation that has just changed the site's capacity and reconciles
+    inline: reconciliation reads these caches, which are otherwise only as fresh
+    as the last poll or explicit refresh. The refresh belongs to that operation,
+    so it runs whether or not the lifecycle loops are held, and starts no loop.
+    A site with no cache yet is left to the poller's first load. A failed fetch
+    is recorded on its cache, which keeps its last generation, and never raised.
+    """
+    caches = _caches.get(site_id)
+    if caches is None:
+        return
+    for cache in (caches.resource_pools, caches.capacity_buckets):
+        try:
+            await cache.refresh(force=True)
+        except Exception:
+            logger.exception("[PROJECTIONS] refreshing site %s failed", site_id)
+
+
+def _resource_pool_identities() -> dict[str, Any]:
+    return {
+        site: caches.resource_pools.view().identity
+        for site, caches in _caches.items()
+    }
+
+
 async def site_projection_poller_loop(sqlite_client: Any) -> None:
     from market_storefront.utils import config
 
@@ -170,7 +229,11 @@ async def site_projection_poller_loop(sqlite_client: Any) -> None:
         getattr(getattr(config.settings, "capacity", None), "poll_interval", 5) or 5
     )
     while True:
+        if gate(SITE_PROJECTION_POLLER):
+            await asyncio.sleep(0.05)
+            continue
         try:
+            before = _resource_pool_identities()
             if not _caches:
                 await load_site_projections(sqlite_client)
             else:
@@ -181,9 +244,16 @@ async def site_projection_poller_loop(sqlite_client: Any) -> None:
                         for cache in (site.resource_pools, site.capacity_buckets)
                     )
                 )
+            if _resource_pool_identities() != before:
+                # A pool-level change a site declares — a tag edit, a disabled
+                # pool — emits no capacity event, so the publication loop is
+                # woken here instead of waiting out its interval.
+                wake_publication_loop()
         except Exception as exc:
             logger.warning("[PROJECTIONS] refresh failed: %s", exc)
-        await asyncio.sleep(interval)
+        # Through the controller, so a pause requested during the interval
+        # reaches the gate at once rather than after it.
+        await idle(interval)
 
 
 async def refresh_after_topology_error(

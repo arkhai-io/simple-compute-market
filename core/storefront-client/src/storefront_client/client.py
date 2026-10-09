@@ -63,7 +63,10 @@ from storefront_client.auth import (
     build_authenticated_request,
     verify_authenticated_response,
 )
+from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 from storefront_client.models import (
+    AgreementSettleResponse,
+    RefundSettlementResponse,
     EvaluateNegotiateResponse,
     IdentitySubjectStatusResponse,
     StorefrontListingClaimResponse,
@@ -97,6 +100,14 @@ class StorefrontClientError(Exception):
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _strict(model: Any, payload: Any) -> Any:
+    """Parse a strict response model, reporting contract breaks as client errors."""
+    try:
+        return model.from_dict(payload)
+    except ValueError as exc:
+        raise StorefrontClientError(f"storefront response broke its contract: {exc}") from exc
 
 
 def _validate_provision_terms_envelope(
@@ -147,6 +158,71 @@ def _build_listings_params(
             continue
         params[key] = "true" if val is True else "false" if val is False else val
     return params
+
+
+def _negotiate_new_proposal(
+    *,
+    initial_amount: int | None,
+    proposal_fields: dict[str, Any] | None,
+    token: str,
+    chain_name: str,
+    escrow_address: str,
+    escrow_expiration_unix: int | None,
+    literal_fields: dict[str, Any] | None,
+    rates: list[dict[str, Any]] | None,
+    demands: list[dict[str, Any]] | None,
+    settlement_selection: dict[str, Any] | None,
+    selection_only: bool,
+) -> dict[str, Any]:
+    """The opening proposal ``negotiate_new`` sends.
+
+    An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
+    fields, literal fields, and expiry, with development defaults for any the
+    caller omits. A selection-only opening carries only ``fields`` beside its
+    ``settlement_selection``: a payments or introduction mechanism has no escrow,
+    and a storefront may refuse a proposal that mixes the two carriers. Stating
+    an escrow parameter in a selection-only opening is refused here rather than
+    silently dropped.
+    """
+    fields = dict(proposal_fields or {})
+    if initial_amount is not None:
+        fields.setdefault("amount", str(initial_amount))
+    if selection_only:
+        if settlement_selection is None:
+            raise ValueError("a selection-only opening requires settlement_selection")
+        stated = [
+            name
+            for name, value in (
+                ("token", token),
+                ("chain_name", chain_name),
+                ("escrow_address", escrow_address),
+                ("escrow_expiration_unix", escrow_expiration_unix),
+                ("literal_fields", literal_fields),
+                ("rates", rates),
+                ("demands", demands),
+            )
+            if value not in (None, "")
+        ]
+        if stated:
+            raise ValueError(
+                "a selection-only opening carries no escrow; remove " + ", ".join(stated)
+            )
+        return {"fields": fields}
+    literals = dict(literal_fields or {})
+    if token or literal_fields is None:
+        literals.setdefault("token", token or ("0x" + "0" * 40))
+    proposal: dict[str, Any] = {
+        "chain_name": chain_name or "anvil",
+        "escrow_address": escrow_address or ("0x" + "0" * 40),
+        "fields": fields,
+        "literal_fields": literals,
+        "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
+    }
+    if rates is not None:
+        proposal["rates"] = rates
+    if demands is not None:
+        proposal["demands"] = demands
+    return proposal
 
 
 def _query_resource(prefix: str, params: dict[str, Any]) -> str:
@@ -317,6 +393,26 @@ class _StorefrontClientBase:
             )
         except StorefrontAuthenticationError as exc:
             raise StorefrontClientError(str(exc)) from exc
+
+    def _authenticated_payload(
+        self,
+        method: str,
+        url: str,
+        resp: httpx.Response,
+        signed: SignedRequest,
+    ) -> dict[str, Any]:
+        """Verify a signed JSON object response and raise for its status."""
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"{method} {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
+        self._raise_for_status(method, url, resp.status_code, resp.text)
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"{method} {url} returned non-object JSON")
+        return payload
 
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
@@ -498,6 +594,45 @@ class StorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
+    async def authenticated_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
+        signed = self._signed_request(
+            role=role,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = await self._client.request(
+            method.upper(),
+            path,
+            params=params,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
+        )
+        return self._authenticated_payload(method.upper(), url, resp, signed)
+
     async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
         resp = await self._client.get(path, params=params or {}, timeout=self._timeout)
@@ -512,6 +647,19 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(await self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     async def get_system_status(
         self,
         *,
@@ -521,7 +669,7 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             await self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -690,7 +838,7 @@ class StorefrontClient(_StorefrontClientBase):
         limit: int = 50,
         offset: int = 0,
         request_id: str | None = None,
-    ) -> "NegotiationListResponse":
+    ) -> NegotiationListResponse:
         """GET /api/v1/listings/{listing_id}/negotiations through admin v2 auth."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
@@ -718,7 +866,7 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         request_id: str | None = None,
-    ) -> "NegotiationDetail":
+    ) -> NegotiationDetail:
         """GET one negotiation through admin v2 authentication."""
         resource = f"{listing_id}/negotiations/{neg_id}"
         return NegotiationDetail.from_dict(
@@ -740,7 +888,7 @@ class StorefrontClient(_StorefrontClientBase):
         proposal: dict[str, Any] | None = None,
         reason: str | None = None,
         request_id: str | None = None,
-    ) -> "NegotiationActionResponse":
+    ) -> NegotiationActionResponse:
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
         body: dict[str, Any] = {"action": action}
         if proposal is not None:
@@ -765,12 +913,15 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         amount: int,
         request_id: str | None = None,
-    ) -> "NegotiationActionResponse":
+    ) -> NegotiationActionResponse:
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",
@@ -797,6 +948,117 @@ class StorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    async def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    async def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    async def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`,
+        `publication`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing. Also supported by `publication`, whose
+        dry run reports every publish, refresh, close, reopen, and hold the
+        next cycle would perform, with its reason.
+        """
+        return await self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    async def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return await self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
         )
 
     async def admin_resume(
@@ -1010,7 +1272,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         request_id: str | None = None,
-    ) -> "ReleaseReservationsResponse":
+    ) -> ReleaseReservationsResponse:
         """POST /api/v1/admin/portfolio/release-reservations."""
         return ReleaseReservationsResponse.from_dict(
             await self._authenticated_post(
@@ -1043,9 +1305,9 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        resource_id: "str | None" = None,
-        provider_lease_id: "str | None" = None,
-        released_at: "str | None" = None,
+        resource_id: str | None = None,
+        provider_lease_id: str | None = None,
+        released_at: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated capacity release callback.
@@ -1083,14 +1345,13 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        escrow_uid: "str | None" = None,
-        provider_id: "str | None" = None,
-        provider_lease_id: "str | None" = None,
-        resource_id: "str | None" = None,
-        vm_host: "str | None" = None,
-        vm_target: "str | None" = None,
-        gpu_count: "int | None" = None,
-        lease_end_utc: "str | None" = None,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_lease_id: str | None = None,
+        resource_id: str | None = None,
+        host_id: str | None = None,
+        gpu_count: int | None = None,
+        lease_end_utc: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated usage-started callback.
@@ -1112,10 +1373,8 @@ class StorefrontClient(_StorefrontClientBase):
             body["provider_lease_id"] = provider_lease_id
         if resource_id is not None:
             body["resource_id"] = resource_id
-        if vm_host is not None:
-            body["vm_host"] = vm_host
-        if vm_target is not None:
-            body["vm_target"] = vm_target
+        if host_id is not None:
+            body["host_id"] = host_id
         if gpu_count is not None:
             body["gpu_count"] = gpu_count
         if lease_end_utc is not None:
@@ -1134,13 +1393,13 @@ class StorefrontClient(_StorefrontClientBase):
         capacity_reservation_id: str,
         *,
         site_id: str,
-        escrow_uid: "str | None" = None,
-        provider_id: "str | None" = None,
-        provider_job_id: "str | None" = None,
-        resource_id: "str | None" = None,
-        reason: "str | None" = None,
-        message: "str | None" = None,
-        logs_ref: "str | None" = None,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        resource_id: str | None = None,
+        reason: str | None = None,
+        message: str | None = None,
+        logs_ref: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """Post a service-authenticated fulfillment-failed callback.
@@ -1180,7 +1439,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         resource_id: str,
         *,
-        state: "str | None" = None,
+        state: str | None = None,
         attributes: "dict | None" = None,
         request_id: str | None = None,
     ) -> dict:
@@ -1207,29 +1466,29 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
@@ -1244,7 +1503,7 @@ class StorefrontClient(_StorefrontClientBase):
     async def create_listing(
         self,
         *,
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
         capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
@@ -1257,7 +1516,7 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> StorefrontListingCreateResponse:
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
-            "offer": offer,
+            "listing_resource": listing_resource,
             "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
@@ -1372,6 +1631,7 @@ class StorefrontClient(_StorefrontClientBase):
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         settlement_selection: dict[str, Any] | None = None,
+        selection_only: bool = False,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new through the buyer v2 contract.
@@ -1381,25 +1641,22 @@ class StorefrontClient(_StorefrontClientBase):
         interprets a domain payload. ``initial_amount`` is the absolute opening
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
+        ``selection_only=True`` opens with a ``settlement_selection`` and no
+        escrow carrier, as a payments or introduction buyer does.
         """
-        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
-        fields = dict(proposal_fields or {})
-        if initial_amount is not None:
-            fields.setdefault("amount", str(initial_amount))
-        literals = dict(literal_fields or {})
-        if token or literal_fields is None:
-            literals.setdefault("token", token or ("0x" + "0" * 40))
-        proposal = {
-            "chain_name": chain_name or "anvil",
-            "escrow_address": escrow_address or ("0x" + "0" * 40),
-            "fields": fields,
-            "literal_fields": literals,
-            "expiration_unix": exp_unix,
-        }
-        if rates is not None:
-            proposal["rates"] = rates
-        if demands is not None:
-            proposal["demands"] = demands
+        proposal = _negotiate_new_proposal(
+            initial_amount=initial_amount,
+            proposal_fields=proposal_fields,
+            token=token,
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+            escrow_expiration_unix=escrow_expiration_unix,
+            literal_fields=literal_fields,
+            rates=rates,
+            demands=demands,
+            settlement_selection=settlement_selection,
+            selection_only=selection_only,
+        )
         body = {
             "listing_id": listing_id,
             "buyer_principal": self._principal_body(),
@@ -1433,7 +1690,7 @@ class StorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,
@@ -1451,35 +1708,83 @@ class StorefrontClient(_StorefrontClientBase):
             request_id=request_id,
         )
 
-    async def settle(
+    async def settle_evm(
         self,
         escrow_uid: str,
         *,
         negotiation_id: str,
         buyer_evm_address: str,
-        ssh_public_key: str = "",
-        chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
+        """POST /api/v1/settle/{escrow_uid} for an EVM settlement mechanism.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        The SSH key and chain are negotiated terms the storefront reads from the
+        accepted negotiation, so settlement does not restate them.
+        Agreement-settled mechanisms use ``settle_agreement`` instead.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
             "buyer_evm_address": buyer_evm_address,
-            "ssh_public_key": ssh_public_key,
-            "chain_name": chain_name,
         }
         return SettleResponse.from_dict(
             await self._authenticated_post(
-                f"/api/v1/settle/{escrow_uid}",
+                SETTLE.path(escrow_uid),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=escrow_uid,
+                request_id=request_id,
+            )
+        )
+
+    async def settle_agreement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> AgreementSettleResponse:
+        """POST /api/v1/settle/{negotiation_id} for a mechanism that settles from the Agreement.
+
+        The request carries only the negotiation and the buyer principal; the
+        storefront reads every term from the accepted Agreement. A ``pending``
+        status with ``retryable`` set means no payment evidence exists yet.
+        """
+        body: dict[str, Any] = {
+            "negotiation_id": negotiation_id,
+            "buyer_principal": self._principal_body(),
+        }
+        return _strict(AgreementSettleResponse,
+            await self._authenticated_post(
+                SETTLE.path(negotiation_id),
+                body,
+                role=SETTLE.role,
+                operation=SETTLE.operation,
+                resource=negotiation_id,
+                request_id=request_id,
+            )
+        )
+
+    async def refund_settlement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> RefundSettlementResponse:
+        """POST /api/v1/settlements/{negotiation_id}/refund as the seller.
+
+        Reverses the deal's still-held payment and records it refunded so
+        delivery cannot start. Only the seller may refund.
+        """
+        return _strict(RefundSettlementResponse,
+            await self._authenticated_post(
+                REFUND.path(negotiation_id),
+                EMPTY_BODY,
+                role=REFUND.role,
+                operation=REFUND.operation,
+                resource=negotiation_id,
                 request_id=request_id,
             )
         )
@@ -1493,9 +1798,9 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
         return SettleStatusResponse.from_dict(
             await self._authenticated_get(
-                f"/api/v1/settle/{escrow_uid}/status",
-                role="buyer",
-                operation="settle_status",
+                SETTLE_STATUS.path(escrow_uid),
+                role=SETTLE_STATUS.role,
+                operation=SETTLE_STATUS.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )
@@ -1539,7 +1844,7 @@ class StorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -1549,11 +1854,16 @@ class StorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,
@@ -1574,18 +1884,23 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",
@@ -1769,6 +2084,45 @@ class SyncStorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
+    def authenticated_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
+        signed = self._signed_request(
+            role=role,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = self._client.request(
+            method.upper(),
+            path,
+            params=params,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
+        )
+        return self._authenticated_payload(method.upper(), url, resp, signed)
+
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
         resp = self._client.get(path, params=params or {}, timeout=self._timeout)
@@ -1783,6 +2137,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(self._get("/health"))
 
+    def _system_status_role(self) -> str:
+        """Role to assert for system status, which two callers may read.
+
+        The storefront dispatches this route on the asserted role: the
+        administrator middleware handles it and passes a request asserting
+        `service` to the service-peer middleware. A client therefore asserts
+        whichever of the two roles it holds. Anything else falls through to
+        `admin` so the refusal names the role an operator would need.
+        """
+        if self._caller_role in ("admin", "service"):
+            return self._caller_role
+        return "admin"
+
     def get_system_status(
         self,
         *,
@@ -1792,7 +2159,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(
             self._authenticated_get(
                 "/api/v1/system/status",
-                role="service",
+                role=self._system_status_role(),
                 operation="admin_system_status",
                 resource="system/status",
                 request_id=request_id,
@@ -2032,7 +2399,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return NegotiationActionResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                {"amount": int(amount)},
+                # Decimal-digit string: this body is canonicalized for
+                # signing, and an 18-decimal amount has no JSON number
+                # form. The route parses either.
+                {"amount": str(int(amount))},
                 role="admin",
                 operation="admin_force_accept_negotiation",
                 resource=f"{listing_id}/{neg_id}",
@@ -2059,6 +2429,117 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 resource="",
                 request_id=request_id,
             )
+        )
+
+    def admin_pause_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/pause.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/pause; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/pause",
+            {},
+            role="admin",
+            operation="admin_pause_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    def admin_resume_lifecycle_loops(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/resume.
+
+        Holds or releases the timer loops only. The storefront's trading pause
+        is a separate control on /admin/resume; neither implies the other.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/lifecycle/resume",
+            {},
+            role="admin",
+            operation="admin_resume_lifecycle_loops",
+            resource="lifecycle",
+            request_id=request_id,
+        )
+
+    def admin_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/run-cycle.
+
+        Run one cycle of a paused loop and return what that cycle reports.
+        `loop` is the loop's route name -- `settlement-servicing`,
+        `fulfillment-resume`, `site-projections`, `capacity-events`,
+        `publication`. The route
+        calls the operation the timer was already invoking, so a caller
+        advances production behaviour rather than a test-only path.
+
+        `admin_dry_run_lifecycle_cycle` reports what a cycle would do for the
+        loops that support it, so a caller can assert the cause before
+        committing to the effect.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            role="admin",
+            operation="admin_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_dry_run_lifecycle_cycle(
+        self,
+        loop: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/lifecycle/{loop}/dry-run.
+
+        Report what one cycle of a paused loop would do, without doing any of
+        it. Supported by `capacity-events`, whose deltas close and reopen
+        derived listings: the dry run names the pending events so a caller can
+        check the cause before advancing. Also supported by `publication`, whose
+        dry run reports every publish, refresh, close, reopen, and hold the
+        next cycle would perform, with its reason.
+        """
+        return self._authenticated_post(
+            f"/api/v1/admin/lifecycle/{loop}/dry-run",
+            {},
+            role="admin",
+            operation="admin_dry_run_lifecycle_cycle",
+            resource=loop,
+            request_id=request_id,
+        )
+
+    def admin_refresh_site_projections(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/admin/capacity/projections/refresh.
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just declared capacity at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return self._authenticated_post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {},
+            role="admin",
+            operation="admin_refresh_site_projections",
+            resource="capacity/projections",
+            request_id=request_id,
         )
 
     def admin_resume(
@@ -2272,7 +2753,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         request_id: str | None = None,
-    ) -> "ReleaseReservationsResponse":
+    ) -> ReleaseReservationsResponse:
         """POST /api/v1/admin/portfolio/release-reservations."""
         return ReleaseReservationsResponse.from_dict(
             self._authenticated_post(
@@ -2343,8 +2824,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         provider_id: str | None = None,
         provider_lease_id: str | None = None,
         resource_id: str | None = None,
-        vm_host: str | None = None,
-        vm_target: str | None = None,
+        host_id: str | None = None,
         gpu_count: int | None = None,
         lease_end_utc: str | None = None,
         request_id: str | None = None,
@@ -2359,8 +2839,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "provider_id": provider_id,
             "provider_lease_id": provider_lease_id,
             "resource_id": resource_id,
-            "vm_host": vm_host,
-            "vm_target": vm_target,
+            "host_id": host_id,
             "gpu_count": gpu_count,
             "lease_end_utc": lease_end_utc,
         }
@@ -2420,7 +2899,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         resource_id: str,
         *,
-        state: "str | None" = None,
+        state: str | None = None,
         attributes: "dict | None" = None,
         request_id: str | None = None,
     ) -> dict:
@@ -2454,29 +2933,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
@@ -2491,7 +2970,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def create_listing(
         self,
         *,
-        offer: dict[str, Any],
+        listing_resource: dict[str, Any],
         capacity_source: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlements: list[dict[str, Any]] | None = None,
@@ -2504,7 +2983,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ) -> StorefrontListingCreateResponse:
         """Create a listing through the seller-authenticated v2 contract."""
         body = {
-            "offer": offer,
+            "listing_resource": listing_resource,
             "capacity_source": capacity_source,
             "accepted_escrows": accepted_escrows or [],
             "settlements": settlements or [],
@@ -2619,31 +3098,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         settlement_selection: dict[str, Any] | None = None,
+        selection_only: bool = False,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new through the buyer v2 contract.
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
+        ``selection_only=True`` opens with a ``settlement_selection`` and no
+        escrow carrier, as a payments or introduction buyer does.
         """
-        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
-        fields = dict(proposal_fields or {})
-        if initial_amount is not None:
-            fields.setdefault("amount", str(initial_amount))
-        literals = dict(literal_fields or {})
-        if token or literal_fields is None:
-            literals.setdefault("token", token or ("0x" + "0" * 40))
-        proposal = {
-            "chain_name": chain_name or "anvil",
-            "escrow_address": escrow_address or ("0x" + "0" * 40),
-            "fields": fields,
-            "literal_fields": literals,
-            "expiration_unix": exp_unix,
-        }
-        if rates is not None:
-            proposal["rates"] = rates
-        if demands is not None:
-            proposal["demands"] = demands
+        proposal = _negotiate_new_proposal(
+            initial_amount=initial_amount,
+            proposal_fields=proposal_fields,
+            token=token,
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+            escrow_expiration_unix=escrow_expiration_unix,
+            literal_fields=literal_fields,
+            rates=rates,
+            demands=demands,
+            settlement_selection=settlement_selection,
+            selection_only=selection_only,
+        )
         body = {
             "listing_id": listing_id,
             "buyer_principal": self._principal_body(),
@@ -2677,7 +3154,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``proposal`` is the full EscrowProposal-shaped dict for ``counter``;
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
-        buyer's absolute new offer in base units.
+        buyer's absolute new listing_resource in base units.
         """
         body: dict[str, Any] = {
             "action": action,
@@ -2695,35 +3172,83 @@ class SyncStorefrontClient(_StorefrontClientBase):
             request_id=request_id,
         )
 
-    def settle(
+    def settle_evm(
         self,
         escrow_uid: str,
         *,
         negotiation_id: str,
         buyer_evm_address: str,
-        ssh_public_key: str = "",
-        chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
+        """POST /api/v1/settle/{escrow_uid} for an EVM settlement mechanism.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        The SSH key and chain are negotiated terms the storefront reads from the
+        accepted negotiation, so settlement does not restate them.
+        Agreement-settled mechanisms use ``settle_agreement`` instead.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
             "buyer_evm_address": buyer_evm_address,
-            "ssh_public_key": ssh_public_key,
-            "chain_name": chain_name,
         }
         return SettleResponse.from_dict(
             self._authenticated_post(
-                f"/api/v1/settle/{escrow_uid}",
+                SETTLE.path(escrow_uid),
                 body,
-                role="buyer",
-                operation="settle_escrow",
+                role=SETTLE.role,
+                operation=SETTLE.operation,
                 resource=escrow_uid,
+                request_id=request_id,
+            )
+        )
+
+    def settle_agreement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> AgreementSettleResponse:
+        """POST /api/v1/settle/{negotiation_id} for a mechanism that settles from the Agreement.
+
+        The request carries only the negotiation and the buyer principal; the
+        storefront reads every term from the accepted Agreement. A ``pending``
+        status with ``retryable`` set means no payment evidence exists yet.
+        """
+        body: dict[str, Any] = {
+            "negotiation_id": negotiation_id,
+            "buyer_principal": self._principal_body(),
+        }
+        return _strict(AgreementSettleResponse,
+            self._authenticated_post(
+                SETTLE.path(negotiation_id),
+                body,
+                role=SETTLE.role,
+                operation=SETTLE.operation,
+                resource=negotiation_id,
+                request_id=request_id,
+            )
+        )
+
+    def refund_settlement(
+        self,
+        negotiation_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> RefundSettlementResponse:
+        """POST /api/v1/settlements/{negotiation_id}/refund as the seller.
+
+        Reverses the deal's still-held payment and records it refunded so
+        delivery cannot start. Only the seller may refund.
+        """
+        return _strict(RefundSettlementResponse,
+            self._authenticated_post(
+                REFUND.path(negotiation_id),
+                EMPTY_BODY,
+                role=REFUND.role,
+                operation=REFUND.operation,
+                resource=negotiation_id,
                 request_id=request_id,
             )
         )
@@ -2737,9 +3262,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
         return SettleStatusResponse.from_dict(
             self._authenticated_get(
-                f"/api/v1/settle/{escrow_uid}/status",
-                role="buyer",
-                operation="settle_status",
+                SETTLE_STATUS.path(escrow_uid),
+                role=SETTLE_STATUS.role,
+                operation=SETTLE_STATUS.operation,
                 resource=escrow_uid,
                 request_id=request_id,
             )
@@ -2783,7 +3308,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: float,
+        agreed_price: int,
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
@@ -2793,11 +3318,16 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes. Used by e2e stage 7b.
+        and reason on failure. No DB writes.
+
+        ``agreed_price`` is base units in the uint256 domain, sent as a
+        decimal-digit string: this body is canonicalized for signing and an
+        18-decimal amount has no JSON number form. It was typed ``float``,
+        which no amount in this protocol is.
         """
         body = {
             "seller_wallet": seller_wallet,
-            "agreed_price": agreed_price,
+            "agreed_price": str(int(agreed_price)),
             "agreed_duration_seconds": agreed_duration_seconds,
             "listing_id": listing_id,
             "chain_name": chain_name,
@@ -2818,18 +3348,23 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, and
+        required_attributes; it names no guest, which provisioning names from
+        the reservation settle commits.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",
