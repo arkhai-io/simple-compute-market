@@ -13,6 +13,8 @@ from core_storefront.domain_registry import StorefrontDomainRegistryError
 import arkhai_bare_metal_storefront.runtime as runtime_module
 from market_identity import Eip191Signer, TrustedIdentitySet
 from settlement_compositions import alkahest_composition
+from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLifecycle
+from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 import arkhai_bare_metal_storefront.server as server_module
@@ -241,9 +243,7 @@ async def test_an_alkahest_only_runtime_composes_the_worker_and_its_step(
     assert health["checks"]["commercial_settlement"] == "ok"
 
 
-async def test_the_ready_hook_declines_contact_exchange_and_refuses_the_unknown(
-    tmp_path,
-) -> None:
+async def test_each_entry_composes_its_own_obligation_servicing(tmp_path) -> None:
     runtime = _direct_runtime(
         tmp_path,
         seller_evm_address="0x" + "33" * 20,
@@ -253,19 +253,16 @@ async def test_the_ready_hook_declines_contact_exchange_and_refuses_the_unknown(
             chain_clients={"anvil": object()},
         ),
     )
-    on_ready = runtime.settlement_worker._on_ready
-    on_terminal = runtime.settlement_worker._on_terminal
 
-    contact = SimpleNamespace(obligation={"mechanism": "contact-exchange.v1"})
-    unknown = SimpleNamespace(obligation={"mechanism": "unknown.v1"})
-
-    # Contact exchange's reveal binds its own obligation; nothing is reserved.
-    assert await on_ready(contact, "w") is None
-    assert await on_terminal(contact, "failed", None) is None
-    with pytest.raises(RuntimeError, match="unknown.v1"):
-        await on_ready(unknown, "w")
-    with pytest.raises(RuntimeError, match="unknown.v1"):
-        await on_terminal(unknown, "failed", None)
+    # Alkahest delivers through its lifecycle; contact exchange's reveal binds
+    # its own obligation, so its entry declines; payments has no obligations.
+    assert isinstance(
+        runtime.obligation_servicing["alkahest.v1"], BareMetalAlkahestLifecycle
+    )
+    assert isinstance(
+        runtime.obligation_servicing["contact-exchange.v1"], DeclinedServicing
+    )
+    assert "arkhai.payments.v1" not in runtime.obligation_servicing
 
 
 async def test_a_root_that_enables_no_payment_reports_settlement_unconfigured(

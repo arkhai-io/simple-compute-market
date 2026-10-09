@@ -44,7 +44,6 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
-from .alkahest_lifecycle import BareMetalAlkahestLifecycle
 from .delivery import storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
 from .fulfillment_service import BareMetalFulfillmentService
@@ -64,6 +63,7 @@ from .settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from .settlement_service import BareMetalSettlementService
+from .settlement_stages import ObligationServicing
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
@@ -150,8 +150,8 @@ class BareMetalStorefrontRuntime:
         default=None, init=False, repr=False
     )
     settlement_servicing_interval_seconds: float = 30.0
-    alkahest_lifecycle: BareMetalAlkahestLifecycle | None = field(
-        default=None, init=False, repr=False
+    obligation_servicing: Mapping[str, ObligationServicing] = field(
+        default_factory=dict, init=False, repr=False
     )
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
@@ -260,51 +260,33 @@ class BareMetalStorefrontRuntime:
         register_bare_metal_lifecycle_steps(self)
 
     def _compose_settlement_servicing(self) -> None:
-        """Compose the Alkahest step and the obligation-servicing worker.
+        """Compose each seller entry's obligation servicing and the worker.
 
         They are built here, before the lifecycle steps are registered, so the
         settlement-servicing step exists whenever settlement does. With no
         settlement composition there is none of them.
         """
 
-        composition = self.settlement_composition
-        if composition is None:
+        if self.settlement_composition is None:
             return
-        if composition.configures(ALKAHEST_MECHANISM):
-            object.__setattr__(
-                self,
-                "alkahest_lifecycle",
-                BareMetalAlkahestLifecycle(
-                    db=self.db,
-                    runtime=self.settlement_runtime,
-                    local_principal=self.seller_principal,
-                    fulfillment_service=self.fulfillment_service,
-                    chain_clients=composition.resources.get("clients") or {},
-                ),
-            )
-        alkahest = self.alkahest_lifecycle
+        object.__setattr__(
+            self,
+            "obligation_servicing",
+            {
+                mechanism: servicing
+                for mechanism, stage in self.domain.settlement.seller_stages.items()
+                if stage.servicing is not None
+                and (servicing := stage.servicing(self)) is not None
+            },
+        )
 
-        # Each mechanism's fulfillment is started by whatever owns it. Contact
-        # exchange's reveal binds its own obligation, so it is declined without
-        # being reserved; an obligation under any other mechanism has nothing
-        # here that could deliver it.
         async def on_ready(record: Any, worker_id: str) -> None:
-            mechanism = str(record.obligation.get("mechanism") or "")
-            if mechanism == ALKAHEST_MECHANISM and alkahest is not None:
-                await alkahest.fulfill(record, worker_id)
-            elif mechanism != CONTACT_MECHANISM:
-                raise RuntimeError(
-                    f"no bare-metal fulfillment is composed for {mechanism!r}"
-                )
+            servicing = await self._accepted_servicing(record)
+            await servicing.ready(record, worker_id)
 
         async def on_terminal(record: Any, state: str, reason: str | None) -> None:
-            mechanism = str(record.obligation.get("mechanism") or "")
-            if mechanism == ALKAHEST_MECHANISM and alkahest is not None:
-                await alkahest.end_service(record, state, reason)
-            elif mechanism != CONTACT_MECHANISM:
-                raise RuntimeError(
-                    f"no bare-metal terminal handling is composed for {mechanism!r}"
-                )
+            servicing = await self._accepted_servicing(record)
+            await servicing.terminal(record, state, reason)
 
         object.__setattr__(
             self,
@@ -318,6 +300,35 @@ class BareMetalStorefrontRuntime:
                 on_terminal=on_terminal,
             ),
         )
+
+    async def _accepted_servicing(self, record: Any) -> ObligationServicing:
+        """The servicing of the seller entry the obligation's Agreement selected.
+
+        The entry is resolved from the accepted Agreement, as every recovery is,
+        never from current configuration; an obligation naming another
+        mechanism than its Agreement, or an entry composed without servicing,
+        is refused before the worker acts on it.
+        """
+
+        thread = await self.db.load_negotiation_thread_row(
+            negotiation_id=record.agreement_ref
+        )
+        if thread is None or not thread.get("agreement_bytes"):
+            raise RuntimeError("serviced obligation has no accepted Agreement")
+        agreement = Agreement.model_validate_json(thread["agreement_bytes"])
+        if agreement.settlement is None:
+            raise RuntimeError("accepted Agreement has no settlement selection")
+        mechanism = agreement.settlement.mechanism
+        if record.obligation.get("mechanism") != mechanism:
+            raise RuntimeError(
+                "serviced obligation names another mechanism than its Agreement"
+            )
+        try:
+            return self.obligation_servicing[mechanism]
+        except KeyError:
+            raise RuntimeError(
+                f"no bare-metal obligation servicing is composed for {mechanism!r}"
+            ) from None
 
     def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
         """Hand a fresh reveal to the configured seller-side dispatch, if any."""

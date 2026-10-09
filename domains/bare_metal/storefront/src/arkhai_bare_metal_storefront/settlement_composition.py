@@ -10,11 +10,13 @@ from typing import Any
 from core_storefront.publication_runner import PublicationPayload
 from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption
+from .alkahest_lifecycle import alkahest_servicing
 from .settlement_stages import (
     ALKAHEST_MECHANISM,
     ContactStage,
     PaymentStage,
     SellerStage,
+    declined_servicing,
     refund_payment,
     revalidate_alkahest,
     revalidate_contact,
@@ -52,6 +54,7 @@ SELLER_STAGES = SettlementStageTable(
             verify_alkahest,
             revalidate_alkahest,
             True,
+            servicing=alkahest_servicing,
         ),
         ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
             create_arkhai_payments_registration,
@@ -66,6 +69,7 @@ SELLER_STAGES = SettlementStageTable(
             verify_contact,
             revalidate_contact,
             False,
+            servicing=declined_servicing,
         ),
     }
 )

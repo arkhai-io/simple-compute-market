@@ -286,7 +286,7 @@ async def test_an_uncollected_settlement_ends_the_lease_once_delivery_began(
     )
     record = await _record(runtime, obligation_ref)
 
-    await runtime.alkahest_lifecycle.end_service(record, state, None)
+    await runtime.obligation_servicing["alkahest.v1"].terminal(record, state, None)
 
     assert site.terminations == (
         [("reservation-a", f"settlement_{state}")] if terminated else []
@@ -299,7 +299,7 @@ async def test_a_parked_obligation_does_not_end_the_lease(tmp_path) -> None:
         tmp_path, site=site, chain=ChainClient(), escrow=EscrowOnChain()
     )
 
-    await runtime.alkahest_lifecycle.end_service(
+    await runtime.obligation_servicing["alkahest.v1"].terminal(
         await _record(runtime, obligation_ref), "manual_required", "parked"
     )
 

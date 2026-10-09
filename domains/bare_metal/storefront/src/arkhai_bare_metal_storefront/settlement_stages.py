@@ -6,7 +6,7 @@ import hashlib
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from core_storefront.models.settle_models import (
     AgreementSettleResponse,
@@ -652,6 +652,35 @@ async def revalidate_contact(
         raise SettlementRequestError("introduction has not been revealed")
 
 
+class ObligationServicing(Protocol):
+    """What one mechanism does when its adopted obligation is ready, or ends.
+
+    The settlement-servicing worker calls it for obligations of deals accepted
+    under that mechanism; the entry that declares it is the only place the
+    worker's behaviour differs by mechanism.
+    """
+
+    async def ready(self, record: Any, worker_id: str) -> Any: ...
+
+    async def terminal(self, record: Any, state: str, reason: str | None) -> None: ...
+
+
+class DeclinedServicing:
+    """Servicing for a mechanism whose obligation completes outside the worker."""
+
+    async def ready(self, record: Any, worker_id: str) -> None:
+        return None
+
+    async def terminal(self, record: Any, state: str, reason: str | None) -> None:
+        return None
+
+
+def declined_servicing(runtime: Any) -> ObligationServicing:
+    # A contact exchange's obligation is bound by its authenticated reveal, so
+    # the worker reserves nothing and ends nothing for it.
+    return DeclinedServicing()
+
+
 @dataclass(frozen=True, slots=True)
 class SellerStage:
     """One mechanism's seller entry: its verification, recovery gate and hooks.
@@ -661,7 +690,9 @@ class SellerStage:
     than a separate declaration. ``refund`` is the seller-initiated reversal
     of an accepted deal and ``reconcile`` advances an accepted deal without
     its buyer; an entry without them refunds or converges through its own
-    mechanism path.
+    mechanism path. ``servicing`` builds the entry's obligation servicing over
+    one runtime, or returns None when this storefront services none of its
+    obligations; an entry without it never puts an obligation in the journal.
     """
 
     registration_factory: Callable[[], Any]
@@ -670,6 +701,7 @@ class SellerStage:
     physical: bool
     refund: Callable[..., Any] | None = None
     reconcile: Callable[..., Any] | None = None
+    servicing: Callable[[Any], ObligationServicing | None] | None = None
 
     def accepted_data(
         self, agreement: Mapping[str, Any], payment_stage: Any
