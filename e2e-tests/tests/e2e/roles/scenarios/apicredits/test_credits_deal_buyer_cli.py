@@ -5,12 +5,12 @@ The domain's end-to-end (ARCHITECTURE.md, "API-credits market domain"):
     discover → negotiate (new key) → settle → consume to 402
              → buy again into the existing key → consume succeeds
 
-The topology (docker-compose.yml): a second registry speaking the
-``api_credits`` schema, the credits service, the credits storefront
-(self-seeds one quota-backed listing pointing at the sample app), and
-the sample app gated by the Python middleware. The buyer runs the same
-`market` binary as the VM tests — its schema filter routes discovery to
-the api-credits registry while leaving the compute.market registry alone.
+The topology (the API-credit lane): a registry speaking the ``api_credits``
+schema, the credits service, the credits storefront (self-seeds one
+quota-backed listing pointing at the sample app), the sample app gated by the
+Python middleware, and the lane's own compute-schema registry. The buyer runs
+the same `market` binary as the VM tests — its schema filter routes discovery
+to the api-credits registry while leaving the compute registry alone.
 
 Consuming runs against the gated sample app directly with the issued
 bearer secret, exactly as a real client of that API would.
@@ -45,44 +45,48 @@ log = logging.getLogger(__name__)
 pytestmark = pytest.mark.e2e_credits_deal
 
 
+def _required(name: str) -> str:
+    """One lane setting, failing the scenario when it is absent.
+
+    The lane supplies its own configuration, so a missing value is a broken
+    lane, not a scenario to skip: in this lane a skip would leave nothing
+    passing and the run green.
+    """
+    value = str(settings.get(name, "") or "").strip()
+    if not value:
+        pytest.fail(f"API-credit lane setting {name} is not configured")
+    return value
+
+
+def _registry_pin(prefix: str) -> tuple[str, dict[str, Any]]:
+    url = _required(f"API_CREDITS.{prefix}_URL").rstrip("/")
+    return url, {
+        "authority": _required(f"API_CREDITS.{prefix}_AUTHORITY_ID"),
+        "identities": [
+            {
+                "scheme": _required(f"API_CREDITS.{prefix}_SCHEME"),
+                "identifier": _required(f"API_CREDITS.{prefix}_IDENTIFIER"),
+            }
+        ],
+    }
+
+
 @pytest.fixture(scope="module")
 def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
     """Compose API credits over the shared profile/config fixture."""
-    private_key = str(settings.BUYER.PRIVATE_KEY or "")
-    wallet_address = str(settings.BUYER.WALLET_ADDRESS or "")
-    if not private_key or not wallet_address:
-        pytest.skip("BUYER.PRIVATE_KEY / BUYER.WALLET_ADDRESS not configured")
-    marketplace_credential = str(
-        getattr(settings.BUYER, "MARKETPLACE_CREDENTIAL", None) or ""
-    )
-    if not marketplace_credential:
-        pytest.skip("BUYER.MARKETPLACE_CREDENTIAL not configured")
+    private_key = _required("BUYER.PRIVATE_KEY")
+    wallet_address = _required("BUYER.WALLET_ADDRESS")
+    marketplace_credential = _required("BUYER.MARKETPLACE_CREDENTIAL")
 
-    vms_registry = str(settings.REGISTRY.API_URL or "")
-    credits_registry = str(
-        getattr(settings, "API_CREDITS", {}).get("REGISTRY_URL", "")
-        if hasattr(settings, "API_CREDITS")
-        else ""
-    )
-    if not credits_registry:
-        credits_registry = str(settings.get("API_CREDITS.REGISTRY_URL", "") or "")
-    if not credits_registry:
-        pytest.skip("API_CREDITS.REGISTRY_URL not configured")
-
-    rpc_url = (
-        str(settings.BUYER.CHAIN_RPC_URL or "").strip()
-        or str(settings.RPC.URL or "").strip()
-        or "ws://localhost:8545"
-    )
+    rpc_url = _required("BUYER.CHAIN_RPC_URL")
     if rpc_url.startswith("http://"):
         rpc_url = "ws://" + rpc_url[len("http://"):]
     elif rpc_url.startswith("https://"):
         rpc_url = "wss://" + rpc_url[len("https://"):]
     alkahest_path = _alkahest_addresses_path()
     if not alkahest_path:
-        pytest.skip("Could not locate alkahest_anvil_addresses.json")
+        pytest.fail("Could not locate alkahest_anvil_addresses.json")
 
-    registries = tuple(url for url in (vms_registry, credits_registry) if url)
     # Every registry the buyer reads has to be pinned: discovery is
     # authenticated in both directions and the CLI refuses outright ("Missing
     # required [registry.authorities] identity pins") rather than reading an
@@ -90,39 +94,13 @@ def credits_buyer_cli(buyer_cli_binary, tmp_path_factory) -> BuyerCli:
     # the schema filter routing to the credits one is what this scenario
     # exercises — so the compute registry must be pinned as well, even though
     # nothing in this scenario discovers through it.
+    compute_registry, compute_pin = _registry_pin("COMPUTE_REGISTRY")
+    credits_registry, credits_pin = _registry_pin("REGISTRY")
+    registries = (compute_registry, credits_registry)
     authorities: dict[str, dict[str, Any]] = {
-        vms_registry.rstrip("/"): {
-            "authority": str(settings.REGISTRY.get("authority_id", "") or ""),
-            "identities": [
-                {
-                    "scheme": "eip191",
-                    "identifier": str(settings.REGISTRY.get("identifier", "") or ""),
-                }
-            ],
-        },
-        credits_registry.rstrip("/"): {
-            "authority": str(
-                settings.get("API_CREDITS.REGISTRY_AUTHORITY_ID", "") or ""
-            ),
-            "identities": [
-                {
-                    "scheme": str(
-                        settings.get("API_CREDITS.REGISTRY_SCHEME", "") or "ed25519"
-                    ),
-                    "identifier": str(
-                        settings.get("API_CREDITS.REGISTRY_IDENTIFIER", "") or ""
-                    ),
-                }
-            ],
-        },
+        compute_registry: compute_pin,
+        credits_registry: credits_pin,
     }
-    missing = sorted(
-        url
-        for url, pin in authorities.items()
-        if not pin["authority"] or not pin["identities"][0]["identifier"]
-    )
-    if missing:
-        pytest.skip(f"registry authority pins not configured for {missing}")
     log.info("[credits_buyer_cli] registries=%s rpc=%s", registries, rpc_url)
     yield create_profiled_buyer_cli(
         binary=buyer_cli_binary,

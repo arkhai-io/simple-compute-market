@@ -14,9 +14,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("mode", ["mock", "real"])
 @pytest.mark.parametrize("development", [False, True])
 def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
-    tmp_path: Path, development: bool
+    tmp_path: Path, development: bool, mode: str
 ) -> None:
     compose_binary = os.environ.get("E2E_COMPOSE_BINARY")
     command = [compose_binary] if compose_binary else ["docker", "compose"]
@@ -30,6 +31,7 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
             cwd=REPO_ROOT,
             stdout=output,
             check=True,
+            env={**os.environ, "PROVISIONING_MODE": mode},
         )
     command += [
         "--env-file", str(env_file), "-p", "bare-metal-render",
@@ -52,8 +54,10 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
     }
     assert set(services) == expected | ({"anvil"} if development else set())
     provisioning = services["bare-metal-provisioning"]
+    # The run's provisioning mode selects the site's profile, with or without
+    # the development overlay.
     assert provisioning["environment"]["ACTIVE_PROFILES"] == (
-        "mock" if development else "docker"
+        "mock" if mode == "mock" else "docker"
     )
     mounts = {v["target"]: v["source"] for v in provisioning["volumes"]}
     # Bare metal's stack needs nothing from another domain's tree.

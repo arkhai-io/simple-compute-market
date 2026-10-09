@@ -11,18 +11,14 @@
 # development value that must never be used on a public network; see
 # dev-env/identities/README.md.
 #
-# It changes the stack in exactly two ways. The site runs the provisioning mock
-# profile, since the lane has no host inventory, which also mounts the /test/*
-# controller. And the storefront waits for the dev chain, reads its Alkahest
+# It changes only the storefront: it waits for the dev chain, reads its Alkahest
 # address book, and runs a seller chain ending in `bisection`, which counters
 # an opening below the listed rate where the default chain would exit, so the
 # lane's deal negotiates an open thread; its chains and wallet key arrive
-# through the wrapper's inputs.
+# through the wrapper's inputs. Whether the site provisions through its mock
+# profile is the run's choice, not this overlay's: the environment file's
+# BARE_METAL_PROVISIONING_ACTIVE_PROFILES, from `PROVISIONING_MODE`.
 services:
-  bare-metal-provisioning:
-    environment:
-      - ACTIVE_PROFILES=mock
-
   bare-metal-storefront:
     environment:
       - BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES=["escrow_shape_guard","bisection"]

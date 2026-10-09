@@ -49,7 +49,10 @@ services:
     ports:
       - "${BARE_METAL_PROVISIONING_PORT:-8081}:8081"
     environment:
-      - ACTIVE_PROFILES=docker
+      # `docker`, or `mock` when a run selects mock provisioning: the mock
+      # runner in place of Ansible, and the /test/* controls. Never mock in
+      # production.
+      - ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://bare-metal-redis:6379
       - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000

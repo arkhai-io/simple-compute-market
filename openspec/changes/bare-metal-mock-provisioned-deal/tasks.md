@@ -4727,7 +4727,7 @@ against the code (2026-10-09)", decisions 8 and 9. Reviewable alone: compose fil
 targets, the workflow, the lane settings, the VM storefronts' development configuration,
 and the credits scenario's settings; no service code or package version changes.
 
-- [ ] 10.1 Split the overlay (decision 3).
+- [x] 10.1 Split the overlay (decision 3).
       - `compose.vms-local.yml` (new): `registry`, `registry-b`, `bob-storefront`,
         `alice-storefront`, `provisioning`, `alice-provisioning`, and `buyer-cli`, moved
         verbatim from `compose.local-identities.yml` with their comments; its header
@@ -4757,7 +4757,11 @@ and the credits scenario's settings; no service code or package version changes.
         `openspec/changes/repair-storefront-alkahest-configuration/tasks.md` (the file
         Alice's key moved to). The workflow and `e2e-tests/Makefile` change in 10.3 and
         10.4.
-- [ ] 10.2 The API-credit lane's own topology (decisions 4 and 9).
+    - Done. `compose.local-identities.yml` is deleted rather than tombstoned, since
+      the change commits directly; the API-credit overlay's moved comments no longer
+      point at services in the VM file. The full stack renders as before but for the
+      VM storefronts' unread mode variables (10.2a).
+- [x] 10.2 The API-credit lane's own topology (decisions 4 and 9).
       - `compose.apicredits-lane.yml` (new): `compute-registry`, the `arkhai:registry`
         image with its default compute filter spec, `core/registry/.env.docker-compose`
         and `./shared-env` as VM's `registry` has, and the inputs the registry refuses to
@@ -4791,7 +4795,12 @@ and the credits scenario's settings; no service code or package version changes.
         asserts each renders, VM's has no API-credit service, the API-credit lane's has
         `compute-registry` and the storefront's wallet key, and the full stack has one
         `anvil` and no `compute-registry`. 10.2a adds its provisioning assertions.
-- [ ] 10.2a Mock provisioning chosen per run (decision 8).
+    - Done. The credits stack's values are one internal target,
+      `e2e-apicredits-stack-env`, which the lane and the full stack both print. The
+      credits fixture reads the registries, their pins, and the buyer's wallet, key,
+      credential, and RPC URL through `_required`; it reads no storefront setting,
+      since its discovery finds the storefront.
+- [x] 10.2a Mock provisioning chosen per run (decision 8).
       - Root `Makefile`: `PROVISIONING_MODE ?= mock`, its comment stating that mock and
         local are separate choices and that the lanes' scenarios need the mock profile's
         `/test` controls; `e2e-vms-dev-env`, `e2e-bare-metal-dev-env`, and
@@ -4825,7 +4834,10 @@ and the credits scenario's settings; no service code or package version changes.
         VM's two provisioning services follow the mode the same way, no storefront in any
         stack carries `ARKHAI_PROVISIONING_MODE`, `MOCK_PROVISIONING_SUCCESS`, or
         `PROVISIONING_MODE`, and an unknown mode fails each environment target.
-- [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5).
+    - Done. A render of the full stack before and after differs only in the VM
+      storefronts' `ARKHAI_PROVISIONING_MODE`, `MOCK_PROVISIONING_SUCCESS`, and
+      `PROVISIONING_MODE`; the provisioning services still render `mock`.
+- [x] 10.3 Lane builds and targets (decisions 1, 2, and 5).
       - Root `Makefile`: `build-e2e-vm`, `build-e2e-bare-metal`, and
         `build-e2e-apicredits`, each `init-prerequisites`, `dist`, `build-dev-env`, and
         `build-test-image`, then the lane's images in parallel (VM: `build-registry`,
@@ -4847,7 +4859,9 @@ and the credits scenario's settings; no service code or package version changes.
         `e2e_credits_deal or e2e_credits_payment_deal`. `test-e2e` is `test-e2e-vm`,
         `e2e-vm-down`, `test-e2e-bare-metal`, `e2e-bare-metal-down`,
         `test-e2e-apicredits`. Comments state why the stacks run in turn.
-- [ ] 10.4 Workflow and diagnostics (decisions 6 and 8).
+    - Done, with `build-e2e-base` holding the four steps every lane shares, and one
+      bring-up recipe (`e2e_up`) carrying the failure diagnostics for all three lanes.
+- [x] 10.4 Workflow and diagnostics (decisions 6 and 8).
       - `.github/workflows/e2e.yml`: `e2e-vm`, `e2e-bare-metal`, and `e2e-apicredits`,
         each checkout, uv, Foundry, `make -C e2e-tests test-e2e-<lane>`, then
         `e2e-<lane>-logs` teed into `compose-logs.txt`, the `e2e-<lane>-logs` artifact,
@@ -4861,6 +4875,8 @@ and the credits scenario's settings; no service code or package version changes.
         missing-artifact and reuse cases covering all three.
       - `docs/development/TESTING.md`'s paragraph on running the lanes and fetching
         their logs: three lanes and the three artifacts.
+    - Done; `test_fetch_e2e_logs.py` also pins the fetcher's artifact list to the
+      three lanes.
 - [ ] 10.5 **Gate.** The three live jobs pass concurrently, the API-credit lane reporting
       exactly one passed (`e2e_credits_deal`) and three skipped
       (`e2e_credits_payment_deal`, with no payments target). 10.2's render test, 10.2a's

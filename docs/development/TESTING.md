@@ -263,23 +263,34 @@ clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
 
-The pipeline runs two lanes, as separate jobs so each failure's logs stand
-alone:
+The pipeline runs one lane per market domain, each as its own job, so each
+failure's logs stand alone and one domain's failure never hides another's
+evidence. Each lane builds only the images its stack runs
+(`make build-e2e-<lane>`) and brings up only its own services, as a compose
+project of its own:
 
-- **VM lane** (`make -C e2e-tests test-e2e-vm`): the VM and API-credit markets
-  on one dev chain, with the VM site in the provisioning mock profile.
-- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site in the
-  provisioning mock profile, trusting the bare-metal storefront, a bare-metal
-  registry, and the dev chain. Its publication scenario declares pools and
-  whole-host capacity through the site's operator clients, steps publication,
-  and follows one listing through discovery, withdrawal, and reinstatement at
-  the registry.
+- **VM lane** (`make -C e2e-tests test-e2e-vm`): Bob's and Alice's storefronts
+  and provisioning authorities, the two VM registries, and the dev chain.
+- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site
+  trusting the bare-metal storefront, a bare-metal registry, and the dev chain.
+  Its publication scenario declares pools and whole-host capacity through the
+  site's operator clients, steps publication, and follows one listing through
+  discovery, withdrawal, and reinstatement at the registry.
+- **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
+  registry, service, storefront, and gated sample app, a compute-schema registry
+  of the lane's own that the credits deal's discovery is routed away from, and
+  the dev chain.
 
-`make -C e2e-tests test-e2e` runs both in turn. A lane provides its own
-configuration, so a scenario that finds a lane setting missing fails rather
-than skipping. The release-qualified bare-metal deal needs a real whole host to
-reach and revoke access on, which the pipeline never has, so neither lane
-selects it; a mock-profile site proves the services compose, not real delivery.
+The compute lanes' provisioning services run their mock profile because the
+run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is read
+by each lane's environment target, never by a storefront.
+`make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
+before the next, because every stack names its chain container `anvil` and
+publishes fixed host ports. A lane provides its own configuration, so a
+scenario that finds a lane setting missing fails rather than skipping. The
+release-qualified bare-metal deal needs a real whole host to reach and revoke
+access on, which the pipeline never has, so no lane selects it; a mock-profile
+site proves the services compose, not real delivery.
 
 The VM multi-registry scenario seeds Bob's and Alice's separate provisioning
 authorities through typed administration clients and refreshes both site
@@ -291,13 +302,15 @@ use the typed registry client; the scenario does not establish that multiple
 storefronts can share a site authority. Resource-query and explain preparation
 have separate fail-closed behavior.
 
-To run both lanes in GitHub Actions, push the current branch and run
+To run the lanes in GitHub Actions, push the current branch and run
 `make run-e2e` with an authenticated `gh` CLI on PATH. Then run
 `make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
 diagnostics. Omitting the ID selects the current branch's latest run among the
 100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
-`actions.log`, `e2e-vm-logs/compose-logs.txt`, and
-`e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
+`actions.log`, `e2e-vm-logs/compose-logs.txt`,
+`e2e-bare-metal-logs/compose-logs.txt`, and
+`e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
+directory.
 Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful

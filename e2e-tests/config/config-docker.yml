@@ -64,6 +64,9 @@ alice_provisioning:
   authority_scheme: "ed25519"
   authority_identifier: "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw"
 
+# The API-credit end-to-end lane (`make test-e2e-apicredits`): the credits
+# registry, service, storefront, and sample app on their own dev chain, beside
+# the lane's own compute-schema registry.
 api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"
@@ -71,10 +74,18 @@ api_credits:
   # The credits registry's own signing principal, pinned by the buyer: a
   # registry read is authenticated in both directions, and the buyer refuses
   # to discover through an index it cannot pin. Matches
-  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits.yml.
+  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits-local.yml.
   registry_authority_id: "api-credits-registry"
   registry_scheme:       "ed25519"
   registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+  # The compute-schema registry the scenario's discovery is routed away from,
+  # declared in compose.apicredits-lane.yml. Its signer is the committed Anvil
+  # 3 development key (`registry-a.eip191`), a well-known development value
+  # never to be used on a public network.
+  compute_registry_url:          "http://compute-registry:8080"
+  compute_registry_authority_id: "compute-registry"
+  compute_registry_scheme:       "eip191"
+  compute_registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
 
 # Second storefront (multi-registry scenario)
 alice:

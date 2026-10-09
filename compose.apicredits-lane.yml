@@ -1,0 +1,48 @@
+# The API-credit end-to-end lane's compute-schema registry.
+#
+# The credits scenario reads two registries, so the buyer's schema filter is
+# shown routing discovery to the API-credit one and leaving the compute one
+# alone. In the full local stack that compute registry is VM's; the lane runs
+# no VM services, so it runs this one, layered after compose.apicredits.yml
+# and compose.apicredits-local.yml:
+#
+#     docker compose -p simple-market-apicredits --env-file <file> \
+#       -f compose.apicredits.yml -f compose.apicredits-local.yml \
+#       -f compose.apicredits-lane.yml up -d
+#
+# The full local stack never layers this file: it would gain a second compute
+# registry beside VM's. Its signer reuses the committed `registry-a.eip191`
+# under the authority `compute-registry`, a well-known development value that
+# must never be used on a public network; see dev-env/identities/README.md,
+# "The API-credit lane". Paths are relative to the repository root, the
+# project directory of the lane's first compose file.
+services:
+  compute-registry:
+    # The registry image's default filter specification is the compute one.
+    image: arkhai:registry
+    env_file:
+      - core/registry/.env.docker-compose
+    environment:
+      - REGISTRY_AUTHORITY_ID=compute-registry
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      # No host port: the buyer reaches it on the lane's network, at the
+      # address its descriptor advertises.
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://compute-registry:8080
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local API-Credit Lane Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+    volumes:
+      - ./shared-env:/app/shared-env
+      - ${APICREDITS_COMPUTE_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set the API-credit lane compute registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
