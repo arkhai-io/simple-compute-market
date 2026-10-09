@@ -1373,6 +1373,7 @@ class TestStage09c_LeaseRecorded:
         """
         require_state(
             deal_state,
+            "negotiation_id",
             "real_escrow_uid",
             "settlement_status",
             "fulfillment_id",
@@ -1380,9 +1381,9 @@ class TestStage09c_LeaseRecorded:
 
         # DealLease resolves where this deal's lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease_view = DealLease(provisioning_client, deal_state.negotiation_id)
         lease = lease_view.refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get("negotiation_id") == deal_state.negotiation_id
         host_id = lease.get("host_id")
         assert host_id == E2E_DEAL_CLI_HOST, (
             f"lease bound to executor {host_id!r}; this scenario's deal was "
