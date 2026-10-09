@@ -415,7 +415,6 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     reachable by writing directly to the database or reading an HTTP
     route by hand.
     """
-    from market_resource_pools_contracts import PoolCreate
     provisioning_client, _ = client_and_queue
     await provisioning_client.pools.create_pool(
         PoolCreate(
@@ -477,7 +476,6 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         -> resource-pool projection
         -> SiteCapacityClient.resource_pool_projection()
     """
-    from market_resource_pools_contracts import PoolCreate
     from market_site_client import SiteCapacityClient
     from compute_provisioning_service.db.models import Host
     from compute_provisioning_service.container import container
@@ -535,8 +533,6 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
 ):
     """A pool's `listing_shapes` hint reaches the storefront exactly as stored:
     policy tags are projected verbatim, and the reading domain interprets them."""
-    from market_resource_pools_contracts import PoolCreate
-
     shapes = {
         "vm": [
             {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 8},

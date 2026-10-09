@@ -48,6 +48,7 @@ from market_identity import (
     sign_request,
 )
 from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate
 from market_resource_pools_client import SyncResourcePoolClient
 from vm_provisioning_operator import SyncVmOperatorClient
 from e2e_harness.settings import settings
@@ -532,8 +533,6 @@ def _ensure_provisioning_host_registered(provisioning_client):
     Real-host integration tests use a real key path; this fixture is
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
-    from compute_provisioning_contracts import ConnectionSubmission, HostCreate
-
     host_name = "kvm1"
 
     try:

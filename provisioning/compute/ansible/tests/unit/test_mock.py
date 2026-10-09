@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from compute_provisioning import JobExecutorTable
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
 from compute_provisioning.jobs import JobFailure, JobRun, JobSuccess
 from compute_provisioning.jobs.executor_mock import MockRule
+from compute_provisioning_contracts import ResultEnvelope
 
 from compute_provisioning_ansible import (
     AnsibleJobExecutor,
@@ -21,7 +24,7 @@ from compute_provisioning_ansible import (
     MockAnsibleRunner,
     MockPlaybook,
 )
-from compute_provisioning_ansible.runner import AnsibleError, AnsibleRun
+from compute_provisioning_ansible.runner import AnsibleError, AnsibleRun, AnsibleRunner
 
 _HOST = ExecutionHost(
     host_id="node-1",
@@ -49,8 +52,6 @@ class _EchoCodec:
         return AnsibleJobPlan(variables={"host_id": run.host.host_id}, limit=run.host.host_id)
 
     def interpret(self, run, host, output) -> AnsibleJobInterpretation:
-        from compute_provisioning_contracts import ResultEnvelope
-
         return AnsibleJobInterpretation(
             result=ResultEnvelope(
                 offering_mode=run.offering_mode, result_kind="echo", value={"stdout": output.stdout}
@@ -230,10 +231,6 @@ class TestExecutorIntegration:
 
     def test_the_family_reports_a_mode_run_by_the_mock_as_mock(self):
         """What readiness reports as each offering mode's executor mode."""
-        from compute_provisioning import JobExecutorTable
-        from compute_provisioning_ansible.runner import AnsibleRunner
-        from types import SimpleNamespace
-
         table = JobExecutorTable()
         table.register(
             "mocked", "grant",

@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from compute_provisioning import ComputeProvisioningBackgroundTask
 
+from compute_provisioning_service import container as container_module
 from compute_provisioning_service import worker
 
 
@@ -71,9 +72,6 @@ def test_runtime_imports_contributed_documents_after_composition_and_before_pool
 def test_a_contributed_task_named_like_a_service_worker_is_refused(monkeypatch):
     """Every running task has the identity it declares: a contribution may not
     reuse a name the service gives one of its own workers."""
-    from compute_provisioning import ComputeProvisioningBackgroundTask
-    from compute_provisioning_service import container as container_module
-
     async def run():
         return None
 

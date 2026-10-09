@@ -31,13 +31,16 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
+from market_alkahest.dev_chain import anvil_address_book_path
 from seeded_threads import seed_thread
 from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
+from source_sites import SourceSites
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -734,11 +737,6 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
     obligations exactly. Built here with the real builder against the development
     chain's addresses, every build recorded.
     """
-    from market_alkahest.dev_chain import anvil_address_book_path
-    from source_sites import SourceSites
-
-    from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
-
     builds: list[dict] = []
 
     def recording_builder(**kwargs):

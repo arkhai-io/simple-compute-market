@@ -23,6 +23,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from compute_provisioning_ansible import render_extra_vars
 from cryptography.fernet import Fernet
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -33,7 +34,9 @@ from compute_provisioning_service.db.models import (
     DefinitionDocumentImport,
     ResourcePool,
 )
-from vm_provisioning_adapter.db import Relay
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+from vm_provisioning_adapter.db import Relay, RelayPortLease
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.services.relay_definitions import (
     RelayDefinitionError,
     import_relay_definitions,
@@ -50,6 +53,10 @@ from vm_provisioning_adapter.services.relay_service import (
 )
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
+)
+from vm_provisioning_adapter.services.relay_execution import (
+    RelayExecutionResolver,
+    RelayUnusableAtExecutionError,
 )
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
@@ -467,8 +474,6 @@ class TestRebinding:
 
     def _make_lease(self, session_factory, *, relay_id="site-a",
                     pool_id="gpu-pool", host="kvm1"):
-        from vm_provisioning_adapter.db import RelayPortLease
-
         with session_factory() as db, db.begin():
             db.add(
                 RelayPortLease(
@@ -510,7 +515,6 @@ class TestRebinding:
         assert "Disable the pool" in message
 
     def test_a_relay_can_move_once_drained(self, session_factory, relays):
-        from vm_provisioning_adapter.db import RelayPortLease
         from datetime import datetime, timezone
 
         self._relay_with_lease(session_factory, relays)
@@ -573,8 +577,6 @@ class TestRebinding:
     def test_a_token_can_be_rotated_once_drained(self, session_factory, relays):
         from datetime import datetime, timezone
 
-        from vm_provisioning_adapter.db import RelayPortLease
-
         self._relay_with_lease(session_factory, relays)
         with session_factory() as db, db.begin():
             db.query(RelayPortLease).one().released_at = datetime.now(timezone.utc)
@@ -607,15 +609,9 @@ class TestExecutionTimeTokenResolution:
     """
 
     def _resolver(self, session_factory, settings):
-        from vm_provisioning_adapter.services.relay_execution import (
-            RelayExecutionResolver,
-        )
-
         return RelayExecutionResolver(session_factory=session_factory, settings=settings)
 
     def _params(self, **overrides):
-        from vm_provisioning_adapter.models.jobs_model import VmJobParams
-
         fields = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         fields.update(overrides)
         return VmJobParams(**fields)
@@ -650,10 +646,6 @@ class TestExecutionTimeTokenResolution:
         rotation took effect "without a restart", which was true of the
         variables and false of the host.
         """
-        from compute_provisioning_ansible import render_extra_vars
-        from vm_provisioning_adapter.codec import VmAnsibleCodec
-        from vm_provisioning_adapter.models.jobs_model import VmJobParams
-
         _make_relay(relays, token="original")
         params = VmJobParams(
             host_id="kvm1",
@@ -694,10 +686,6 @@ class TestExecutionTimeTokenResolution:
     def test_an_unusable_relay_fails_the_job(
         self, relays, session_factory, settings, break_it, expected
     ):
-        from vm_provisioning_adapter.services.relay_execution import (
-            RelayUnusableAtExecutionError,
-        )
-
         _make_relay(relays, token="admission-token" if expected == "disabled" else None)
         break_it(relays)
         with pytest.raises(RelayUnusableAtExecutionError) as excinfo:
@@ -707,10 +695,6 @@ class TestExecutionTimeTokenResolution:
         assert expected in str(excinfo.value)
 
     def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
-        from vm_provisioning_adapter.services.relay_execution import (
-            RelayUnusableAtExecutionError,
-        )
-
         with pytest.raises(RelayUnusableAtExecutionError):
             self._resolver(session_factory, settings).resolve_into(
                 self._params(relay_id="never-created", vm_remote_port=6100)

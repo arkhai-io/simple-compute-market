@@ -13,6 +13,7 @@ directly (same as production).
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import patch
 from typing import AsyncIterator
 
@@ -24,6 +25,7 @@ from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
 import market_storefront.container as _container
+from market_storefront.controllers import admin_controller
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
@@ -42,6 +44,7 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import site_capacity
 
 
 _TEST_SELLER_PRINCIPAL = Identity(
@@ -561,8 +564,6 @@ class TestFulfillmentEvents:
 
     @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -603,8 +604,6 @@ class TestFulfillmentEvents:
         """A durably bound listing must reserve at its exact site rather than
         re-running placement for an already-derived candidate.
         """
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -692,8 +691,6 @@ class TestFulfillmentEvents:
 
     @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
@@ -734,8 +731,6 @@ class TestFulfillmentEvents:
         ]
 
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -759,8 +754,6 @@ class TestFulfillmentEvents:
         """A listing mapped to a site that isn't currently configured is
         a data-integrity problem, not a capacity answer -- must not be
         collapsed into the same 409 a genuine refusal returns."""
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db, site_id="ghost-site")
 
@@ -783,8 +776,6 @@ class TestFulfillmentEvents:
         """The mapped site itself failing to respond is also distinct
         from a genuine "no capacity" refusal -- must surface as an
         upstream-communication failure, not a 409."""
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
@@ -817,7 +808,6 @@ class TestFulfillmentEvents:
     async def test_usage_started_closes_oversized_listings(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -846,7 +836,6 @@ class TestFulfillmentEvents:
     async def test_capacity_released_releases_and_reopens(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -888,7 +877,6 @@ class TestFulfillmentEvents:
     async def test_manual_compute_listings_reopen_after_release(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -927,7 +915,6 @@ class TestFulfillmentEvents:
     async def test_fulfillment_failed_releases_with_failure_metadata(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -958,11 +945,6 @@ class TestFulfillmentEvents:
         """A hold placed before the deal had an escrow learns it at commit, on
         the reservation itself; a failure callback naming none still reaches the
         failure policy with that escrow."""
-        from types import SimpleNamespace
-
-        from market_storefront.controllers import admin_controller
-        from tests.fake_site import site_capacity
-
         received = []
 
         async def failure_policy(_db, context, *, capacity):

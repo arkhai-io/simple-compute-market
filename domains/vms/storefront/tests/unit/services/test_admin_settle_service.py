@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from market_site_client import SiteCapacityClientError
 
 
 @pytest.fixture
@@ -257,8 +258,6 @@ class TestEvaluateSettleDryRun:
         assert result["capacity_reservation_id"] == "res-held"
 
     async def test_a_hold_the_site_no_longer_has_previews_no_host(self, svc, db):
-        from market_site_client import SiteCapacityClientError
-
         db.load_listing.return_value = {
             **_LISTING_ROW,
             "listing_resource": {

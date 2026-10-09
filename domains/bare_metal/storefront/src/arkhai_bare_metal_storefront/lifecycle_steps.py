@@ -67,6 +67,8 @@ def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> 
 
     async def publication_preview() -> Mapping[str, Any]:
         """What one publication pass would open, close, refresh, reopen, or hold."""
+        # Imported when the preview runs, for the same import cycle as
+        # publication_step.
         from .publication_composition import compose_publication_cycle
 
         factory = runtime.publication_cycle_factory or compose_publication_cycle

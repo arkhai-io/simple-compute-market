@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 import uuid
 from dataclasses import replace
@@ -10,6 +11,7 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -774,8 +776,6 @@ async def test_a_buyer_exits_whatever_the_source(tmp_path) -> None:
 
 async def test_force_accept_answers_a_domain_refusal_with_its_status(tmp_path) -> None:
     """A refusal the domain owns answers force-accept as it answers negotiate/{id}."""
-    from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
-
     def failing_builder(**_kwargs):
         raise BareMetalSettlementPlanError("accepted escrow could not be materialized")
 
@@ -806,8 +806,6 @@ async def test_force_accept_answers_a_domain_refusal_with_its_status(tmp_path) -
 
 
 async def test_a_thread_without_its_opening_message_is_not_resumed(tmp_path) -> None:
-    import sqlite3
-
     site = SourceSite()
     runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
     await _insert_listing(runtime)

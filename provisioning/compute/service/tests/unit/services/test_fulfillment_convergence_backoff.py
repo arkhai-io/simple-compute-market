@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from random import Random
+
 from compute_provisioning_service.services.fulfillment_convergence import Backoff
 
 
 def test_backoff_random_source_is_injectable_for_deterministic_tests():
     """``Backoff.random_source`` gives reproducible delay sequences without
     patching global randomness."""
-
-    from random import Random
 
     backoff_a = Backoff(
         initial_seconds=1.0, multiplier=2.0, max_seconds=60.0,

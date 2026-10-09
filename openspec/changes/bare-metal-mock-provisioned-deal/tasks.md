@@ -5081,9 +5081,22 @@ and the credits scenario's settings; no service code or package version changes.
       reaches, so the locks of `domains/vms/storefront`, `domains/vms/buyer`, and
       `kit/policy` remain unverified by a real relock. Open until a run with that host
       allowed relocks them.
-- [ ] 2.3 **Import placement.** For each function-level import this change adds or
+- [x] 2.3 **Import placement.** For each function-level import this change adds or
       touches, move it to module level unless a verified circular import or a documented
       lazy-load reason keeps it; verify each move against the real suites.
+    - Done change-wide, over the function-level imports the change added across its two
+      merges to `dev` and this branch: 24 distinct production imports, 16 moved and 8
+      kept, and all ~150 test imports moved. Kept: the bare-metal storefront's
+      `lifecycle_steps` import of `publication_composition` (a verified cycle through
+      `runtime`), the compute service's `vm_provisioning_adapter.db` (the optional
+      `adapters` extra), and the VM listings' five `market_resource_pools_contracts`
+      imports (the optional `pools` extra), each with its reason in a comment. Suites:
+      `kit/site`, `kit/fulfillment`, `provisioning/compute` and its Ansible, client, and
+      contracts distributions, both provisioning adapters, the compute service (unit
+      and integration, also against the edited sources), the bare-metal and API-credit
+      storefronts, the VM storefront (its two Node-backed Alkahest tests need a Node
+      the workspace lacks), the e2e unit suite and collection, and `make
+      check-packaging`.
 - [x] 2.4 **Documentation compliance.** Re-check every accepted decision in `design.md`
       against `openspec/README.md`'s placement rules.
     - Done: every accepted decision has its permanent location in the promotion record

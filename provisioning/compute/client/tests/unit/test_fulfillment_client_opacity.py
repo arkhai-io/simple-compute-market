@@ -39,6 +39,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
 )
+from market_core import VersionedEnvelope
 
 _CAPACITY_RESERVATION_ID = "resv-mock-001"
 _SETTLEMENT_RESOURCE_ID = "settlement-resource-mock-001"
@@ -166,8 +167,6 @@ async def test_schedule_begin_send_no_placement_fields() -> None:
         )
     )
     assert scheduled.settlement_resource_id == _SETTLEMENT_RESOURCE_ID
-
-    from market_core import VersionedEnvelope
 
     accepted = await provisioning.begin_fulfillment(
         FulfillmentRequestBody(

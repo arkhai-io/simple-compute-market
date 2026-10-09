@@ -52,6 +52,7 @@ from market_negotiation_runtime import (
 )
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.listing_source import ListingSourceVerdict
+from market_resource_pools_contracts.hints import capped_hold_seconds
 from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
 from market_capacity_publication import (
@@ -728,7 +729,6 @@ async def _place_capacity_hold(
     """
 
     from core_storefront.stage_log import stage_event
-    from market_resource_pools_contracts.hints import capped_hold_seconds
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )

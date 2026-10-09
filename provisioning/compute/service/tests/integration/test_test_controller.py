@@ -48,8 +48,9 @@ from compute_provisioning_service.services.principal_authority import (
 )
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.controllers import test_jobs_controller
 from compute_provisioning_service.db.database import create_db_engine
-from compute_provisioning_service.main import app
+from compute_provisioning_service.main import _vm_mock_router, app
 from vm_provisioning_operator.models import CreateVmRequest
 from compute_provisioning_ansible.runner import AnsibleRunner
 from vm_provisioning_adapter.codec import VmAnsibleCodec
@@ -62,7 +63,10 @@ from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning.jobs.submission import JobSubmissionService
 from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_contracts import HostCreate
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
+from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
+from vm_provisioning_adapter.services.relay_service import RelayService
 
 HOST = "kvm1"
 
@@ -153,7 +157,6 @@ async def client_and_queue(
             )
         ),
     )
-    from compute_provisioning_contracts import HostCreate
     host_authority.register_host(HostCreate(
         host_id=HOST,
         connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
@@ -172,8 +175,6 @@ async def client_and_queue(
     )
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
-    from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
-    from vm_provisioning_adapter.services.relay_service import RelayService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import (
         AnsiblePoolConfigHandler,
     )
@@ -217,14 +218,11 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = programmable_mock
     _container_module.resolved_host_authority = host_authority
 
-    from compute_provisioning_service.main import _vm_mock_router
     _test_prefix = "/test"
     _already_mounted = any(
         getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
     )
     if not _already_mounted:
-        from compute_provisioning_service.controllers import test_jobs_controller
-
         app.include_router(test_jobs_controller.router)
         app.include_router(_vm_mock_router())
 
