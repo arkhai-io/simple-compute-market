@@ -34,8 +34,8 @@ a time; nothing else should be building in the checkout while you run.
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
-  runs every pipeline scenario, ignoring its exclusion list, to establish which the
-  charts cannot serve (step 3).
+  runs every pipeline scenario rather than only those the default charts serve, to
+  find which the charts serve now (step 3).
 
 ## 2. Start the pipeline first
 
@@ -201,13 +201,13 @@ labelled `V<n>` so triage can carry them beside review findings; write `None.` w
 there are none. Environmental failures go under `## Environment` and are never
 findings.
 
-When the run used `HELM_ALL_SCENARIOS=1`, the scenarios on the exclusion list ran
-to test the list, not the commit, and the script's `e2e` step fails whenever one
-of them does. Judge the Helm part by the other scenarios alone. Under `## Helm`,
-list each listed scenario with what it showed: failed only for a service the
-charts do not provide (expected; the list holds), failed for another reason (a
-failure, diagnosed like any other), or passed (the list is stale). Report a stale
-or wrong list under "About the validation".
+When the run used `HELM_ALL_SCENARIOS=1`, the scenarios outside the served list
+(`HELM_SCENARIOS` in `scripts/validate_slice.py`) ran to test the list, not the
+commit, and the script's `e2e` step fails whenever one of them does. Judge the Helm
+part by the served scenarios alone. Under `## Helm`, list each other scenario with
+what it showed: failed because the charts do not serve it (expected), failed for
+another reason (diagnose it like any failure), or passed (it can join the list).
+Report a list that should grow under "About the validation".
 
 ## 8. Report
 

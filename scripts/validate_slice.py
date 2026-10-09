@@ -57,17 +57,15 @@ STOREFRONT_PYTHON = Path(STOREFRONT_PROJECT, ".venv/bin/python")
 # The end-to-end pipeline's scenario selections, one per lane; the Helm run reads
 # them from e2e-tests/Makefile so the two lists cannot drift apart.
 PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
-# Pipeline scenarios the default chart values cannot serve, each with what is
-# missing. They are reported as not run against Helm, never as passed. An entry
-# leaves this list when the charts and `make -C helm forward` provide what the
-# pipeline's compose stacks do.
-HELM_EXCLUSIONS = {
-    "multi_registry": "a second storefront and a second registry",
-    "e2e_credits_deal": "the API-credits service, storefront, and registry",
-    "e2e_vm_introduction": "Mailpit forwarded to the host",
-    "e2e_bare_metal_publication": "the bare-metal storefront and registry",
-    "e2e_bare_metal_introduction": "the bare-metal storefront and registry",
-}
+# The scenarios the default charts can serve, run against the Helm deployment. The
+# charts configure no settlement mechanism, so no scenario that creates a listing
+# can pass there; nor do they deploy a second storefront and registry, the
+# API-credits and bare-metal services, or forward Mailpit. Every other pipeline
+# scenario is reported as not run against Helm, never as passed. A scenario joins
+# this list when the charts serve what the pipeline's compose stacks do.
+HELM_SCENARIOS = ("contracts", "e2e_alkahest_escrow_codecs")
+NOT_SERVED = ("the default charts do not serve it: no settlement mechanism, and not "
+              "every service the pipeline's compose stacks run")
 # The local ports `make -C helm forward` binds. Port-forwards start in the
 # background, so the scenarios wait for every port to accept a connection.
 FORWARDED_PORTS = (8545, 8080, 8001, 8081)
@@ -276,7 +274,7 @@ def validate_local(validation: Validation) -> Summary:
 
 
 def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT,
-                  exclusions: dict[str, str] = HELM_EXCLUSIONS,
+                  scenarios: Sequence[str] | None = HELM_SCENARIOS,
                   probe: PortProbe = _port_open, sleep: Callable[[float], None] = time.sleep,
                   forward_wait: float = FORWARD_WAIT_SECONDS,
                   volume_wait: float = VOLUME_WAIT_SECONDS,
@@ -290,10 +288,10 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
     except ValidationError as exc:
         validation.fail("scenarios", str(exc))
         return validation.finish()
-    selected = [marker for marker in markers if marker not in exclusions]
-    validation.summary.not_run = {
-        marker: f"the charts and `make -C helm forward` do not provide {exclusions[marker]}"
-        for marker in markers if marker in exclusions}
+    # `scenarios=None` runs every pipeline scenario, to find which the charts serve.
+    selected = list(markers if scenarios is None else scenarios)
+    validation.summary.not_run = {marker: NOT_SERVED for marker in markers
+                                  if marker not in selected}
 
     # The loader check runs in the VM storefront's own environment, which holds the
     # internal wheels it last synced. The images are built first, rebuilding the
@@ -325,7 +323,7 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
                 validation.step("e2e", ["make", "-C", "e2e-tests", "test-module",
                                         f"MODULE={' or '.join(selected)}"])
             else:
-                validation.note("e2e", "every pipeline scenario is excluded from the Helm run")
+                validation.note("e2e", "no scenario is selected for the Helm run")
     finally:
         validation.step("unforward", ["make", "-C", "helm", "unforward"])
     return _after_helm(validation)
@@ -513,8 +511,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--context", default=DEFAULT_HELM_CONTEXT,
                         help="the only kube context the Helm part may deploy to")
     parser.add_argument("--all-scenarios", action="store_true",
-                        help="run every pipeline scenario on Helm, ignoring the exclusions; "
-                             "for establishing which ones the charts cannot serve")
+                        help="run every pipeline scenario on Helm rather than the ones the "
+                             "default charts serve; for establishing which those are")
     args = parser.parse_args(argv)
     try:
         validation = Validation(args.part)
@@ -522,7 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = validate_local(validation)
         else:
             summary = validate_helm(validation, context=args.context or DEFAULT_HELM_CONTEXT,
-                                    exclusions={} if args.all_scenarios else HELM_EXCLUSIONS)
+                                    scenarios=None if args.all_scenarios else HELM_SCENARIOS)
     except ValidationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

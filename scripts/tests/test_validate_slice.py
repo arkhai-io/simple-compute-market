@@ -206,10 +206,11 @@ def test_helm_runs_every_step_and_the_pipeline_scenarios_it_can_serve(tmp_path: 
         "make -C helm undeploy",
         "make -C helm deploy-local",
         "make -C helm forward",
-        "make -C e2e-tests test-module MODULE=e2e_deal or e2e_listing_shapes",
+        "make -C e2e-tests test-module MODULE=contracts or e2e_alkahest_escrow_codecs",
         "make -C helm unforward",
     ]
-    assert set(summary.not_run) == {"multi_registry", "e2e_bare_metal_publication"}
+    assert set(summary.not_run) == {"e2e_deal", "multi_registry", "e2e_listing_shapes",
+                                    "e2e_bare_metal_publication"}
     assert "not run multi_registry" in validator.render(summary)
 
 
@@ -448,13 +449,19 @@ def test_the_pipeline_marker_variables_exist_and_are_plain_disjunctions() -> Non
 
     assert "e2e_deal" in markers
     assert "e2e_bare_metal_publication" in markers
-    assert set(validator.HELM_EXCLUSIONS) <= set(markers)
 
 
-def test_all_scenarios_runs_the_excluded_ones_too(tmp_path: Path) -> None:
+def test_every_helm_scenario_is_a_declared_marker() -> None:
+    declared = (REPO_ROOT / "e2e-tests" / "pyproject.toml").read_text("utf-8")
+
+    for marker in validator.HELM_SCENARIOS:
+        assert f'"{marker}:' in declared
+
+
+def test_all_scenarios_runs_every_pipeline_scenario(tmp_path: Path) -> None:
     _storefront_env(tmp_path)
     fake = Fake()
-    summary = _helm(tmp_path, fake, exclusions={})
+    summary = _helm(tmp_path, fake, scenarios=None)
 
     assert summary.not_run == {}
     assert ("make -C e2e-tests test-module MODULE=e2e_deal or multi_registry or "

@@ -279,6 +279,9 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       run with `make test-module` and reported as not run; `make unforward`
       whatever failed; a clean worktree afterwards. The list starts from the
       services the default chart values do not deploy and is confirmed by 8.6.
+      Corrected after 8.6: the exclusion list became `HELM_SCENARIOS`, the scenarios
+      the default charts serve (`contracts`, `e2e_alkahest_escrow_codecs`); every
+      other pipeline scenario is reported as not run against Helm.
       Corrected by 8.10 and 8.11: preflights now include Docker, the node, the
       Secrets, freed ports, and retained volumes, and `make deploy` became the
       uninstall-then-`deploy-local` sequence.
@@ -352,7 +355,7 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       `test_settlement_deployment_surfaces.py`'s two tests, as at the section's
       starting commit. `scripts/tests` is not part of `make test`, so
       `validate-local` does not run it.
-- [ ] 8.6 Pilot: validate `capacity-shape-envelope` at `HEAD`. The Helm part runs
+- [x] 8.6 Pilot: validate `capacity-shape-envelope` at `HEAD`. The Helm part runs
       the whole scenario set once with no exclusions, and the exclusion list is set
       from what fails for a missing service, as distinct from what fails for a real
       reason.
@@ -368,6 +371,25 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       exclusions, because the instruction sat in this change, not the one validated.
       The owner's review of that record produced 8.8–8.14; re-run after them, as
       `make validate CHANGE=capacity-shape-envelope HELM_ALL_SCENARIOS=1`.
+      Attempt 2 (`capacity-shape-envelope`'s `10-validation.md`, commit
+      `004e580e`): local passed; pipeline run 37917228588 passed (VM lane 135
+      passed and 3 skipped — the API-credits payment cases, which skip as
+      `blocked: PAYMENTS… not configured` and arrived with the merged `dev`;
+      bare-metal 16 passed). The Helm part's first attempt stopped at the
+      retained-volume preflight before any build, as designed; on the owner's word
+      the release was uninstalled and its three `keep` PVCs deleted. The second
+      deployed fresh and ran every pipeline scenario: all that create a listing
+      failed, because the default chart values configure no settlement mechanism
+      (`Settlement.priority: []`, no chain) — unchanged since before this branch
+      merged `dev`, and never exercised before, since earlier Helm runs ran the
+      contract checks only. Only the codec cases and setup stages passed. The owner
+      chose to keep chart work in `helm-e2e-pipeline-parity` and narrow the Helm
+      part to the scenarios the charts serve (8.2's correction); on that scope the
+      record is `passed`. What the pilot showed about the skill: the
+      retained-volume stop and the settle-with-the-owner step worked as written;
+      the three outcomes have no case for "the tooling produced no evidence"; the
+      exclusion list could not be established while one gap blocked every
+      scenario.
 - [x] 8.7 Propose a change bringing the Helm charts and `make forward` to the
       pipeline's compose topology, using the compose configuration the pipeline
       runs, so the exclusion list empties; add its row to
@@ -464,7 +486,9 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       part with it and records which scenarios fail only for a missing service.
       Done. `make validate … HELM_ALL_SCENARIOS=1` opens the session as
       `/change-validate <change> with HELM_ALL_SCENARIOS=1`; the skill's first step
-      reads it. The Makefile text is asserted; the session behaviour is 8.6's.
+      reads it. The Makefile text is asserted; the session read it in 8.6. After 8.6
+      it runs every pipeline scenario instead of the served list, so the list can
+      grow.
 - [x] 8.14 Record for `capacity-shape-envelope`'s closeout (10.3), to place there:
       a namespace per validation, and chart Secrets made optional with the ordinary
       values overlays as fallback.

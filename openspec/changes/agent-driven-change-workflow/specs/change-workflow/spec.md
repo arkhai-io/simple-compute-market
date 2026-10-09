@@ -188,10 +188,10 @@ condition validation could repair, such as a stale lock, MUST fail validation an
 return the slice to implementation. End-to-end evidence MUST come from a pipeline
 run whose head commit is the commit under validation. Validation MUST also build the
 service images and include the Helm render checks, with the chart-to-loader check
-able to run, and a Helm end-to-end run of the scenarios the pipeline runs. A skipped
-chart-to-loader check MUST fail validation. A pipeline scenario the charts cannot
-serve MAY be excluded from the Helm run only by an explicit list naming the
-missing service, and MUST be reported as not run, never as passed. Validation MUST
+able to run, and a Helm end-to-end run of the scenarios the charts serve, named in
+an explicit list. A skipped chart-to-loader check MUST fail validation. Every
+pipeline scenario not on that list MUST be reported as not run against Helm, never
+as passed. Validation MUST
 NOT fix what it finds in the commit. Its result MUST be `passed`, `failed` — a
 failure caused by the commit or of unknown cause — or `inconclusive`, when no
 failure is caused by the commit but a part produced no evidence for an
@@ -222,12 +222,11 @@ name the end-to-end scenarios that exercise the change, with the basis for each.
 - **THEN** validation reports the run whose head commit is the validated commit,
   never the earlier one
 
-#### Scenario: A pipeline scenario needs a service the charts do not deploy
+#### Scenario: A pipeline scenario the charts do not serve
 
-- **WHEN** the Helm end-to-end run reaches a pipeline scenario that needs a service
-  the charts do not deploy
-- **THEN** the scenario is on the exclusion list with that service named, and the
-  validation report lists it as not run against Helm
+- **WHEN** the pipeline runs a scenario that is not on the Helm run's list
+- **THEN** the validation report lists it as not run against Helm, and its evidence
+  comes from the pipeline alone
 
 ### Requirement: Guarded push of a change branch
 

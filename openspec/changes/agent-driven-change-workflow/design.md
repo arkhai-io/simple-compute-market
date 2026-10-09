@@ -406,17 +406,21 @@ it refuses a kube context other than `HELM_CONTEXT`, `docker-desktop` by default
 render pass is not deployment evidence and a deployment pass does not prove the
 render contracts, so neither replaces the other.
 
-The Helm end-to-end run selects the scenarios the pipeline runs, from the same
-marker variables in `e2e-tests/Makefile`, so the two lists cannot drift. The charts
-do not yet deploy everything the pipeline's compose stacks do — a second
-storefront, the API-credits service, the bare-metal storefront, a forwarded
-Mailpit — so a scenario that needs one of them is excluded from the Helm run by an
-explicit list naming the missing service, and the validation report lists it as
-not run against Helm, never as passed. The list is established by running the whole
-set against the charts once, not by inspection, and shrinks as the charts gain what
-the compose stacks have. Bringing the charts to parity, using the compose
-configuration the pipeline already runs, is its own change: this one changes no
-deployment beyond the local overlay below.
+The Helm end-to-end run is meant to run the scenarios the pipeline runs. Today it
+runs only the scenarios the default charts can serve, listed explicitly — the
+contract checks and the Alkahest codec cases — and reads the pipeline's marker
+variables in `e2e-tests/Makefile` to report every other pipeline scenario as not
+run against Helm, never as passed. The first validation pilot established why the
+list is short: the default chart values configure no settlement mechanism, so no
+scenario that creates a listing can pass on Helm, and the charts lack a second
+storefront and registry, the API-credits and bare-metal services, and a forwarded
+Mailpit. That gap predates this change; earlier Helm runs exercised the contract
+checks only. Bringing the charts to the pipeline's topology, from the compose
+configuration the pipeline already runs, is its own change, which grows the list
+until it matches the pipeline; this change changes no deployment beyond the local
+overlay below. The Helm part's evidence is therefore the render checks, the images,
+a fresh deployment that comes up, and the scenarios it serves; deal and
+publication evidence comes from the pipeline.
 
 The validation skill reads failing scenarios from the logs rather than reporting
 only an exit status, diagnoses each, and writes `reviews/NN-validation.md`. It
@@ -490,10 +494,9 @@ them in the section's task notes before it commits, so validation reads coverage
 from the change rather than inferring it; its own reading of the diff adds what the
 notes miss.
 
-**Re-establishing the exclusion list.** `make validate CHANGE=<change>
+**Re-checking what the charts serve.** `make validate CHANGE=<change>
 HELM_ALL_SCENARIOS=1` carries the instruction into the session, which runs every
-pipeline scenario on Helm and records which fail only for a service the charts do
-not provide. The instruction travels with the invocation because the skill reads
+pipeline scenario on Helm and records which pass, so the list can grow. The instruction travels with the invocation because the skill reads
 the change being validated, not the one whose plan asked for the check.
 
 `make fetch-e2e-logs` selects the newest `e2e.yml` run whose head branch is the
