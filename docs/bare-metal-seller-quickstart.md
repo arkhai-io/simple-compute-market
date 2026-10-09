@@ -18,7 +18,7 @@ buyer-side escrow requirements.
 
 ## Prerequisites
 
-- Docker/Podman with Compose v2 on a Linux host.
+- Docker/Podman with Compose v2.24 or later on a Linux host.
 - The staged internal wheels and the images built from this checkout.
 - Canonical marketplace principals and matching role-scoped signer files for
   the registry, storefront, and selected-site provisioning authority.
@@ -26,9 +26,7 @@ buyer-side escrow requirements.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration. Alkahest requires the ordinary chain
-  configuration and funded public seller address. Never put a wallet private key
-  or provider object in Compose or this document.
+- One strict shared settlement configuration. Alkahest roles require chain configuration, the funded public seller address, and the wallet key in its own credential file. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose or this document.
 
 The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
@@ -141,7 +139,9 @@ export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
 export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
 export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
-export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
+export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>   # Alkahest only
+export BARE_METAL_STOREFRONT_CHAINS_JSON='{"<chain>":{"rpc_url":"<rpc-url>"}}'   # Alkahest only
+export BARE_METAL_STOREFRONT_WALLET_ENV_FILE=/run/operator/wallet.env   # Alkahest only; holds BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
 export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
 export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
 export BARE_METAL_MAX_DURATION_SECONDS=7200
@@ -268,7 +268,7 @@ reason), hold, refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-`BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Payments-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime registers the ready mechanisms and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+The storefront refuses to start without its settlement configuration. While that configuration has an Alkahest section, enabled or not, the seller address, the chains, and the wallet file are required, since a disabled section still services accepted deals; with no Alkahest section they must be absent. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
 
 ### Resetting the storefront database
 

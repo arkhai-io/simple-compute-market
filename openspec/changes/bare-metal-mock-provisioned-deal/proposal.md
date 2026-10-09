@@ -24,7 +24,12 @@ VM's. What stands in the way:
   the runtime's acceptance hooks and evaluate-negotiate skips the opening's own guards.
 - **Fulfillment never starts on the Alkahest path**; it waits for a buyer call no buyer
   makes, and the settlement-servicing worker that would retry it exists only with hosted
-  settlement.
+  settlement. A storefront started without its settlement configuration enables Alkahest
+  outside it, so escrow verification and settlement servicing disagree about which
+  mechanisms exist, and the Helm chart and production Compose supply no Alkahest chain or
+  wallet key at all.
+- **A bare-metal Alkahest escrow is never collected.** Nothing publishes fulfillment
+  evidence for it or binds a fulfillment the worker could check and collect.
 - **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
   a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
 - **No scenario exists**, and stage definitions are VM's alone.
@@ -58,8 +63,22 @@ API-credit deal runs inside the VM lane.
   recorded; evaluate-negotiate becomes a side-effect-free preview of the full opening,
   taking the opening request as its body.
 - Start bare-metal fulfillment when settlement verifies the escrow through the kit
-  settlement-servicing worker, composed for every mechanism rather than only hosted
-  settlement, and retire `POST /api/v1/fulfillments/begin`.
+  settlement-servicing worker, one mechanism-neutral worker over the configured
+  settlement runtime for obligation-based mechanisms, and retire
+  `POST /api/v1/fulfillments/begin`. The storefront requires its explicit settlement
+  configuration (`BARE_METAL_STOREFRONT_SETTLEMENT`) and builds every configured
+  mechanism's resources from it; the implicit Alkahest fallback is retired. The Helm chart
+  and production Compose carry the chain and wallet inputs Alkahest needs, and the chart's
+  `alkahestEnabled` flag, which restated the settlement configuration, is removed.
+- Preserve Arkhai payments' receipt-based delivery and reconciliation independently
+  of the obligation worker. Remove hosted Stripe bindings and authority readers
+  while retaining the Alkahest evidence codec and authenticated resolver.
+- Deliver a bare-metal Alkahest deal through the worker: once the lease is active, the
+  storefront stores its credential-free lease-ready evidence, publishes only its digest
+  on chain through a new `kit/alkahest` fulfillment publisher, and binds the attestation
+  so the worker can check and collect. An evidence submission whose outcome is unknown is
+  never repeated: the obligation waits for an operator, and the administrator's status
+  counts the obligations waiting. The evidence route authenticates its caller.
 - Make the lease lifecycle the only owner of release for every offering mode: lease
   release delegates to durable fulfillment teardown, buyer teardown goes through lease
   termination, and the storefront's direct site release is removed.
@@ -165,7 +184,12 @@ None.
   and bare-metal teardown releases capacity through the site's lease lifecycle; the
   inventory guard's recheck runs before every seller round and acceptance, and a backed
   bare-metal listing is checked for availability; an accepted thread is successful only
-  once its agreement and plan are recorded, rather than persisted atomically.
+  once its agreement and plan are recorded, rather than persisted atomically; a
+  bare-metal Alkahest fulfillment publishes only its evidence's digest on chain, and the
+  evidence route authenticates its caller.
+- `settlement-servicing`: a fulfillment submission whose outcome is unknown is never
+  repeated; it parks the obligation for an operator, and the parked obligations are
+  counted.
 
 ## Non-Goals
 
@@ -227,7 +251,15 @@ None.
 - `domains/bare_metal/storefront`: negotiation on the kit runtime with a configured
   seller chain and no hold, its durable pause removed, deal controls,
   settlement-started fulfillment, teardown through lease termination, the
-  capacity-released callback, the publication dry run, restart integration tests.
+  capacity-released callback, the publication dry run, restart integration tests. Startup
+  requires the settlement configuration; a deployment that relied on the implicit
+  Alkahest fallback must supply one.
+- `helm/charts/bare-metal-storefront` and `compose.bare-metal.yml`: chain and wallet-key
+  inputs; the chart's `alkahestEnabled` value removed.
+- `kit/settlement-runtime`: recording a fulfillment's submission intent, parking a
+  fulfillment for an operator, and counting the obligations parked. `kit/alkahest`: the
+  fulfillment publisher. `core/storefront-client`: the status model's count.
+- `domains/bare_metal`: the lease-ready evidence's Alkahest binding.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
 - `e2e-tests`: shared compute deal stages, VM's scenario moved onto them, the bare-metal
   scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets; the
@@ -247,15 +279,20 @@ None.
       distributions), the deal-control route services in the kit layers, the five-piece
       route pattern, the compute-provisioning executor table and mock mechanism, release
       ownership (mode-agnostic), `VersionedEnvelope`'s home in core, and the bare-metal
-      fulfillment hook statement, which is stale today.
+      fulfillment hook statement, which is stale today; bare-metal settlement-started
+      fulfillment and its digest-only Alkahest evidence.
 - [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
       open gap, and the findings recorded under "Controls and routes (5B.8)".
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` and
+      `docs/bare-metal-seller-quickstart.md` — the bare-metal storefront's required
+      settlement configuration and the chain and wallet-key inputs of its Helm chart and
+      Compose file.
 - [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
       `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`,
-      `compute-provisioning-contract`, `resource-pool-management`.
+      `compute-provisioning-contract`, `resource-pool-management`, `settlement-servicing`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -281,8 +318,19 @@ None.
 - Lease release delegates to durable fulfillment teardown for every offering mode, and
   storefront teardown goes through lease termination —
   `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
-- Bare-metal fulfillment starts at settlement verification —
+- Bare-metal fulfillment starts at settlement verification, through one servicing worker
+  whose ready and terminal hooks dispatch by mechanism —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
+- A fulfillment submission whose outcome is unknown is never repeated; it parks the
+  obligation for an operator, which status counts —
+  `openspec/specs/settlement-servicing/spec.md`.
+- Bare-metal Alkahest delivery publishes only its evidence's digest on chain, and the
+  evidence route authenticates its caller —
+  `openspec/specs/storefront-publication/spec.md`.
+- The bare-metal storefront requires its settlement configuration and its deployment
+  surfaces carry the Alkahest chain and wallet inputs (enforcing the existing
+  "Peer mechanism configuration hierarchy" requirement, not adding one) —
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, `docs/bare-metal-seller-quickstart.md`.
 - The negotiation runtime rechecks a listing against its source before every seller
   decision and every acceptance, refuses a source it cannot confirm as retryable, and
   records a thread as successful only once its agreement and plan are recorded; the

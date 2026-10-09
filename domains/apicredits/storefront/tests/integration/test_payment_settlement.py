@@ -442,4 +442,3 @@ async def test_a_malformed_agreement_never_stops_reconciliation(harness):
 
     assert (done.attempted, done.failed) == (1, 0)
     assert h.issuer.issued == [NEGOTIATION]
-

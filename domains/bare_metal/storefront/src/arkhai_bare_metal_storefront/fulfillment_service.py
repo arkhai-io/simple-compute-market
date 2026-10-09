@@ -35,6 +35,13 @@ if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
 
 
+# The lifecycle state recorded once teardown has asked the site to end the lease.
+TERMINATING = "terminating"
+_TEARDOWN_STATES = frozenset(
+    {"teardown_dispatch_pending", "tearing_down", "teardown_failed", "torn_down"}
+)
+
+
 class BareMetalFulfillmentError(RuntimeError):
     def __init__(self, detail: str, *, status_code: int = 409) -> None:
         super().__init__(detail)
@@ -84,14 +91,16 @@ class BareMetalFulfillmentService:
         context: dict[str, Any],
         delivery_started: bool = False,
     ) -> tuple[SettlementEvidence, Any]:
-        # A seller refund may follow a delivery that had already started; that
-        # delivery is still read and torn down under the evidence it began with.
-        # A delivery that has not started requires currently verified evidence.
+        # A seller refund, or the mechanism collecting its settlement, may follow
+        # a delivery that had already started; that delivery is still read and
+        # torn down under the evidence it began with. A delivery that has not
+        # started requires currently verified, currently active evidence.
         try:
             evidence = await self.read_verified_evidence(
                 negotiation_id=negotiation_id,
                 buyer_principal=buyer_principal,
                 include_refunds=delivery_started,
+                delivery_started=delivery_started,
             )
             payload = EvidencePayload.model_validate(dict(evidence.evidence))
         except (SettlementRequestError, ValueError) as exc:
@@ -397,46 +406,26 @@ class BareMetalFulfillmentService:
         if not reservation_id or not fulfillment_id:
             raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
 
-        teardown_pending = lifecycle["state"] in {
-            "teardown_dispatch_pending",
-            "tearing_down",
-            "teardown_failed",
-            "torn_down",
-        }
         remote = await self.fulfillment_client.get_fulfillment_status(
             str(fulfillment_id),
             capacity_reservation_id=str(reservation_id),
         )
-        if teardown_pending and remote.state not in {
-            "teardown_dispatch_pending",
-            "tearing_down",
-            "teardown_failed",
-            "torn_down",
-        }:
+        if lifecycle["state"] in _TEARDOWN_STATES and remote.state not in _TEARDOWN_STATES:
             raise BareMetalFulfillmentError(
                 "provisioning returned a conflicting teardown state"
             )
+        if lifecycle["state"] == TERMINATING and remote.state not in _TEARDOWN_STATES:
+            # The lease is ending; the site has not begun the teardown it
+            # converges through the fulfillment yet.
+            return lifecycle
+        # The site releases the capacity after an authoritative teardown and says
+        # so through its capacity-released callback, which alone records
+        # ``released``; a torn-down fulfillment is not yet a released lease.
         lifecycle = await self.db.update_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id,
             state=str(remote.state),
             failure_reason=remote.failure_reason or remote.failure_message,
         )
-        if lifecycle["state"] == "torn_down":
-            await self.capacity_client.site(lifecycle["site_id"]).release(
-                capacity_reservation_id=str(reservation_id),
-                deal_ref={
-                    "negotiation_id": negotiation_id,
-                    "escrow_uid": lifecycle["settlement_ref"],
-                },
-            )
-            self.capacity_client.reservation_sites.pop(
-                str(reservation_id),
-                None,
-            )
-            return await self.db.update_bare_metal_fulfillment_lifecycle(
-                negotiation_id=negotiation_id,
-                state="released",
-            )
 
         if remote.state == "active":
             delivery, endpoint = await self._active_delivery(
@@ -529,26 +518,36 @@ class BareMetalFulfillmentService:
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
-        if lifecycle["state"] in {
-            "teardown_dispatch_pending",
-            "tearing_down",
-            "teardown_failed",
-            "torn_down",
-            "released",
-        }:
+        if lifecycle["state"] in _TEARDOWN_STATES | {TERMINATING, "released"}:
             return lifecycle
         reservation_id = lifecycle.get("capacity_reservation_id")
         fulfillment_id = lifecycle.get("fulfillment_id")
         if not reservation_id or not fulfillment_id:
             raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
-        accepted = await self.fulfillment_client.begin_fulfillment_teardown(
-            str(fulfillment_id),
+        return await self.end_lease(
+            negotiation_id=negotiation_id,
             capacity_reservation_id=str(reservation_id),
+            reason="buyer_teardown",
+        )
+
+    async def end_lease(
+        self,
+        *,
+        negotiation_id: str,
+        capacity_reservation_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Ask the reservation's site to end its lease, and record that it is ending.
+
+        The site converges teardown through the lease's fulfillment and releases
+        the capacity once; terminating a lease already ending returns it as it is.
+        """
+        await self.fulfillment_client.terminate_lease(
+            capacity_reservation_id, reason=reason
         )
         return await self.db.update_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id,
-            state=str(accepted.state),
-            fulfillment_id=accepted.fulfillment_id,
+            state=TERMINATING,
         )
 
     async def converge_teardown(

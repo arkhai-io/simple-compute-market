@@ -232,7 +232,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -241,7 +241,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]

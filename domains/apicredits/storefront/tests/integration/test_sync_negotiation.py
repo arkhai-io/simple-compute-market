@@ -384,4 +384,3 @@ async def test_accept_revalidates_the_current_trusted_listing_option(db, fake_ca
             actor_principal=BUYER_PRINCIPAL,
             actor_role="buyer",
         )
-

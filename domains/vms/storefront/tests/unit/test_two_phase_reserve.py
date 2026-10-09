@@ -91,7 +91,6 @@ def _hold(**overrides) -> dict:
         "capacity_reservation_id": "alloc-1",
         "resource_id": "res-1",
         "site": _BINDING.site_id,
-        "vm_host": "kvm1",
         "hold_expires_at": _future(),
     }
     base.update(overrides)

@@ -49,6 +49,31 @@ The VM storefront owns domain matching of connection-details data. The Alkahest 
 
 The production adapter supplies no discovery capability. A recorded ambiguous submission therefore remains pending and emits an operator-visible error. This is intentionally incomplete recovery but preserves duplicate safety.
 
+## A second consumer: bare-metal Alkahest delivery (2026-10-07)
+
+`bare-metal-mock-provisioned-deal` (Section 7) gives bare metal an Alkahest fulfillment
+with the same ambiguous window, and keeps this change's rule: no blind resubmission.
+
+- `kit/alkahest` gains `AlkahestFulfillmentPublisher`, whose outcomes are published, not
+  submitted, outcome unknown, and rejected. A failure it cannot place is an unknown
+  outcome.
+- `kit/settlement-runtime` records a first-write-wins submission intent on the
+  obligation's fulfillment operation before the submission, and the created UID beside
+  it before the fulfillment is completed. An attempt that finds an intent with no UID, or
+  an unknown outcome, parks the obligation for an operator (`manual_required`,
+  `alkahest_submission_outcome_unknown`); a rejection is retried up to a bound, since no
+  attestation exists. The administrator's status counts parked obligations.
+- Bare metal's attestation data is the `sha256:` digest of its lease-ready evidence, not
+  connection details, so its domain match is the digest it recorded with its intent.
+
+What this changes here: the lookup's repository-owned protocol is injected where that
+publisher's unknown outcome is decided, serving both domains, rather than into VM's
+fulfillment alone; the scan cursor is written into the same first-write-wins intent; and
+adopting a matching UID records it as the operation's reference and completes the parked
+fulfillment. Bare metal's domain match is the evidence digest recorded in its intent
+rather than connection details. The tasks carry this. If `kit-owned-listing-and-fulfillment-lifecycles` has
+moved VM onto the same publisher by then, there is one injection point.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |

@@ -195,6 +195,12 @@ class _ResumedThread:
     agreement: AgreementTerms
 
 
+
+
+
+
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedNegotiation:
     """Authoritative domain/listing resolution returned by a composition root."""
@@ -777,7 +783,9 @@ class NegotiationRuntime:
         expected_buyer = Identity.model_validate(buyer_principal)
         actor = Identity.model_validate(actor_principal)
         if expected_buyer != stored_buyer:
-            raise NegotiationStateError("buyer principal does not own this negotiation")
+            raise NegotiationStateError(
+                "buyer principal does not own this negotiation"
+            )
         if seller_principal is not None:
             expected_seller = Identity.model_validate(seller_principal)
             if expected_seller != stored_seller:

@@ -657,4 +657,3 @@ def test_pricing_uses_only_the_selected_option_rate():
 
     assert pricing_listing["accepted_escrows"] == []
     assert extract_seller_min_price(pricing_listing) == 125
-

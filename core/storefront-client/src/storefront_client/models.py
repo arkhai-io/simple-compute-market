@@ -180,6 +180,9 @@ class HealthResponse:
     #: data, keyed by policy: ``introduction_retention`` while contact exchange
     #: is enabled. Empty when the storefront discloses none.
     disclosures: dict[str, Any] = field(default_factory=dict)
+    #: Settlement obligations waiting for an operator, each counted once;
+    #: present on /api/v1/system/status where the storefront reports it.
+    settlement_manual_required: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -191,9 +194,11 @@ class HealthResponse:
             "publication_derivation",
             "provisioning_contract_version",
             "disclosures",
+            "settlement_manual_required",
         }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
+        raw_manual = d.get("settlement_manual_required")
         return cls(
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
@@ -208,6 +213,9 @@ class HealthResponse:
             publication_derivation=d.get("publication_derivation"),
             provisioning_contract_version=d.get("provisioning_contract_version"),
             disclosures=dict(d.get("disclosures") or {}),
+            settlement_manual_required=(
+                int(raw_manual) if raw_manual is not None else None
+            ),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

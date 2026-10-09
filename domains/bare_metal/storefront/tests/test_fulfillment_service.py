@@ -79,7 +79,8 @@ class FakeDb:
         return dict(self.context)
 
     async def verified_evidence(
-        self, *, negotiation_id, buyer_principal, include_refunds=False
+        self, *, negotiation_id, buyer_principal, include_refunds=False,
+        delivery_started=False,
     ):
         assert negotiation_id == "neg-a" and buyer_principal == BUYER
         return SettlementEvidence(
@@ -202,6 +203,7 @@ class FakeFulfillment:
         self.schedules = []
         self.begins = []
         self.teardowns = []
+        self.terminations = []
         self.begin_failures = begin_failures
 
     async def schedule_resource(self, request):
@@ -267,6 +269,12 @@ class FakeFulfillment:
             },
         )
 
+    async def terminate_lease(self, capacity_reservation_id, *, reason=None):
+        """The site ends the lease and converges teardown through its fulfillment."""
+        self.phase = "teardown"
+        self.terminations.append((capacity_reservation_id, reason))
+        return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
+
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
         self.phase = "teardown"
         self.teardowns.append((fulfillment_id, request))
@@ -278,7 +286,7 @@ class FakeFulfillment:
 
 
 @pytest.mark.asyncio
-async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> None:
+async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> None:
     db = FakeDb()
     capacity = FakeCapacity()
     fulfillment = FakeFulfillment()
@@ -353,23 +361,22 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    assert tearing_down["state"] == "teardown_dispatch_pending"
-    released = await service.status(
+    assert tearing_down["state"] == "terminating"
+    repeated_teardown = await service.teardown(
         negotiation_id="neg-a",
         buyer_principal=BUYER,
     )
-    assert released["state"] == "released"
-    assert capacity.site_client.releases == [
-        {
-            "capacity_reservation_id": "reservation-a",
-            "deal_ref": {
-                "negotiation_id": "neg-a",
-                "escrow_uid": "escrow-a",
-            },
-        }
-    ]
-    assert "reservation-a" not in capacity.reservation_sites
-    assert len(fulfillment.teardowns) == 1
+    torn_down = await service.status(
+        negotiation_id="neg-a",
+        buyer_principal=BUYER,
+    )
+    # Teardown ends the lease once; a repeat reports what the site has since
+    # converged, and only its capacity-released callback records the release.
+    assert repeated_teardown["state"] == "torn_down"
+    assert fulfillment.terminations == [("reservation-a", "buyer_teardown")]
+    assert fulfillment.teardowns == []
+    assert torn_down["state"] == "torn_down"
+    assert capacity.site_client.releases == []
 
 
 @pytest.mark.asyncio

@@ -467,4 +467,3 @@ def test_an_uninstalled_mechanism_is_still_unknown(tmp_path):
 
     with pytest.raises(SettlementMigrationValidationError, match="unknown mechanism"):
         migrate_settlement_config(path, role="seller", check=True, installed=_ALKAHEST_ONLY)
-

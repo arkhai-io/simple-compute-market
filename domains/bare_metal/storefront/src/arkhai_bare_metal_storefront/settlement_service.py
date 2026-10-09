@@ -1,4 +1,4 @@
-"""Agreement-based seller dispatch and durable evidence handoff."""
+"""Agreement-based seller dispatch, whose verified evidence starts fulfillment."""
 
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ from .sqlite_client import SQLiteClient
 logger = logging.getLogger(__name__)
 
 VerifyEscrow = Callable[..., Awaitable[int]]
-PlanBuilder = Callable[..., dict[str, Any]]
 BeginFulfillment = Callable[..., Awaitable[dict[str, Any]]]
 
 # Evidence statuses a seller refund may move verified evidence through. The
@@ -53,12 +52,26 @@ class BareMetalSettlementService:
     seller_wallet: str | None
     chain_clients: Mapping[str, Any]
     chain_config_paths: Mapping[str, str | None]
-    build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
     settlement_runtime: SettlementRuntime
     arkhai_payments_stage: PaymentSellerStage | None = None
     stages: SettlementStageTable[Any] = SELLER_STAGES
     begin_fulfillment: BeginFulfillment | None = None
+    # Steps an adopted obligation once, so fulfillment starts without waiting
+    # for the worker's next pass; the worker remains its only retry path.
+    service_obligation: Callable[[str], Awaitable[None]] | None = None
+
+    async def _step(self, obligation_ref: str) -> None:
+        if self.service_obligation is None:
+            return
+        try:
+            await self.service_obligation(obligation_ref)
+        except Exception:
+            # The adoption stands; the worker's schedule retries the step.
+            logger.exception(
+                "stepping a verified bare-metal settlement failed",
+                extra={"obligation_ref": obligation_ref},
+            )
 
     @staticmethod
     def _response(
@@ -199,12 +212,17 @@ class BareMetalSettlementService:
         negotiation_id: str,
         buyer_principal: Identity,
         include_refunds: bool = False,
+        delivery_started: bool = False,
     ) -> SettlementEvidence:
         """Verified evidence for an accepted deal, after its entry's recovery gate.
 
         ``include_refunds`` also admits evidence a seller refund has since moved
         to ``refunding`` or ``refunded``; only reads of delivery that had already
         started may ask for it, since a refund never undoes a started delivery.
+        ``delivery_started`` asks the entry's recovery gate to confirm only the
+        evidence's identity: a started delivery is observed and ended under the
+        evidence it began with, while the mechanism's own progress (collection,
+        reclaim) moves on.
         """
         thread = await self._owned_thread(
             negotiation_id=negotiation_id, buyer_principal=buyer_principal
@@ -234,7 +252,9 @@ class BareMetalSettlementService:
                 "settlement evidence conflicts with accepted state"
             )
         try:
-            await stage.revalidate(self, thread, record)
+            await stage.revalidate(
+                self, thread, record, delivery_started=delivery_started
+            )
         except SettlementRequestError:
             raise
         except Exception as exc:

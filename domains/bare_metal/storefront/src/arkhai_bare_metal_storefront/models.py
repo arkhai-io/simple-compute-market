@@ -68,14 +68,9 @@ class BareMetalHealthResponse(BaseModel):
     # policy. ``introduction_retention`` is present only while contact exchange
     # is enabled.
     disclosures: dict[str, dict[str, object]] = Field(default_factory=dict)
-
-
-class BareMetalFulfillRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    negotiation_id: str = Field(min_length=1)
-    escrow_uid: str | None = Field(default=None, min_length=1)
-    buyer_principal: Identity
+    # Settlement obligations waiting for an operator, each counted once;
+    # administrator status only.
+    settlement_manual_required: int | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):
@@ -134,3 +129,76 @@ class BareMetalSettleStatusResponse(BaseModel):
     seller_principal: Identity
     obligation_ref: str | None = None
     fulfillment_available: bool = True
+
+
+class BareMetalVerifyEscrowRequest(BaseModel):
+    """An administrator's dry-run check of an escrow against a listing's terms."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seller_wallet: str = Field(min_length=1)
+    # Base units in the uint256 domain, as a decimal-digit string.
+    agreed_price: str = Field(pattern=r"^[0-9]+$")
+    agreed_duration_seconds: int = Field(gt=0)
+    listing_id: str = Field(min_length=1)
+    chain_name: str = Field(default="anvil", min_length=1)
+
+
+class BareMetalVerifyEscrowResponse(BaseModel):
+    escrow_uid: str
+    valid: bool
+    reason: str | None = None
+
+
+class BareMetalEvaluateSettleRequest(BaseModel):
+    """An administrator's preview of the fulfillment settlement would start."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    listing_id: str = Field(min_length=1)
+    ssh_public_key: str = ""
+    duration_seconds: int = Field(default=3600, gt=0)
+    negotiation_id: str | None = None
+
+
+class BareMetalEvaluateSettleResponse(BaseModel):
+    escrow_uid: str
+    would_submit: bool
+    reason: str | None = None
+    host_id: str | None = None
+    site_id: str | None = None
+    physical_resource_id: str | None = None
+    required_attributes: dict[str, object] | None = None
+    duration_seconds: int | None = None
+
+
+class BareMetalSettleWaitResponse(BaseModel):
+    ready: bool
+    status: str
+    elapsed_ms: int
+    fulfillment_state: str | None = None
+
+
+class BareMetalReserveCapacityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    required_attributes: dict[str, object] = Field(default_factory=dict)
+    listing_id: str | None = None
+    escrow_uid: str | None = None
+
+
+class BareMetalCapacityReleasedEvent(BaseModel):
+    """A site's report that a reservation's capacity is free again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    capacity_reservation_id: str = Field(min_length=1)
+    site_id: str = Field(min_length=1)
+    resource_id: str | None = None
+    provider_lease_id: str | None = None
+    released_at: str | None = None
+
+
+class BareMetalCapacityEventResponse(BaseModel):
+    capacity_reservation_id: str
+    state: str

@@ -858,16 +858,18 @@ def reap_buyer_settle_subprocess(deal_state: DealState):
 
 @pytest.fixture(scope="module", autouse=True)
 def release_reserved_resources(storefront_admin_client):
-    """Release any leftover reserved compute resources after the module runs.
+    """Release every hold the module leaves behind once it has run.
 
-    Stage 09 reserves a compute VM for the deal but mocked provisioning never
-    expires the lease, so the resource stays in ``reserved`` state forever.
-    Without this teardown, a second back-to-back e2e_deal run against the
-    same stack hits ``no_matching_inventory`` at stage 05b.
+    Not every scenario drives its deal through lease expiry and teardown, and
+    a scenario that stops early leaves its reservation held at the site and
+    its local resource row ``reserved`` or ``leased``. Without this teardown,
+    the next module run against the same stack finds no matching inventory.
 
-    Production storefronts release reservations via ``resource_poller`` once
-    the lease expires; this fixture is the test-only equivalent for the
-    short-circuited mock flow.
+    ``admin_release_reservations`` is fleet-wide cleanup: it releases every
+    held site reservation and resets held local rows. In production a lease
+    ends through provisioning's lease lifecycle, which releases the
+    reservation and sends the owning storefront a ``capacity_released``
+    event.
     """
     yield
     try:

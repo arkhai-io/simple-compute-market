@@ -481,33 +481,39 @@ class TestStage00h_ProvisioningStorefrontLink:
     ):
         """GET /api/v1/system/status → checks.storefront=ok, checks.storefront_auth=ok.
 
-        Validates that the provisioning service's lease watchdog can reach and
-        authenticate to the storefront admin API. This is the connectivity path
-        the watchdog uses when it releases leases at expiry:
+        Validates that the provisioning service can reach and authenticate to
+        the storefront. This is the path a released lease's capacity takes back
+        to the storefront that sold it:
 
-            provisioning LeaseWatchdog
-              → PATCH {storefront_url}/api/v1/admin/portfolio/resources/{id}
+            provisioning lease lifecycle
+              → signed service-peer `capacity_released` event
+              → POST {storefront_url}/api/v1/admin/fulfillment/events/capacity-released
 
         Two sub-checks from the provisioning health endpoint:
           - storefront      — GET {storefront_url}/health responded 200
-          - storefront_auth — GET {storefront_url}/api/v1/system/status with
-                              a signed request responded 200
+          - storefront_auth — GET {storefront_url}/api/v1/system/status, signed
+                              under the `service` role, responded 200 with a
+                              response signed by the pinned storefront principal
 
         If this fails with storefront='unconfigured':
-          - For deploy-docker: ensure storefront_url and the service-peer identity
-            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
+          - For deploy-docker: ensure storefront_url is set in
+            provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
-            bob storefront Service; provisioning.storefront.adminKey defaults
-            to global.adminApiKey.
+            bob storefront Service.
 
         If this fails with storefront='unreachable':
           - Both services must be on the same Docker network.
           - Check that the storefront container is running and healthy (00a/00c).
 
-        If this fails with storefront_auth='unauthorized':
-          - The admin key in config-docker.yml / provisioning-secrets must
-            match the principal pinned in storefront.bob.toml.
+        If this fails with storefront_auth='unauthorized' or
+        'configuration_error':
+          - The provisioning service's signing identity must be the principal
+            storefront.bob.toml pins under
+            [Identity.service_peers.provisioning_default].
+          - The storefront principal provisioning pins
+            (PROVISIONING_STOREFRONT_IDENTITY__*, or the chart's
+            storefrontIdentity) must be the storefront's own signer.
         """
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
@@ -517,7 +523,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
-            "The lease watchdog will not be able to release resources when leases expire.\n"
+            "Provisioning will not be able to tell the storefront when a lease's capacity is released.\n"
             "For deploy-docker: verify storefront_url in "
             "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
@@ -528,7 +534,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         auth_check = checks.get("storefront_auth", "absent")
         assert auth_check == "ok", (
             f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
-            "The lease watchdog signs as the provisioning service; 'unauthorized'\n"
+            "Provisioning signs as its own service identity; 'unauthorized'\n"
             "means its principal is not the one storefront.bob.toml pins as a\n"
             "service peer.\n"
             f"Full health response: {health}"

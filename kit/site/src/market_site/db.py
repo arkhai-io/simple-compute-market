@@ -105,17 +105,15 @@ class CapacityBucket(Base):
 class CapacityReservation(Base):
     """A capacity hold and its lease tail, as one ledger row.
 
-    Merges the storefront's ``compute_allocations`` shape with the lease
-    fields previously duplicated into ``vm_leases``: when the watchdog
-    releases an expired lease it updates *this* row locally and emits
-    events, instead of PATCHing the storefront's resource table.
+    The hold and the lease it becomes are one record, so the lease watchdog
+    releases an expired lease by updating this row and emitting events; the
+    owning storefront learns of the release from those events.
 
     deal_ref is the opaque mapping the storefront passed at reserve time
     (listing_id, escrow_uid, owner callback) — the ledger never interprets
     it beyond routing deal-scoped events back to the owning storefront.
-    Timestamps are ISO-8601 TEXT, matching the storefront ledger they
-    replace; the reservation count per site is small enough to compare in
-    Python.
+    Timestamps are ISO-8601 TEXT; the reservation count per site is small
+    enough to compare in Python.
     """
 
     __tablename__ = "capacity_reservations"

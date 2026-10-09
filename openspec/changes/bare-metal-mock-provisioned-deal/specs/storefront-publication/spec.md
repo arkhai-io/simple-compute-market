@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes for every registered settlement mechanism, and MUST NOT wait for a buyer request to begin it or be retried by any other path.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
 
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
@@ -24,6 +24,31 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Fulfillment start is interrupted
 - **WHEN** settlement was verified but fulfillment did not start
 - **THEN** the settlement-servicing worker's next cycle for that obligation starts it, without a second reservation or a buyer request
+
+#### Scenario: An Alkahest fulfillment is evidenced and collected
+- **WHEN** an Alkahest fulfillment's lease becomes active
+- **THEN** the storefront stores the lease-ready evidence, bound to the accepted thread, the committed plan, and the escrow, and submits its digest on chain as a string obligation referencing the escrow, never its body
+- **AND** it binds the attestation as the obligation's fulfillment, after which the worker checks the condition and collects the escrow
+
+#### Scenario: An evidence submission's outcome is unknown
+- **WHEN** an Alkahest evidence submission may have reached the chain but its attestation was not recorded
+- **THEN** no later attempt submits again; the obligation waits for an operator with a reason, and the administrator's system status counts it
+
+#### Scenario: The chain refuses an evidence submission
+- **WHEN** the chain rejects an Alkahest evidence submission
+- **THEN** the storefront retries it with backoff, and after a bounded number of rejections the obligation waits for an operator with a reason, which the administrator's system status counts
+
+#### Scenario: Evidence is resolved
+- **WHEN** a caller requests lease-ready evidence by its digest
+- **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
+
+#### Scenario: A settlement ends uncollected after delivery started
+- **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started
+- **THEN** the storefront terminates the lease at the recorded site
+
+#### Scenario: The storefront starts without its settlement configuration
+- **WHEN** the bare-metal storefront starts with no settlement configuration, with a configured Alkahest section, enabled or not, that lacks its seller address, chains, or wallet key, or with any of those supplied and no Alkahest section
+- **THEN** startup refuses with a clear error, and no mechanism is enabled implicitly
 
 #### Scenario: Buyer supplies conflicting routing material
 - **WHEN** a request or domain artifact asserts a provisioning URL, credential, different site, Physical Resource, machine, or physical-host identity

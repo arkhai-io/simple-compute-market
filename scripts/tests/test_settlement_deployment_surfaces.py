@@ -53,5 +53,3 @@ def test_public_deployment_config_examples_exclude_wallet_credentials() -> None:
         config = _toml(relative_path)
         assert "wallet.private_key" not in _field_paths(config)
         assert "alkahest.v1" in config["Settlement"]["priority"]
-
-

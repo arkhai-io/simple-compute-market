@@ -700,4 +700,3 @@ async def test_a_malformed_agreement_never_stops_reconciliation(make):
     assert (done.attempted, done.failed) == (1, 0)
     await h.delivered()
     assert h.delivery.starts == [NEGOTIATION]
-

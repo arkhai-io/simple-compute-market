@@ -155,4 +155,3 @@ def test_every_settlement_route_contract_is_mounted() -> None:
     ]
 
     assert unmounted_settlement_routes(mounted) == []
-

@@ -372,19 +372,15 @@ async def verify_alkahest(
     ):
         raise SettlementRequestError("escrow identity already belongs to another state")
 
-    try:
-        artifacts = service.build_plan(
-            proposal=proposal,
-            agreed_amount=int(agreed_amount),
-            duration_seconds=terms.duration_seconds,
-            buyer_principal=buyer_principal,
-            seller_principal=Identity.model_validate(thread["seller_principal"]),
-            seller_wallet_address=service.seller_wallet or "",
-            chain_config_paths=service.chain_config_paths,
+    # The plan the buyer funded is the one committed at acceptance; one
+    # rebuilt from today's configuration could name another wallet or chain.
+    committed = thread.get("settlement_plan")
+    if not committed:
+        raise SettlementRequestError(
+            "the accepted agreement has no committed settlement plan"
         )
-        plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
-    except SettlementRequestError:
-        raise
+    try:
+        plan = SettlementPlan.model_validate(committed)
     except Exception as exc:
         raise SettlementRequestError(
             "settlement verification failed",
@@ -424,6 +420,7 @@ async def verify_alkahest(
                 thread=thread,
                 source={"obligation_ref": adopted[0].obligation_ref},
             )
+            await service._step(adopted[0].obligation_ref)
             return service._response(
                 escrow_uid=escrow_uid,
                 negotiation_id=request.negotiation_id,
@@ -527,6 +524,7 @@ async def verify_alkahest(
         thread=thread,
         source={"obligation_ref": records[matched_index].obligation_ref},
     )
+    await service._step(records[matched_index].obligation_ref)
     return service._response(
         escrow_uid=escrow_uid,
         negotiation_id=request.negotiation_id,
@@ -544,7 +542,11 @@ async def verify_contact(service: Any, **kwargs: Any) -> Any:
 
 
 async def revalidate_payment(
-    service: Any, thread: Mapping[str, Any], record: Mapping[str, Any]
+    service: Any,
+    thread: Mapping[str, Any],
+    record: Mapping[str, Any],
+    *,
+    delivery_started: bool = False,
 ) -> None:
     stage = service.arkhai_payments_stage
     if stage is None:
@@ -565,7 +567,11 @@ async def revalidate_payment(
 
 
 async def revalidate_alkahest(
-    service: Any, thread: Mapping[str, Any], record: Mapping[str, Any]
+    service: Any,
+    thread: Mapping[str, Any],
+    record: Mapping[str, Any],
+    *,
+    delivery_started: bool = False,
 ) -> None:
     aggregate = await service.settlement_runtime.get_status(record["negotiation_id"])
     adopted = [
@@ -576,9 +582,13 @@ async def revalidate_alkahest(
         and obligation.obligation_ref
         == record["evidence"]["source"].get("obligation_ref")
     ]
-    if len(adopted) != 1 or adopted[0].fulfillment_ref is not None:
+    if len(adopted) != 1:
         raise SettlementRequestError("verified settlement lifecycle is inconsistent")
     obligation = adopted[0]
+    if delivery_started:
+        # Once delivery started, the servicing worker carries the obligation on
+        # through fulfillment and collection; neither retracts that delivery.
+        return
     if (
         obligation.reclaim_state != "pending"
         or obligation.mechanism_status != "ready"
@@ -629,23 +639,17 @@ async def revalidate_alkahest(
 
 
 async def revalidate_contact(
-    service: Any, thread: Mapping[str, Any], record: Mapping[str, Any]
+    service: Any,
+    thread: Mapping[str, Any],
+    record: Mapping[str, Any],
+    *,
+    delivery_started: bool = False,
 ) -> None:
     reveal = await SQLiteIntroductionStore(service.db.db_path).load(
         record["settlement_ref"]
     )
     if reveal is None or reveal.agreement_ref != record["negotiation_id"]:
         raise SettlementRequestError("introduction has not been revealed")
-
-
-def alkahest_resources(
-    seller_wallet: str | None, build_chains: Callable[[], Any]
-) -> Any:
-    if not seller_wallet:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required when Alkahest is enabled"
-        )
-    return build_chains()
 
 
 @dataclass(frozen=True, slots=True)
@@ -664,7 +668,6 @@ class SellerStage:
     verify: Callable[..., Any]
     revalidate: Callable[..., Any]
     physical: bool
-    runtime_resources: Callable[..., Any] | None = None
     refund: Callable[..., Any] | None = None
     reconcile: Callable[..., Any] | None = None
 

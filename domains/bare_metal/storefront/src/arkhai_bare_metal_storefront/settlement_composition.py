@@ -15,7 +15,6 @@ from .settlement_stages import (
     ContactStage,
     PaymentStage,
     SellerStage,
-    alkahest_resources,
     refund_payment,
     revalidate_alkahest,
     revalidate_contact,
@@ -53,7 +52,6 @@ SELLER_STAGES = SettlementStageTable(
             verify_alkahest,
             revalidate_alkahest,
             True,
-            alkahest_resources,
         ),
         ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
             create_arkhai_payments_registration,
@@ -140,6 +138,17 @@ class BareMetalStorefrontSettlementComposition:
             )
             for mechanism, entry in self.seller_stages.items()
         }
+
+    def configures(self, mechanism_id: str) -> bool:
+        """Whether the settlement root has a section for ``mechanism_id``.
+
+        A configured section may be disabled for new deals and still owns the
+        obligations accepted while it was enabled, so whatever services them
+        is built for every configured section, not only the enabled ones.
+        """
+
+        config_key = self.registry.registration(mechanism_id).config_key
+        return config_key in self.config.mechanisms
 
     async def readiness(
         self,

@@ -79,6 +79,9 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
     assert "ARKHAI_IDENTITY_CREDENTIAL=" not in wrapper
     assert "BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?" in wrapper
     assert "BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?" in wrapper
+    # The seller wallet's key arrives in its own optional file, never inline.
+    assert "BARE_METAL_STOREFRONT_WALLET_ENV_FILE:-" in wrapper
+    assert "BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=" not in wrapper
     assert "BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?" in wrapper
     for name in (
         "bare-metal-registry-data",

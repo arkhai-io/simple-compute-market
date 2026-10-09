@@ -202,6 +202,15 @@ Protected evidence extends the existing signed report model with exact API-credi
 
 **Alternative considered:** fold credits service or evidence resolver into the hosted service. Rejected because hosted is a domain-neutral financial authority and must not own API keys, quota, or issuance meaning.
 
+### Note from a sibling change (2026-10-07)
+
+`kit-owned-listing-and-fulfillment-lifecycles` now carries a proposed kit evidence
+envelope (from `bare-metal-mock-provisioned-deal`'s Section 7 audit). Its design wraps a
+domain's public evidence projection and binds its digest; it does not replace the signed
+issuance evidence this change defines, whose fields the hosted condition verifies. Nothing
+here changes; that change coordinates with this one before it touches API credits'
+evidence path.
+
 ## Risks / Trade-offs
 
 - **[Adding a second listing carrier can create ambiguous selection]** → Require exact `SettlementSelection`, duplicate-free identities, explicit mechanism/profile constraints, and seller-side revalidation against trusted listing.

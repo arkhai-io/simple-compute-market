@@ -148,6 +148,14 @@ class _RecordingFulfillmentClient:
         self.calls.append(("teardown", fulfillment_id))
         return self.site_id
 
+    async def get_lease(self, capacity_reservation_id):
+        self.calls.append(("lease", capacity_reservation_id))
+        return self.site_id
+
+    async def terminate_lease(self, capacity_reservation_id, request):
+        self.calls.append(("terminate", capacity_reservation_id, request.reason))
+        return self.site_id
+
 
 async def test_every_fulfillment_verb_routes_to_persisted_site_after_restart(
     tmp_path,
@@ -197,6 +205,12 @@ async def test_every_fulfillment_verb_routes_to_persisted_site_after_restart(
         == "site-b"
     )
 
+    assert await fulfillment.get_lease("reservation-b") == "site-b"
+    assert (
+        await fulfillment.terminate_lease("reservation-b", reason="settlement_reclaimed")
+        == "site-b"
+    )
+
     assert clients["site-a"].calls == []
     assert clients["site-b"].calls == [
         ("schedule", "reservation-b"),
@@ -204,6 +218,8 @@ async def test_every_fulfillment_verb_routes_to_persisted_site_after_restart(
         ("status", "fulfillment-b"),
         ("result", "fulfillment-b"),
         ("teardown", "fulfillment-b"),
+        ("lease", "reservation-b"),
+        ("terminate", "reservation-b", "settlement_reclaimed"),
     ]
 
 

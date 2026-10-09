@@ -21,13 +21,12 @@ import time
 from typing import Any
 
 import typer
-from arkhai_vms import make_vm_provision_terms
+from arkhai_vms import VmConnectionDetails, make_vm_provision_terms
 from core_buyer import build_buyer_explanation, explain_registry_query
 from core_buyer.action_policy import (
     ACTION_REQUIRED_EXIT_CODE,
     BuyerActionRequired,
 )
-from arkhai_vms import VmConnectionDetails
 from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection

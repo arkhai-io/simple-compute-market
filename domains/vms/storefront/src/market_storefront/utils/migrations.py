@@ -106,25 +106,6 @@ VM_LEGACY_MIGRATION_INPUTS = LegacyMigrationInputs(
 )
 
 
-def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> None:
-    _add_column_if_missing(conn, "compute_allocations", "pool_id", "TEXT")
-    _add_column_if_missing(conn, "compute_allocations", "member_id", "TEXT")
-    for column in (
-        "provider_id",
-        "provider_job_id",
-        "provider_lease_id",
-        "provider_resource_id",
-        "vm_host",
-        "vm_target",
-        "lease_end_utc",
-        "failure_reason",
-        "failure_message",
-        "logs_ref",
-        "vm_remove_job_id",
-    ):
-        _add_column_if_missing(conn, "compute_allocations", column, "TEXT")
-
-
 def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
     # Fresh databases use the current table name. The migration identifier is
     # stable because existing databases may already have recorded it; the
@@ -174,14 +155,6 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_compute_pool_members_pool "
         "ON compute_pool_members(pool_id, status)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_compute_allocations_pool_state "
-        "ON compute_allocations(pool_id, state)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_compute_allocations_member_state "
-        "ON compute_allocations(member_id, state)"
     )
     # Only a database written before the common listing binding existed has
     # this table; a fresh one never creates it.
@@ -327,29 +300,6 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
                 first[10],
             ),
         )
-    if _table_exists(conn, "compute_allocations"):
-        conn.execute(
-            """
-            UPDATE compute_allocations
-            SET pool_id = COALESCE(
-                  pool_id,
-                  (
-                    SELECT pool_id
-                    FROM compute_pool_members
-                    WHERE compute_pool_members.resource_id = compute_allocations.resource_id
-                  )
-                ),
-                member_id = COALESCE(
-                  member_id,
-                  (
-                    SELECT member_id
-                    FROM compute_pool_members
-                    WHERE compute_pool_members.resource_id = compute_allocations.resource_id
-                  )
-                )
-            WHERE pool_id IS NULL OR member_id IS NULL
-            """
-        )
 
 
 def _migrate_pool_member_sites(conn: sqlite3.Connection) -> None:
@@ -360,16 +310,6 @@ def _migrate_pool_member_sites(conn: sqlite3.Connection) -> None:
     members of resources hosted at *other* sites carry a name.
     """
     _add_column_if_missing(conn, "compute_pool_members", "site", "TEXT")
-
-
-def _migrate_allocation_hold_expiry(conn: sqlite3.Connection) -> None:
-    """Two-phase reserve: TTL soft holds on the embedded ledger.
-
-    A reserved allocation with ``hold_expires_at`` in the past lapses
-    back to available (swept lazily ahead of reads and reserves) —
-    mirroring the site ledger's semantics.
-    """
-    _add_column_if_missing(conn, "compute_allocations", "hold_expires_at", "TEXT")
 
 
 def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
@@ -611,10 +551,6 @@ def _migrate_fulfillment_context_names_no_guest(conn: sqlite3.Connection) -> Non
 
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
-        "20260604_001_compute_allocation_callback_metadata",
-        _migrate_compute_allocation_callback_metadata,
-    ),
-    Migration(
         "20260604_002_compute_inventory_pools",
         _migrate_compute_inventory_pools,
     ),
@@ -625,10 +561,6 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260611_006_pool_member_sites",
         _migrate_pool_member_sites,
-    ),
-    Migration(
-        "20260611_007_allocation_hold_expiry",
-        _migrate_allocation_hold_expiry,
     ),
     Migration(
         "20260716_008_rename_compute_capacity_pools",

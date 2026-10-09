@@ -43,11 +43,13 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
 from seeded_threads import seed_thread
+from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -64,6 +66,7 @@ BUYER_SIGNER = Eip191Signer(PRIVATE_KEY)
 BUYER = BUYER_SIGNER.identity.identifier
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
 ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
+SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 ESCROW_ADDRESS = "0x1111111111111111111111111111111111111111"
 ESCROW_UID = "0x" + "ab" * 32
 OTHER_ESCROW_UID = "0x" + "cd" * 32
@@ -179,8 +182,18 @@ def _plan(**kwargs):
     }
 
 
+def _alkahest(escrow: EscrowOnChain | None = None):
+    """The production Alkahest composition over the chain boundary's doubles."""
+    return alkahest_composition(
+        SELLER_SIGNER,
+        wallet="0x3333333333333333333333333333333333333333",
+        chain_clients={"anvil": ChainClient()},
+        escrow=escrow or EscrowOnChain(),
+    )
+
+
 async def _accepted_runtime(
-    path: str, verifier
+    path: str, verifier, *, commit_plan: bool = True
 ) -> tuple[BareMetalStorefrontRuntime, str]:
     domain = get_market_domain_contract()
     db = SQLiteClient(path, domain=domain)
@@ -195,7 +208,7 @@ async def _accepted_runtime(
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=_plan,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -271,6 +284,15 @@ async def _accepted_runtime(
             listing_ref="listing-1",
         ),
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
+        settlement_plan=(
+            _plan(
+                proposal=proposal,
+                buyer_principal=BUYER_SIGNER.identity,
+                seller_principal=SELLER_SIGNER.identity,
+            )["settlement_plan"]
+            if commit_plan
+            else None
+        ),
     )
     return runtime, negotiation_id
 
@@ -312,7 +334,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         marketplace_signer=runtime.marketplace_signer,
         seller_evm_address=runtime.seller_evm_address,
         plan_builder=_plan,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -342,14 +364,19 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert "negotiation already has a primary escrow" in str(conflict.value)
     # Status re-checks the accepted escrow on chain before reporting it verified.
     assert len(calls) == 2
-    assert calls[1]["alkahest_client"] is restarted.chain_clients["anvil"]
+    assert (
+        calls[1]["alkahest_client"]
+        is restarted.settlement_composition.resources["clients"]["anvil"]
+    )
     assert calls[0]["agreed_duration_seconds"] == 3600
     assert calls[0]["agreed_price"] == 100
     assert "ssh_public_key" not in body
     assert (first.provisioning_job_id, first.fulfillment_id) == (None, None)
     assert not ({"tenant_credentials", "receipt", "result"} & first.extra.keys())
     assert _settled(restart_retry) == expected
-    assert restarted.settlement_runtime._clients == {}
+    # The restarted process services the obligation through the same
+    # composition the first one verified it with.
+    assert set(restarted.settlement_runtime._clients) == {"alkahest.v1"}
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
     obligations = SettlementPlan.model_validate(
@@ -372,7 +399,9 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert verified.materialization_state == "materialized"
     assert verified.mechanism_status == "ready"
     assert verified.mechanism_state == {}
-    assert verified.condition_anchor is None
+    # The worker's status step, run once by verification, anchors the
+    # condition on the escrow; with no site configured here nothing is delivered.
+    assert verified.condition_anchor == ESCROW_UID
     assert verified.fulfillment_ref is None
     assert verified.condition_state == "pending"
     assert verified.collection_state == "pending"
@@ -395,7 +424,10 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         )
     finally:
         conn.close()
-    assert operations == [("materialize", "succeeded")]
+    # Verification adopted the escrow and stepped the worker once; no
+    # collection or reclaim was attempted.
+    assert ("materialize", "succeeded") in operations
+    assert not {operation for operation, _state in operations} & {"collect", "reclaim"}
     assert legacy_claims == 0
 
 
@@ -466,9 +498,11 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     async def verifier(**_kwargs):
         raise AssertionError("status must not call a settlement provider")
 
+    # No committed plan, so nothing at startup can adopt the recorded escrow.
     runtime, negotiation_id = await _accepted_runtime(
         str(tmp_path / "storefront.db"),
         verifier,
+        commit_plan=False,
     )
     inserted = await runtime.db.insert_escrow(
         escrow_uid=ESCROW_UID,
@@ -541,6 +575,7 @@ class _ProvisioningClient:
     def __init__(self, *, torn_down: bool = False) -> None:
         self.begin_calls = []
         self.teardown_calls = []
+        self.terminations = []
         self.torn_down = torn_down
 
     async def schedule_resource(self, request):
@@ -602,6 +637,12 @@ class _ProvisioningClient:
             },
         )
 
+    async def terminate_lease(self, capacity_reservation_id, *, reason=None):
+        """The site ends the lease, then converges teardown through its fulfillment."""
+        self.terminations.append((capacity_reservation_id, reason))
+        self.torn_down = True
+        return SimpleNamespace(capacity_reservation_id=capacity_reservation_id, status="releasing")
+
     async def begin_fulfillment_teardown(self, fulfillment_id, **request):
         self.teardown_calls.append((fulfillment_id, request))
         self.torn_down = True
@@ -651,7 +692,11 @@ async def test_alkahest_recovery_refuses_non_active_journal_before_physical_effe
     runtime = replace(
         runtime, capacity_client=capacity, fulfillment_client=provisioning
     )
-    verified = await runtime.settlement_service().verify(
+    # Adopt without stepping the obligation, so the gate below is the first
+    # thing that could start delivery.
+    verified = await replace(
+        runtime.settlement_service(), service_obligation=None
+    ).verify(
         escrow_uid=ESCROW_UID,
         request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
         buyer_principal=BUYER_SIGNER.identity,
@@ -703,7 +748,9 @@ async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
     runtime = replace(
         runtime, capacity_client=capacity, fulfillment_client=provisioning
     )
-    await runtime.settlement_service().verify(
+    # Adopt without stepping the obligation, so the gate below is the first
+    # thing that could start delivery.
+    await replace(runtime.settlement_service(), service_obligation=None).verify(
         escrow_uid=ESCROW_UID,
         request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
         buyer_principal=BUYER_SIGNER.identity,
@@ -733,7 +780,10 @@ async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
     assert all(call["escrow_uid"] == ESCROW_UID for call in calls)
     assert all(call["agreed_price"] == 100 for call in calls)
     assert all(call["agreed_duration_seconds"] == 3600 for call in calls)
-    assert calls[-1]["alkahest_client"] is restarted.chain_clients["anvil"]
+    assert (
+        calls[-1]["alkahest_client"]
+        is restarted.settlement_composition.resources["clients"]["anvil"]
+    )
     assert calls[-1]["escrow_proposal"].escrow_address == ESCROW_ADDRESS
 
 
@@ -752,24 +802,6 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         capacity_client=capacity,
         fulfillment_client=provisioning,
     )
-    begin_body = {
-        "negotiation_id": negotiation_id,
-        "escrow_uid": ESCROW_UID,
-        "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
-    }
-    # Rejection path: a begin before settlement has verified evidence is a
-    # request the buyer's client never sends, so its refusal is checked
-    # hand-built, before any site effect.
-    with TestClient(_app(runtime)) as client:
-        unverified = client.post(
-            "/api/v1/fulfillments/begin",
-            json=begin_body,
-            headers=_headers(
-                "bare_metal_fulfillment_begin", negotiation_id, begin_body
-            ),
-        )
-    assert unverified.status_code == 409
-    assert capacity.reserve_calls == [] and provisioning.begin_calls == []
     with serving(_app(runtime)) as base_url:
         async with StorefrontClient(
             base_url,
@@ -781,7 +813,7 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
                 ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
             )
         buyer = _fulfillment_client(base_url)
-        begun = buyer.begin(negotiation_id, escrow_uid=ESCROW_UID)
+        # Settlement started fulfillment; the buyer only observes it.
         ready = buyer.status(negotiation_id)
         result = buyer.result(negotiation_id)
         access = buyer.access(negotiation_id)
@@ -793,16 +825,33 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         db=SQLiteClient(path, domain=runtime.domain),
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                authority_url="http://site-a",
+                authority_principal=SITE_SIGNER.identity,
+            ),
+        ),
     )
     with serving(_app(restarted)) as base_url:
         buyer = _fulfillment_client(base_url)
+        torn_down = buyer.status(negotiation_id)
+        # The site releases the capacity after the teardown and says so.
+        async with StorefrontClient(
+            base_url,
+            signer=SITE_SIGNER,
+            caller_role="service",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        ) as site:
+            recorded = await site.notify_capacity_released("reservation-a", site_id="site-a")
         released = buyer.status(negotiation_id)
         repeated = buyer.status(negotiation_id)
 
     assert settled.status == "settlement_verified"
-    assert begun["negotiation_id"] == negotiation_id
     assert ready["state"] == "active"
-    assert tearing_down["state"] == "teardown_dispatch_pending"
+    assert tearing_down["state"] == "terminating"
+    assert torn_down["state"] == "torn_down"
+    assert recorded == {"capacity_reservation_id": "reservation-a", "state": "released"}
     assert released["state"] == "released"
     assert repeated == released
     assert capacity.reserve_calls[0]["site"] == "site-a"
@@ -811,8 +860,10 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
     assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
-    assert len(provisioning.teardown_calls) == 1
-    assert len(restarted_capacity.site_client.releases) == 1
+    assert provisioning.terminations == [("reservation-a", "buyer_teardown")]
+    assert provisioning.teardown_calls == []
+    # The storefront never releases capacity itself.
+    assert restarted_capacity.site_client.releases == []
     public_result = result
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
@@ -840,12 +891,12 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         assert forbidden not in serialized_result
 
 
-async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
-    """The opening commits the plan verify registers, built from the same inputs.
+async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
+    """Settlement verification registers the plan committed at acceptance.
 
-    The buyer funds from the plan in the negotiation response, so that plan, the
-    one committed at acceptance, and the one settlement verification builds must
-    be the same plan. Built here with the real builder against the development
+    The buyer funds from the plan in the negotiation response, the one committed
+    at acceptance; verification builds nothing and registers that plan's
+    obligations exactly. Built here with the real builder against the development
     chain's addresses, every build recorded.
     """
     from market_alkahest.dev_chain import anvil_address_book_path
@@ -875,7 +926,7 @@ async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=recording_builder,
-        chain_clients={"anvil": object()},
+        settlement_composition=_alkahest(),
         chain_config_paths={"anvil": str(anvil_address_book_path())},
         escrow_verifier=verifier,
         capacity_client=SourceSites(),
@@ -945,8 +996,12 @@ async def test_the_plan_settled_is_the_plan_accepted(tmp_path) -> None:
     thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     committed = thread["settlement_plan"]
     committed = json.loads(committed) if isinstance(committed, str) else committed
-    assert len(builds) == 2, "the opening and settlement verification each build once"
-    assert opened["settlement_plan"] == committed == builds[0] == builds[1]
+    assert len(builds) == 1, "only the opening builds a plan"
+    assert opened["settlement_plan"] == committed == builds[0]
+    registered = await runtime.settlement_runtime.get_status(negotiation_id)
+    assert [record.obligation for record in registered.obligations] == (
+        SettlementPlan.model_validate(committed).model_dump(mode="json")["obligations"]
+    )
 
 
 PAYER = "00000000-0000-4000-8000-000000000011"
@@ -1141,3 +1196,23 @@ async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
             negotiation_id=negotiation_id, buyer_principal=buyer.identity
         )
     assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+
+async def test_verify_refuses_a_thread_with_no_committed_plan(tmp_path) -> None:
+    async def verifier(**_kwargs):
+        raise AssertionError("verification must not reach the escrow")
+
+    runtime, negotiation_id = await _accepted_runtime(
+        str(tmp_path / "storefront.db"), verifier, commit_plan=False
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.settle_evm(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
+
+    assert refused.value.status_code == 409
+    assert "no committed settlement plan" in str(refused.value)
+    assert (await runtime.settlement_runtime.get_status(negotiation_id)).obligations == []

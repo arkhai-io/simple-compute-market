@@ -129,4 +129,3 @@ A test that needs a signed receipt over its own Agreement MUST sign it through t
 
 - **WHEN** an integration test settles a payments deal
 - **THEN** it builds the receipt with the kit's fixture and a test signer, and the vector test proves the fixture signs what the service signs
-

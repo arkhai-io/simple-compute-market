@@ -10,7 +10,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from market_identity import Identity, IdentityScheme
 
@@ -1194,6 +1194,151 @@ class SettlementSQLiteRepository:
 
         return await asyncio.to_thread(run)
 
+    async def write_operation_receipt_field(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        key: str,
+        value: Any,
+        uncertain_acknowledgement: bool,
+    ) -> Literal["written", "unchanged", "conflict", "lost"]:
+        """Write one receipt field of a leased operation, first write wins.
+
+        The field records something the holder did outside this journal, so it
+        is never overwritten: an equal value is a replay and changes nothing, a
+        different value is a changed reuse of the operation and is refused.
+        Only the lease holder writes, so a worker whose lease was taken over
+        cannot record an effect for an attempt that is no longer its own.
+        """
+
+        def run() -> Literal["written", "unchanged", "conflict", "lost"]:
+            now = self._now()
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT receipt FROM settlement_operations "
+                    "WHERE obligation_ref=? AND operation=? "
+                    "AND state='in_progress' AND lease_owner=?",
+                    (obligation_ref, operation, lease_owner),
+                ).fetchone()
+                if row is None:
+                    conn.rollback()
+                    return "lost"
+                receipt = json.loads(row[0]) if row[0] else {}
+                if key in receipt:
+                    conn.rollback()
+                    if canonical_json(receipt[key]) == canonical_json(value):
+                        return "unchanged"
+                    return "conflict"
+                receipt[key] = value
+                conn.execute(
+                    "UPDATE settlement_operations SET receipt=?, "
+                    "uncertain_acknowledgement=MAX(uncertain_acknowledgement, ?), "
+                    "updated_at=? WHERE obligation_ref=? AND operation=?",
+                    (
+                        canonical_json(receipt),
+                        int(uncertain_acknowledgement),
+                        now,
+                        obligation_ref,
+                        operation,
+                    ),
+                )
+                conn.commit()
+                return "written"
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
+    async def clear_operation_receipt_field(
+        self,
+        *,
+        obligation_ref: str,
+        operation: str,
+        lease_owner: str,
+        key: str,
+        unless_key: str,
+    ) -> Literal["cleared", "refused", "lost"]:
+        """Remove one receipt field of a leased operation unless another is set.
+
+        ``unless_key`` names the field whose presence makes the removal unsafe:
+        once an operation has recorded what its effect created, the record that
+        the effect was attempted is part of that evidence.
+        """
+
+        def run() -> Literal["cleared", "refused", "lost"]:
+            now = self._now()
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT receipt FROM settlement_operations "
+                    "WHERE obligation_ref=? AND operation=? "
+                    "AND state='in_progress' AND lease_owner=?",
+                    (obligation_ref, operation, lease_owner),
+                ).fetchone()
+                if row is None:
+                    conn.rollback()
+                    return "lost"
+                receipt = json.loads(row[0]) if row[0] else {}
+                if unless_key in receipt:
+                    conn.rollback()
+                    return "refused"
+                receipt.pop(key, None)
+                conn.execute(
+                    "UPDATE settlement_operations SET receipt=?, updated_at=? "
+                    "WHERE obligation_ref=? AND operation=?",
+                    (
+                        canonical_json(receipt) if receipt else None,
+                        now,
+                        obligation_ref,
+                        operation,
+                    ),
+                )
+                conn.commit()
+                return "cleared"
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
+    async def count_manual_required(self) -> int:
+        """Count the obligations waiting for an operator, each once.
+
+        An obligation waits when its mechanism parked it or when any of its
+        operations did; the two are counted together so an obligation parked
+        both ways is still one obligation an operator has to look at.
+        """
+
+        def run() -> int:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM settlement_obligations o
+                    WHERE o.mechanism_status='manual_required'
+                       OR EXISTS (
+                         SELECT 1 FROM settlement_operations op
+                         WHERE op.obligation_ref=o.obligation_ref
+                           AND op.state='manual_required'
+                       )
+                    """
+                ).fetchone()
+                return int(row[0]) if row is not None else 0
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
     async def finish_settlement_operation(
         self,
         *,
@@ -1387,6 +1532,18 @@ class SettlementSQLiteRepository:
                             now,
                             obligation_ref,
                         ),
+                    )
+                elif operation == "fulfill" and state == "manual_required":
+                    # A fulfillment has no lifecycle column of its own; a park
+                    # records its reason where every other park does.
+                    conn.execute(
+                        """
+                        UPDATE settlement_obligations SET
+                          mechanism_state=COALESCE(?, mechanism_state),
+                          last_error=?, version=version+1, updated_at=?
+                        WHERE obligation_ref=?
+                        """,
+                        (mechanism_json, last_error, now, obligation_ref),
                     )
                 elif operation == "reclaim":
                     lifecycle = {
