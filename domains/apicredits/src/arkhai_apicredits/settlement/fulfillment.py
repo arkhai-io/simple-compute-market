@@ -106,7 +106,7 @@ async def fulfill_api_credits_obligation(
     delivery = credit_delivery(evidence)
     settlement_ref = evidence.settlement_ref
     listing_resource = delivery.listing_resource
-    quantity, key_mode = delivery.quantity, delivery.key_mode
+    quantity = delivery.quantity
     listing_id = delivery.listing_id
     capacity_reservation_id = (
         str(held_reservation.get("capacity_reservation_id"))

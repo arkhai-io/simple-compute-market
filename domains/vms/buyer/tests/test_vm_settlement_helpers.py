@@ -11,7 +11,6 @@ from market_identity import (
 from arkhai_vms_buyer import (
     common,
     settle_cli,
-    settlement_composition,
     settlement_stages,
 )
 from arkhai_vms_buyer.escrow_selection import select_escrow_entry

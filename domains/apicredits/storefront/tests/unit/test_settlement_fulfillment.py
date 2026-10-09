@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from market_core import ImmutableFulfillmentCapability, SettlementEvidence
+from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
 
 from arkhai_apicredits.settlement import fulfillment as fulfillment_module

@@ -13,7 +13,7 @@ from market_identity import Ed25519Signer
 def test_payments_only_registry_resolution_does_not_resolve_wallet(monkeypatch) -> None:
     """A wallet-free buyer is never asked for an EVM wallet."""
     monkeypatch.setattr(
-        "arkhai_apicredits_buyer.settlement_composition.resolve_buyer_wallet",
+        "arkhai_apicredits_buyer.settlement_stages.resolve_buyer_wallet",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("payments-only policy resolved wallet")
         ),

@@ -15,11 +15,11 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
+from arkhai_apicredits.settlement.fulfillment import credit_delivery
+from market_core import SettlementEvidence
+
 #: Statuses whose verified facts are fixed; only the refund transitions move between them.
 _SETTLED = frozenset({"verified", "refunding", "refunded"})
-
-from market_core import SettlementEvidence
-from arkhai_apicredits.settlement.fulfillment import credit_delivery
 
 
 class SettlementRepository:

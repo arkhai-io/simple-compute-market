@@ -9,9 +9,7 @@ from typing import Any
 
 from market_settlement_runtime import derive_obligation_ref
 from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.settlement_stages import (
-    accepted_agreement, ApiCreditsFulfillmentInput, ApiCreditsSettlementProjection,
-)
+from apicredits_storefront.settlement_stages import accepted_agreement
 
 from market_core import (
     DomainCapability,
