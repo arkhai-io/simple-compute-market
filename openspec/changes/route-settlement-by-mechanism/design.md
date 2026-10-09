@@ -87,6 +87,52 @@ The [final inventory](../../../docs/attachments/route-settlement-closeout/final-
 - Optional convention adapter extraction is deferred until concrete reuse earns
   a kit home. No speculative module/dependency was created.
 
+## Post-merge reconciliation
+
+The development branch's bare-metal provisioned-deal work arrived after this
+change's implementation and review. The merged tree is the one this change
+closes out on; these decisions bring it back to the change's invariants and the
+repository's current closeout rules.
+
+- **Obligation servicing resolves the accepted entry.** Bare-metal servicing
+  had regained a concrete-mechanism switch: the worker's ready and terminal
+  hooks compared `record.obligation["mechanism"]` with Alkahest and contact
+  exchange, and the runtime decided which mechanisms needed an Alkahest
+  lifecycle. Each seller entry now declares an optional servicing factory
+  (a `ready`/`terminal` continuation over one runtime): Alkahest builds its
+  lifecycle when its section is configured, contact exchange declines because
+  its reveal binds the obligation, and payments has no obligations. The
+  runtime resolves the entry from the accepted Agreement of
+  `record.agreement_ref`, refuses an obligation whose mechanism differs from
+  that Agreement, and refuses an entry with no servicing before any effect.
+  Rejected: looking up the obligation's recorded mechanism directly (it is
+  accepted state too, but recovery resolves from the Agreement everywhere
+  else) and keeping a conditional chain (a second dispatch declaration that a
+  new mechanism must also edit).
+- **Client-contract integration for the two repairs.** Standalone credits
+  negotiation runs the real buyer command against the real API-credit
+  storefront served on loopback, from the storefront's integration suite with
+  the buyer as a development dependency. The command does not use the typed
+  storefront client, and moving buyers onto it is not required here. Accepted
+  contact reveal after disablement drives negotiation through
+  `StorefrontClient` and reveal/read through the production
+  `IntroductionTransport`; the disabled-restart persistence assertions stay.
+- **Validation evidence is regenerated, not annotated.** The joined replay
+  scripts hard-coded wheel versions and pre-merge paths. They are replaced by a
+  validation record that names `make` targets and the change's own regression
+  tests, with counts from the merged tree; the pre-merge packet stays in Git
+  history.
+- **Public-repository discipline.** The payments wire contract is identified
+  by content: the vendored schema and vectors are named by SHA-256 and
+  described as the payments service's published contract, with no repository
+  name or commit in the kit, its generated models, permanent documents or
+  change documents. Live payment qualification is described by its owner role
+  (the payments service's own end-to-end tests).
+- **Closeout follows the current checklist:** documentation citations,
+  `make check-packaging`, and the end-to-end pipeline with its run recorded.
+  Goal 6's gap table drops the contact-exchange and delivery rows that the
+  archived cross-compute and retention work closed.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location | Disposition |
@@ -99,3 +145,6 @@ The [final inventory](../../../docs/attachments/route-settlement-closeout/final-
 | Opt-in convention has a future kit home, no mandatory adapter | `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` | Boundary permanent/promoted; implementation deferred; core protocol rejected |
 | Explicit fresh-database reset, no compatibility adoption | Three domain specs; VM `architecture.md#explicit-database-reset`, physical `architecture.md#explicit-storefront-database-reset`, API credits `architecture.md#explicit-database-reset`; repository `ARCHITECTURE.md#build-packaging-and-initialization` | Current reset contract permanent/promoted; in-place migration method temporary provenance |
 | Goal 6 current-state and gap mapping | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Updated: core/delivery and B1/B2 gaps closed; carrier/wire/live gaps retained |
+| Seller entries own obligation servicing; hooks resolve the accepted Agreement's entry | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/market-composition/spec.md` | Planned (section 10) |
+| Payments contract identified by content, not source repository | `kit/arkhai-payments/schema/SOURCE.md`; `openspec/specs/market-composition/spec.md`; `docs/development/TESTING.md` | Planned (section 10) |
+| Goal 6 gap table after cross-compute contact exchange and retention | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Planned (section 10) |

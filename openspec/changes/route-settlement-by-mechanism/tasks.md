@@ -4,7 +4,7 @@ Final implementation and post-review closeout checklist. Completed task IDs and
 ownership are retained; detailed implementation/review history is in Git and
 [final joined evidence](../../../docs/attachments/route-settlement-closeout/final.md).
 No escrow-carrier/runtime extraction or public listing/registry wire cutover is
-included. All tasks are complete; the change is ready to archive after code review.
+included. Sections 1–9 are complete; section 10 reconciles the change with the merged development branch.
 
 ## 1. Shared core and buyer dispatch
 
@@ -107,7 +107,7 @@ measurements, not additive coverage. Evidence: final joined packet.
 
 ## 9. Payment end-to-end coverage
 
-- [x] 9.1 Typed payments-client doubles and published conformance vectors pass. Complete live payment scenarios remain in private `arkhai-io/arkhai-payments` (`scm-complete-deal-e2e`); public CI does not require private credentials/service.
+- [x] 9.1 Typed payments-client doubles and published conformance vectors pass. Complete live payment scenarios are qualified by the payments service's own end-to-end tests, which import this repository's published packages; public CI requires no payments credentials or service.
 
 ## 8. Joined validation and plan closeout
 
@@ -121,3 +121,50 @@ Owner: joined post-review closeout. Exact commands/counts/readiness/limits are i
 - [x] 8.5 Added/touched local imports reviewed. API-credit imports moved and real suites pass; two VM cycles reproduced against actual imports/wheels, publication operator-config load deliberately lazy with local reasons.
 - [x] 8.6 Six capability deltas synchronized; existing companions/repository architecture promoted and current limits disclosed. Tasks/design compressed with baseline inventory and detailed evidence retained in attachments; no new companion/index edit needed.
 - [x] 8.7 Goal6 and active change status reflect repaired core/evidence boundaries and precise B1/B2 blockers while retaining carrier/wire/live gaps. Promotion record complete; residuals owned by move-escrow proposal and GitHub ideas #261/#262. Strict change/spec validation passes. Archive with `--skip-specs` after review; specs were promoted directly.
+
+## 10. Post-merge reconciliation
+
+Owner: joined post-merge closeout on the tree that merged the development
+branch's bare-metal provisioned-deal and dead-surface work. Decisions are in
+`design.md#post-merge-reconciliation`.
+
+- [ ] 10.1 Bare-metal obligation servicing through seller entries. Files:
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/{settlement_stages,settlement_composition,alkahest_lifecycle,runtime}.py`
+  and tests. Add the optional entry servicing factory and continuation
+  protocol; Alkahest builds its lifecycle when its section is configured,
+  contact exchange declines, payments declares none. Runtime hooks resolve the
+  entry from the accepted Agreement, refuse a mismatched obligation mechanism
+  and a missing servicing before effects, and no longer compare mechanism IDs
+  or build an Alkahest lifecycle themselves. Focused routing tests with a fake
+  table; existing restart-recovery and Alkahest lifecycle integration suites.
+- [ ] 10.2 Standalone credits negotiation integration (B1). Add the API-credit
+  buyer to the API-credit storefront's development dependencies (lock refreshed
+  through `scripts/uv_project.py`) and an integration test that runs the real
+  `market credits negotiate` command against the served storefront for a
+  payment-only, wallet-free negotiation and its accepted state.
+- [ ] 10.3 Accepted contact reveal after disablement through the production
+  clients (B2). Rewrite the successful negotiation, reveal and read in
+  `test_accepted_introduction_survives_contact_disable` onto `StorefrontClient`
+  and `IntroductionTransport` against a served app; keep the disabled-restart
+  persistence assertions.
+- [ ] 10.4 Public-repository discipline. Remove private repository names,
+  commits, planning-document paths and private test-target names from this
+  change, its attachments, the payments kit (`schema/SOURCE.md`, generator and
+  generated models header, schema `$id` with its recorded SHA-256), permanent
+  documents (`docs/development/TESTING.md`,
+  `openspec/specs/market-composition/spec.md`) and the change documents that
+  repeat them; identify the contract by content.
+- [ ] 10.5 Regenerate joined validation on the merged tree: replace
+  `docs/attachments/route-settlement-closeout/replay*.sh` and the pre-merge
+  counts with a validation record naming `make` targets and this change's
+  regression tests, and reconcile `final.md`, `final-inventory.md`, `index.md`
+  and `design.md` to the repaired B1/B2 state.
+- [ ] 10.6 Promote the servicing rule (physical-provisioning, market-composition)
+  and the content-identified payments contract; reconcile Goal 6's gap table.
+- [ ] 10.7 Closeout per `openspec/README.md#plan-closeout-requirements`: comment
+  hygiene; import placement for touched imports; documentation compliance;
+  narrative compression of this section; roadmap currency (Goal 6); campaign
+  index currency (`openspec/changes/README.md` row); `make check-doc-citations
+  CHANGE=route-settlement-by-mechanism`; `make check-packaging`; end-to-end
+  pipeline run recorded with its scenarios (or an explicit blocker naming its
+  owner); design promotion record complete.
