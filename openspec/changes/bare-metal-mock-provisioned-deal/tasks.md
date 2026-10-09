@@ -4642,7 +4642,7 @@ lane (9.1–9.5).
       absent without it. The status admission and the callback both use the site
       bindings, so no service-role credential is added (design, "Section 9 design",
       implementation findings).
-- [ ] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
+- [x] 9.6 **Gate.** Both lanes pass: the bare-metal lane with publication, introduction,
       and the mock deal, and the VM lane with 9.0b's hooks. Also: the bare-metal
       storefront, domain, and buyer suites, the VM storefront suite (the exact pin), the
       e2e unit suite, `make check-packaging`, comment hygiene, documentation citations,
@@ -4657,9 +4657,11 @@ lane (9.1–9.5).
       mock-deal stages). The suites and checks above pass; the VM storefront's two
       Alkahest integration tests need a local Node and Anvil chain the workspace
       lacks.
-    - Open until the bare-metal lane runs again with 9.6b: that run's 09bb inferred
-      publication from the stored evidence digest, which a rejected submission also
-      leaves behind.
+    - Run 37910886195, on commit ab4a1284 with 9.6b (the code tested here since): both
+      lanes pass, VM 135 passed and 3 skipped (the payment deal, with no payments
+      target), bare metal 51 passed. 09bb read the escrow's fulfillment attestation
+      from the chain rather than inferring it from the stored digest. Jobs took 5m44s
+      (VM) and 4m16s (bare metal).
 - [x] 9.6a Settlement wait and the repeated teardown (design, "Settlement wait observes
       the selected site (2026-10-09)"). Run 37896157446 timed out at 09b: with
       servicing held, the administrator wait read the storefront's cached dispatch
@@ -4704,13 +4706,17 @@ lane (9.1–9.5).
       campaign index currency (this change's row); documentation citations; `make
       check-packaging`; 9.6's run recorded; and promotion pending at 11.2 and 11.4 for
       the `storefront-publication` and `test-compatibility` deltas.
-    - Done with 9.6b: roadmap currency (the gap is Goal 4's, closed, and Goal 4's
-      state names the lane's deal), narrative compression of 9.6, citations, comment
-      hygiene, and packaging. Remaining: the direct read of the section's new modules
-      and the import-placement pass, 9.6's rerun, and this change's index row once
-      both land. Section 9's implementation and live gate are complete when 9.6
-      closes; its closeout stays open until the 11.2 and 11.4 promotions land, since
-      this change promotes every delta in Section 11.
+    - Done: roadmap currency (the gap is Goal 4's, closed, and Goal 4's state names
+      the lane's deal), narrative compression of 9.6, citations, comment hygiene, and
+      packaging, with 9.6b; 9.6's run recorded (37910886195); a direct read of the
+      comments and docstrings in `scenarios/bare_metal/compute_deal_driver.py`,
+      `test_bare_metal_mock_deal.py`, and `conftest.py` and of every comment the
+      section adds elsewhere, each describing present behaviour; import placement,
+      where the section adds no function-level import (the function-level imports in
+      `vms/conftest.py` and `test_http_negotiation.py` predate it); and this change's
+      index row. Section 9's implementation and live gate are complete; its closeout
+      stays open only for the 11.2 and 11.4 promotions, since this change promotes
+      every delta in Section 11.
 
 ## 10. Pipeline: three lanes, each building and composing its own stack
 
