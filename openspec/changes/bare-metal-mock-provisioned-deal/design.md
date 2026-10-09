@@ -2991,22 +2991,45 @@ Decisions:
 2. **Lane targets.** `e2e-tests/Makefile`'s `test-e2e-vm`, `test-e2e-bare-metal`, and a
    new `test-e2e-apicredits` each write the lane's environment file, take its stack
    down, run its build target, bring the stack up, and run its markers in the test
-   container on its network; `test-e2e` runs the three in turn, taking each stack down
-   before the next, since each runs its own `anvil`. `E2E_MODULE` drops
-   `e2e_credits_deal` and `e2e_credits_payment_deal`, and `E2E_APICREDITS_MODULE` holds
-   them. No run-only targets: nothing loads prebuilt images any more.
+   container on its network. Each lane also has `e2e-<lane>-down` and
+   `e2e-<lane>-logs` (`e2e-vm-down` exists), the one place its compose files, project,
+   and environment file are named; the workflow's log collection and teardown call
+   them. The three stacks cannot run side by side on one host: each names its chain
+   container `anvil` and publishes host ports, 8545 among them and, for VM and bare
+   metal, 8080 and 8081. `test-e2e` is therefore VM, `e2e-vm-down`, bare metal,
+   `e2e-bare-metal-down`, then API credits. Isolating the lanes' host ports and
+   networks, so they can run concurrently on one host, is a change of its own, proposed
+   at this section's closeout. `E2E_MODULE` drops `e2e_credits_deal` and
+   `e2e_credits_payment_deal`, and `E2E_APICREDITS_MODULE` holds them. No run-only
+   targets: nothing loads prebuilt images any more.
 3. **Composition files.** `compose.local-identities.yml` splits into
    `compose.vms-local.yml` (the VM services' bindings and the VM buyer service) and
    `compose.apicredits-local.yml` (the API-credit services' bindings, the storefront's
    EVM key, and the credits buyer service), following `compose.bare-metal-local.yml`.
    `compose.apicredits.yml` becomes `include`-only, as `compose.vms.yml` is.
    `docker-compose.yml` stays the full local stack and documents layering both overlays.
-   The VM lane composes `compose.vms.yml` and its overlay, so its stack has no API-credit
-   service.
+   Both wrappers include `compose.dev.yml`, so the full stack includes the VM wrapper and
+   API credits' domain file, never `compose.apicredits.yml`, and the chain enters once:
+
+   | Stack | Files |
+   |---|---|
+   | VM lane | `compose.vms.yml`, `compose.vms-local.yml` |
+   | API-credit lane | `compose.apicredits.yml`, `compose.apicredits-local.yml`, `compose.apicredits-lane.yml` |
+   | Full local stack | `docker-compose.yml` (`compose.vms.yml` and `domains/apicredits/compose.yml`), `compose.vms-local.yml`, `compose.apicredits-local.yml` |
+
+   The VM lane's stack therefore has no API-credit service, and only the API-credit
+   lane's has `compute-registry`. A render test asserts each stack's services, and that
+   the full stack has one `anvil` and no `compute-registry`.
 4. **The API-credit lane owns its topology.** It is a compose project of its own
    (`simple-market-apicredits`), with its own network, volumes, and environment file
    from `make e2e-apicredits-dev-env`; `make e2e-vms-dev-env` prints the VM lane's, and
-   `e2e-dev-identities-env` prints both for the full stack. The compute-schema registry
+   `e2e-dev-identities-env` prints both for the full stack. Each environment file is
+   generated, never committed, and ignored: `.e2e-vms.env`, `.e2e-bare-metal.env`, and
+   `.e2e-apicredits.env`, which each lane's `test-e2e-<lane>` writes from its target
+   before anything else, and `.e2e-identities.env` for the full stack. They hold the
+   committed development identities' resolved paths and, for bare metal, deadlines
+   generated at each run; a lane's down and logs targets write the file only if a
+   failed run never did. The compute-schema registry
    the credits scenario routes across is the lane's own, `compute-registry`, from the
    registry image with the compute filter spec and a development identity, declared in
    `compose.apicredits-lane.yml`, which only the lane layers: the full stack already has
@@ -3022,13 +3045,25 @@ Decisions:
 6. **Workflow.** `.github/workflows/e2e.yml` runs three parallel jobs, `e2e-vm`,
    `e2e-bare-metal`, and `e2e-apicredits`, each with uv and Foundry (the dev chain's
    baked state is generated against Anvil), running its `test-e2e-<lane>` target and
-   collecting logs and tearing down with its own files, project, and environment file.
+   collecting logs and tearing down through its `e2e-<lane>-logs` and `e2e-<lane>-down`.
+   The workflow and its diagnostics are one interface: `scripts/fetch-e2e-logs.py`,
+   its test, and `TESTING.md`'s paragraph on fetching a run's logs name the
+   `e2e-apicredits-logs` artifact with the other two, in the same task.
 7. **The lane requirement drops "images built once".** The `test-compatibility` delta's
    requirement becomes "Each domain runs in its own lane": a lane per market domain, as
    its own job, building what its stack runs and composing only its own services.
 
 Unchanged: holding and stepping the API-credit storefront's loops in that lane, and its
 production-application integration tests, stay with `apicredits-end-to-end-lane`.
+
+Design review (2026-10-09), each point checked against the code and decided with the
+maintainer: the log fetcher and its test named two artifacts (decision 6); the full
+stack's assembly was implied, not stated (decision 3); the sequential local run was a
+convenience where it is a constraint of the stacks' fixed names and host ports
+(decision 2), and the maintainer asked for lane-isolated ports or networks to be
+proposed as a change of its own at closeout; the generated environment files had no
+stated lifecycle (decision 4); `proposal.md` still described shared images. The lane
+jobs' wall-clock times are recorded as observations, not a threshold.
 
 Permanent destinations: the lane requirement in `openspec/specs/test-compatibility/spec.md`
 through this change's delta (11.4); the three lanes, their targets, and their composition

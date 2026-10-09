@@ -4724,7 +4724,10 @@ lane settings, and the credits scenario's registry settings; no service code.
       API-credit services' bindings, the storefront's EVM key, and the credits buyer
       service, moved from `compose.apicredits.yml`); tombstone
       `compose.local-identities.yml`; `compose.apicredits.yml` becomes `include`-only;
-      `docker-compose.yml` documents layering both overlays. Update every reference:
+      `docker-compose.yml` keeps including `compose.vms.yml` and
+      `domains/apicredits/compose.yml`, never `compose.apicredits.yml`, and documents
+      layering both overlays; `.gitignore` gains `.e2e-vms.env` and
+      `.e2e-apicredits.env`. Update every reference:
       `compose.vms.yml`, `docker-compose.yml`, `e2e-tests/Makefile`,
       `.github/workflows/e2e.yml`, `scripts/tests/test_multi_storefront_compose.py`,
       `dev-env/identities/README.md`, and
@@ -4737,8 +4740,10 @@ lane settings, and the credits scenario's registry settings; no service code.
       the full stack; `e2e-tests/config/config-docker.yml`'s `api_credits` gains the
       compute registry's URL and pins, and `test_credits_deal_buyer_cli.py` reads them
       there instead of the VM lane's `registry` settings. A compose render test, beside
-      `scripts/tests/test_bare_metal_compose.py`, asserts the lane's services and that
-      the full stack has no `compute-registry`.
+      `scripts/tests/test_bare_metal_compose.py`, renders the three stacks of decision
+      3's table and asserts that each renders on its own, that VM's has no API-credit
+      service, that the API-credit lane's has `compute-registry`, and that the full
+      stack has one `anvil` and no `compute-registry`.
 - [ ] 10.3 Lane builds and targets (decisions 1, 2, and 5): the root `Makefile` gains
       `build-e2e-vm`, `build-e2e-bare-metal`, and `build-e2e-apicredits`, each the wheels,
       the dev chain image, the test image, and that lane's runtime images; `build-dev` is
@@ -4747,24 +4752,33 @@ lane settings, and the credits scenario's registry settings; no service code.
       `build-e2e-bare-metal`, and `test-e2e-apicredits` brings up the
       `simple-market-apicredits` project and runs `E2E_APICREDITS_MODULE`
       (`e2e_credits_deal or e2e_credits_payment_deal`), which `E2E_MODULE` no longer
-      lists; `test-e2e` runs the three in turn, taking each stack down before the next.
+      lists. Each lane writes its environment file first (`.e2e-vms.env`,
+      `.e2e-bare-metal.env`, `.e2e-apicredits.env`) and has `e2e-<lane>-down` and
+      `e2e-<lane>-logs`, which write it only if missing; `test-e2e` runs `test-e2e-vm`,
+      `e2e-vm-down`, `test-e2e-bare-metal`, `e2e-bare-metal-down`, then
+      `test-e2e-apicredits`.
 - [ ] 10.4 `.github/workflows/e2e.yml` (decision 6): jobs `e2e-vm`, `e2e-bare-metal`, and
       `e2e-apicredits`, in parallel, each with uv and Foundry, running its
-      `test-e2e-<lane>` target, and collecting logs and tearing down with its own
-      files, project, and environment file.
-- [ ] 10.5 **Gate.** All three lanes pass, VM's with no API-credit service in its stack;
-      record each job's wall-clock time beside run 37899278727's (VM 6m55s, bare metal
-      4m25s). Also: the compose render tests, the e2e unit suite, collection of each
-      lane's marker set, `make check-packaging`, comment hygiene, citations, and strict
-      OpenSpec validation.
+      `test-e2e-<lane>` target, then `e2e-<lane>-logs` and `e2e-<lane>-down`. In the
+      same task, `scripts/fetch-e2e-logs.py` and `scripts/tests/test_fetch_e2e_logs.py`
+      add the `e2e-apicredits-logs` artifact, and `docs/development/TESTING.md`'s
+      paragraph on fetching a run's logs names the three lanes and their artifacts.
+- [ ] 10.5 **Gate.** The three live jobs pass concurrently; 10.2's render test passes;
+      each lane's marker expression collects exactly that lane's scenarios. Record each
+      job's wall-clock time beside run 37899278727's (VM 6m55s, bare metal 4m25s), as an
+      observation, not a threshold. Also: the compose and log-fetch tests, the e2e unit
+      suite, `make check-packaging`, comment hygiene, citations, and strict OpenSpec
+      validation.
 - [ ] 10.6 **Section closeout** (`openspec/README.md#plan-closeout-requirements`, scoped to
       Section 10): comment hygiene over the compose files and Makefiles; documentation
       compliance against decisions 1–7; roadmap currency (`ROADMAP.md`'s Goal 4 gap
       that API credits has no lane of its own, which this section closes for the lane
       and `apicredits-end-to-end-lane` keeps for its loops and integration tests);
       campaign index currency (this change's row and `apicredits-end-to-end-lane`'s);
-      documentation citations; `make check-packaging`; 10.5's run recorded; and
-      promotion pending at 11.2, 11.3, and 11.4.
+      documentation citations; `make check-packaging`; 10.5's run recorded; the
+      proposal for a change isolating the lanes' host ports and networks, so they run
+      concurrently on one host (design, "Section 10 design", decision 2), written and
+      given its index row; and promotion pending at 11.2, 11.3, and 11.4.
 
 ## 11. Permanent documentation
 

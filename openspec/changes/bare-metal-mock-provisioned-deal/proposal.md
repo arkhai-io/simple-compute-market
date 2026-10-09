@@ -285,7 +285,7 @@ None.
       fulfillment and its digest-only Alkahest evidence.
 - [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
       open gap, and the findings recorded under "Controls and routes (5B.8)".
-- [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
+- [x] `docs/development/TESTING.md` — three lanes, each building and composing its own stack, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` and
