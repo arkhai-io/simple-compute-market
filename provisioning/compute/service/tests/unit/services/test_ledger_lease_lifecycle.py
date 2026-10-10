@@ -39,7 +39,7 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from market_site.authority import LedgerSiteAuthority
-from market_site.db import Base as SiteBase
+from market_site.db import Base as SiteBase, CapacityReservation
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -449,8 +449,6 @@ async def test_a_failed_create_leaves_the_lease_for_an_operator(session_factory,
 
 def _release_began(session_factory, capacity_reservation_id: str, ago: timedelta) -> None:
     """Move the release's recorded start back, as if it began ``ago``."""
-    from market_site.db import CapacityReservation
-
     with session_factory() as db, db.begin():
         db.get(CapacityReservation, capacity_reservation_id).release_requested_at = (
             datetime.now(timezone.utc) - ago

@@ -39,6 +39,7 @@ from .bare_metal_deal import (
     create_job_id,
     schedule,
 )
+from .conftest import AsyncProvisioningTestClientError
 
 
 @pytest.fixture
@@ -173,8 +174,6 @@ async def test_a_bare_metal_rule_can_fail_a_grant(test_client, client_and_queue)
 
 
 async def test_bare_metal_rule_routes_refuse_an_unknown_resume(test_client) -> None:
-    from .conftest import AsyncProvisioningTestClientError
-
     with pytest.raises(AsyncProvisioningTestClientError) as refused:
         await test_client.resume_bare_metal_rule("missing")
     assert refused.value.status_code == 404

@@ -64,6 +64,9 @@ alice_provisioning:
   authority_scheme: "ed25519"
   authority_identifier: "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw"
 
+# The API-credit end-to-end lane (`make test-e2e-apicredits`): the credits
+# registry, service, storefront, and sample app on their own dev chain, beside
+# the lane's own compute-schema registry.
 api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"
@@ -71,10 +74,18 @@ api_credits:
   # The credits registry's own signing principal, pinned by the buyer: a
   # registry read is authenticated in both directions, and the buyer refuses
   # to discover through an index it cannot pin. Matches
-  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits.yml.
+  # REGISTRY_AUTHORITY_ID / _IDENTIFIER in compose.apicredits-local.yml.
   registry_authority_id: "api-credits-registry"
   registry_scheme:       "ed25519"
   registry_identifier:   "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho"
+  # The compute-schema registry the scenario's discovery is routed away from,
+  # declared in compose.apicredits-lane.yml. Its signer is the committed Anvil
+  # 3 development key (`registry-a.eip191`), a well-known development value
+  # never to be used on a public network.
+  compute_registry_url:          "http://compute-registry:8080"
+  compute_registry_authority_id: "compute-registry"
+  compute_registry_scheme:       "eip191"
+  compute_registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
 
 # Second storefront (multi-registry scenario)
 alice:
@@ -120,6 +131,13 @@ bare_metal_lane:
   site_admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
   buyer_scheme:     "eip191"
   buyer_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  # The buyer's wallet is its signer's Anvil development account, so the deal's
+  # escrow is funded by the key above; the seller's wallet is the storefront's
+  # settlement address, as `make e2e-bare-metal-dev-env` binds it. Development
+  # values only, never to be used on a public network.
+  buyer_wallet_address:  "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  buyer_rpc_url:         "ws://anvil:8545"
+  seller_wallet_address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   # The storefront's contact-exchange settings, as `make e2e-bare-metal-dev-env`
   # binds them: a development contact on a reserved domain and the short
   # retention window the introduction scenario watches expire.

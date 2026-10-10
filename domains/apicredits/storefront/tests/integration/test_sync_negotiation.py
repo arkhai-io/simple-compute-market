@@ -22,6 +22,7 @@ from market_identity import Ed25519Signer
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.seller_round import SellerRoundResult
 
+from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
     SELLER_PRINCIPAL,
@@ -175,8 +176,6 @@ async def test_bisection_counter_round_scales_by_quantity(
     db, fake_capacity, key_records
 ):
     """Counter rounds keep the quantity-scaled reference from the terms row."""
-    from tests._settings_overrides import settings_overrides
-
     with settings_overrides(**{"negotiation.policies": ["bisection"]}):
         opening = await _start(db, amount=250, quantity=3)
         assert opening["action"] == "counter"
@@ -209,9 +208,6 @@ async def test_force_accept_records_what_a_negotiated_acceptance_records(
     """Administrative acceptance runs the domain's acceptance hooks: the credit
     terms and agreed price are recorded, and no unfunded quota hold is granted,
     exactly as after a negotiated acceptance."""
-    from market_identity import Ed25519Signer
-    from tests._settings_overrides import settings_overrides
-
     with settings_overrides(**{"negotiation.policies": ["bisection"]}):
         opening = await _start(db, amount=250, quantity=3)
         assert opening["action"] == "counter"
@@ -245,8 +241,6 @@ async def test_force_accept_records_what_a_negotiated_acceptance_records(
 async def test_payment_selection_places_quota_hold(db, monkeypatch):
     """A payment deal holds its quota between acceptance and the buyer's approval."""
     from apicredits_storefront import settlement_stages
-
-    from tests._settings_overrides import settings_overrides
 
     class CapacityRuntime:
         async def reserve(self, _binding, *, claim, deal_ref, ttl_seconds):

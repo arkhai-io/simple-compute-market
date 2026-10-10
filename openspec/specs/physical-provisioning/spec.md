@@ -189,19 +189,12 @@ remove authority without assigning it to another principal.
 - **THEN** no principal retains authority, the audit history remains, and the
   operation does not transfer that authority to another principal
 
-### Requirement: Allocation-backed executor registration
-Market-managed VM and bare-metal leases MUST attach the offering mode, target, and executor-specific reference data to an existing committed site allocation.
-
-#### Scenario: Bare-metal lease is registered
-- **WHEN** a caller registers a lease for a committed allocation and bare-metal machine
-- **THEN** the allocation records the `bare_metal` offering mode, machine target, and physical-host reference
-
 ### Requirement: Executor-dispatched lifecycle
-Market-managed release MUST dispatch by offering mode; direct VM host administration endpoints MAY remain separate operator surfaces.
+Market-managed release MUST begin the reservation's fulfillment teardown through one provider-neutral release executor, whatever the reservation's offering mode; the fulfillment's provider dispatches the domain's teardown. Direct VM host administration endpoints MAY remain separate operator surfaces.
 
 #### Scenario: Bare-metal allocation is released
 - **WHEN** its lease lifecycle invokes release
-- **THEN** dispatch selects the bare-metal reclaim executor rather than VM teardown
+- **THEN** release begins the bare-metal fulfillment's durable teardown, whose provider dispatches the bare-metal reclaim rather than VM teardown
 
 ### Requirement: Durable asynchronous jobs
 Provisioning operations MUST expose durable job identity and terminal status while the in-process worker queue executes provider actions.
@@ -232,17 +225,22 @@ Compute lease lifecycle MUST use an injected site-authority port and MUST NOT re
 - **WHEN** an authorized operator force-releases after an unrecoverable executor failure
 - **THEN** the audit state distinguishes the operator override from successful physical teardown
 
-Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by offering mode: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's offering mode the same way release submission already resolves an executor delegate by mode, so adding or changing one mode's completion semantics does not touch the generic watchdog or any other mode's path. VM's specific delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "VM release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`); this section states only the kind-routing rationale that applies to bare-metal too.
+Release submission and release-completion reads are separate seams, and neither is selected by offering mode. Every offering mode's teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence; what a provider does to tear down differs by mode, not how lease lifecycle begins it or observes completion. Compute lease lifecycle is therefore mode-agnostic: one provider-neutral release executor begins the aggregate's teardown and one status port reads the aggregate, so adding a mode registers a fulfillment provider and touches neither seam. The delegation shape — the narrow fulfillment-teardown port, the durable `fulfillment_id` as release tracking identifier, and the failure-propagation contract for unexpected submission errors — is the formal subject of "Lease release delegates to durable fulfillment teardown" and "Lease release and fulfillment teardown have separate retry ownership" below (`## Relationship to fulfillment`).
 
 #### Scenario: VM lease release begins durable fulfillment teardown
 
 - **WHEN** a VM lease is due for release, whether by watchdog-detected expiry or an explicit early-termination request
 - **THEN** the executor delegate begins the fulfillment aggregate's teardown and returns its fulfillment identifier as the job the lease lifecycle polls, rather than submitting provider work directly
 
+#### Scenario: Bare-metal lease release begins durable fulfillment teardown
+
+- **WHEN** a bare-metal lease is due for release, whether by watchdog-detected expiry or an explicit early-termination request
+- **THEN** the same provider-neutral delegate begins the bare-metal fulfillment's teardown and returns its fulfillment identifier, and no reclaim job is submitted outside the aggregate
+
 #### Scenario: Executor release delegate has nothing to poll
 
-- **WHEN** an executor's release delegate reports no pollable job for a submitted release (e.g. no release mechanism configured for that kind)
-- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other offering mode has a release-job port configured
+- **WHEN** a lease is due for release but the release executor finds no fulfillment aggregate to tear down, so it reports no job to poll
+- **THEN** capacity is released directly only if the reservation's provenance proves that nothing was dispatched; otherwise the lease enters `release_failed` and capacity stays held until an operator force-releases it, and nothing to poll never counts as a completed release by itself
 
 ### Requirement: Explicit early lease termination
 
@@ -253,15 +251,6 @@ An authorized caller MUST be able to end a lease before its natural expiry throu
 - **WHEN** an authorized caller requests termination of a lease whose end time has not yet passed
 - **THEN** release begins immediately through the reservation's registered executor delegate, without waiting for a watchdog cycle and without bypassing the release-job tracking a watchdog-detected expiry would also go through
 
-### Requirement: Lease registration tolerates omitted identity hints
-
-Lease registration MUST NOT require a caller to resupply identity information the executor's own committed resource attributes already carry. Registration MAY omit an executor-kind-specific physical-target hint; a release delegate resolving that hint later from the reservation's own attributes MUST produce the same outcome as if the hint had been supplied at registration.
-
-#### Scenario: Registration omits a physical-target hint already implied by the committed resource
-
-- **WHEN** a lease is registered without an executor-kind-specific physical-target hint, and the reservation's committed resource already carries the equivalent attribute
-- **THEN** release still resolves the correct physical target and no lease registration fails or degrades for the omission
-
 ### Requirement: Lifecycle dependency isolation
 Generic lease lifecycle and watchdog scheduling MUST depend on executor and site ports rather than concrete VM, bare-metal, storefront, or HTTP client implementations.
 
@@ -270,32 +259,42 @@ Generic lease lifecycle and watchdog scheduling MUST depend on executor and site
 - **THEN** lease expiry, failure, retry, and release transitions execute without importing a concrete domain or storefront composition root
 
 ### Requirement: Adapter-owned compute execution
-
-VM and bare-metal execution MUST consume the common compute-provisioning envelope while concrete adapters own action validation, infrastructure invocation, result interpretation, credentials, and release behavior.
+VM and bare-metal execution MUST consume the common compute-provisioning envelope. Domain adapter contributions MUST own action-specific validation, execution preparation, codec and playbook selection, domain result interpretation, credential meaning, and release behavior; reusable execution technology MAY own the mechanics of invoking a prepared execution.
 
 #### Scenario: Generic provisioner dispatches VM work
-
 - **WHEN** a committed allocation identifies the VM executor and a supported action
 - **THEN** generic orchestration selects the registered VM adapter without importing or inspecting VM request fields
 
 #### Scenario: Generic provisioner dispatches bare-metal work
-
 - **WHEN** a committed allocation identifies the bare-metal executor and a supported action
 - **THEN** generic orchestration selects the registered bare-metal adapter without importing or inspecting access-grant fields
 
-### Requirement: Compute-owned caller contract
+#### Scenario: Shared Ansible mechanics run a domain's job
+- **WHEN** a VM or bare-metal job runs through the shared Ansible executor
+- **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
 
-Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain, while direct VM operator APIs MAY retain VM-owned host, VM action, Ansible job, credential, and lease models.
+### Requirement: Compute-owned caller contract
+Shared storefront/provisioner DTOs, the job, host, credential, lease, and system-status wire models, and the family's route contracts MUST be owned by compute provisioning rather than the VM domain, in a contracts distribution that depends on no service, persistence, or web-framework package. Routes the provisioning service hosts for another capability, such as resource-pool administration and capacity-definition import, MUST keep that capability's models, contracts, and client; hosting a route does not make it compute provisioning's. The family's typed client MUST be a separate client distribution depending on no service, persistence, or web-framework package: only that contracts distribution, the core carrier package, the identity kit, its HTTP library, and its model library; it offers async and sync variants with identical operations, and the family kit itself MUST contain no client. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models and a VM client extension over the family client's authenticated transport; callers import compute-owned models from the contracts distribution. Compute provisioning MUST NOT name a domain's routes: a domain, an execution implementation, or another capability MUST contribute the route contracts of the routes it mounts. The service's request authentication MUST resolve requests against the table the provisioning service's composition root assembles from those contributions; each typed client MUST sign its routes from its owner's contracts. Where the owner's contracts are one declaration that both the service's table and the client read, as the compute family's, the resource-pool authority's, the Ansible implementation's, and each domain's are, operation, resource binding, and roles cannot diverge. Where an owner keeps separate server and client declarations, as the site capacity authority does, a contract-parity test MUST hold the two equal in method, path, operation, resource binding, and the models they exchange.
 
 #### Scenario: Bare-metal storefront installs the shared client
-
 - **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
 - **THEN** it can submit and observe bare-metal lifecycle operations without importing VM request models
 
-#### Scenario: Provisioning service exposes resource-pool administration
+#### Scenario: A storefront installs the client without the family kit
+- **WHEN** a storefront depends on the compute-provisioning client
+- **THEN** it installs the contracts and client distributions only, and no persistence, web-framework, or job-authority package arrives with them
 
-- **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
-- **THEN** that offering-mode-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
+#### Scenario: Provisioning service exposes resource-pool administration
+- **WHEN** an operator client or the provisioning service creates, validates, imports, or returns a resource-pool model
+- **THEN** that offering-mode-neutral model resolves from the resource-pool capability's contracts distribution, not from compute provisioning or a VM-domain package
+
+#### Scenario: A domain's routes are signed and authenticated
+- **WHEN** a compute domain mounts routes on the provisioning service
+- **THEN** it contributes their route contracts, and neither the compute-provisioning client nor the service's authentication needs a compute-provisioning change to sign or authorize them
+
+#### Scenario: An operator reads a lease
+- **WHEN** an operator reads a VM or bare-metal lease through the generic lease routes
+- **THEN** the response is the neutral lease view, carrying no VM-only field
 
 ### Requirement: Compute-owned provisioning service
 
@@ -313,11 +312,11 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor registrations, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. An executor adapter MUST be selected by the `offering_mode` it serves together with its action; no surface may name that selector `executor_kind`, `offering_type`, or `virtualization_type`. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor's offering mode. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
+Service composition MUST reject duplicate job-executor registrations for one `(offering_mode, action)` key, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. A job executor MUST be selected by the `offering_mode` it serves together with its action; no surface may name that selector `executor_kind`, `offering_type`, or `virtualization_type`. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor's offering mode. A fulfillment provider submits its jobs to the job authority, which resolves each job's executor through the executor table.
 
-`executor` names this action-dispatch abstraction and nothing else when it is the head noun. It MUST NOT stand in for the offering mode, the machine, or the delivery handler: the mode is an offering mode, the machine is a host, and the handler is a provider. The abstraction keeps the name because it validates parameters, submits work, and validates results and credentials; only its selector moves.
+`executor` names the job-execution abstraction and nothing else when it is the head noun. It MUST NOT stand in for the offering mode, the machine, or the delivery handler: the mode is an offering mode, the machine is a host, and the handler is a provider. The abstraction keeps the name because it executes a job and returns its outcome; only its selector moves.
 
-`executor_`-prefixed compounds naming the abstraction's own targets, references, or actions MUST retain the name, because `executor` carries its action-dispatch sense in them rather than standing in for another concept. `executor_ref` is the executor's reference, `executor_target` is the target of an executor action, and an executor action envelope carries an executor action; none of these is the mode, the machine, or the handler as a head noun. This requirement's prohibition therefore applies to the head noun and MUST NOT be read as a prohibition on the prefix.
+`executor_`-prefixed compounds naming the abstraction's own targets, references, or actions MUST retain the name, because `executor` carries its execution sense in them rather than standing in for another concept. `executor_ref` is the executor's reference, `executor_target` is the target of an executor action, and an executor action envelope carries an executor action; none of these is the mode, the machine, or the handler as a head noun. This requirement's prohibition therefore applies to the head noun and MUST NOT be read as a prohibition on the prefix.
 
 #### Scenario: An executor-prefixed compound names the abstraction's own target
 
@@ -327,7 +326,7 @@ Service composition MUST reject duplicate executor registrations, duplicate fulf
 
 #### Scenario: Two adapters claim one offering mode
 
-- **WHEN** composition registers duplicate ownership for an `offering_mode` and action pair
+- **WHEN** composition registers two job executors for the same `offering_mode` and action pair
 - **THEN** startup fails with both registrations identified and no server begins serving
 
 #### Scenario: Two adapters claim one provider identity
@@ -337,12 +336,12 @@ Service composition MUST reject duplicate executor registrations, duplicate fulf
 
 #### Scenario: Provider and executor registrations coexist
 
-- **WHEN** service composition registers executor adapters and fulfillment providers
-- **THEN** each registration remains in its own namespace and provider availability does not select or replace an executor adapter
+- **WHEN** service composition registers job executors and fulfillment providers
+- **THEN** each registration remains in its own namespace and provider availability does not select or replace a job executor
 
 ### Requirement: Ansible fulfillment adapter
 
-The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
 Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
@@ -366,7 +365,7 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 #### Scenario: VM teardown is dispatched
 
 - **WHEN** teardown begins for an accepted VM fulfillment
-- **THEN** the adapter targets the recorded `host_id` and `vm_target` from fulfillment metadata
+- **THEN** the adapter targets the recorded `host_id` and `executor_target` from fulfillment metadata
 
 #### Scenario: A committed dimension is present
 
@@ -382,22 +381,6 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 
 - **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
 - **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
-
-### Requirement: VM fulfillment result payload
-
-`AnsibleFulfillmentProvider.fetch_credentials` (see `openspec/specs/fulfillment/spec.md#requirement-provider-contract`) MUST return a `vm.fulfillment.result.v1` versioned envelope, defined in `vm_provisioning_adapter/fulfillment_results.py`, nested inside the generic `fulfillment.result.v1` envelope's `domain_result` field. Its payload carries `provisioned_resources` (each output's `provisioned_resource_id` and `status`, mirroring the fulfillment-owned identity the kit already exposes) and `credentials`: a tuple of `role`, `password`, `ssh_commands`, `ssh_key_path_host`, `key_type`, and `provisioned_resource_ids` — the output identities that credential is associated with, expressed this way so a fulfillment with more than one provisioned resource can eventually express which credential belongs to which output rather than a single flat list. Today every VM fulfillment produces exactly one `ProvisionedResource`, so every credential's `provisioned_resource_ids` names that one output; this is a real limitation, not yet a genuine many-to-many resolution, since the adapter has no way to attribute an individual credential to a specific output when more than one exists. Credentials MUST be sourced from `AnsibleJobService.get_credentials(job_id)` and MUST NOT be persisted by this adapter or by the fulfillment kit — they exist only in the response constructed for one `get_fulfillment_result` call.
-
-The payload also carries an optional `connection_info` object (`vm_name`, `host`, `timestamp`, `tenant_user`, `vm_ip_internal`, `ssh_port`) — structured VM identity/connection metadata, best-effort read from the same job's parsed Ansible result alongside credentials. A missing or unreadable result must not fail an otherwise-successful credential fetch, so every `connection_info` field, and `connection_info` itself, is optional. Each credential's `ssh_commands` already carries a ready-to-use connection string (host, port, and tenant user baked in), so `connection_info` is not required to connect — it exists for callers that want the pieces separately rather than parsing a command string.
-
-#### Scenario: Result query on an active VM fulfillment includes the domain payload
-
-- **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose VM fulfillment is `active`
-- **THEN** the envelope's `domain_result` is a `vm.fulfillment.result.v1` payload whose `credentials` reflect a live `AnsibleJobService.get_credentials` read for the recorded job, and whose `provisioned_resources` mirror the fulfillment kit's own `ProvisionedResource` rows
-
-#### Scenario: Job result carries connection metadata
-
-- **WHEN** the recorded job's parsed result includes VM identity/connection fields
-- **THEN** `domain_result`'s `connection_info` carries them, without failing the credential fetch if any individual field is absent
 
 ### Requirement: Generic provisioning has one package owner
 
@@ -430,29 +413,13 @@ configuration rather than by constructing provider payload JSON independently.
   are derived through host and resource-pool configuration and the provider
   contract rather than reconstructed independently
 
-
-### Requirement: VM release delegates to durable fulfillment teardown
-
-For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by the reservation's `offering_mode`, the same value the capacity claim carries and the Resource Pool declares; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
-
-#### Scenario: Release status is selected by the offering mode
-
-- **WHEN** lease lifecycle resolves a release-status lookup for a reservation
-- **THEN** the lookup is selected by the reservation's recorded `offering_mode`
-- **AND** a reservation carrying the retired selector key is treated as carrying no offering mode rather than defaulting to one
-
-#### Scenario: Unexpected teardown submission failure remains diagnosable
-
-- **WHEN** composition, persistence, or an unexpected implementation failure prevents VM teardown submission
-- **THEN** the failure SHALL propagate to lease lifecycle handling and be recorded as `release_submit_error` rather than being converted to an absent job identifier
-
 ### Requirement: Lease release and fulfillment teardown have separate retry ownership
 
 Lease lifecycle SHALL own the reservation's `releasing` and terminal release states, final capacity return, and release notification. Fulfillment convergence SHALL own teardown dispatch, provider polling, retry, and recovery through `torn_down` or `teardown_failed`. An operator lease retry SHALL re-observe the same fulfillment aggregate and SHALL NOT create a second teardown operation. Capacity SHALL remain held until the fulfillment reaches `torn_down` or an explicit force-release occurs.
 
 #### Scenario: Failed teardown is requeued without duplicate teardown
 
-- **GIVEN** a VM reservation is `releasing` and its fulfillment is `teardown_failed`
+- **GIVEN** a reservation is `releasing` and its fulfillment is `teardown_failed`
 - **WHEN** fulfillment convergence requeues teardown and an operator retries lease release
 - **THEN** both paths SHALL continue using the same `fulfillment_id`
 - **AND** capacity SHALL remain unavailable until that aggregate reaches `torn_down`
@@ -767,7 +734,7 @@ The provisioning service MUST allocate a VM's relay port from the referenced rel
 
 A port lease MUST be unique on the relay and the remote port. The host is recorded as an attribute of the lease and MUST NOT form part of its uniqueness, because the listening socket is bound on the relay rather than on the host, and two hosts sharing a relay share one port namespace.
 
-A lease MUST be released when the owning settlement record reaches a terminal state, in the same transaction that records that state. Attaching release to individual lifecycle paths instead leaves whichever path was not enumerated leaking silently; attaching it outside the terminal transaction reintroduces the same leak on any crash between the two. A periodic reconciliation MUST release leases whose owning job or fulfillment has been terminal beyond a grace period, as a backstop for paths that bypass the transition rather than as the primary mechanism.
+A lease MUST be released with its reservation's capacity, in the transaction that releases it, whatever path releases it, and MUST NOT be released on a fulfillment state alone. A failed creation may leave a guest running with its tunnel bound, so its port is held, with its capacity, until an operator verifies the host and forces the release. A periodic reconciliation MUST release leases whose reservation has been released beyond a grace period, as a backstop rather than as the primary mechanism.
 
 Allocation MUST be idempotent for one owner: allocating twice for the same fulfillment MUST return the lease already held rather than issuing a second port.
 
@@ -780,12 +747,12 @@ A pool whose referenced relay has no usable allocation window MUST be rejected b
 
 #### Scenario: A VM creation fails before teardown would run
 
-- **WHEN** a VM's lifecycle reaches a terminal state without a teardown having run
-- **THEN** its port lease is released
+- **WHEN** a VM's fulfillment fails, including after its provider reported the create succeeded
+- **THEN** its port lease is held until an operator forces the release of its capacity, and is released then
 
 #### Scenario: A release path is missed
 
-- **WHEN** a lease's owning job has been terminal beyond the grace period and the lease is still held
+- **WHEN** a lease's reservation has been released beyond the grace period and the lease is still held
 - **THEN** reconciliation releases it
 
 #### Scenario: An accepted fulfillment allocates twice
@@ -1190,6 +1157,555 @@ without applying either.
 - **WHEN** no capacity-definitions path is configured
 - **THEN** startup proceeds and declarations come only from derivation and the
   administration surface
+
+### Requirement: Storefront teardown goes through lease termination
+
+A storefront requesting teardown of a delivered lease MUST request it through the site's
+storefront-role lease termination, the same release path lease expiry takes, and MUST
+NOT begin fulfillment teardown or release a site reservation directly. A repeated
+termination request MUST return the same releasing or released lease. The storefront
+MUST learn that capacity was released only from the site's capacity-released callback.
+
+#### Scenario: Buyer requests bare-metal teardown
+
+- **WHEN** a buyer requests teardown of a delivered bare-metal lease at the storefront
+- **THEN** the storefront terminates the lease at the site, which begins the lease's
+  fulfillment teardown, and the storefront makes no site release call of its own
+
+#### Scenario: Teardown is requested twice
+
+- **WHEN** the storefront repeats termination for a lease already releasing or released
+- **THEN** the site returns that lease unchanged and starts no second teardown
+
+### Requirement: Job execution resolves its executor by offering mode and action
+
+Compute provisioning MUST own the table that selects the executor running a job, keyed by
+the job's `offering_mode` and the action its executor runs, populated by adapter
+bundles, and MUST reject a duplicate `(offering_mode, action)` registration at startup.
+Each entry MUST be one complete job executor that executes a job and returns a
+normalized outcome and cancels through its own handle; the job engine, not the executor,
+knows when a job has finished. The job engine MUST resolve
+each job's executor through that table and MUST NOT know how a job runs: no playbook,
+fact, inventory, process identifier, or SSH vocabulary, and no domain's parameter
+construction. Job persistence and the pre-execution host lookup MUST be independent of
+which executor runs. Under the mock profile an adapter MUST register a mock executor for
+its own offering mode only.
+
+#### Scenario: A bare-metal access job runs
+
+- **WHEN** a job with offering mode `bare_metal` and a grant or reclaim action runs
+- **THEN** it runs through the executor the bare-metal bundle registered, and its result
+  is interpreted by bare metal's codec whether that executor is real or mock
+
+#### Scenario: Two bundles claim the same executor key
+
+- **WHEN** two adapter bundles register an executor for the same offering mode and action
+- **THEN** compute provisioning refuses to start
+
+### Requirement: Compute provisioning owns the job and host authorities
+
+Compute provisioning MUST own durable physical-execution jobs — their identity, state,
+route key, `host_id`, retry counts and timing, scheduling, cancellation through the
+executor and its opaque handle, logs, and results and credentials, persisted and served as
+`ResultEnvelope` and `CredentialEnvelope` — and operational host registration — host
+identity, enabled state, pool association, a connection envelope whose secrets it holds
+only in a protected form, and the lookup made immediately before execution, which yields
+an immutable execution-host value. An executor MUST decide whether its failure is retryable
+and MUST redact what it reports; the job authority decides whether and when a retry
+happens. Shared execution technology MAY own the mechanics of invoking a prepared
+execution: process lifecycle, transient inventory rendering, redaction, failure
+classification, and connectivity probes. The site authority MUST reference a host only
+by `host_id` and MUST NOT own provisioning connection information. The provisioning
+service's composition root MUST build exactly one job authority and one host authority
+and supply both to every adapter runtime; no adapter runtime builds or owns either. The
+root supplies the connection codecs a deployment supports, and a domain contributes its
+host pool-change hooks as declarations the root merges. Every change of a registered host's
+pool MUST go through those hooks, whether it arrives as a host update or in an imported
+inventory, and assigning a host the pool it already has is not a move. A hook MAY refuse a
+move; a refused move MUST leave every host the operation names unchanged, and a provisioning
+route MUST answer it as a conflict (409).
+
+#### Scenario: A host changes pool
+
+- **WHEN** an operator moves a registered host to another pool
+- **THEN** the host authority records it and notifies subscribers, and a domain's
+  dependent state (such as VM relay rebinding) reacts through that notification
+
+#### Scenario: An imported inventory moves a host a subscriber protects
+
+- **WHEN** an operator imports an inventory that moves a host, whose VM tunnels a buyer
+  holds, to a pool dialling another relay
+- **THEN** VM's hook refuses the move, the import answers 409, and no host the inventory
+  names is created or changed
+
+#### Scenario: An executor reports a non-retryable failure
+- **WHEN** a job's executor returns a failure it classifies as not retryable
+- **THEN** the job fails without another attempt, whatever attempts remain under the retry policy
+
+#### Scenario: A VM and a bare-metal job are in flight
+
+- **WHEN** both run at once
+- **THEN** one job engine and one host registry serve both, and neither domain's adapter
+  holds either
+
+### Requirement: A cancelled job stays cancelled
+
+Once a job is cancelled, no outcome its executor reports later MAY change its state. A
+cancellation requested before the executor reports its cancellation handle MUST take
+effect when the handle is reported.
+
+#### Scenario: A running job is cancelled and its execution then completes
+
+- **WHEN** an operator cancels a running job and its executor afterwards reports success
+- **THEN** the job remains cancelled and records no result or credentials from that outcome
+
+#### Scenario: A job is cancelled before its executor reports a handle
+
+- **WHEN** cancellation is requested before the executor has reported a handle
+- **THEN** the executor is asked to cancel through the handle as soon as it is reported
+
+### Requirement: Host connections are typed by their implementation's codec
+
+A host's connection MUST be held as a connection envelope (a kind, a version, public
+fields, and protected values) whose kind names the codec of the implementation
+distribution that supports it. Compute provisioning MUST NOT define per-kind connection
+fields; it validates an envelope through its codec. An executor MUST receive an immutable
+execution-host value, not the persistence record, and MUST refuse a connection kind it
+does not support.
+
+#### Scenario: A compute domain needs another connection kind
+
+- **WHEN** a domain's executor reaches its targets by a means other than SSH
+- **THEN** an implementation distribution adds a codec for that kind, and neither the host
+  authority's model nor the executor contract changes
+
+### Requirement: Connection secrets stay protected
+
+Connection secrets MUST be persisted, stored, and passed to executors only in a protected
+representation (a scheme and its ciphertext). A secret submitted with a host's
+connection MUST be turned into a protected value by that connection kind's codec before
+it is persisted, and the submitted secret MUST NOT be stored, returned, or logged. The
+host authority MUST treat a protected value as opaque, MUST NOT encrypt or decrypt it, and
+MUST keep it out of every read, logging, and error surface. Only a connection codec MAY
+decrypt a protected value, just in time for execution, and plaintext MUST stay confined
+to the submitting request, the codec, and the transient storage the connection requires.
+
+#### Scenario: A host is registered with an embedded key
+
+- **WHEN** an operator registers a host whose `ssh` connection submits a private key
+- **THEN** the `ssh` codec protects it, the host authority stores only the protected
+  value, and its responses name the protected value and its scheme without the ciphertext
+
+#### Scenario: A job runs against a host with an embedded key
+
+- **WHEN** an executor runs a job against that host
+- **THEN** it receives the protected envelope, and only the `ssh` codec decrypts the key,
+  into transient storage removed when execution ends
+
+### Requirement: Provisioning adapters import neither each other nor the deployed service
+
+A compute provisioning adapter MUST NOT depend on or import another provisioning
+adapter or the deployed provisioning service, including under `TYPE_CHECKING`. It
+receives its collaborators from composition. No neutral provisioning module MAY import a
+domain's operator client; compatibility flows from a domain client to the neutral
+contract.
+
+#### Scenario: Package boundaries are checked
+
+- **WHEN** the import-boundary check runs
+- **THEN** neither the VM nor the bare-metal provisioning adapter imports
+  `compute_provisioning_service` or the other adapter, and no `compute_provisioning`
+  module imports `vm_provisioning_operator`
+
+### Requirement: Domains contribute their inventory views
+
+A domain view in the site's resource-pool projection, whether attached to a projected
+resource or to a pool, MUST be produced by a projection the domain's adapter contributes.
+The provisioning service MUST NOT name a domain's view, its source attributes, or its
+provider configuration. Each projection MUST declare the view identifiers it produces and
+the declaration attributes it consumes, a consumed attribute MUST NOT appear in the neutral
+projected attributes, and composition MUST refuse a view identifier or consumed attribute
+declared by two projections.
+
+#### Scenario: A third domain contributes a view
+
+- **WHEN** a domain contributes a projection producing a resource view under its own
+  identifier
+- **THEN** projected resources carry that view without any change to the provisioning
+  service
+
+#### Scenario: Two projections claim one view
+
+- **WHEN** two contributed projections declare the same view identifier
+- **THEN** composition refuses to start
+
+### Requirement: Domain routes are bound through accessors
+
+A provisioning adapter that contributes routes MUST supply them as router factories
+taking zero-argument accessors for its collaborators, and MUST NOT import the deployed
+service's composition module to find them. A route whose collaborator is not yet
+composed MUST answer 503.
+
+#### Scenario: A route is mounted before composition
+
+- **WHEN** the service mounts an adapter's routes before its lifespan has composed the
+  adapter's collaborators
+- **THEN** the routes resolve them through the accessors at request time, and a request
+  arriving before composition answers 503
+
+### Requirement: What is held for a reservation is returned with its capacity
+
+A domain resource held for a reservation's lifetime, such as a relay port, MUST be
+returned in the transaction that releases the reservation's capacity, whether the
+release guard permits it or an operator forces it, and never on a fulfillment state
+alone. The provisioning service MUST NOT name the resource, and a failing return MUST
+abort the release.
+
+#### Scenario: A failed fulfillment holds its port
+
+- **WHEN** a VM's fulfillment fails and the release guard refuses its capacity
+- **THEN** its relay port stays held until an operator forces the release, which returns both
+
+#### Scenario: An abandoned hold returns a port leased before dispatch
+
+- **WHEN** the release guard abandons an `assigned` aggregate whose create was prepared and leased a relay port
+- **THEN** the port is returned in the ledger's transaction, not left to reconciliation
+
+### Requirement: Relay administration admits only the administrator
+
+The relay routes MUST admit only the administrator role: creating, reading, updating,
+enabling, disabling, and rotating the token of a relay are operator infrastructure, and no
+storefront calls them.
+
+#### Scenario: A storefront signs a relay request
+
+- **WHEN** a request to a relay route is signed under the seller role
+- **THEN** it is refused before reaching relay administration
+
+### Requirement: Job-backed fulfillment is the compute family's
+
+A fulfillment provider that executes through the job authority MUST be the compute
+family's: it submits, reads status, resolves the provisioned resource, and assembles the
+delivery. A domain MUST contribute only its codec and its preparation, which turns a
+settled resource into a job and a create job's parameters into its teardown. A job-backed
+fulfillment MUST produce one provisioned resource, the one its `executor_target` names.
+
+#### Scenario: A domain prepares a job
+
+- **WHEN** a domain's preparation returns a job for a settled resource
+- **THEN** the family submits it, tracks it, and delivers its result, with no further domain code
+
+#### Scenario: Teardown undoes what create ran
+
+- **WHEN** a job-backed fulfillment's teardown is prepared
+- **THEN** the domain receives the parameters its create job ran with, and a fulfillment whose create job is missing fails preparation as a configuration error
+
+### Requirement: Jobs are submitted against a registered host
+
+Every job MUST be submitted through the compute family's job submission, which MUST
+refuse a host that is not registered. A fulfillment's create MUST also refuse a disabled
+host; a teardown or an operator's job MUST NOT. A fulfillment job's operation id MUST
+derive from its contract's idempotency key; an operator's job keeps its request's
+operation id.
+
+#### Scenario: A disabled host holds a fulfillment
+
+- **WHEN** a host is disabled while a fulfillment on it is active
+- **THEN** that fulfillment's teardown is submitted, and a new create on the host is refused
+
+### Requirement: Jobs are correlated by capacity reservation
+
+A fulfillment's job MUST record the capacity reservation it serves, and no job MAY record
+a deal reference, because a deal's commercial identity does not cross the provisioning
+boundary for correlation. The job list MUST filter by capacity reservation and MUST NOT
+filter by escrow.
+
+#### Scenario: An operator finds a deal's jobs
+
+- **WHEN** a seller maps a buyer's negotiation to its capacity reservation and filters the job list by it
+- **THEN** the deal's jobs are returned, whatever settlement mechanism the deal used
+
+### Requirement: A create succeeds only with readable delivery evidence
+
+A codec MUST report a create job's result as the compute family's create result: the
+delivery evidence (the endpoints to connect to and when access became ready), or none
+when the output cannot say, and a detail mapping of non-secret operator data. A create
+job reported succeeded MUST NOT make its fulfillment active unless its evidence is valid;
+otherwise the fulfillment MUST fail. The family MUST NOT read or deliver the detail.
+
+#### Scenario: A create job's evidence is unreadable
+
+- **WHEN** a create job succeeds but its result carries no valid delivery evidence
+- **THEN** its fulfillment fails, and its capacity is held as for any failed create
+
+#### Scenario: A relay-backed VM is delivered
+
+- **WHEN** a VM is created behind a relay
+- **THEN** its delivery's endpoint is the relay's address and leased port, not its host's
+
+### Requirement: Delivery says how to reach what was provisioned
+
+A fulfillment's delivery MUST carry only the endpoints to connect to, the credentials
+issued, each by role with an allowlisted set of fields, and when access became ready. It
+MUST NOT carry a provisioner-side path, an address internal to a host, a deal reference,
+a lease window, or a credential field outside the allowlist.
+
+#### Scenario: A VM is delivered
+
+- **WHEN** a VM fulfillment becomes active
+- **THEN** its delivery carries the tenant's endpoint and credentials, and not the guest's internal address or a key path on its host
+
+### Requirement: Provisioning names what it provisions
+
+Provisioning MUST name the resource a job creates, deriving the name from the capacity
+reservation so a retry names the same resource, and the name MUST satisfy every use the
+resource's playbooks make of it. A storefront MUST NOT supply it, and a request naming one
+MUST be refused. The lease's target MUST be the one the reservation's fulfillment recorded.
+
+#### Scenario: A lease reports its target
+
+- **WHEN** a VM fulfillment becomes active
+- **THEN** the lease reports the guest its fulfillment named, without a storefront naming it
+
+#### Scenario: A VM guest is named
+
+- **WHEN** a VM create is prepared for a capacity reservation
+- **THEN** the guest is named `tenant-` and the first 24 hex characters of a UUIDv5 of the
+  reservation's identifier, the same on every retry
+- **AND** the name is a valid hostname label, contains no other guest's name, and uses only
+  lowercase letters, digits, and a hyphen
+- **AND** stripped to letters and digits it is a login of at most 32 characters starting
+  with a letter, which `useradd` accepts
+
+#### Scenario: A fulfillment request names a guest
+
+- **WHEN** a VM fulfillment request names a guest
+- **THEN** it is refused, and nothing is prepared
+
+#### Scenario: A fulfillment accepted earlier is requested again
+
+- **WHEN** a request is repeated for a fulfillment whose create was already prepared
+- **THEN** the fulfillment keeps the name its create was prepared with
+
+### Requirement: Every provisioning route admits the administrator
+
+Every route on the provisioning service's route table MUST admit the `admin` role, in
+addition to any other role it admits. A route contract a domain contributes that does not
+admit `admin` MUST be refused when the table is assembled.
+
+#### Scenario: An operator calls a storefront route
+
+- **WHEN** a request signed by the provisioning administrator calls a route that also
+  admits the seller, such as lease termination or fulfillment begin
+- **THEN** it is authorized as it would be for the seller
+
+#### Scenario: A domain contributes a seller-only route
+
+- **WHEN** a domain declares a route whose roles omit `admin`
+- **THEN** the provisioning service refuses to assemble its route table
+
+### Requirement: Leases have one family surface that records and releases
+
+Compute provisioning MUST serve every offering mode's leases through one route surface
+returning the neutral lease view: get, list, terminate, release-oversight, retry-release,
+and force-release. Get and terminate MUST admit the seller and the administrator; list,
+release-oversight, retry-release, and force-release MUST admit the administrator only. No
+lease route writes a lease. A lease MUST be addressed by its capacity reservation identifier;
+the list MAY filter by lease status and offering mode and MUST NOT filter by a deal's
+commercial identity or by host. A lease route MUST NOT deliver: no lease route grants
+access, creates a workload, or submits provider work, and a domain MUST NOT add or
+override lease routes. A domain MAY extend what a lease reports only by contributing a
+versioned projection.
+
+#### Scenario: An operator lists bare-metal leases
+
+- **WHEN** an administrator lists leases filtered by offering mode `bare_metal`
+- **THEN** the response carries every bare-metal lease as the neutral lease view
+
+#### Scenario: A storefront asks for the lease list
+
+- **WHEN** a request signed as the seller calls the lease list
+- **THEN** it is refused, and the storefront reads its own leases by reservation id
+
+#### Scenario: Bare-metal access is granted
+
+- **WHEN** a bare-metal deal is delivered
+- **THEN** access is granted only through the fulfillment aggregate, and provisioning
+  records the machine as the lease's target when the fulfillment becomes active
+
+### Requirement: A lease's executor identity and evidence are fixed once recorded
+
+No caller writes a lease. Commit MUST record a lease's window; provisioning MUST record its
+executor target when the reservation's fulfillment becomes active, in the transaction that
+makes it active, as the target that fulfillment recorded; and the lease lifecycle records
+release. A recorded target MUST NOT be replaced. A target the data prevents recording
+(metadata naming no job-backed target, or a reservation the site refuses) MUST NOT fail
+the activation; any other failure to record it MUST leave the fulfillment unactivated, for
+convergence to retry. Convergence MUST keep recording the target of every active
+job-backed fulfillment whose reservation records none, and MUST report each it cannot
+record and each reservation that records a different target. No route MAY change a lease's executor identity, its start, or its create or
+release handles once recorded, and its end MAY move only through the site authority's lease
+truncation.
+
+#### Scenario: A fulfillment becomes active
+
+- **WHEN** a reservation's job-backed fulfillment becomes active
+- **THEN** the reservation records the target that fulfillment acts on, in the same
+  transaction, and its state and window are unchanged
+
+#### Scenario: A target is already recorded
+
+- **WHEN** a fulfillment becomes active on a reservation that already records another target
+- **THEN** the recorded target is kept, the fulfillment still becomes active, and each
+  convergence cycle reports the difference
+
+#### Scenario: Recording the target fails for a reason other than the data
+
+- **WHEN** recording the target fails while a fulfillment becomes active, other than for
+  its data
+- **THEN** the fulfillment stays unactivated, and a later convergence cycle activates it
+  and records the target
+
+#### Scenario: An active fulfillment's lease records no target
+
+- **WHEN** a convergence cycle finds an active job-backed fulfillment whose reservation
+  records no target
+- **THEN** it records the target where it now can, and reports it where it cannot
+
+#### Scenario: A lease body is posted
+
+- **WHEN** a caller posts a lease to the lease routes
+- **THEN** it is refused, and nothing is recorded
+
+### Requirement: Execution readiness is reported in system status
+
+The provisioning service's system status MUST report whether execution is mocked, as a
+boolean for the deployment and per composed executor by offering mode, derived from the
+composed executors rather than from deployment profiles, together with each contributed
+readiness component's readiness and a versioned detail. A component that is not ready MUST
+degrade the status. The status MUST NOT disclose a database URL or any credential.
+Readiness MUST have no route of its own, and an execution implementation MUST contribute
+its readiness rather than serve it.
+
+#### Scenario: Every executor is mocked
+
+- **WHEN** the service runs with every composed executor mocked
+- **THEN** status reports execution as mocked, and lists each offering mode's executor as
+  mocked
+
+#### Scenario: A domain's playbook is missing
+
+- **WHEN** the Ansible executor for one offering mode names a playbook that does not exist
+- **THEN** the Ansible component reports that playbook and is not ready, and the status is
+  degraded
+
+### Requirement: Host connectivity is probed by connection kind
+
+A host connectivity check MUST run the probe registered for the host's connection kind and
+return a neutral connectivity result. A host whose connection kind has no registered probe
+MUST be refused. The probe's execution resources MUST be composed by the provisioning
+service, not borrowed from a domain's runtime.
+
+#### Scenario: A bare-metal host is probed
+
+- **WHEN** an operator checks connectivity to a registered bare-metal host with an `ssh`
+  connection
+- **THEN** the `ssh` probe runs over the service's own runner and returns the neutral result
+
+### Requirement: Delivery happens only through fulfillment
+
+No provisioning route MAY submit delivery work (creating a workload or granting access) outside a fulfillment aggregate, for any offering mode. The provisioning service MUST NOT serve a generic executor-action route, and a domain MUST NOT contribute one.
+
+#### Scenario: An operator looks for a direct grant
+
+- **WHEN** an operator wants to grant bare-metal access or create a VM for a reservation
+- **THEN** the only path is the reservation's fulfillment, and no provisioning route submits that work directly
+
+### Requirement: An undelivered lease is released by what its fulfillment proves
+
+A lease's release MUST follow the state of its reservation's fulfillment aggregate. Deciding
+a release MUST NOT write: the reservation MUST be recorded `releasing`, with the fulfillment
+as its release handle, before teardown is begun, so that a restart between the two resumes
+the release from `releasing`, and a failure to begin teardown leaves it for the lease
+lifecycle's next cycle. The grace period after which a stalled teardown is marked failed
+MUST run from when the reservation entered `releasing`, not from the lease's end. When the
+site refuses one of the lifecycle's writes because the reservation changed since it was
+read, the lifecycle MUST re-read the reservation and leave it in the state another actor
+recorded; in particular, it MUST NOT begin teardown after a refused move to `releasing`.
+
+- An `active` aggregate MUST be torn down before capacity returns.
+- An aggregate whose teardown has already begun — `teardown_dispatch_pending`, `tearing_down`, or `teardown_failed` — MUST have that teardown adopted, not a second one begun.
+- A `torn_down` aggregate MUST return the capacity as a completed release.
+- An absent, `assigned`, or `abandoned` aggregate MUST return the capacity directly, as a completed release, only when the reservation's provenance proves nothing was dispatched: no create handle on the reservation and no job bound to the reservation. An `assigned` aggregate MUST be abandoned only by a compare-and-set taken after the proof is checked, so a concurrent dispatch cannot outrun it and a refused release writes nothing.
+- When the create is in flight (`dispatch_pending` or `dispatching`), the release MUST be remembered durably, with the reservation `releasing` and the fulfillment as its release handle, and teardown MUST begin once the aggregate reaches `active`; the grace timeout MUST NOT run while the create is in flight.
+- A `failed` aggregate, or an absent, `assigned`, or `abandoned` one without that proof, MUST put the lease in `release_failed` for an operator to verify and force-release.
+- A teardown observed as `teardown_failed` while the lease is `releasing` MUST put the lease in `release_failed`; an operator's retry-release MUST re-observe the same aggregate.
+
+The compute provisioning composition MUST supply the site authority's release guard, which permits freeing a reservation's capacity only for a `torn_down` aggregate or for an absent, `assigned`, or `abandoned` one whose provenance proof holds, and MUST check that proof in the transaction that frees the capacity. Every direct capacity return, whether by the lease lifecycle or by any caller of the site's release, MUST pass that guard; force-release remains the operator's recorded override.
+
+#### Scenario: A committed lease whose fulfillment never began expires
+
+- **WHEN** a lease's reservation was committed but its fulfillment was never dispatched, and the lease reaches its end
+- **THEN** the assigned aggregate is abandoned, the capacity returns, and no teardown is attempted
+
+#### Scenario: A lease is terminated while its create is in flight
+
+- **WHEN** a lease is terminated while its fulfillment is `dispatching`
+- **THEN** the reservation becomes `releasing` at once, survives a restart in that state, and its teardown begins when the aggregate reaches `active`
+
+#### Scenario: A create failed
+
+- **WHEN** a lease is released and its aggregate is `failed`
+- **THEN** the lease enters `release_failed`, and capacity stays held until an operator force-releases it
+
+#### Scenario: Teardown fails while the lease is releasing
+
+- **WHEN** a releasing lease's aggregate reaches `teardown_failed`
+- **THEN** the lease enters `release_failed`, and when convergence's retry later reaches `torn_down`, an operator's retry-release adopts that teardown and releases the capacity
+
+#### Scenario: A storefront releases a delivered lease
+
+- **WHEN** a storefront asks the site to release a reservation whose aggregate is `active`
+- **THEN** the release guard refuses, the reservation keeps its capacity and state, and the lease is released only through its lifecycle
+
+### Requirement: Host import belongs to the execution implementation that reads its format
+
+A host-import route that reads an implementation's inventory format MUST be contributed by that implementation, with its route contract, route service, and typed client; the compute family's host routes MUST serve only format-neutral host administration and connectivity.
+
+#### Scenario: Hosts are imported from an Ansible inventory
+
+- **WHEN** an operator imports hosts from an Ansible INI inventory
+- **THEN** the Ansible implementation's import route parses it and registers the hosts through the host authority, and the family's host route contracts name no inventory format
+
+### Requirement: Lease release delegates to durable fulfillment teardown
+
+For every offering mode, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The release adapter SHALL be provider-neutral, SHALL use the durable `fulfillment_id` as the release tracking identifier, and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL read fulfillment aggregate state and SHALL NOT be selected by the reservation's offering mode.
+
+#### Scenario: Release status is read from the aggregate
+
+- **WHEN** lease lifecycle reads release status for a VM or a bare-metal reservation
+- **THEN** both reads go through the same status port to the fulfillment aggregate, whose teardown state decides the outcome
+
+#### Scenario: Unexpected teardown submission failure remains diagnosable
+
+- **WHEN** composition, persistence, or an unexpected implementation failure prevents teardown submission
+- **THEN** the failure SHALL propagate to lease lifecycle handling and be recorded as `release_submit_error` rather than being converted to an absent job identifier
+
+#### Scenario: A bare-metal lease expires
+
+- **WHEN** a delivered bare-metal lease passes its end
+- **THEN** release begins the bare-metal fulfillment's teardown, the aggregate leaves `active`, and capacity stays held until it reaches `torn_down`
+
+### Requirement: A committed allocation's lease records its executor target
+Market-managed leases MUST record the executor target on an existing committed site allocation, when the allocation's fulfillment becomes active; the lease window is the one its commit recorded. The allocation's offering mode is the one the site recorded when capacity was claimed, and executor-specific reference data such as a physical-host identity MUST stay with the fulfillment that delivered the workload rather than the lease.
+
+#### Scenario: Bare-metal lease records its machine
+- **WHEN** a bare-metal fulfillment granting access on a committed allocation becomes active
+- **THEN** provisioning records the machine as the lease's target, and the allocation keeps its recorded `bare_metal` offering mode and committed window, with the physical-host identity staying in the fulfillment's metadata
+
+#### Scenario: Teardown cannot begin after the release is recorded
+- **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
+- **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
 
 ## Evidence
 

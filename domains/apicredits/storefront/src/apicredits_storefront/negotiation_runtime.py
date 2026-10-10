@@ -36,6 +36,7 @@ from market_negotiation_runtime import (
 )
 from market_policy.scalar_policies import _amount_from_proposal
 
+import apicredits_storefront.container as _container
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
@@ -732,8 +733,6 @@ def build_api_credit_negotiation_runtime(
         return bool(await repository.is_listing_paused(listing_id=listing_id))
 
     def storefront_is_paused() -> bool:
-        import apicredits_storefront.container as _container
-
         return _container.trading_pause.paused
 
     from core_storefront.stage_log import stage_event

@@ -31,7 +31,10 @@ from unittest.mock import AsyncMock
 import pytest
 from arkhai_vms import VmConnectionDetails
 
-from compute_provisioning_client import ComputeProvisioningTimeoutError
+from compute_provisioning_client import (
+    ComputeProvisioningJobError,
+    ComputeProvisioningTimeoutError,
+)
 from market_core import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
 from market_storefront.services import vm_fulfillment_service as vfs
@@ -283,8 +286,6 @@ class TestDoProvision:
             ),
             raising=False,
         )
-
-        from compute_provisioning_client import ComputeProvisioningJobError
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(

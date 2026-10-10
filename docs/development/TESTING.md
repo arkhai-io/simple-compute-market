@@ -168,7 +168,7 @@ drives transitions instead of waiting for a timer:
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
 | VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
 | Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../introduction-retention/dry-run` |
-| Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs |
+| Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs, previewed by `.../publication/dry-run`, which reports what the pass would open, close, refresh, reopen, or hold |
 | API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
 
 Every storefront composes its loops onto the one kit loop controller in
@@ -253,6 +253,28 @@ opaque: they do not assume a VM listing, provisioning job, host field, API key,
 Physical Resource, site, or teardown payload. A scenario supplies its codecs
 and domain assertions instead of copying another domain's control flow.
 
+The compute family's canonical deal (Alkahest settlement on the dev chain,
+delivery through the provisioning mock profile) takes every stage its domains
+run identically from `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
+Those stages are not named `Test*`, so pytest collects them only where a
+domain's scenario module subclasses them, with an empty body, in its run order.
+A shared stage's body is therefore defined once and runs in every compute lane;
+a stage whose body would differ stays each domain's own, inserted between the
+shared ones (VM's listing creation and claim, bare metal's publication, evidence,
+and second-deal stages). What differs reaches a shared stage two ways: fixtures
+every compute conftest provides under one set of names supply who is calling,
+and each domain's `ComputeDealDriver`
+(`e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`,
+`e2e-tests/tests/e2e/roles/scenarios/bare_metal/compute_deal_driver.py`)
+supplies supply seeding, provision terms, the mock rules and their release, the
+settlement preview's expectations, the settlement's dispatch, the delivery
+assertions, the lease view, and the re-reservation of released supply.
+Negotiation has no driver hook: a compute domain that negotiates differently is
+resolved in its storefront composition. `e2e-tests/tests/unit/test_compute_deal_stages.py`
+checks the stage set from source: each domain subclasses every shared stage once,
+in order, with an empty body, and every state field has one producer that runs
+before any stage reads it.
+
 Staged scenarios use `require_state` with one exact producer/consumer field.
 When an earlier stage or external authority is unavailable, the dependent
 stage names that prerequisite and remains blocked; it is never counted as a
@@ -263,23 +285,51 @@ clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
 
-The pipeline runs two lanes, as separate jobs so each failure's logs stand
-alone:
+The pipeline runs one lane per market domain, each as its own job, so each
+failure's logs stand alone and one domain's failure never hides another's
+evidence. Each lane builds only the images its stack runs
+(`make build-e2e-<lane>`) and brings up only its own services, as a compose
+project of its own:
 
-- **VM lane** (`make -C e2e-tests test-e2e-vm`): the VM and API-credit markets
-  on one dev chain, with the VM site in the provisioning mock profile.
-- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site in the
-  provisioning mock profile, trusting the bare-metal storefront, a bare-metal
-  registry, and the dev chain. Its publication scenario declares pools and
-  whole-host capacity through the site's operator clients, steps publication,
-  and follows one listing through discovery, withdrawal, and reinstatement at
-  the registry.
+- **VM lane** (`make -C e2e-tests test-e2e-vm`): Bob's and Alice's storefronts
+  and provisioning authorities, the two VM registries, and the dev chain.
+- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site
+  trusting the bare-metal storefront, a bare-metal registry, and the dev chain.
+  Its publication scenario declares pools and whole-host capacity through the
+  site's operator clients, steps publication, and follows one listing through
+  discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
+  deal runs the canonical compute deal for one whole host, stage for stage with
+  VM's, then a second deal on the freed host whose buyer teardown, sent twice,
+  returns one operation and releases capacity once.
+- **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
+  registry, service, storefront, and gated sample app, a compute-schema registry
+  of the lane's own that the credits deal's discovery is routed away from, and
+  the dev chain.
 
-`make -C e2e-tests test-e2e` runs both in turn. A lane provides its own
-configuration, so a scenario that finds a lane setting missing fails rather
-than skipping. The release-qualified bare-metal deal needs a real whole host to
-reach and revoke access on, which the pipeline never has, so neither lane
-selects it; a mock-profile site proves the services compose, not real delivery.
+The compute lanes' provisioning services run their mock profile because the
+run selects it: `PROVISIONING_MODE` (`mock` or `real`, default `mock`) is read
+by each lane's environment target, which prints the stack's provisioning
+profiles, never by a storefront. Under the `mock` profile each compute adapter
+runs its jobs through a mock executor of its own, resolved by the same
+`(offering_mode, action)` table as its real one, and the playbook output the
+mock returns is parsed by the adapter's real result path. The rule and gate
+mechanism is shared
+(`provisioning/compute/src/compute_provisioning/jobs/executor_mock.py`); each
+adapter mounts its rules and job dry run under its own prefix, VM's at
+`/test/mock-rules` and `/test/evaluate-job` and bare metal's at
+`/test/bare-metal/mock-rules` and `/test/bare-metal/evaluate-job`, beside the
+shared `/test/jobs/*` routes. None of them is mounted outside the mock profile.
+
+`make -C e2e-tests test-e2e` runs the three in turn, taking each stack down
+before the next, because every stack names its chain container `anvil` and
+publishes fixed host ports. A lane provides its own configuration, so a
+scenario that finds a lane setting missing fails rather than skipping.
+
+A mock-provisioned deal proves the services compose into a working deal, not
+that a real resource was delivered. Bare metal's release-qualified deal
+(`e2e_bare_metal_deal`) needs a real whole host to grant and revoke access on,
+which the pipeline never has, so no lane selects it: real access and its
+revocation remain a separate protected lane's evidence.
 
 The VM multi-registry scenario seeds Bob's and Alice's separate provisioning
 authorities through typed administration clients and refreshes both site
@@ -291,13 +341,15 @@ use the typed registry client; the scenario does not establish that multiple
 storefronts can share a site authority. Resource-query and explain preparation
 have separate fail-closed behavior.
 
-To run both lanes in GitHub Actions, push the current branch and run
+To run the lanes in GitHub Actions, push the current branch and run
 `make run-e2e` with an authenticated `gh` CLI on PATH. Then run
 `make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
 diagnostics. Omitting the ID selects the current branch's latest run among the
 100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
-`actions.log`, `e2e-vm-logs/compose-logs.txt`, and
-`e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
+`actions.log`, `e2e-vm-logs/compose-logs.txt`,
+`e2e-bare-metal-logs/compose-logs.txt`, and
+`e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
+directory.
 Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.
 An unavailable artifact is reported without discarding other logs. A successful
@@ -473,10 +525,11 @@ scenarios at every level:
   semantics, and the production lifecycle hook supplied by that package;
 - deployment tests render one combined image/command/database, both explicit
   registrations, disabled-domain absence, and secret canary exclusion;
-- the system lane must observe a real VM deal and a real selected-site POOLS-7
-  bare-metal deal concurrently, including result, teardown, and restored
-  capacity. It remains blocked—not mocked—until the production bare-metal
-  contribution and its live provisioning prerequisites are installed.
+- the system lanes observe a VM deal and a selected-site bare-metal deal, each
+  in its own lane through mock-provisioned delivery, including result,
+  teardown, and restored capacity; real bare-metal access and its revocation
+  are the protected lane's evidence, which no mock-provisioned deal stands in
+  for.
 
 Every cross-swap test asserts the unselected policy, repository mutation,
 capacity/provider call, result decoder, and teardown spy remain untouched.

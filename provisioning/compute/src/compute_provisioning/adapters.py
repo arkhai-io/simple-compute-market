@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .jobs.executor import JobExecutor
+from .jobs.executor_mock import executor_is_mocked
 
 
 class UnsupportedExecutorActionError(LookupError):
@@ -65,8 +66,6 @@ class JobExecutorTable:
         A mode counts as mocked only when every executor registered for it
         carries the compute mock mechanism's rules (``executor_is_mocked``).
         """
-        from .jobs.executor_mock import executor_is_mocked
-
         mocked: dict[str, bool] = {}
         for (offering_mode, _action), executor in self._executors.items():
             mocked[offering_mode] = mocked.get(offering_mode, True) and executor_is_mocked(

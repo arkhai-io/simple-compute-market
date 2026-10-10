@@ -58,7 +58,10 @@ from market_fulfillment import (
     SettlementResult,
 )
 from market_core import VersionedEnvelope
+from vm_provisioning_adapter.db import RelayPortLease
 from vm_provisioning_adapter.guest_names import fulfillment_guest_name
+from vm_provisioning_adapter.services.relay_service import RelayService
+from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
 from compute_provisioning_contracts import HostCreate
@@ -225,9 +228,6 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
     )
     # The host the declaration is delivered through; every job is submitted
     # against a registered host.
-    from compute_provisioning_ansible import ssh_connection
-    from compute_provisioning_contracts import HostCreate
-
     hosts = _container_module.resolved_host_authority
     if hosts.get_host("kvm-fulfillment-1") is None:
         hosts.register_host(HostCreate(
@@ -404,7 +404,6 @@ class TestARepeatedBeginAdoptsTheAcceptedFulfillment:
         again = await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
 
         assert again["fulfillment_id"] == first["fulfillment_id"]
-        from compute_provisioning.jobs.db import JobRecord
 
         with _container_module.resolved_session_factory() as db:
             record = SettlementRepository().get(db, capacity_reservation_id)
@@ -522,9 +521,6 @@ class TestTeardownPreparation:
         assert teardown_params["playbook_path"] == _PLAYBOOK_PATH
 
         # The job runs as soon as it is enqueued, against this registered host.
-        from compute_provisioning_contracts import HostCreate
-        from compute_provisioning_ansible import ssh_connection
-
         result = await provider.dispatch_teardown(
             VersionedEnvelope.model_validate(prepared.model_dump(mode="json"))
         )
@@ -663,8 +659,6 @@ class TestAcknowledgementFailureRecovery:
         with session_factory() as db:
             record = SettlementRepository().get(db, capacity_reservation_id)
             job_id = record.provider_metadata["create_job_id"]
-
-            from compute_provisioning_service.db.models import JobRecord
 
             jobs = (
                 db.query(JobRecord)
@@ -877,7 +871,6 @@ class TestRelayPortLifecycleOverTheApi:
         one pool is a conflict, not a race.
         """
         from compute_provisioning_service import container as _container_module
-        from vm_provisioning_adapter.services.relay_service import RelayService
 
         relays: RelayService = _container_module.resolved_relay_service
         # The container outlives a single test in this module, and relays live
@@ -906,9 +899,6 @@ class TestRelayPortLifecycleOverTheApi:
     @staticmethod
     def _held_ports() -> list[int]:
         from compute_provisioning_service import container as _container_module
-        from vm_provisioning_adapter.services.relay_port_allocator import (
-            RelayPortAllocator,
-        )
 
         # Port accounting is durable: any allocator over the service's database
         # reads what the fulfillment path leased.
@@ -970,7 +960,6 @@ class TestRelayPortLifecycleOverTheApi:
         await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
 
         from compute_provisioning_service import container as _container_module
-        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db:

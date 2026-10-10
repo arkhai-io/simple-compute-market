@@ -117,7 +117,7 @@ phases:
       - compose_preexisting_stack_check
     commands:
       - id: compose_up
-        run: PROVISIONING_MODE=mock docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} up -d
+        run: VMS_PROVISIONING_ACTIVE_PROFILES=mock docker compose ${ISSUE_DISCOVERY_COMPOSE_ARGS:--f docker-compose.yml} up -d
         timeout_seconds: 300
     collect_on_failure:
       - compose_config

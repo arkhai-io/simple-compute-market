@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 import uuid
 from dataclasses import replace
@@ -10,6 +11,7 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -540,6 +542,105 @@ async def test_evaluate_negotiate_reports_what_negotiate_new_refuses(tmp_path) -
     assert threads.count == 0
 
 
+#: An escrow proposal may leave its contract unpinned; the storefront client
+#: sends the zero address when the buyer names none.
+_UNPINNED = "0x" + "0" * 40
+
+
+def _unpinned_proposal(amount: int) -> dict:
+    return {**_escrow_proposal(amount), "escrow_address": _UNPINNED}
+
+
+async def _open_unpinned(buyer: StorefrontClient, amount: int) -> dict:
+    return await buyer.negotiate_new(
+        listing_id="listing-1",
+        initial_amount=amount,
+        provision_terms=_opening()["provision_terms"],
+        token=TOKEN,
+        proposal_fields={"token": TOKEN},
+    )
+
+
+async def test_an_unpinned_opening_below_the_listed_rate_exits_under_the_default_chain(
+    tmp_path,
+) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            preview = await admin.evaluate_negotiate(
+                "listing-1",
+                proposal=_unpinned_proposal(1),
+                buyer_principal=BUYER_SIGNER.identity,
+                provision_terms=_opening()["provision_terms"],
+            )
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_unpinned(buyer, 1)
+
+    # Priced from the listing's accepted escrow, 100 for the hour, not from
+    # nothing: the default chain accepts only at or above it.
+    assert (preview.decision, preview.our_reference_amount) == ("exit", 100)
+    assert opened["action"] == "exit"
+
+
+async def test_an_unpinned_opening_below_the_listed_rate_is_countered(tmp_path) -> None:
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), SourceSite())
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            preview = await admin.evaluate_negotiate(
+                "listing-1",
+                proposal=_unpinned_proposal(80),
+                buyer_principal=BUYER_SIGNER.identity,
+                provision_terms=_opening()["provision_terms"],
+            )
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_unpinned(buyer, 80)
+
+    assert (preview.decision, preview.our_reference_amount) == ("counter", 100)
+    assert opened["action"] == "counter"
+    assert 80 < int(opened["proposal"]["fields"]["amount"]) <= 100
+    assert int(opened["proposal"]["fields"]["amount"]) == preview.decision_amount
+
+
+async def test_a_pinned_escrow_the_listing_does_not_accept_is_refused(tmp_path) -> None:
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), SourceSite())
+    await _insert_listing(runtime)
+    app = _app(runtime)
+    unlisted = "0x" + "33" * 20
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            preview = await admin.evaluate_negotiate(
+                "listing-1",
+                proposal={**_escrow_proposal(80), "escrow_address": unlisted},
+                buyer_principal=BUYER_SIGNER.identity,
+                provision_terms=_opening()["provision_terms"],
+            )
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_new(
+                    listing_id="listing-1",
+                    initial_amount=80,
+                    provision_terms=_opening()["provision_terms"],
+                    token=TOKEN,
+                    chain_name="anvil",
+                    escrow_address=unlisted,
+                    proposal_fields={"token": TOKEN},
+                )
+
+    # The fallback prices an unpinned proposal only; a pinned one the listing
+    # does not offer is the guard's refusal, in the preview and the opening.
+    assert preview.refused is True
+    assert "escrow_not_in_accepted_set" in (preview.decision_reason or "")
+    assert refused.value.status_code == 409
+    assert "escrow_not_in_accepted_set" in str(refused.value)
+
+
 _SOURCE_CHANGES = [
     pytest.param(
         {"projection": listing_source_projection(gpu_model="B200")},
@@ -675,8 +776,6 @@ async def test_a_buyer_exits_whatever_the_source(tmp_path) -> None:
 
 async def test_force_accept_answers_a_domain_refusal_with_its_status(tmp_path) -> None:
     """A refusal the domain owns answers force-accept as it answers negotiate/{id}."""
-    from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
-
     def failing_builder(**_kwargs):
         raise BareMetalSettlementPlanError("accepted escrow could not be materialized")
 
@@ -707,8 +806,6 @@ async def test_force_accept_answers_a_domain_refusal_with_its_status(tmp_path) -
 
 
 async def test_a_thread_without_its_opening_message_is_not_resumed(tmp_path) -> None:
-    import sqlite3
-
     site = SourceSite()
     runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
     await _insert_listing(runtime)

@@ -1,10 +1,11 @@
 # Bare-metal seller domain stack.
 #
 # This stack runs the dedicated wheel-only storefront, one compute-family
-# registry, and the ordinary selected-site provisioning authority. It never
-# enables the provisioning test controller or substitutes mock fulfillment;
-# only the end-to-end lane's development overlay, compose.bare-metal-local.yml,
-# does.
+# registry, and the ordinary selected-site provisioning authority. The
+# provisioning service runs its container profile, real fulfillment with no
+# test controller, unless a run selects its mock profile through
+# BARE_METAL_PROVISIONING_ACTIVE_PROFILES, as the end-to-end lane does from
+# `PROVISIONING_MODE`.
 # Deployment-specific principals and signer credentials are supplied by the
 # root compose.bare-metal.yml wrapper.
 
@@ -49,7 +50,10 @@ services:
     ports:
       - "${BARE_METAL_PROVISIONING_PORT:-8081}:8081"
     environment:
-      - ACTIVE_PROFILES=docker
+      # `docker`, or `mock` when a run selects mock provisioning: the mock
+      # runner in place of Ansible, and the /test/* controls. Never mock in
+      # production.
+      - ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://bare-metal-redis:6379
       - PROVISIONING_STOREFRONT_URL=http://bare-metal-storefront:8000

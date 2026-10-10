@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
+from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as _container
 from market_storefront.services.listing_identity_carryover import carryover_report
@@ -422,7 +423,6 @@ class SystemService:
           'error: <msg>'                 — load or run failed
         """
         try:
-            from market_policy.listing_source import ListingSourceVerdict
             from market_policy.negotiation_middleware import (
                 NegotiationContext,
                 NegotiationRound,

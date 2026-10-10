@@ -131,11 +131,12 @@ API-credit deal runs inside the VM lane.
   accessors rather than reaching into the service's module state; report execution
   readiness in system status instead of a route of its own; record the five-piece route
   pattern in `ARCHITECTURE.md`.
-- Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
-  VM's scenario onto them, and add the bare-metal mock-provisioned deal.
+- Share the canonical compute deal's stages that VM and bare metal run identically in
+  `compute_deal_stages.py`, with a per-domain driver, move VM's scenario onto them, and
+  add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.
-- Build pipeline images once and share them across lanes; give API credits its own lane
-  (migrated from `apicredits-end-to-end-lane`).
+- Give API credits its own lane (migrated from `apicredits-end-to-end-lane`), with each
+  lane building the images its stack runs and composing its own topology.
 - Keep the real-host scenario, deactivated; move the buyer CLI requirements to
   `bare-metal-and-credits-domain-stacks`.
 
@@ -149,8 +150,9 @@ None.
 
 - `test-compatibility`: a deployable domain's deal runs on every pipeline run against
   its ordinary local authorities, with compute provisioning in its mock profile where
-  delivery crosses it; compute domains share deal stages; every lane runs on images
-  built once; bare-metal storefront restart recovery is proven at integration level.
+  delivery crosses it; compute domains share deal stages; each domain runs in its own
+  lane, building its own stack; bare-metal storefront restart recovery is proven at
+  integration level.
 - `market-composition`: storefront deal controls are kit-owned route services;
   administrative acceptance and opening previews go through the negotiation runtime;
   compute mock executors share one compute-family mechanism; the runtime rechecks a
@@ -267,7 +269,10 @@ None.
   client.
 - `domains/vms/storefront` and `domains/bare_metal/storefront`: the thin contracts and
   client in place of the family kit.
-- Root `Makefile`, compose files, and `.github/workflows/e2e.yml`.
+- Root `Makefile`, compose files, and `.github/workflows/e2e.yml`: three lanes, the
+  per-market overlays, and each compute stack's provisioning profile chosen per run by
+  `PROVISIONING_MODE`; the VM storefronts' development configuration loses its unread
+  provisioning mode.
 - `openspec/changes/bare-metal-and-credits-domain-stacks/`,
   `openspec/changes/kit-owned-storefront-shell/`, and
   `openspec/changes/apicredits-end-to-end-lane/`: migrated scope recorded.
@@ -283,7 +288,7 @@ None.
       fulfillment and its digest-only Alkahest evidence.
 - [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
       open gap, and the findings recorded under "Controls and routes (5B.8)".
-- [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
+- [x] `docs/development/TESTING.md` — three lanes, each building and composing its own stack, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` and
@@ -300,8 +305,12 @@ None.
 
 - A deployable domain's deal runs on every pipeline run against its ordinary local
   authorities, with compute provisioning mocked where delivery crosses it; compute
-  domains share deal stages; lanes run on images built once —
+  domains share deal stages; each domain runs in its own lane —
   `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.
+- Mock provisioning is the provisioning service's profile, chosen per run, never a
+  storefront setting — `docs/development/DEPLOYMENT_AND_CONFIG.md`,
+  `docs/development/TESTING.md`, and the lane requirement's scenario in
+  `openspec/specs/test-compatibility/spec.md`.
 - Storefront deal controls are kit-owned route services; administrative acceptance and
   opening previews go through the negotiation runtime; compute mock executors share
   `compute_provisioning.executor_mock` — `openspec/specs/market-composition/spec.md`,

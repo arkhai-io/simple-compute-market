@@ -108,7 +108,7 @@ the missing controls are built (below).
 | 08a evaluate-settle, 08c evaluate-job, 08b settle → dispatching | Same; bare metal's evaluate-settle previews scheduling and materialization |
 | 09a release gate, converge to active; 09a2 listing closes | Same; the publication dry run then step closes the listing as unavailable |
 | 09b ready and credentials | Buyer result carries no access coordinates; buyer access returns host, port, and user |
-| 09bb settlement-servicing dry run then step → claim | Same |
+| 09bb settlement-servicing dry run then step → claim | Bare metal's own: the servicing step publishes the evidence digest, which resolves for the buyer ("Section 9 design: the bare-metal deal on the shared stages", decision 3) |
 | 09c lease registered | Same, through the bare-metal lease view |
 | 10a–11b expire lease, gated teardown, release, re-reserve | Same; release reaches the storefront through the capacity-released callback |
 | — | A second deal on the freed host: buyer-requested teardown sent twice returns the same operation, capacity is released once, and publication reopens the listing |
@@ -2312,6 +2312,47 @@ Found while planning:
   contract (`domains/bare_metal/tests/test_domain_runtime.py`); it covers contract
   capabilities, not negotiation, so nothing is added there.
 
+Implementation findings (6A and 6B), settled while building:
+
+- VM's seller hook is still built for each round, so it reads the current negotiation
+  settings; only the per-round binding it no longer needs is gone (the plan said "once").
+  `build_vm_negotiation_runtime` takes an injected `listing_source_check`, the real check
+  by default.
+- VM's source check reports an unreadable capacity snapshot as unverifiable, where the
+  failure used to escape the round as an exception. The system status's strategy probe
+  hands the guard a matching verdict, since it exercises the strategy and checks no
+  listing.
+- Two planned VM integration cases are proven below the route: a listing without a
+  `gpu_model` is rechecked (the policy kit's guard has no such condition, and the
+  runtime's enforcement tests are domain-free), and an availability refusal at a buyer's
+  accept (the fixture reads availability from the fake site's snapshot, so the accept test
+  changes the declaration instead).
+- API credits' system controller no longer imports the server module, so the
+  import-order workaround in `test_force_accept_api.py` is gone.
+- Bare metal's taken-machine recheck reads the resource-pool projection the recheck
+  already fetches, not a capacity snapshot: a Physical Resource's view already reports
+  whether the whole machine is available. The source check moved from `opening_guard.py`
+  to `listing_source_check.py`, since it now runs before every seller decision and
+  acceptance, and answers with the policy kit's verdict instead of raising.
+- An exact-option opening is validated, and its plan built, inside the round evaluation,
+  because the runtime's artifact builder is synchronous and the physical-fact checks read
+  the repository. The request-carrier checks (a selection both beside and inside the
+  proposal, or beside an escrow proposal) stay in the route: the runtime sees only the
+  merged proposal.
+- The terms a bare-metal thread records, and the response returns, are the envelope the
+  buyer sent (`kind`, `version`, `payload`), which continuation decodes again.
+- Bare metal's refusals use the shared reasons: a source mismatch answers 409
+  `no_matching_declaration`, a taken machine 409 `no_matching_inventory`, and an
+  unreadable site or a missing site authority 503 `listing_source_unverifiable`, naming no
+  site (the seller's log carries the detail). An opening below the listed rate under the
+  default chain is recorded and answered as `exit` (200), where it used to be refused with
+  409 and nothing recorded.
+- With the real builder, a proposal carrying no demands cannot be materialized without the
+  seller wallet, so the retired opening's wallet-less plan could never have matched what
+  verification builds (the table above). The equality test runs the real builder against
+  the development chain's address book and finds the response's plan, the committed plan,
+  and verification's rebuild equal.
+
 What this changes beyond Section 6:
 
 - **Section 7.** 7.2's commit half is done (the Alkahest path commits before fulfillment)
@@ -2596,7 +2637,7 @@ Design review of this section (2026-10-07), with the maintainer's dispositions:
 | Access ownership and VM's cutover are undesigned | Moved, with the correction |
 | A configured but disabled mechanism may still strand obligations | Accepted: recovery resources are required while configured; the startup refusal for an unconfigured mechanism moves, for all three domains |
 | Validation must grow with the scope | Moot for the moved work; this plan validates its own pieces |
-| The Zone.Identifier files remain | They are tombstoned in the fileset and deleted after packaging |
+| The Zone.Identifier files remain | They are tombstoned in the fileset and deleted after packaging. The 2026-10-08 snapshot carried them again; Section 8's review fixes tombstone them again |
 
 Second design review of this section (2026-10-07), with the maintainer's dispositions:
 
@@ -2655,6 +2696,483 @@ end-to-end gates stay open; this merge does not complete the feature campaign.
 campaign graph is unchanged. `docs/development/ROADMAP.md` retains the outstanding
 full-deal pipeline evidence gap until the remaining scenario work is qualified.
 
+### Section 8 design: the shared stages against the code (2026-10-08)
+
+Re-read against `e2e-tests` on the tree that carries the Arkhai payments merge, before
+planning Section 8; the payments merge changed nothing Section 8 touches. Revised after a
+design review; decided with the maintainer. The two decisions above ("The scenario is
+VM's deal, stage for stage" and "Compute deal stages are shared") stand. This records
+how they meet the code.
+
+| Finding | Consequence |
+|---|---|
+| `test_full_deal.py` has a stage the plan placed nowhere: `TestStage00c2_ProvisioningContractPins`, where both participants report an agreeing provisioning contract pin. The bare-metal storefront speaks the same provisioning wire but reports no `provisioning_contract_version`, though the shared client model already parses it | Decision 1 |
+| `helpers/domain_deal.py` already holds `DomainDealState` and `require_state`, and VM's `DealState` subclasses `DomainDealState` | Decision 2 |
+| VM's `DealState` is shared by the typed-client deal, the buyer-CLI deal, and the one-shot buy, so its field names are those scenarios' contract too. The sentinels where a domain's own stage hands over to a shared stage are named for VM's mechanism: `resume_confirmed` (the listing was resumed into publication), `_capacity_events_advanced` (the capacity-event loop was stepped), and `_executor_host_registered` | Decision 2 |
+| Stages write sentinels the dataclass does not declare (`_executor_host_registered`, `_escrow_expiration_unix`, `_claims_swept`); `require_state` reads through `getattr`, so a misspelled sentinel silently skips every dependent stage. Eight fields are written and never read. Four record nothing a later stage needs (`settlement_submitted`, `tenant_credentials`, `seller_listing_final_status`, `_claims_swept`). Four record a readiness check whose failure should stop the stages that depend on it, and none does: `_contract_pins_agree`, `_negotiation_strategy_viable`, `_provisioning_storefront_ok`, `_executor_host_registered`. So VM's 00f mutates after 00c2 fails, and 02b creates a listing after 00f1 fails to declare supply | Decision 2 |
+| 04a reads the registry with a hand-built signed `httpx` request, though `SyncRegistryClient.get_listing` is the same read and the `registry_client` fixture is buyer-signed and verifies responses; `TESTING.md`'s system level follows the "no raw calls" rule | Decision 3 |
+| 05a reads the buyer's principal from VM's settings | Decision 3 |
+| 00c asserts the `ansible` component, one implementation distribution's; the family's readiness is `checks.execution`, `ok` only when every contributed component is ready | Decision 3 |
+| 07's create rule, 08c's job evaluation (`evaluate_job(host, vm_action=...)`), 10a's teardown rule, 08a's preview arguments and expectations, 09b's credentials, 09c's resource, and 11b's re-reservation claim and callback site are VM's | Decision 3 |
+| `DealLease` and `SiteCapacity` build their site client from VM's settings; the lease contract they read (`get_lease`, the site ledger's reservations and truncation) is the compute family's | Decision 4 |
+| The shared stages fix Alkahest readiness (00g), escrow creation and verification (07, 07b), claim servicing (09bb), and the dev chain's MockERC20; the payments merge already gives compute storefronts another settlement lifecycle | Decision 5 |
+| Helpers live in `scenarios/vms/conftest.py`, and the importer list in 8.1 is stale: `test_vm_introduction.py`, `test_compute_dynamic_listings.py`, and `test_multi_registry.py` import from it too, and `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and `test_buy_oneshot_buyer_cli.py` import moved helpers inside functions | Decision 7 |
+| `escrow_helper.py`'s `_ensure_ws_rpc_url` is private and imported by `test_non_erc20_settlement.py` and a unit test | Decision 7 |
+| The bare-metal storefront's status reports no `registry`, `negotiation_strategy`, or `alkahest` check, which 00b, 00d, and 00g read | Decision 8 |
+
+Decisions:
+
+1. **Stage 00c2 is shared.** Contract skew on the provisioning wire matters as much for
+   bare metal as for VM. Section 9 makes the bare-metal storefront report the pin from
+   its installed `compute_provisioning_contracts` wheel, as VM's does, rather than drop
+   the stage. The shared stages are 00, 00a, 00b, 00c, 00c2, 00d, 00e, 00f1, 00g, 00h,
+   04a, 05a, 05b, 06b, 07, 07b, 08a, 08c, 08b, 09a, 09b, 09bb, 09c, 10a, 10b, 11a, and
+   11b. VM's own are 00f (storefront resource seed), 02b, 03a, 03b (listing creation and
+   resume), and 09a2 (the capacity-event cycle). Bare metal's own, in Section 9, are its
+   publication stages and its listing-close stage in their places.
+2. **`ComputeDealState` extends `DomainDealState`** and declares every field the shared
+   stages read or write; the fields it inherits are not the shared stages' protocol.
+   - The sentinels a domain's own stage produces for a shared stage get domain-neutral
+     names: `listing_published` (VM's 03b, bare metal's publication step),
+     `_listing_reconciled` (VM's 09a2, bare metal's publication close), and
+     `_supply_seeded` (shared 00f1), with `seller_listing_id` unchanged.
+   - Every readiness sentinel gains the consumer its check implies:
+     `_contract_pins_agree` is required by 00f1, the first write over the provisioning
+     wire, and by VM's 00f, VM's first write; `_negotiation_strategy_viable` by 05a;
+     `_provisioning_storefront_ok` by 10a, where release begins, since the
+     capacity-released callback is the first thing in the deal that needs provisioning
+     to reach the storefront (the listing close is pulled from the capacity-event feed
+     and settlement status is polled); and `_supply_seeded` by each domain's first
+     listing stage (VM's 02b). Shared 00f1 requires `_storefront_healthy`,
+     `_provisioning_mock_mode`, and `_contract_pins_agree`, instead of VM's
+     `_resources_seeded`, which 02b still requires. These tighten which stages skip;
+     no assertion changes.
+   - `_escrow_expiration_unix` is declared. The shared stages stop writing the four
+     fields that record nothing a later stage needs.
+   - VM's `DealState` extends `ComputeDealState` and keeps `resume_confirmed`,
+     `_capacity_events_advanced`, `_executor_host_registered`, and the other fields the
+     buyer-CLI and one-shot scenarios use, so those scenarios change only their imports
+     and their lease-view construction (decision 4).
+3. **The driver owns what is a domain's; fixtures own who is calling, through typed
+   clients.** Each compute domain's conftest provides the fixtures the shared stages
+   request under one set of names: `storefront_client` (buyer),
+   `storefront_admin_client`, `storefront_service_client`, `registry_client` (buyer),
+   `provisioning_client`, `provisioning_test_client`, `buyer_config`, `seller_wallet`,
+   `buyer_principal`, `deal_state`, and `deal_driver`. 04a reads the listing through
+   `registry_client.get_listing`; a listing the registry does not hold raises, which
+   fails the stage as the status assertion did. 00c asserts the family's readiness:
+   `checks.execution` is `ok` and every component reported is ready, which still
+   includes Ansible's. The `ComputeDealDriver` protocol carries the per-domain parts the
+   `test-compatibility` delta names:
+   - supply: `seed_supply()` (00f1), and for 11b `reserve_released_capacity(...)`, which
+     re-reserves the released supply through the deal's listing and asserts the domain's
+     reservation, and `site_id`, the site the capacity-released callback names;
+   - provision terms: `provision_terms()` (05a, 05b);
+   - mock rules: `create_rule_id` and `arm_create_gate()` (07, 08c, 09a),
+     `evaluate_create_job(host_id)` returning the job evaluation's `params_valid`,
+     `host_exists`, `rule_matched`, and `would_pause` (08c), and `teardown_rule_id` and
+     `arm_teardown_gate()` (10a, 11b);
+   - settlement preview: `evaluate_settle_arguments()` and
+     `check_evaluate_settle(result)`, which returns the host the preview placed (08a);
+   - result and access: `assert_delivery(settle_status)` (09b);
+   - the lease view: `lease_view(escrow_uid)` and `reserved_resource_id` (09c to 11b).
+
+   The shared stages keep every assertion that is not a domain's: `would_submit`, the
+   rule matched and pausing, `dispatching` then `active`, the listing closed, the primary
+   escrow ready with its `fulfillment_uid`, the claim submitted, and the lease, teardown,
+   and release sequence. The deal's commercial terms are shared constants (the dev
+   chain's MockERC20, an opening bid of 7 and a ceiling of 12 tokens against a 10
+   token/hour asking rate, one hour, a one-hour escrow deadline), so each lane configures
+   its listing's clause to that rate; Section 9's lane configuration does so for bare
+   metal. Negotiation has no driver hook.
+4. **The lease view is the family's.** `DealLease` and `SiteCapacity` move to the shared
+   helpers and take their site client's URL, signer, and trust as arguments; each
+   conftest builds one from its lane settings. The three places that construct a
+   `DealLease` (VM's driver, the buyer-CLI deal's 09c, the one-shot buy's lease check)
+   pass the VM site client.
+5. **What is shared is the canonical compute deal, and only where it removes
+   duplication.** The shared stages are the compute family's canonical complete deal:
+   Alkahest settlement on the dev chain and delivery through the provisioning mock
+   profile. A compute scenario settling another way, or a stage whose body differs
+   between domains, keeps its own stages; sharing follows the kit layer's rule, extracting
+   what two domains run identically rather than forcing every stage into the shared
+   set. A shared stage's body is defined once: a domain subclasses it with an empty
+   body, supplies its differences through fixtures and the driver, and inserts its own
+   stages between shared ones. A domain never replaces a shared stage's body, so a
+   change to one runs in every lane that uses it; a stage that would need replacing is
+   not shared.
+6. **The stage set is checked in a unit test,** `tests/unit/test_compute_deal_stages.py`,
+   reading the modules' source rather than collecting them:
+   - no shared stage is named for collection;
+   - each domain module subclasses every shared stage once, in the shared order, named
+     `Test` plus the base's name, so stage IDs and test names cannot drift, and each
+     subclass body is empty;
+   - every field a stage writes or requires is declared on its state class;
+   - in each domain's run order, with each shared stage standing for the body it
+     runs, every field a stage requires or reads is produced by an earlier stage
+     (or, for a read, earlier in the same stage), each field `ComputeDealState`
+     declares has exactly one producer, and each is read by a stage after its
+     producer.
+7. **Helpers move to `helpers/compute_deal.py` and `helpers/escrow.py`**, and importers
+   import from there, with no re-export from VM's conftest: `DealLease`, `SiteCapacity`,
+   `advance_fulfillment_to`, `wait_for_stage_event`, `delete_mock_rules_if_present`,
+   `advance_storefront`, `dry_run_storefront`, `pause_storefront`, and the body of
+   `convergence_advanced_explicitly` as `convergence_paused(provisioning_client)`, which
+   each conftest's fixture yields from. VM's conftest keeps what reads VM's settings
+   (`signed_listing_read_headers`, still used by the buyer-CLI deal, `capacity_site_id`,
+   `capacity_source_for`, `_signer`, `_trust`, `_require_setting`) and `one_site`, which
+   reads VM's capacity-event report. The escrow helper's `_ensure_ws_rpc_url` becomes
+   `ensure_ws_rpc_url`, since two modules outside it call it. Function-level imports of
+   moved helpers go to module level; `host_registry.py` stays VM's.
+8. **Readiness checks bare metal does not report are Section 9's** (decided in
+   "Section 9 design: the bare-metal deal on the shared stages", decision 1). 00b,
+   00d, and 00g stay shared as VM runs them. Section 9 decides, before it implements its driver,
+   whether the bare-metal storefront reports `registry`, `negotiation_strategy`, and
+   `alkahest` checks or those stages become each domain's own; the first follows
+   decision 1 and the delta's rule that a domain's difference is resolved in its
+   storefront composition, not in the stage.
+
+Implementation review (2026-10-08), with the maintainer's dispositions. The review
+found the stage contract right on the happy path and incomplete on failure paths:
+
+| Finding | Disposition |
+|---|---|
+| `fulfillment_id` had two producers: 08b wrote the delivery fulfillment and 10b rewrote it from the lease. If 10b failed before its write, 11a and 11b ran against a fulfillment still `active` and failed again instead of skipping. Both name one fulfillment aggregate, since release goes through it, so the harm is a secondary failure, not a wrong operation | 10b writes `teardown_fulfillment_id`, which 11a and 11b require. `lease_status`, written three times and read only by a log line, leaves the shared state; VM's `DealState` keeps it for the buyer-CLI deal |
+| The structural test checked field sets, so it could not see a consumer running before its producer, or a second producer | Decision 6's ordered checks |
+| 07 created an on-chain escrow even when 00g found Alkahest unconfigured | 07 requires `_alkahest_configured`: an escrow cannot be undone |
+| A failed pause at 00 did not stop later stages | 00 sets `_lifecycle_paused`, required by the first stages that write (shared 00f1, VM's 00f). The read-only readiness stages still run after a failed pause, so their diagnostics stay available |
+| The change directory's two `Zone.Identifier` files name a private workstation path | Tombstoned; they arrived with the snapshot, not a Section 8 fileset |
+
+Alternatives rejected: keeping 04a's raw request behind a shared signed-header helper,
+which would make every compute domain inherit a request path that can diverge from the
+registry client; a per-stage `requires` attribute a domain subclass extends, because
+`require_state` calls in the stage body already state each prerequisite where it is used
+and decision 6 checks them; keeping VM's sentinel names for bare metal to set, because
+`resume_confirmed` describes VM's listing creation, not publication; a conftest re-export
+of the moved helpers, which would leave two import paths for each; and letting a domain
+replace a shared stage's body, which would make "defined once" untrue for that stage.
+
+The permanent destination is `openspec/specs/test-compatibility/spec.md` through the
+change's "The canonical compute deal's shared stages are defined once" delta, and
+`docs/development/TESTING.md`'s system-test section, which 11.2 updates to name the
+shared stages module beside `domain_deal.py`.
+
+### Section 9 design: the bare-metal deal on the shared stages (2026-10-08)
+
+Re-read against the bare-metal storefront, its site's mock routes, and the lane's
+configuration before planning Section 9, stage by stage against the shared stages;
+decided with the maintainer, who kept the larger VM and bare-metal unification (settle
+responses, escrow rows, and claim events made alike) out of this change, where
+`kit-owned-listing-and-fulfillment-lifecycles` owns it. This settles task 9.0 and
+Section 8 design decision 8.
+
+Most shared stages fit with the driver and the lane's fixtures: 00, 00a, 00c, 00e,
+00f1, 04a, 05a, 05b, 06b, 07, 07b, 08a, 08c, 09c, 10a, 10b, and 11a. Bare metal emits
+the negotiation runtime's `round_decided` events, its preview returns `would_submit`
+and the listing's `host_id`, its job evaluation has its own route
+(`evaluate_bare_metal_job`, behind the existing `evaluate_create_job` hook), and its
+site commits the lease with the escrow as its deal reference, so the shared lease view
+resolves it.
+
+| Finding | Consequence |
+|---|---|
+| The bare-metal status reports no `registry`, `negotiation_strategy`, or `alkahest` check, which 00b, 00d, and 00g read, and no `provisioning_contract_version`, which 00c2 reads | Decision 1 |
+| Bare metal's `/api/v1/system/status` admits only administrators. The site's `storefront_auth` probe, which 00h reads, signs with the `service` role, so it reports `unauthorized`; VM's administrator routes admit a verified service peer | Decision 1 |
+| 09a and 11b release the mock gate with `resume_rule`. Bare metal's rules live on `/test/bare-metal/mock-rules` and are released with `resume_bare_metal_rule` | Decision 2 |
+| 08b expects settle to return `provisioning`, waits for a `provision/job_submitted` event, and reads `fulfillment_id` from settle status. Bare metal's settle returns `settlement_verified` and emits no event; its fulfillment exists when settle returns, since settle verify runs one servicing pass that begins it, and it is read through the buyer's `/api/v1/fulfillments/{negotiation_id}/status` | Decision 2 |
+| 09b expects settle status `ready` with `tenant_credentials`, and the primary escrow `ready` with a `fulfillment_uid`. Bare metal's admin wait reports `ready` once the lease is active, but its settle status stays `settlement_verified`, delivery is the fulfillments status, result, and access routes, and its escrow row stays `settlement_verified`: the attestation UID is recorded on the obligation, and only after the next servicing pass | Decision 2 |
+| 09bb asserts a `claims/claim_submitted` event. Bare metal's servicing pass after activation is what publishes the evidence digest and completes the fulfillment; there are no claim events, and the step means something different | Decision 3 |
+| 11b waits for `fulfillment/capacity_released`, which bare metal never emits, and releases its re-reservation through the peer callback, which bare metal refuses for a reservation that is not a deal lifecycle's | Decisions 1 and 2 |
+| The lane's publication clause lists 100 tokens an hour, where the shared deal terms are 10; `bare_metal_lane` has no buyer wallet, RPC URL, seller wallet, or service-role credential | Decision 5 |
+| `test_restart_recovery.py` does not show a retried teardown returns the same operation, nor that status, result, access, and settle-status reads after a restart while the lease is active are idempotent. An active status poll re-derives and saves the result and receipt each time, and those artifacts are write-once, so a restarted process that derived a different one would fail the read | Decision 6 |
+
+Decisions:
+
+1. **The bare-metal storefront reports what the shared readiness stages read.** Its
+   `/api/v1/system/status`, not its `/health` probe, adds `registry` (its registry's
+   reachability through the client publication already uses), `negotiation_strategy`
+   (its seller chain run through `market_policy`'s `run_negotiation_chain` against a
+   synthetic round zero, VM's probe and values), `alkahest` (the configured chain
+   names, or `unconfigured`), and `provisioning_contract_version` (from its installed
+   `compute_provisioning_contracts`). Status health is judged per key as VM's is: a
+   chain list is not a degradation, a strategy reporting `exit_on_probe` or `error` is.
+   The route admits a configured site authority under the `service` role as well as an
+   administrator, the same trust its capacity-released callback already uses, so the
+   site's link check reads it. When it records a release, the storefront emits
+   `fulfillment/capacity_released`, VM's event, so the lease view's release
+   observation means one thing in both lanes. The delta's rule that a domain's
+   difference is resolved in its storefront composition, not in the stage, decides
+   this over driver-supplied readings.
+2. **Four shared stages gain driver hooks; their bodies stay shared.** VM's driver
+   gains each with VM's current behaviour, so VM's lane proves the change:
+   - `release_create_gate()` (09a) and `release_teardown_gate()` (11b);
+   - `settle_dispatched(settle_response, deal_state)` (08b), which asserts the domain's
+     settle response and returns the dispatched fulfillment's ID: VM's asserts
+     `provisioning`, waits for `job_submitted`, and reads settle status; bare metal's
+     asserts `settlement_verified` and reads the buyer's fulfillments status. The stage
+     keeps the settle call and the `dispatching` assertion;
+   - `assert_delivery(deal_state)` (09b) replaces `assert_delivery(settle_status)`: VM's
+     asserts settle status `ready` with credentials and the primary escrow `ready` with
+     its `fulfillment_uid`; bare metal's asserts an active lease, a result carrying no
+     access coordinates, and access carrying host, port, and user, through
+     `BareMetalFulfillmentTransport`. The stage keeps the settlement wait and the
+     closed listing;
+   - `release_reserved(reservation)` (11b) replaces the stage's peer callback and the
+     driver's `site_id`: VM's sends the callback, bare metal's releases the reservation
+     at the site, the only place an administrative reservation exists.
+   VM's escrow assertions move out of the shared body; none is weakened.
+3. **09bb is each domain's own.** VM's keeps its body, as VM's own stage under its
+   name. Bare metal's steps settlement servicing and asserts the evidence it published:
+   the obligation's evidence resolves as the buyer through the typed evidence client
+   and matches the lease, and status reports no obligation waiting for an operator.
+   It is the first live run of Alkahest delivery and digest publication. Collection is
+   not asserted, for the reason VM's stage gives.
+4. **Bare metal's own stages** follow the stage-for-stage table: after 00h,
+   `TestStage03a_PublicationDryRun` (the preview reports the deal's resource as a
+   publish) and `TestStage03b_PublicationStepPublishes` (the step publishes it; sets
+   `seller_listing_id` and `listing_published`, requiring `_lifecycle_paused` and
+   `_supply_seeded`); after 09a, `TestStage09a2_PublicationClosesTheListing` (the
+   preview reports a close as `unavailable`, the step closes it; sets
+   `_listing_reconciled`); its 09bb; and after 11b the second deal's stages, numbered
+   from 12: publication reopens the listing, a second negotiated and settled deal,
+   buyer teardown sent twice returning the same operation, and capacity released
+   once.
+5. **Lane configuration.** The publication clause's rate becomes `10` tokens an hour,
+   the shared deal terms' rate; `bare_metal_lane` gains the buyer's wallet key,
+   address, and RPC URL, the seller's wallet address, and the service-role credential
+   (the site authority's well-known development key); the seller chain is set to
+   `["escrow_shape_guard", "bisection"]` (Section 6 decision 11). The site's
+   `PROVISIONING_STOREFRONT_URL` is already set, and the storefront already trusts the
+   site's authority through `BARE_METAL_STOREFRONT_SITES`, which decision 1's status
+   admission reuses.
+6. **Task 3.5's two gaps are closed with Section 9, at integration level.**
+   `test_restart_recovery.py` gains a restart while the lease is active (status and
+   result read twice, access and settle status read, all identical; one begin and one
+   reservation), and its teardown restart asserts the retried response is the first
+   one (`terminating`, the same reservation and fulfillment). A restarted process whose
+   site reports a different delivery keeps failing the read closed, as the write-once
+   artifacts make it; the test pins the unchanged case.
+7. **The structural test gains bare metal's row**, so its ordered checks run over
+   bare metal's scenario too. Each domain subclasses every shared stage once; 09bb
+   leaves the shared set.
+
+Versions: `arkhai-bare-metal-storefront` 0.14.2 → 0.15.0 (status checks, service
+admission, the release event), cascading VM's exact pin; `e2e-tests` gains
+`arkhai-bare-metal-buyer` and raises `arkhai-bare-metal` to 0.11.0, the evidence
+route's clients.
+
+Alternatives rejected: aligning bare metal's settle and settle-status responses,
+escrow rows, and claim events with VM's, which would change the bare-metal buyer's wire
+and anticipate the unification `kit-owned-listing-and-fulfillment-lifecycles` owns;
+driver-supplied readiness readings, which would let a shared readiness stage assert
+nothing of bare metal; and driver hooks for 09bb, which would hollow out a stage whose
+meaning differs.
+
+Permanent destinations: the bare-metal storefront's status checks, service admission,
+and release event in `openspec/specs/storefront-publication/spec.md` through this
+change's delta, promoted at 11.4; the shared stages, their hooks, and the per-domain
+09bb in `docs/development/TESTING.md` at 11.2; restart recovery in the
+`test-compatibility` delta's "Bare-metal storefront restart recovery is proven at
+integration level".
+
+Implementation findings (2026-10-08), each checked against the code:
+
+| Finding | Resolution |
+|---|---|
+| Decision 3's evidence check needs the published digest, and the buyer's fulfillment status carried none: the digest is recorded on the fulfillment as `lease_ready_evidence_digest` | `BareMetalFulfillmentResponse` gains `evidence_digest`, read from either name, so 09bb resolves exactly the digest the storefront published |
+| Decision 2's release at the site had no shared client operation | `SiteCapacity.release`, beside its reads and truncation, as the site's admin |
+| Decision 5's service-role credential has no consumer: the site's link check signs as the site authority, which `BARE_METAL_STOREFRONT_SITES` already trusts, and bare metal releases its re-reservation at the site, not through the callback | Not added to `bare_metal_lane` |
+| The Compose wrapper forwards no seller chain | The lane's overlay, `compose.bare-metal-local.yml`, sets it on the storefront; an operator's stack keeps the default chain, and the wrapper's forwarding stays with closeout task 2.6 |
+| An unsigned registry reply reads as `http_502` in the `registry` check, not as the registry's own status: the client verifies a reply before reporting its status | The check's values are `ok`, `http_<status>`, and `error: <type>`, as the client reports them |
+| The storefront's begin checks a scheduled resource's `bare_metal_publication.host_id` and `physical_host_id`, while the site treats a nested `physical_host_id` as a legacy shape and keeps a top-level one | The driver declares both; whether the site's declaration validation keeps the nested field is first observed in 9.6's run, recorded for 2.6 |
+| A restarted storefront whose site reports a different delivery for an active lease fails the status read as an unhandled 500, since the result and receipt are write-once | Fail-closed, as decision 6 records; the unhandled error rather than a typed refusal is recorded for 2.6 |
+| Run 37850683369, bare-metal lane: 05a's preview accepted the opening at round zero, with a reference amount of 0. The zero escrow address is the system's unpinned proposal, which the storefront client sends whenever a buyer names no contract and `escrow_shape_guard` passes; VM's seller prices it from the listing's first accepted escrow, bare metal's priced it from nothing, so a bare-metal opening naming no contract was accepted at any amount under either chain, the buyer's real opening included. A pinned contract the listing does not accept was, and is, refused by the guard | Decided with the maintainer: bare metal's seller prices a proposal matching no accepted escrow from the listing's first accepted escrow, as VM's does (`_priced_acceptance` in `negotiation_runtime.py`), for the opening, its preview, and acceptance alike; the shared stages are unchanged. Narrowing which escrow prices an unpinned proposal, or refusing one, is a change of its own for every domain, not this one's |
+| Run 37853584444, bare-metal lane: 05a through 08c passed; 08b's settle returned `settlement_verified`, but no fulfillment had begun. The site answered the storefront's schedule with 422 `no_eligible_resource`: the driver declared the machine with the site's default resource type, `compute.gpu`, and bare-metal scheduling places only `compute.bare-metal` resources. The servicing step's failure was retried silently, since the bare-metal servicing worker records no events | The driver declares the machine as `compute.bare-metal`, as the domain's fixtures and the site's own bare-metal integration tests do; a site integration probe reproduced the 422 with the default type and scheduled and began the deal with the bare-metal one, the scheduled resource keeping its nested publication view's host and physical machine. The worker's missing events are recorded for 2.6 |
+
+### Section 9 pre-closeout review (2026-10-09)
+
+Reviewed against run 37899278727 and decided with the maintainer.
+
+| Finding | Resolution |
+|---|---|
+| 09bb inferred publication from the stored evidence digest. The lifecycle stores the digest and records the submission before the chain call, and a rejected submission is retried with the digest still resolvable and nothing waiting for an operator, so the stage could pass with no attestation on chain | The buyer's fulfillment status names `evidence_attestation_uid`: the attestation settlement recorded as the escrow obligation's fulfillment, which it records only after the chain accepted the submission. 09bb reads that attestation from the chain through alkahest-py and asserts it references the escrow, carries the digest, and is not revoked. The pending attestation-reference query is not needed for this |
+| The site authority, admitted to `/api/v1/system/status` under `service`, also received the pool overrides and the manual-required count the model documents as administrator status | The site reads the readiness checks and the contract version, which its link check and a pin comparison use; pool overrides and the manual-required count stay the administrator's |
+| The roadmap still listed the pipeline's missing bare-metal deal as open | Closed in Goal 4's table, whose state now names the lane's deal |
+| Promotion is deferred to Section 11, while section closeout calls for it | Section 9's closeout stays open until 11.2 and 11.4 land; its implementation and live gate are complete once 9.6's rerun passes |
+
+### Section 10 design: each lane builds and composes its own stack (2026-10-09)
+
+Re-read against the workflow, the Makefiles, every compose file, and run 37899278727
+before planning Section 10; decided with the maintainer. Supersedes "Lanes run on images
+built once" and refines "API credits runs in its own lane" and "Lane composition files".
+
+| Finding | Consequence |
+|---|---|
+| Each lane job builds every image, and a whole job took 4m25s (bare metal) and 6m55s (VM), about three minutes of it the build | One build job ahead of the lanes, plus saving, uploading, downloading, and loading the image set, would lengthen every lane's wall-clock time. What it saves is runner time, which costs this repository nothing (decision 1) |
+| `build-dev` builds every image, the API-credit images included, whichever lane runs | Each lane builds only what its stack runs (decision 1) |
+| `compose.local-identities.yml` binds VM and API-credit services together | The overlay splits per market, as planned (decision 3) |
+| `compose.apicredits.yml` omits the API-credit storefront's `APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY`, so its stack cannot settle, and requires `APICREDITS_BUYER_*` paths no target prints | The API-credit bindings and buyer paths move to its overlay, with an environment target of its own (decisions 3 and 4) |
+| The plan held that Compose refuses a file redefining a service it `include`s; Compose 5.5.1 merges the definitions instead, and the runner's version is not recorded | `compose.apicredits.yml` becomes `include`-only anyway, so no stack depends on either behaviour (decision 3) |
+| `test_credits_deal_buyer_cli` pins a compute-schema registry beside the credits registry, to exercise discovery routed by schema; in the VM lane that is VM's registry | The API-credit lane deploys a compute-schema registry of its own (decision 4) |
+| `e2e_credits_payment_deal` exists beside `e2e_credits_deal` and skips in the VM lane with no payments target | It moves with the credits deal (decision 5) |
+| 10.1's reference list names a test since removed and two files that no longer mention the overlay | The task names the references that exist |
+
+Decisions:
+
+1. **Each lane builds the images its stack runs, in its own job.** The root `Makefile`
+   gains `build-e2e-vm`, `build-e2e-bare-metal`, and `build-e2e-apicredits`: the wheels,
+   the dev chain image with its baked state, the test image, and the lane's runtime
+   images (VM: registry, storefront, provisioning; bare metal: registry, provisioning,
+   bare-metal storefront; API credits: registry, credits service, credits storefront,
+   sample app). `build-dev` keeps building everything for local use. The three lane jobs
+   run in parallel, each building, and share no image artifact; wall-clock time is the
+   measure. Rejected: one build job publishing the images as an artifact (a serial
+   build, plus the transfer and load, before any lane starts) and a registry-backed
+   build cache (machinery for builds that take about three minutes).
+2. **Lane targets.** `e2e-tests/Makefile`'s `test-e2e-vm`, `test-e2e-bare-metal`, and a
+   new `test-e2e-apicredits` each write the lane's environment file, take its stack
+   down, run its build target, bring the stack up, and run its markers in the test
+   container on its network. Each lane also has `e2e-<lane>-down` and
+   `e2e-<lane>-logs` (`e2e-vm-down` exists), the one place its compose files, project,
+   and environment file are named; the workflow's log collection and teardown call
+   them. The three stacks cannot run side by side on one host: each names its chain
+   container `anvil` and publishes host ports, 8545 among them and, for VM and bare
+   metal, 8080 and 8081. `test-e2e` is therefore VM, `e2e-vm-down`, bare metal,
+   `e2e-bare-metal-down`, then API credits. Isolating the lanes' host ports and
+   networks, so they can run concurrently on one host, is a change of its own, proposed
+   at this section's closeout. `E2E_MODULE` drops `e2e_credits_deal` and
+   `e2e_credits_payment_deal`, and `E2E_APICREDITS_MODULE` holds them. No run-only
+   targets: nothing loads prebuilt images any more.
+3. **Composition files.** `compose.local-identities.yml` splits into
+   `compose.vms-local.yml` (the VM services' bindings and the VM buyer service) and
+   `compose.apicredits-local.yml` (the API-credit services' bindings, the storefront's
+   EVM key, and the credits buyer service), following `compose.bare-metal-local.yml`.
+   `compose.apicredits.yml` becomes `include`-only, as `compose.vms.yml` is.
+   `docker-compose.yml` stays the full local stack and documents layering both overlays.
+   Both wrappers include `compose.dev.yml`, so the full stack includes the VM wrapper and
+   API credits' domain file, never `compose.apicredits.yml`, and the chain enters once:
+
+   | Stack | Files |
+   |---|---|
+   | VM lane | `compose.vms.yml`, `compose.vms-local.yml` |
+   | API-credit lane | `compose.apicredits.yml`, `compose.apicredits-local.yml`, `compose.apicredits-lane.yml` |
+   | Full local stack | `docker-compose.yml` (`compose.vms.yml` and `domains/apicredits/compose.yml`), `compose.vms-local.yml`, `compose.apicredits-local.yml` |
+
+   The VM lane's stack therefore has no API-credit service, and only the API-credit
+   lane's has `compute-registry`. A render test asserts each stack's services, and that
+   the full stack has one `anvil` and no `compute-registry`.
+4. **The API-credit lane owns its topology.** It is a compose project of its own
+   (`simple-market-apicredits`), with its own network, volumes, and environment file
+   from `make e2e-apicredits-dev-env`; `make e2e-vms-dev-env` prints the VM lane's, and
+   `e2e-dev-identities-env` prints both for the full stack. Each environment file is
+   generated, never committed, and ignored: `.e2e-vms.env`, `.e2e-bare-metal.env`, and
+   `.e2e-apicredits.env`, which each lane's `test-e2e-<lane>` writes from its target
+   before anything else, and `.e2e-identities.env` for the full stack. They hold the
+   committed development identities' resolved paths and, for bare metal, deadlines
+   generated at each run; a lane's down and logs targets write the file only if a
+   failed run never did. The compute-schema registry
+   the credits scenario routes across is the lane's own, `compute-registry`, from the
+   registry image with the compute filter spec and a development identity, declared in
+   `compose.apicredits-lane.yml`, which only the lane layers: the full stack already has
+   VM's. The scenario reads that registry and its pins from the `api_credits` settings,
+   so it names nothing of the VM lane. Rejected: the lane borrowing VM's registry service
+   (it would compose another market's topology), and declaring the registry in
+   `compose.apicredits-local.yml` (the full stack would gain a redundant compute
+   registry).
+5. **Scenario placement.** `e2e_credits_deal` and `e2e_credits_payment_deal` run in the
+   API-credit lane; the payment deal still skips without a payments target.
+   `e2e_alkahest_escrow_codecs` and `multi_registry` stay in VM's, which alone needs
+   VM's two registries.
+6. **Workflow.** `.github/workflows/e2e.yml` runs three parallel jobs, `e2e-vm`,
+   `e2e-bare-metal`, and `e2e-apicredits`, each with uv and Foundry (the dev chain's
+   baked state is generated against Anvil), running its `test-e2e-<lane>` target and
+   collecting logs and tearing down through its `e2e-<lane>-logs` and `e2e-<lane>-down`.
+   The workflow and its diagnostics are one interface: `scripts/fetch-e2e-logs.py`,
+   its test, and `TESTING.md`'s paragraph on fetching a run's logs name the
+   `e2e-apicredits-logs` artifact with the other two, in the same task.
+7. **The lane requirement drops "images built once".** The `test-compatibility` delta's
+   requirement becomes "Each domain runs in its own lane": a lane per market domain, as
+   its own job, building what its stack runs and composing only its own services.
+
+Unchanged: holding and stepping the API-credit storefront's loops in that lane, and its
+production-application integration tests, stay with `apicredits-end-to-end-lane`.
+
+Design review (2026-10-09), each point checked against the code and decided with the
+maintainer: the log fetcher and its test named two artifacts (decision 6); the full
+stack's assembly was implied, not stated (decision 3); the sequential local run was a
+convenience where it is a constraint of the stacks' fixed names and host ports
+(decision 2), and the maintainer asked for lane-isolated ports or networks to be
+proposed as a change of its own at closeout; the generated environment files had no
+stated lifecycle (decision 4); `proposal.md` still described shared images. The lane
+jobs' wall-clock times are recorded as observations, not a threshold.
+
+Permanent destinations: the lane requirement in `openspec/specs/test-compatibility/spec.md`
+through this change's delta (11.4); the three lanes, their targets, and their composition
+in `docs/development/TESTING.md` (11.2) and the compose file list in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` (11.3).
+
+### Section 10 design review: mock provisioning and the plan against the code (2026-10-09)
+
+Section 10's plan re-read against the code before implementation; decided with the
+maintainer.
+
+| Finding | Consequence |
+|---|---|
+| The workflow's `PROVISIONING_MODE: mock`, which 10.4 moved to the VM job as "the only stack reading it", reaches no lane's mock. Compose passes it only to the VM storefronts, as `ARKHAI_PROVISIONING_MODE` beside `MOCK_PROVISIONING_SUCCESS`; the storefront reads its environment under the `STOREFRONT` prefix, and nothing reads `[provisioning] mode` | The mock is the provisioning service's `mock` profile, which its own profile file calls "a provisioning service concern, not an agent concern". The VM stack is mock because `domains/vms/compose.yml` hard-codes `ACTIVE_PROFILES=mock` in the base topology; the bare-metal stack is mock because the lane's local overlay replaces the base's `docker`. Helm already has the intended shape, the provisioning chart's `mockMode` (decision 8) |
+| The credits deal skips when a lane setting is missing; in its own lane it is the only scenario that can pass, so a misconfigured lane reports nothing passed and the job is green | `TESTING.md` already holds that a lane's scenario fails rather than skips on a missing lane setting, and the bare-metal lane's fixtures fail (decision 9) |
+| 10.2's `compute-registry` names its authority id and credential but not the scheme, identifier, or credential path, nor the descriptor's base URL, display name, and operator identity, without which the registry refuses to start | 10.2 names every input |
+| 10.1's references miss `dev-env/identities/README.md`'s registry-pin paragraph and Alice's pin, the lane's reuse of `registry-a.eip191` as `compute-registry`, and `e2e-tests/tests/e2e/roles/README.md`'s "Running" block, which starts each wrapper without its overlay | 10.1 names them |
+| Closeout 2.9 still confirms "all three lanes pass from one image build", which decision 1 superseded | 2.9 reads each lane building its own stack |
+| Run 37910886195's jobs took 5m44s (VM) and 4m16s (bare metal) | 10.5 records each lane beside both runs |
+
+Decisions:
+
+8. **Mock provisioning is the provisioning service's setting, chosen per run.** Mock and
+   local are separate choices: a local stack can provision real hosts, and a dev cluster
+   runs mock through Helm's `mockMode`. One input, `PROVISIONING_MODE` (`mock` or
+   `real`), selects it for the compose stacks. The workflow keeps it at workflow level,
+   where both compute lanes now read it and the API-credit stack, which has no
+   provisioning service, ignores it. The lane environment targets (`e2e-vms-dev-env`,
+   `e2e-bare-metal-dev-env`, and `e2e-dev-identities-env` for the full stack) refuse any
+   other value, default it to `mock`, since the lanes' scenarios hold jobs through the
+   mock profile's `/test` controls, and print each stack's provisioning profiles:
+   `VMS_PROVISIONING_ACTIVE_PROFILES` and `BARE_METAL_PROVISIONING_ACTIVE_PROFILES`,
+   `mock` under mock, as each lane runs today, and `docker` under real, the profile the
+   bare-metal base already names and the VM service's container profile. The
+   provisioning services read `ACTIVE_PROFILES` from those variables, defaulting to
+   `docker`, as Helm's `mockMode` defaults to false; `compose.bare-metal-local.yml` no
+   longer sets the profile, so the local overlay means the dev chain and the storefront's
+   seller chain only. No storefront carries a provisioning mode: `ARKHAI_PROVISIONING_MODE`
+   and `MOCK_PROVISIONING_SUCCESS` leave `domains/vms/compose.yml`, `PROVISIONING_MODE`
+   leaves the VM storefronts' development env files, and the VM development profiles'
+   `[provisioning] mode` and its comment go. The storefront wheel's shipped `mode` key,
+   and the validation runbook's Helm override of it, are recorded for 2.6, so this
+   section bumps no service. Rejected: moving the setting to the VM job unchanged (it
+   would keep a switch that switches nothing) and dropping it (mock is a per-run choice,
+   which the pipeline states).
+9. **The API-credit lane's settings are required.** The credits deal reads every lane
+   setting it needs (the credits registry and its pin, the compute registry and its pin,
+   the storefront, and the buyer's wallet and credential) through a helper that fails
+   naming the setting, as the bare-metal lane's does. The payment deal's skip without a
+   payments target stays, since a blocked scenario is not a missing setting. The gate
+   checks the lane reports exactly one passed and three skipped.
+
+Permanent destinations: decision 8 in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
+per-domain stack composition (11.3) and `docs/development/TESTING.md`'s lanes (11.2),
+and the lane requirement's scenario in the `test-compatibility` delta (11.4); decision 9
+is `TESTING.md`'s existing rule, applied.
+
+### Section 10 implementation review (2026-10-09)
+
+Reviewed against run 37919102415 and decided with the maintainer.
+
+| Finding | Resolution |
+|---|---|
+| `test-e2e` listed the lanes and their teardowns as prerequisites, which `make -j` runs concurrently, though the stacks cannot coexist; `build-e2e-base`, `build`, and `build-dev` likewise relied on left-to-right prerequisites for the wheels to exist before the images and dev chain that copy `.dist/` | Each is a recipe of recursive calls in the required order, since GNU Make 4.3, the runners' version, has no `.WAIT`. The pipeline reaches only `build-e2e-base`, on a fresh checkout, so that target makes the wheels itself; only the images, which share nothing but `.dist/`, build in parallel |
+| The payment deal skipped on a missing `API_CREDITS` setting, and checked the payments target first, so a broken lane stayed hidden behind the blocked scenario | Both credits scenarios read lane settings through one `lane_setting` in the API-credit scenarios' `conftest.py`, which fails; the payment deal checks them before the payments target, the only cause it skips for |
+| `domains/bare_metal/compose.yml` still said only the local overlay enables the test controller; `apicredits-end-to-end-lane`'s design described the API-credit scenario in the VM lane; the validation runbook brought the full stack up with neither overlay nor environment file, so 10.6 overstated documentation compliance | Each describes the current system; the runbook runs every compose command through one invocation carrying the environment file and both overlays |
+| Two `.DS_Store` files were tracked | Removed and ignored |
+
 ### Bare-metal publication has a dry run
 
 The publication loop gains a dry-run step that reports what one pass would open, close,
@@ -2685,6 +3203,9 @@ under "Where each route's typed client lives"; this change does not move the cli
 
 ### Lanes run on images built once
 
+*Superseded by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decision 1: each lane builds the images its stack runs.*
+
 Decided with the maintainer. One pipeline job builds the wheels and every image once and
 publishes them as a short-lived workflow artifact; each lane job depends on it, loads the
 images, and runs its stack and scenarios without building. Each lane gains a run-only
@@ -2692,6 +3213,10 @@ Make target, and the existing `test-e2e-<lane>` targets become build plus run so
 use is unchanged. Toolchains needed only to build move to the build job.
 
 ### API credits runs in its own lane
+
+*Refined by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decisions 4 and 5: the lane owns its topology, including the compute
+registry its scenario routes across, and the payment deal moves with the credits deal.*
 
 Decided with the maintainer, and migrated from `apicredits-end-to-end-lane`: the third
 lane runs the API-credit stack (`compose.apicredits.yml`) and `e2e_credits_deal` as its
@@ -2752,6 +3277,9 @@ removed lease registration ("5B.12.D decision gate (2026-10-06)"); what remains 
 is in "Section 6 design: bare metal on the negotiation runtime (2026-10-07)".*
 
 ### Lane composition files
+
+*Refined by "Section 10 design: each lane builds and composes its own stack
+(2026-10-09)", decisions 3 and 4.*
 
 Found in planning. `compose.local-identities.yml` binds both the VM and API-credit
 services, so the VM stack cannot drop the API-credit services while it is layered.
@@ -2885,3 +3413,57 @@ Earlier:
 - **Admin reserve's VM path** (`/api/v1/admin/portfolio/reservations`) carries VM
   vocabulary; it is kept for client compatibility. `remove-dead-storefront-physical-surfaces`
   does not retire it (checked 2026-10-01).
+
+### Settlement wait observes the selected site (2026-10-09)
+
+Run 37896157446 passed the VM lane and bare-metal provisioning through 09a2,
+then timed out at 09b. The site had converged fulfillment to active, while the
+administrator wait hook read only the storefront's cached dispatch state. The
+scenario deliberately holds settlement servicing; the existing route test hid
+the defect by refreshing fulfillment before waiting.
+
+Decision: once fulfillment has begun, the administrator wait hook refreshes it
+through `BareMetalFulfillmentService.status`, using the accepted thread's buyer
+principal and the durable selected-site references. This observes and records
+delivery without starting fulfillment, stepping servicing, or publishing evidence.
+Pre-dispatch waits remain pending. Released lifecycles retain the service's
+terminal handling. Changing the shared stage or resuming timers would hide the
+route defect and weaken deterministic coverage, so those alternatives are rejected.
+
+Files: `deal_controls.py` for the live read; `tests/test_deal_controls.py` for
+a paused-worker, pending-to-active regression; the `storefront-publication`
+delta for the wait contract, promoted with the delta at 11.4. No repository-wide
+architecture or proposal scope change is required. Validate the route suite,
+bare-metal storefront suite, chart render tests, the failing scenario on locally
+deployed Helm charts, both Compose lanes, packaging, comment hygiene, citations,
+and OpenSpec validation. Closeout includes review of touched imports/comments,
+compressed task evidence, documentation promotion, and explicit roadmap/index
+disposition; campaign completion remains governed by the existing closeout.
+
+The local Helm run reproduced 09b on the original image. Fixing that wait
+exposed 09bb: the servicing pass processed zero obligations because the
+initial pending fulfillment scheduled a 30-second retry. Observing the
+transition to active now wakes only the obligation adopted for that escrow
+through the worker's existing `wake` operation. It does not run servicing;
+the explicit next pass owns evidence publication. Repeated ready reads do
+not wake again. The route regression also asserts that the next servicing
+pass processes the obligation immediately. This preserves the production
+backoff for unchanged pending work and avoids timing-dependent scenarios.
+
+The next local Helm run passed readiness, evidence publication, expiry, release,
+and the second deal, then exposed an invalid assertion in 12d. Lease termination
+can synchronously begin provider teardown even while its timer is held. The first
+response records `terminating`; the retry observes `teardown_dispatch_pending`
+from the site. These are the same release, with unchanged negotiation, reservation,
+and fulfillment identities. The scenario compares those identities and accepts
+that progress under its held convergence controls; 12e still proves one release.
+No production teardown behavior changes. The scenario file joins this follow-up's
+fileset and validation scope. The existing physical-provisioning contract for
+storefront teardown and idempotent lease termination remains authoritative.
+
+Reviewed 2026-10-09 and accepted, with two points recorded for closeout task 2.6:
+the wake is the wait's alone, so a buyer's status read that observes activation
+first leaves evidence to the pending retry, where waking at the recorded transition
+in `BareMetalFulfillmentService.status` would cover every reader; and the wait reads
+the site on every poll, so a site error fails the wait rather than being polled
+through. Run 37899278727 is 9.6's evidence.

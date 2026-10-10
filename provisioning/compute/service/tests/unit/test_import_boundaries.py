@@ -4,6 +4,9 @@ import ast
 import re
 from pathlib import Path
 
+from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 SERVICE_PACKAGE = SERVICE_ROOT / "src" / "compute_provisioning_service"
@@ -208,9 +211,6 @@ def test_no_domain_s_deployment_configuration_names_another_domain_s_tree():
 def test_the_ansible_distribution_names_no_domain_s_inventory_group_or_playbook():
     """The distribution runs whichever playbooks and inventory groups the
     domains' codecs and configuration name; it knows none of them."""
-    from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-    from vm_provisioning_adapter.codec import VmAnsibleCodec
-
     names = {VmAnsibleCodec.inventory_group, BareMetalAnsibleCodec.inventory_group}
     names.update(
         path.name

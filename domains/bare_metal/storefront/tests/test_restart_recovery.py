@@ -21,6 +21,7 @@ from test_alkahest_lifecycle import (
     _stopped_after,
 )
 from test_http_settlement import BUYER, ESCROW_UID, _app, _buyer, _fulfillment_client
+from test_http_settlement import _settled as _settle_wire
 
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
@@ -98,5 +99,52 @@ async def test_a_restart_after_teardown_ends_the_lease_once(tmp_path) -> None:
         retried = _fulfillment_client(base_url).teardown("neg-accepted")
 
     assert first["state"] == "terminating"
-    assert retried["negotiation_id"] == "neg-accepted"
+    # The retried teardown is the first one: the same lease release, not a
+    # second.
+    for name in ("negotiation_id", "state", "capacity_reservation_id", "fulfillment_id"):
+        assert retried[name] == first[name], name
     assert site.terminations == [("reservation-a", "buyer_teardown")]
+
+
+async def _settle_status(app) -> dict:
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            return _settle_wire(await buyer.get_settle_status(ESCROW_UID))
+
+
+async def test_a_restart_while_the_lease_is_active_reads_the_same_delivery(
+    tmp_path,
+) -> None:
+    site = _Site("active")
+    runtime, _app_, _obligation_ref = await _settled(
+        tmp_path,
+        site=site,
+        chain=ChainClient(StringObligations(uid=ATTESTATION_UID)),
+        escrow=EscrowOnChain(),
+    )
+    capacity = runtime.capacity_client
+    with serving(_app(runtime)) as base_url:
+        buyer = _fulfillment_client(base_url)
+        status = buyer.status("neg-accepted")
+        result = buyer.result("neg-accepted")
+        access = buyer.access("neg-accepted")
+    settle_status = await _settle_status(_app(runtime))
+
+    restarted = _restarted(runtime)
+    with serving(_app(restarted)) as base_url:
+        buyer = _fulfillment_client(base_url)
+        # Each active status read re-derives the result and receipt from the
+        # site's delivery and saves them, and both are write-once: reads after a
+        # restart are idempotent only while they derive what is stored.
+        statuses = [buyer.status("neg-accepted") for _ in range(2)]
+        results = [buyer.result("neg-accepted") for _ in range(2)]
+        restarted_access = buyer.access("neg-accepted")
+    restarted_settle_status = await _settle_status(_app(restarted))
+
+    assert status["state"] == "active"
+    assert statuses == [status, status]
+    assert results == [result, result]
+    assert restarted_access == access
+    assert restarted_settle_status == settle_status
+    assert len(site.begin_calls) == 1
+    assert len(capacity.reserve_calls) == 1

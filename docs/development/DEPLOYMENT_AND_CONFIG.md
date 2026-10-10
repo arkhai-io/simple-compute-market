@@ -244,20 +244,48 @@ authorities:
   gated sample service, and API-credit storefront.
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
+- `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`
+  and `domains/apicredits/compose.yml`, so the dev chain enters once.
+
+Each base file composes topology only. The development bindings are per-market
+overlays layered with `-f`: `compose.vms-local.yml` (the VM services' signer,
+wallet, and buyer-path bindings, and the VM buyer service),
+`compose.apicredits-local.yml` (the API-credit services' bindings, the
+storefront's EVM key, and the credits buyer service), and
+`compose.bare-metal-local.yml` (the bare-metal storefront's dev-chain wait,
+Alkahest address book, and seller chain). The bare-metal stack also layers
+`compose.dev.yml` for its dev chain. The API-credit end-to-end lane adds
+`compose.apicredits-lane.yml`, a compute-schema registry of its own that the
+credits scenario routes discovery away from; the full local stack never layers
+it, because VM's registry already fills that role there. Each stack takes its
+values from a generated environment file printed by the root `Makefile`
+(`e2e-vms-dev-env`, `e2e-bare-metal-dev-env`, `e2e-apicredits-dev-env`, and
+`e2e-dev-identities-env` for the full stack), so every required binding
+resolves to a committed development identity.
+
+Whether a compute stack provisions through its provisioning service's `mock`
+profile is chosen per run, not per stack file and never by a storefront.
+`PROVISIONING_MODE` (`mock` or `real`, default `mock`) is mapped by the root
+`Makefile`'s compute environment targets, which refuse any other value, to
+`VMS_PROVISIONING_ACTIVE_PROFILES` and `BARE_METAL_PROVISIONING_ACTIVE_PROFILES`:
+`mock` under mock, `docker` under real. The provisioning services read
+`ACTIVE_PROFILES` from those variables, and the base compose files default them
+to `docker`, real provisioning, as the provisioning Helm chart's `mockMode`
+defaults to false. The API-credit stack has no provisioning service and ignores
+the setting.
 
 The VM development stack runs Bob and Alice as separate storefronts with
 separate provisioning authorities. Each authority has its own service signer,
 storefront trust pin, callback destination, database, and process-local job
 queue. Both storefronts use the local site alias `default`, resolved against
-their respective authorities. The local identity overlay supplies deterministic
+their respective authorities. `compose.vms-local.yml` supplies deterministic
 development credentials.
 
 The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
 to merge role bindings with the domain topology, and declares the named volumes
 those services use. Service extension preserves the domain file's relative mount
 paths. An `include` cannot be used to import a service and redefine it in the same
-wrapper. The e2e lane adds `compose.dev.yml` and `compose.bare-metal-local.yml`
-with `-f` for its dev chain and provisioning mock profile.
+wrapper.
 
 Storefront images install their distributions from the staged `.dist`
 wheelhouse; runtime images do not resolve editable sibling source. API-credit
@@ -271,12 +299,13 @@ inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
-The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry, and a public settlement address
-alone does not compose a settlement authority. Its stack may be brought up for
-operator integration, but it is not release-qualified or discoverable-deal
-evidence until accepted publication and settlement lifecycles are ready and
-the installed buyer completes real access and revocation.
+The bare-metal storefront has no publication timer: it publishes when a pass is
+invoked, through the `bare-metal-storefront publish` command or the publication
+loop's step. A public settlement address alone does not compose a settlement
+authority (see "Bare-metal role configuration"). Its end-to-end lane completes
+a discoverable deal with mock-provisioned delivery, which is not
+release-qualified evidence: that needs the installed buyer to complete real
+access and revocation on a real host.
 
 ## Stateful service persistence
 

@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.db.database import create_session_factory
 from compute_provisioning_service.db.models import Base
 from market_resource_pools import ResourcePool
+from vm_provisioning_adapter.db import Base as VmBase
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
@@ -33,7 +34,6 @@ def db_engine():
     )
     # resource_pools must exist before VM's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
-    from vm_provisioning_adapter.db import Base as VmBase
     PoolsBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)

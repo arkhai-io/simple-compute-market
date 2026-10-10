@@ -17,27 +17,9 @@ Once a deal has been accepted, commercial delivery takes priority over local boo
 - **AND** continues the live commercial delivery attempt
 - **AND** does not tear down or discard the deliverable VM solely because of that write failure
 
-### Requirement: Versioned fulfillment context
-
-Before the first recoverable physical mutation, the VM storefront MUST persist a versioned `vm.storefront.fulfillment-context` envelope linked to its negotiation and verified SettlementEvidence. It MUST record the exact normalized fulfillment request, generated target, listing/order references, lease timing and opaque settlement reference without credentials. Payment context MUST NOT be stored as an escrow row. Unknown kinds or versions MUST remain operator-visible and MUST NOT be guessed or silently rewritten.
-
-#### Scenario: Generated VM target is preserved exactly
-
-- **WHEN** the storefront constructs fulfillment context for an accepted VM deal
-- **THEN** it generates a non-empty VM target once
-- **AND** records that exact target in the versioned fulfillment request
-- **AND** sends the same target to physical fulfillment
-- **AND** uses the same target when registering the VM lease
-
-#### Scenario: Unsupported context remains visible
-
-- **WHEN** recovery loads an unknown fulfillment-context kind or schema version
-- **THEN** it leaves delivery pending and operator-visible
-- **AND** does not guess, rewrite or replay the unknown payload
-
 ### Requirement: Full settlement convergence ownership
 
-The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, required lease registration and listing/delivery progress. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Early lease-termination client plumbing remains available without requiring a buyer-facing flow. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
+The VM storefront MUST own capacity reservation, physical fulfillment, credential delivery, and listing/delivery progress. It MUST commit the deal's reservation before the fulfillment begins, which begins the lease; it writes nothing to the lease afterwards. The selected settlement stage MUST own mechanism-specific attestation, readiness and claim binding; the claims engine retains submission/collection, not physical recovery. Early lease-termination client plumbing remains available without requiring a buyer-facing flow. Common delivery MUST consume evidence and MUST NOT compare mechanism IDs. The VM storefront MUST hold and commit site capacity under the deal's negotiation (`deal_ref.negotiation_id`) whatever the settlement mechanism, so a deal's site reservation is found by its negotiation and carries no settlement reference.
 
 #### Scenario: An escrow-settled deal's reservation is looked up
 
@@ -47,7 +29,7 @@ The VM storefront MUST own capacity reservation, physical fulfillment, credentia
 #### Scenario: Physical success converges commercial delivery
 
 - **WHEN** physical fulfillment reaches an active result
-- **THEN** common delivery records credentials, refreshes capacity, registers the VM lease and updates listing/delivery progress
+- **THEN** common delivery records credentials, refreshes capacity, and updates listing/delivery progress
 - **AND** the selected Alkahest continuation reconciles on-chain fulfillment, escrow readiness and settlement claims when applicable
 - **AND** every step is safe to revisit after interruption
 
@@ -132,6 +114,60 @@ When no supported query capability is configured, the storefront MUST NOT blindl
 
 - **WHEN** a supported injected query capability returns an existing matching fulfillment UID
 - **THEN** recovery adopts that UID without submitting another obligation
+
+### Requirement: A step after physical fulfillment defers a VM deal, never fails it
+
+Once physical fulfillment has produced a running VM, a failure of a later step (storing its
+credentials or publishing the fulfillment evidence) MUST NOT mark the deal's delivery failed.
+The foreground path MUST report the fulfillment as deferred and leave delivery unfinished.
+Restart convergence MUST then complete the deal from the recorded fulfillment, without
+beginning a second one. No step after physical fulfillment writes the lease: the deal's
+reservation is committed, beginning its lease under the deal's negotiation, before its
+fulfillment begins, on the foreground path and on restart convergence alike, and
+provisioning records the lease's target when the fulfillment becomes active.
+
+#### Scenario: Evidence publication fails after provisioning
+
+- **WHEN** the VM is running and publishing its fulfillment evidence fails
+- **THEN** the deal is deferred, and restart convergence publishes the evidence
+
+#### Scenario: Restart convergence recovers a reservation never committed
+
+- **WHEN** restart convergence resumes a deal whose reservation was never committed
+- **THEN** it commits the reservation with the deal's window and negotiation before beginning
+  the fulfillment, and a reservation committed earlier keeps the window its first commit
+  recorded
+
+### Requirement: A VM deal records only how to reach its VM
+
+The connection details a VM storefront records for a deal MUST be the delivery's SSH
+endpoint (host, port, and tenant account), when access became ready, and the provisioned
+resource identities, and nothing else: no guest name, address internal to a host, or key
+path. A record with no buyer-facing address MUST omit the host rather than name another.
+
+#### Scenario: A VM becomes ready
+
+- **WHEN** a VM fulfillment becomes active
+- **THEN** the storefront records the delivered endpoint, readiness, and resource identities as the deal's connection details
+
+### Requirement: The fulfillment context records the exact request, naming no guest
+
+Before the first recoverable external mutation, the VM storefront MUST persist a versioned `vm.storefront.fulfillment-context` envelope linked to its negotiation and verified SettlementEvidence. Version 1 records the exact normalized VM fulfillment request, listing and order references, lease timing inputs, and the opaque settlement reference. The request MUST NOT name the guest, which provisioning names. Credentials and other returned secrets MUST NOT be stored in this envelope, and payment context MUST NOT be stored as an escrow row.
+
+Unsupported kinds or versions MUST remain operator-visible and MUST NOT be guessed or rewritten silently.
+
+#### Scenario: The recorded request is replayed exactly
+
+- **WHEN** the storefront constructs fulfillment context for an accepted VM deal
+- **THEN** it records the exact request it sends to physical fulfillment, naming no guest
+- **AND** recovery sends that recorded request unchanged
+- **AND** the lease's target is the one provisioning recorded, never the storefront's
+
+#### Scenario: Unsupported context remains visible
+
+- **WHEN** recovery loads an unknown fulfillment-context kind or schema version
+- **THEN** it leaves delivery pending and operator-visible
+- **AND** does not guess, rewrite, or replay the unknown payload
 
 ### Requirement: VM role tables gate evidence-based delivery
 

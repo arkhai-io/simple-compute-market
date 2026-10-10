@@ -99,11 +99,6 @@ services:
       # to find the mounted TOML. The storefront config loader resolves
       # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
       - XDG_CONFIG_HOME=/etc
-      # Provisioning-mode override stays a host-level env var because
-      # tests flip it per-invocation (e.g. PROVISIONING_MODE=mock make
-      # e2e-mock-happy). Wired into the storefront runtime via TOML override.
-      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       # The storefront's policy discovery needs `domains/` on PYTHONPATH
       # so it can find arkhai_vms_negotiation.rl callables.
       - PYTHONPATH=/app:/app/src
@@ -169,8 +164,6 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       - XDG_CONFIG_HOME=/etc
-      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
-      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       - PYTHONPATH=/app:/app/src
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
@@ -219,9 +212,11 @@ services:
     environment:
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://redis:6379
-      # Mounts /test/* router used by integration tests' provisioning_test_client
-      # (TestStage07 mock-rules). Should never be set in staging/prod.
-      - ACTIVE_PROFILES=mock
+      # `docker`, or `mock` when the run selects mock provisioning
+      # (`PROVISIONING_MODE` in the environment targets): the mock runner in
+      # place of Ansible, and the /test/* controls the end-to-end scenarios
+      # hold jobs through. Never mock in staging or production.
+      - ACTIVE_PROFILES=${VMS_PROVISIONING_ACTIVE_PROFILES:-docker}
       # Storefront callback target for the lease watchdog.
       # When the watchdog releases a lease, it PATCHes this URL to mark the
       # storefront resource available. Must match the bob-storefront service
@@ -253,5 +248,5 @@ services:
       - "8083:8081"
     environment:
       - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
-      - ACTIVE_PROFILES=mock
+      - ACTIVE_PROFILES=${VMS_PROVISIONING_ACTIVE_PROFILES:-docker}
       - PROVISIONING_STOREFRONT_URL=http://alice-storefront:8002

@@ -3,10 +3,21 @@
 ### Requirement: Complete bare-metal seller lifecycle
 A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
 
+#### Scenario: Administrator waits while settlement servicing is held
+- **WHEN** an accepted bare-metal deal has begun fulfillment and its selected site converges it to active while the storefront's settlement-servicing loop is held
+- **THEN** the administrator's settlement wait refreshes that fulfillment through the accepted thread's buyer principal and durable site binding, reports ready, and records its buyer-safe delivery
+- **AND** observing the transition to active wakes only the obligation adopted for that escrow, so its next servicing pass can publish evidence without waiting for the pending-fulfillment retry deadline; repeated ready reads do not wake it again
+- **AND** the wait starts no fulfillment, creates no reservation, and publishes no settlement evidence
+
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
 - **THEN** the thread records the canonical buyer and seller principals and the exact listing/site/domain binding, and it is recorded as successful only after its agreement payloads and settlement plan are recorded
 - **AND** no capacity is reserved or held until settlement starts fulfillment
+
+#### Scenario: An opening leaves its escrow contract unpinned
+- **WHEN** a buyer opens, or an administrator previews an opening, with an escrow proposal naming no escrow contract (no address, or the zero address)
+- **THEN** the seller negotiates from the listed rate of the listing's first accepted escrow, as VM's seller does, so its floor holds for every opening, and the preview reports the decision the opening makes
+- **AND** a proposal naming a contract the listing does not accept is refused
 
 #### Scenario: Acceptance is interrupted
 - **WHEN** the storefront stops after an acceptance began but before the thread was recorded as successful
@@ -41,6 +52,7 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 #### Scenario: Evidence is resolved
 - **WHEN** a caller requests lease-ready evidence by its digest
 - **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
+- **AND** the buyer's fulfillment status names the evidence digest once the evidence is stored, and the attestation that published it only once settlement has recorded the chain's acceptance of the submission, so a stored digest awaiting a retry never reads as published
 
 #### Scenario: A settlement ends uncollected after delivery started
 - **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started
@@ -158,3 +170,24 @@ verify, or no site authority is configured.
 - **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource is
   reserved by another deal
 - **THEN** the opening is refused with the availability reason
+
+## ADDED Requirements
+
+### Requirement: The bare-metal storefront reports its deal readiness
+
+The bare-metal storefront's administrator status MUST report its registry's reachability, its seller chain's viability, its configured Alkahest chains, and the provisioning contract version it speaks, and MUST admit a configured site authority under the `service` role. When it records a site's capacity release, it MUST record a `fulfillment/capacity_released` stage event.
+
+#### Scenario: A site checks its link to the storefront
+
+- **WHEN** a configured site authority reads the storefront's status under the `service` role
+- **THEN** the storefront answers, signed, with its readiness checks and provisioning contract version, and without its pool overrides or the count of obligations waiting for an operator, which only an administrator reads; any other service principal is refused
+
+#### Scenario: Readiness is read before a deal
+
+- **WHEN** an administrator reads the storefront's status
+- **THEN** it reports `registry`, `negotiation_strategy`, and `alkahest` checks, judged per key as VM's are, and `provisioning_contract_version`, while the `/health` probe makes no registry call
+
+#### Scenario: A site releases a deal's capacity
+
+- **WHEN** the storefront records a capacity release from the reservation's site
+- **THEN** its stage-event log carries a `fulfillment/capacity_released` event for the deal

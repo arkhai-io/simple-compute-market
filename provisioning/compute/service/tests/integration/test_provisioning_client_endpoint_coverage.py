@@ -74,9 +74,6 @@ class TestHostClientEndpointCoverage:
 
 async def _registered(client) -> None:
     """The host the coverage jobs run against; every job needs a registered one."""
-    from compute_provisioning_ansible import ssh_connection
-    from compute_provisioning_contracts import HostCreate
-
     await client.family.register_host(HostCreate(
         host_id=HOST, connection=ssh_connection(ssh_host="192.0.2.40", key_path="/keys/id"),
     ))

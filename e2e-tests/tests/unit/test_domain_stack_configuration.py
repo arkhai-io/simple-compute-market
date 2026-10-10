@@ -61,7 +61,8 @@ def test_bare_metal_stack_requires_real_selected_site_inputs():
     rendered = domain_compose + wrapper
 
     assert "arkhai:bare-metal-storefront" in domain_compose
-    assert "ACTIVE_PROFILES=docker" in domain_compose
+    # Real by default; a run selects the mock profile through the environment.
+    assert "ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}" in domain_compose
     assert "ACTIVE_PROFILES=mock" not in rendered
     assert "MOCK_PROVISIONING" not in rendered
     assert "${BARE_METAL_STOREFRONT_SITES_JSON:?" in domain_compose

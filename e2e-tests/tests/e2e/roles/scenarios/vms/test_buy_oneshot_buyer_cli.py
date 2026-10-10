@@ -49,14 +49,17 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import (
-    DealState,
+from tests.e2e.roles.helpers.compute_deal import (
+    DealLease,
     advance_storefront,
-    capacity_source_for,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    one_site,
     pause_storefront,
+)
+from tests.e2e.roles.scenarios.vms.conftest import (
+    DealState,
+    capacity_source_for,
+    one_site,
     require_state,
 )
 
@@ -625,7 +628,8 @@ class TestStageB4c_CapacityEventCycle:
 
 class TestStageB5_SellerAndLease:
     def test_b5_seller_state_and_lease_recorded(
-        self, storefront_admin_client, provisioning_client, deal_state: DealState
+        self, storefront_admin_client, provisioning_client, site_capacity,
+        deal_state: DealState,
     ):
         """Seller closes the listing while provisioning owns the lease.
 
@@ -670,9 +674,9 @@ class TestStageB5_SellerAndLease:
 
         # DealLease resolves where the lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        from tests.e2e.roles.scenarios.vms.conftest import DealLease
-
-        lease = DealLease(provisioning_client, deal_state.negotiation_id).refresh()
+        lease = DealLease(
+            provisioning_client, site_capacity, negotiation_id=deal_state.negotiation_id
+        ).refresh()
         assert lease.get("negotiation_id") == deal_state.negotiation_id
         # Not `resource_id`: the lease reports the executor it placed the deal
         # on, and physical identity is reported nowhere the commercial side

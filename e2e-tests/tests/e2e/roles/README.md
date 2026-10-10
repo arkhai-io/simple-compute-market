@@ -91,24 +91,28 @@ checks stay in `core/`.
 
 ## Running
 
-Bring up the exact domain wrapper and inject every role-scoped prerequisite
-before selecting its marker. The API-credit stack requires
-`APICREDITS_ADMIN_KEY_FILE`; the bare-metal scenario additionally requires the
-installed `market.buyer_domains/bare-metal` wheel, its registry and seller/site
-authorities, a canonical Ed25519 credential in the configured environment
-reference, exact public `BARE_METAL.BUY_ARGS`, and
-`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`.
+Each lane target builds its stack's images, brings the stack up with its
+development bindings, and runs the lane's markers from the test image on the
+stack's network. A domain wrapper alone carries none of those bindings, so
+bring a stack up through its lane rather than with `docker compose -f` on the
+wrapper:
 
 ```bash
-docker compose -f compose.vms.yml up -d
-uv run pytest -m e2e_deal_buyer_cli -v
+make -C e2e-tests test-e2e-vm           # VM scenarios
+make -C e2e-tests test-e2e-apicredits   # e2e_credits_deal, e2e_credits_payment_deal
+make -C e2e-tests test-e2e-bare-metal   # bare-metal publication, introduction, mock deal
 
-docker compose -f compose.apicredits.yml up -d
-uv run pytest -m e2e_credits_deal -v
-
-docker compose -f compose.bare-metal.yml up -d
-uv run pytest -m e2e_bare_metal_deal -v
+# One marker against a stack a lane target brought up:
+make -C e2e-tests test-buyer-machine NETWORK=simple-market-service_default \
+  BUYER_MODULE=e2e_deal_buyer_cli
 ```
+
+The release-qualified bare-metal scenario (`e2e_bare_metal_deal`) is in no lane.
+It additionally requires the installed `market.buyer_domains/bare-metal` wheel,
+its registry and seller/site authorities, a canonical Ed25519 credential in the
+configured environment reference, exact public `BARE_METAL.BUY_ARGS`, and
+`ARKHAI_E2E_BARE_METAL_SSH_PRIVATE_KEY_FILE`, against a stack whose site
+provisions a real host (`PROVISIONING_MODE=real`).
 
 The bare-metal scenario performs real SSH, requests teardown through
 `market bare-metal`, waits for the accepted terminal teardown status, and

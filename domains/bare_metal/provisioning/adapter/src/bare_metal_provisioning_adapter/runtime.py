@@ -22,6 +22,7 @@ from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
+from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 
 
 @dataclass
@@ -71,10 +72,6 @@ def build_bare_metal_runtime(
         if profile.strip()
     ]
     if "mock" in active:
-        from bare_metal_provisioning_adapter.services.mock_output import (
-            bare_metal_mock_output,
-        )
-
         ansible_service = MockAnsibleRunner(default_output=bare_metal_mock_output)
     else:
         ansible_service = AnsibleRunner(config)

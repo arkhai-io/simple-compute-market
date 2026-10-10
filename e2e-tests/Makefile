@@ -20,7 +20,8 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal e2e-vm-down
+.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal test-e2e-apicredits \
+	e2e-vm-down e2e-vm-logs e2e-bare-metal-down e2e-bare-metal-logs e2e-apicredits-down e2e-apicredits-logs
 
 # -----------------------------------------------------------------------
 # Setup
@@ -80,20 +81,25 @@ test-container-module:
 # run`) so it works under daemonless podman, where the docker-compose
 # provider can't reach a daemon.
 #
-# Prereqs: the stack is up (`docker compose up -d`) and the e2e-tests
-# image is rebuilt with the buyer wheel (`make build` at the repo root, then
-# `make -C e2e-tests build`).
+# Prereqs: a lane's stack is up and the test image is built; a lane target
+# below does both, and this target alone reruns markers against its stack.
 #
-# NETWORK defaults to the compose project's default network
-# (<repo-dir>_default). Override if your project name differs.
+# NETWORK defaults to the VM lane project's default network; each lane target
+# passes its own.
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
+# The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
+# stays here; `multi_registry` reads VM's two registries.
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_credits_payment_deal or e2e_listing_shapes or e2e_vm_introduction
+              or e2e_listing_shapes or e2e_vm_introduction
+# The API-credit lane's scenarios. The payment deal is blocked without a
+# payments target and skips naming it.
+E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
-E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction
+E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction \
+                         or e2e_bare_metal_mock_deal
 
 test-buyer-machine:
 	docker run --rm \
@@ -123,78 +129,96 @@ test-ci:
 		$(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
-# Tests — full local e2e stack
+# Tests — end-to-end lanes
 # -----------------------------------------------------------------------
-# Rebuilds the runtime + test images, starts a clean compose stack, then runs
-# the buyer-machine scenarios from inside the compose network. This target is
-# intentionally heavier than test-module: it verifies the deployed images and
-# clears persisted compose state before each run.
-# Generated, never committed: the resolved paths of the committed development
-# identities, in the form `docker compose --env-file` wants.
-E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
+# Each lane is one market domain's stack, as a compose project of its own, so
+# its network and volumes never mix with another lane's: `test-e2e-<lane>`
+# writes the lane's environment file, takes its stack down, builds the images
+# it runs, brings it up, and runs the lane's markers from the test image on its
+# network. `e2e-<lane>-down` and `e2e-<lane>-logs` are the one other place each
+# lane's files, project, and environment file are named; the pipeline collects
+# logs and tears down through them.
+#
+# Every signer, wallet, buyer-path, and bearer-token value in the compose files
+# is guarded with a required-variable form, so *any* compose subcommand that
+# reads the config -- down as much as up -- refuses to run until all of them
+# are set. They come from committed development values, which is what lets a
+# lane run without repository secrets; see dev-env/identities/README.md. The
+# environment file is generated first and passed to every compose invocation,
+# and it is a file rather than an eval of captured make output: a recursive
+# make implies -w and would print "Entering directory" into the capture, and
+# compose reading the file itself has nothing to quote wrong. Down and logs
+# write it only when no run has, since the bare-metal file carries deadlines
+# generated at each run. `PROVISIONING_MODE` reaches the environment targets
+# unchanged; see the root Makefile.
+#
+# The base stacks are assembled by `include`, which resolves each included
+# file's relative paths against that file's own directory; the development
+# bindings are layered with `-f`, because an including file cannot redefine a
+# service it imported. Each project is named explicitly, so a local run and the
+# pipeline share one network name whatever the checkout directory is called.
 
-# The base stack is assembled by `include`, which resolves each included file's
-# relative paths against that file's own directory -- `domains/vms/compose.yml`
-# and `domains/apicredits/compose.yml` need that and sit in different
-# directories, so no single project directory could replace it. The development
-# bindings are layered with `-f` because `include` refuses to let an including
-# file redefine an imported service. See compose.local-identities.yml.
-E2E_COMPOSE_FILES := -f docker-compose.yml -f compose.local-identities.yml
+# Bring a lane's stack up. On failure, print the state and each container's
+# output *here*, in the failing step: `up --wait` reports only which container
+# went unhealthy, never why, and leaving it to the pipeline's log collection
+# puts the answer in an artifact that has to be downloaded separately.
+# $(1): the environment file; $(2): the compose arguments.
+define e2e_up
+docker compose --env-file "$(1)" $(2) up -d --wait \
+	|| { \
+	  echo "::group::compose ps"; \
+	  docker compose --env-file "$(1)" $(2) ps -a; \
+	  echo "::endgroup::"; \
+	  for svc in $$(docker compose --env-file "$(1)" $(2) ps -a --services); do \
+	    echo "::group::logs $$svc"; \
+	    docker compose --env-file "$(1)" $(2) logs --no-color --tail=120 "$$svc" || true; \
+	    echo "::endgroup::"; \
+	  done; \
+	  exit 1; \
+	}
+endef
 
-# Both lanes, one after the other. Each lane's stack runs its own `anvil`
-# container under that fixed name, so the VM stack is taken down before the
-# bare-metal stack comes up. CI runs the lanes as separate jobs instead.
-test-e2e: test-e2e-vm e2e-vm-down test-e2e-bare-metal
+# Write a lane's environment file only if no run has. $(1): the file;
+# $(2): the root Makefile's environment target.
+e2e_env_if_missing = test -f "$(1)" || $(MAKE) -s --no-print-directory $(2) > "$(1)"
 
-e2e-vm-down:
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
+# The stacks run one after another, never side by side on one host: each names
+# its chain container `anvil` and publishes fixed host ports (8545 in every
+# stack; 8080 and 8081 in the VM and bare-metal stacks). The order is a recipe
+# of recursive calls, not a list of prerequisites, because `make -j` runs a
+# target's prerequisites concurrently and GNU Make 4.3 has no `.WAIT`. The
+# pipeline runs each lane as a job of its own instead.
+test-e2e:
+	$(MAKE) test-e2e-vm
+	$(MAKE) e2e-vm-down
+	$(MAKE) test-e2e-bare-metal
+	$(MAKE) e2e-bare-metal-down
+	$(MAKE) test-e2e-apicredits
+
+# VM lane: Bob's and Alice's storefronts and provisioning authorities, the two
+# VM registries, and the dev chain.
+E2E_VMS_ENV ?= $(CURDIR)/../.e2e-vms.env
+E2E_VMS_PROJECT := simple-market-service
+E2E_VMS_COMPOSE := -p $(E2E_VMS_PROJECT) -f compose.vms.yml -f compose.vms-local.yml
 
 test-e2e-vm:
-	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
-	@# files is guarded with a required-variable form, so *any* compose
-	@# subcommand that reads the config -- down as much as up -- refuses to run
-	@# until all of them are set. They come from committed development values,
-	@# which is what lets this run without repository secrets; see
-	@# dev-env/identities/README.md.
-	@#
-	@# The env file is generated first and passed to every compose invocation
-	@# below. Passing it only to `up` left `down` able to fail on the same
-	@# interpolation, for a reason that has nothing to do with the run.
-	@#
-	@# The values reach compose through --env-file rather than an eval of
-	@# captured make output: a recursive make implies -w and would print
-	@# "Entering directory" into the capture, and compose reading the file
-	@# itself has nothing to quote wrong.
-	cd .. && $(MAKE) -s --no-print-directory e2e-dev-identities-env > "$(E2E_IDENTITY_ENV)"
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
-	cd .. && $(MAKE) build-dev
-	@# On failure, print the state and the container output *here*, in the
-	@# failing step. `up --wait` reports only which container went unhealthy,
-	@# never why: the reason is in that container's log. Leaving it to the
-	@# `always()` collection step means the answer lands in an uploaded
-	@# artifact that has to be downloaded separately, which is a slow loop for
-	@# something the job log can carry.
-	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) up -d --wait \
-		|| { \
-		  echo "::group::compose ps"; \
-		  docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a; \
-		  echo "::endgroup::"; \
-		  for svc in $$(docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) ps -a --services); do \
-		    echo "::group::logs $$svc"; \
-		    docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) logs --no-color --tail=120 "$$svc" || true; \
-		    echo "::endgroup::"; \
-		  done; \
-		  exit 1; \
-		}
-	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"
+	cd .. && $(MAKE) -s --no-print-directory e2e-vms-dev-env > "$(E2E_VMS_ENV)"
+	cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) down -v --remove-orphans
+	cd .. && $(MAKE) build-e2e-vm
+	cd .. && $(call e2e_up,$(E2E_VMS_ENV),$(E2E_VMS_COMPOSE))
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_VMS_PROJECT)_default BUYER_MODULE="$(E2E_MODULE)"
 
-# -----------------------------------------------------------------------
-# Bare-metal lane
-# -----------------------------------------------------------------------
-# One mock-profile site, the bare-metal storefront, its registry, and the dev
-# chain, as a compose project of its own so its network and volumes never mix
-# with the VM stack's. Every value comes from `make e2e-bare-metal-dev-env`,
-# which generates the publication deadlines at each run; see
+e2e-vm-down:
+	cd .. && $(call e2e_env_if_missing,$(E2E_VMS_ENV),e2e-vms-dev-env)
+	cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) down -v --remove-orphans
+
+e2e-vm-logs:
+	@cd .. && $(call e2e_env_if_missing,$(E2E_VMS_ENV),e2e-vms-dev-env)
+	@cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) logs --no-color
+
+# Bare-metal lane: one site, the bare-metal storefront, its registry, and the
+# dev chain. Every value comes from `make e2e-bare-metal-dev-env`, which
+# generates the publication deadlines at each run; see
 # compose.bare-metal-local.yml.
 E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
 E2E_BARE_METAL_PROJECT := simple-market-bare-metal
@@ -204,19 +228,37 @@ E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \
 test-e2e-bare-metal:
 	cd .. && $(MAKE) -s --no-print-directory e2e-bare-metal-dev-env > "$(E2E_BARE_METAL_ENV)"
 	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
-	cd .. && $(MAKE) build-dev
-	@# As in test-e2e-vm: on failure, print each container's own output here,
-	@# in the failing step, rather than only in the uploaded artifact.
-	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) up -d --wait \
-		|| { \
-		  echo "::group::compose ps"; \
-		  docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a; \
-		  echo "::endgroup::"; \
-		  for svc in $$(docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a --services); do \
-		    echo "::group::logs $$svc"; \
-		    docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) logs --no-color --tail=120 "$$svc" || true; \
-		    echo "::endgroup::"; \
-		  done; \
-		  exit 1; \
-		}
+	cd .. && $(MAKE) build-e2e-bare-metal
+	cd .. && $(call e2e_up,$(E2E_BARE_METAL_ENV),$(E2E_BARE_METAL_COMPOSE))
 	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)"
+
+e2e-bare-metal-down:
+	cd .. && $(call e2e_env_if_missing,$(E2E_BARE_METAL_ENV),e2e-bare-metal-dev-env)
+	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
+
+e2e-bare-metal-logs:
+	@cd .. && $(call e2e_env_if_missing,$(E2E_BARE_METAL_ENV),e2e-bare-metal-dev-env)
+	@cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) logs --no-color
+
+# API-credit lane: the credits registry, service, storefront, and sample app,
+# the lane's own compute-schema registry, and the dev chain; see
+# compose.apicredits-lane.yml.
+E2E_APICREDITS_ENV ?= $(CURDIR)/../.e2e-apicredits.env
+E2E_APICREDITS_PROJECT := simple-market-apicredits
+E2E_APICREDITS_COMPOSE := -p $(E2E_APICREDITS_PROJECT) -f compose.apicredits.yml \
+	-f compose.apicredits-local.yml -f compose.apicredits-lane.yml
+
+test-e2e-apicredits:
+	cd .. && $(MAKE) -s --no-print-directory e2e-apicredits-dev-env > "$(E2E_APICREDITS_ENV)"
+	cd .. && docker compose --env-file "$(E2E_APICREDITS_ENV)" $(E2E_APICREDITS_COMPOSE) down -v --remove-orphans
+	cd .. && $(MAKE) build-e2e-apicredits
+	cd .. && $(call e2e_up,$(E2E_APICREDITS_ENV),$(E2E_APICREDITS_COMPOSE))
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_APICREDITS_PROJECT)_default BUYER_MODULE="$(E2E_APICREDITS_MODULE)"
+
+e2e-apicredits-down:
+	cd .. && $(call e2e_env_if_missing,$(E2E_APICREDITS_ENV),e2e-apicredits-dev-env)
+	cd .. && docker compose --env-file "$(E2E_APICREDITS_ENV)" $(E2E_APICREDITS_COMPOSE) down -v --remove-orphans
+
+e2e-apicredits-logs:
+	@cd .. && $(call e2e_env_if_missing,$(E2E_APICREDITS_ENV),e2e-apicredits-dev-env)
+	@cd .. && docker compose --env-file "$(E2E_APICREDITS_ENV)" $(E2E_APICREDITS_COMPOSE) logs --no-color

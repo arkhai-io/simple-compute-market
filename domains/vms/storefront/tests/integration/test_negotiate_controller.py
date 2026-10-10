@@ -35,6 +35,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
@@ -116,7 +117,6 @@ def _site_projection_caches():
         ProjectionIdentity,
         ProjectionState,
     )
-    from market_storefront.services import site_projection_cache
 
     _SITE_POOLS.clear()
     resource_pools = ProjectionCache(client=None)
@@ -346,8 +346,6 @@ async def client(db, monkeypatch):
     )
     transport = httpx.ASGITransport(app=app)
     from unittest.mock import patch as _patch
-
-    from market_storefront.services import site_projection_cache
 
     with settings_overrides(
         **{
@@ -881,7 +879,6 @@ class TestAcceptanceRechecksTheSource:
     async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
-        from market_storefront.services import site_projection_cache
 
         site_projection_cache._caches.pop("site-test")
 
@@ -894,7 +891,6 @@ class TestAcceptanceRechecksTheSource:
     async def test_a_buyer_exits_whatever_the_source(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
-        from market_storefront.services import site_projection_cache
 
         site_projection_cache._caches.pop("site-test")
 

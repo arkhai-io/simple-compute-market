@@ -1,18 +1,17 @@
 """Create real on-chain ERC20EscrowObligation attestations for e2e tests.
 
-Stage 07 of the full-deal scenario needs an EAS attestation that the
-storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
-placeholder uid would be rejected by alkahest's ``get_obligation``
-call. So we drive alkahest-py against the local Anvil from the
-buyer's wallet, the same way the VM buyer's domain escrow adapter does in
-production — but inlined here because e2e-tests doesn't depend on the buyer
-wheel.
+The canonical compute deal escrows against an EAS attestation that the
+storefront's pre-settlement verifier resolves, so a placeholder uid would be
+rejected by alkahest's ``get_obligation`` call. The helper drives alkahest-py
+against the local Anvil from the buyer's wallet, as a buyer's domain escrow
+adapter does in production, inlined because e2e-tests does not depend on a
+buyer wheel for it.
 
 Token distribution is baked into the chain state (account #1 holds
-MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in production
-the buyer signs and sends this transaction themselves, so the test
-does the same — with the buyer's private key, against the just-
-finalized negotiation terms.
+MockERC20 — see dev-env/generate_state.py). Escrow creation is runtime: in
+production the buyer signs and sends this transaction themselves, so the test
+does the same, with the buyer's private key, against the just-finalized
+negotiation terms.
 """
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ log = logging.getLogger(__name__)
 _HTTP_TO_WS = {"http": "ws", "https": "wss"}
 
 
-def _ensure_ws_rpc_url(rpc_url: str) -> str:
+def ensure_ws_rpc_url(rpc_url: str) -> str:
     """Coerce an HTTP RPC URL to its WebSocket equivalent and validate it.
 
     ``AlkahestClient`` is backed by the Rust SDK, whose provider factory uses
@@ -118,7 +117,7 @@ def create_buyer_escrow(
     use ``buyer.chain_rpc_url`` in the integration-test config to supply
     the correct scheme directly.
     """
-    rpc_url = _ensure_ws_rpc_url(rpc_url)
+    rpc_url = ensure_ws_rpc_url(rpc_url)
 
     addr_config_path = _alkahest_addresses_path()
     prewarm_alkahest_address_config_cache(addr_config_path)
@@ -158,3 +157,41 @@ def create_buyer_escrow(
         return uid
 
     return asyncio.run(_do_it())
+
+
+def read_string_obligation(
+    uid: str,
+    *,
+    private_key: str,
+    rpc_url: str = "ws://localhost:8545",
+    chain_name: str = "anvil",
+) -> dict[str, object]:
+    """Read a string obligation attestation from the chain itself.
+
+    What a seller publishes as an escrow's fulfillment: the attestation's
+    identity, the escrow it references, whether it was revoked, and its string
+    payload. Read through alkahest-py as any party would, so the answer is the
+    chain's, not a storefront's record of it. The key signs nothing; the client
+    requires one.
+    """
+    rpc_url = ensure_ws_rpc_url(rpc_url)
+    addr_config_path = _alkahest_addresses_path()
+    prewarm_alkahest_address_config_cache(addr_config_path)
+    address_config = resolve_alkahest_address_config(
+        get_alkahest_network(chain_name), config_path=addr_config_path
+    )
+    client = AlkahestClient(
+        private_key=private_key, rpc_url=rpc_url, address_config=address_config,
+    )
+
+    async def _read() -> dict[str, object]:
+        decoded = await client.string_obligation.get_obligation(uid)
+        attestation, data = decoded["attestation"], decoded["data"]
+        return {
+            "uid": str(attestation.uid),
+            "ref_uid": str(attestation.ref_uid),
+            "revoked": bool(attestation.is_revoked()),
+            "item": str(data.item),
+        }
+
+    return asyncio.run(_read())

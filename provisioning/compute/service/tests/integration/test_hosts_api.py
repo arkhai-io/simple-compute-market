@@ -18,18 +18,20 @@ What is NOT covered here (unit test jurisdiction):
 """
 
 from __future__ import annotations
+from compute_provisioning.hosts.db import Host
 from compute_provisioning_ansible import ssh_connection
 
 from compute_provisioning_client import ComputeProvisioningError
 import pytest
 
-from .conftest import ProvisioningClients
+from .conftest import ProvisioningClients, TEST_CONNECTION_KEY
 from compute_provisioning_contracts import (
     HostCreate,
     HostListResponse,
     HostResponse,
     HostUpdate,
 )
+from market_config import decrypt_secret
 
 
 def _connection(**changes):
@@ -383,11 +385,6 @@ class TestEmbeddedKey:
     async def test_a_submitted_key_is_stored_protected_and_returned_by_scheme_only(
         self, client_and_queue, session_factory,
     ):
-        from compute_provisioning.hosts.db import Host
-        from market_config import decrypt_secret
-
-        from .conftest import TEST_CONNECTION_KEY
-
         client, _ = client_and_queue
         registered = await client.family.register_host(HostCreate(
             host_id="bm1",

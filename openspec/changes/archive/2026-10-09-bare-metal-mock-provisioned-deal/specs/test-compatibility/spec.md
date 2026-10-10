@@ -33,39 +33,66 @@ remains a separate protected lane.
 - **THEN** the mock-provisioned deal does not satisfy it, and the protected lane's
   requirement stands
 
-### Requirement: Compute-family deal stages are defined once
+### Requirement: The canonical compute deal's shared stages are defined once
 
-Every compute-family domain's complete-deal scenario MUST declare its stages from one
-shared set of compute deal stage definitions, supplying what differs through a
-per-domain driver: supply seeding, provision terms, the mock rules matched, the lease
-view, settlement-preview expectations, and result and access assertions. A domain MAY
-override or insert a stage; it MUST NOT copy a stage's body. Domains outside the compute
-family keep their own deal flows.
+The compute family's canonical complete deal, settled through Alkahest and delivered
+through the provisioning mock profile, MUST take each stage its domains run identically
+from one shared definition. A domain MUST subclass a shared stage without replacing its
+body and MUST supply its differences through fixtures and a per-domain driver. A domain
+MAY insert stages of its own; a stage whose body differs between domains is not shared.
 
-#### Scenario: A stage changes
+#### Scenario: A shared stage changes
 
-- **WHEN** a shared compute deal stage's preview, advance, or assertion changes
-- **THEN** every compute-family lane runs the changed stage without a per-domain edit
+- **WHEN** a shared stage's preview, advance, or assertion changes
+- **THEN** every compute lane that runs the canonical deal runs the changed stage without
+  a per-domain edit
+
+#### Scenario: A domain's part of a shared stage
+
+- **WHEN** a shared stage needs supply seeding, provision terms, mock rules and their
+  release, the lease view, settlement-preview expectations, the settlement's dispatch,
+  result and access assertions, or the claim that re-reserves released supply and its
+  release
+- **THEN** the domain's driver supplies it and the stage's body is unchanged
+
+#### Scenario: A deal outside the canonical deal
+
+- **WHEN** a compute scenario settles another way, or a domain outside the compute family
+  runs a complete deal
+- **THEN** it keeps its own stages
 
 #### Scenario: A compute domain differs in negotiation
 
 - **WHEN** a compute domain would need its own negotiation stage
 - **THEN** the difference is resolved in its storefront composition, not in the stage
 
-### Requirement: Each domain runs in its own lane on images built once
+### Requirement: Each domain runs in its own lane
 
 The end-to-end pipeline MUST run each market domain's scenarios in a lane of its own, as
 a pipeline job separate from every other domain's lane, so a failure in one domain's
-lane cannot hide or stand in for another's evidence. A pipeline run MUST build each image
-once and every lane MUST run on those images; a lane MUST NOT rebuild them. Local lane
-targets MAY build before they run.
+lane cannot hide or stand in for another's evidence. Each lane MUST build the images its
+own stack runs and compose only its own services, including every registry its
+scenarios read.
 
 #### Scenario: The pipeline runs
 
 - **WHEN** the end-to-end pipeline runs
-- **THEN** one job builds the images, and the VM, bare-metal, and API-credit lanes each
-  load them and run their own stack and scenarios
+- **THEN** the VM, bare-metal, and API-credit lanes each build their own stack's images
+  and run their own stack and scenarios, in parallel
 - **AND** the VM lane's stack does not include the API-credit services
+
+#### Scenario: A scenario reads a registry of another schema
+
+- **WHEN** a lane's scenario discovers across registries of more than one schema
+- **THEN** the lane deploys each of those registries in its own stack, and the scenario
+  reads them from that lane's settings
+
+#### Scenario: A compute lane provisions through the mock profile
+
+- **WHEN** a compute lane runs
+- **THEN** its provisioning services run their mock profile because the run selects mock
+  provisioning, not because the lane's local overlay or stack hard-codes it
+- **AND** no storefront in the lane carries a provisioning mode
 
 ### Requirement: Bare-metal storefront restart recovery is proven at integration level
 
@@ -81,7 +108,12 @@ not restart services.
 - **WHEN** the settlement authority committed the recorded operation but the buyer did not receive its response
 - **THEN** after the rebuild, resume retrieves the same operation and continues without a second obligation or mechanism selection
 
+#### Scenario: Process stops while the lease is active
+
+- **WHEN** the storefront is rebuilt while a delivered lease is active
+- **THEN** repeated status, result, access, and settlement-status reads return what they returned before, with no second reservation or fulfillment start
+
 #### Scenario: Process stops after teardown acceptance
 
 - **WHEN** teardown was accepted before the response was lost
-- **THEN** after the rebuild, recovery observes the same lease release operation and the site releases capacity once
+- **THEN** after the rebuild, a repeated teardown returns the same lease release operation and the site releases capacity once
