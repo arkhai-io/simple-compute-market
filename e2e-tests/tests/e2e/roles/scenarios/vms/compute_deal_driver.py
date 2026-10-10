@@ -200,6 +200,15 @@ class VmComputeDealDriver:
             f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
         )
 
+    def opening_selection(self, alkahest_option: dict, expiration_unix: int) -> dict:
+        # The VM seller accepts nothing it would have to infer from an escrow's
+        # shape, so a fresh negotiation names its settlement option explicitly.
+        return {
+            "mechanism": "alkahest.v1",
+            "option_id": alkahest_option["option_id"],
+            "expiration_unix": expiration_unix,
+        }
+
     def lease_view(self, deal_state: Any) -> DealLease:
         # VM holds and commits capacity under the deal's negotiation, whatever
         # its settlement mechanism.

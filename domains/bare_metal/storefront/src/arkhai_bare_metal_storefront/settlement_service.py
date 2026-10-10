@@ -387,10 +387,17 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "settlement evidence not found", status_code=404
             )
+        # A deal whose fulfillment began has moved its obligation on through
+        # delivery; its settlement stays readable, as the fulfillment's own
+        # status read treats it.
+        lifecycle = await self.db.load_bare_metal_fulfillment_lifecycle(
+            negotiation_id=record["negotiation_id"]
+        )
         evidence = await self.verified_evidence(
             negotiation_id=record["negotiation_id"],
             buyer_principal=buyer_principal,
             include_refunds=True,
+            delivery_started=lifecycle is not None,
         )
         thread = await self._owned_thread(
             negotiation_id=evidence.negotiation_id, buyer_principal=buyer_principal

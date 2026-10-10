@@ -248,6 +248,11 @@ class BareMetalComputeDealDriver:
 
     # -- lease and release --------------------------------------------------
 
+    def opening_selection(self, alkahest_option: dict, expiration_unix: int) -> None:
+        # The bare-metal storefront projects the Alkahest selection from the
+        # escrow carrier and refuses a selection stated beside it.
+        return None
+
     def lease_view(self, deal_state: Any) -> BareMetalDealLease:
         # Bare metal's Alkahest fulfillment commits its hold under the escrow.
         return BareMetalDealLease(

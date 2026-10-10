@@ -55,6 +55,11 @@ Behaviour that answers wrongly:
   settlement wait wakes servicing when a lease becomes active, where
   `BareMetalFulfillmentService.status` recording the transition should; and that
   wait fails on a site error rather than polling through it.
+- The VM storefront requires an opening to state its settlement selection inside the
+  proposal, while the bare-metal storefront projects an Alkahest selection from the
+  escrow carrier and refuses one stated beside it, so the shared compute deal stages
+  ask each domain's driver which opening to send; one rule for both belongs with
+  moving bare metal onto the shell's negotiation routes.
 - The bare-metal Compose wrapper and Helm chart forward no seller negotiation
   chain, so only the lane's overlay sets one.
 - An interrupted contact-exchange reveal is finished only by the buyer retrying,

@@ -249,6 +249,13 @@ class ComputeDealDriver(Protocol):
         """Assert the ready settlement's result and access, where the domain
         delivers them."""
 
+    def opening_selection(
+        self, alkahest_option: dict, expiration_unix: int
+    ) -> dict | None:
+        """The settlement selection the buyer's opening names beside its escrow
+        carrier, or ``None`` when the domain's storefront reads the selection from
+        the escrow carrier itself."""
+
     def lease_view(self, deal_state: ComputeDealState) -> LeaseView:
         """The deal's lease, found by the deal reference its hold names."""
 
@@ -727,8 +734,8 @@ class Stage05b_NegotiationStartsAndVisible:
         # refuses the attestation over a one-second difference.
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
 
-        # A fresh negotiation names its settlement option explicitly; the
-        # seller accepts nothing it would have to infer from an escrow's shape.
+        # The listing's one Alkahest option, which the domain's opening names
+        # where its storefront needs the selection stated explicitly.
         (alkahest_option,) = [
             dict(option)
             for option in registry_client.get_listing(
@@ -747,11 +754,9 @@ class Stage05b_NegotiationStartsAndVisible:
             # supplied later.
             provision_terms=deal_driver.provision_terms(),
             token=DEAL_TOKEN["contract_address"],
-            settlement_selection={
-                "mechanism": "alkahest.v1",
-                "option_id": alkahest_option["option_id"],
-                "expiration_unix": deal_state._escrow_expiration_unix,
-            },
+            settlement_selection=deal_driver.opening_selection(
+                alkahest_option, deal_state._escrow_expiration_unix
+            ),
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
         assert neg_id, (
