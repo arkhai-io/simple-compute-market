@@ -269,9 +269,11 @@ code that is already correctly covered.
         authenticated their own route name and path rather than the contract the canonical
         client signs, so no client call could succeed; they now authenticate the client's
         operations and resources.
-      - Unresolved, recorded for the maintainer's decision: API credits' advance and
-        listing-administration routes keep the same mismatch, outside this change's
-        controls, and the kit route services do not yet own their signed contracts.
+      - Unresolved here: API credits' advance and listing-administration routes keep the
+        same mismatch, outside this change's controls, and the kit route services do not
+        yet own their signed contracts. Routed by the maintainer at archival review to
+        `kit-owned-storefront-auth-and-persistence`, whose shared administrator
+        authentication declares each route's signed contract with the route.
 - [x] 5A.2 Typed lease registration. Amended 2026-10-02 with the maintainer (a
       bare-metal-typed method would make the family kit depend on `arkhai_bare_metal`):
       `ComputeProvisioningClient` gains a market-neutral `authenticated_request`, and
@@ -2267,7 +2269,7 @@ and the credits scenario's settings; no service code or package version changes.
 | A thread is successful only once its agreed terms, any hold, and its plan are recorded; a thread is resumed only when it ends with the seller's counter and records no agreement or plan | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime"; `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` "Discovery and negotiation" |
 | The trading pause is one process-local kit mechanism, separate from the loop pause; bare metal's durable pause is reversed | `openspec/specs/market-composition/spec.md` — "The trading pause is one process-local kit mechanism"; `docs/development/ARCHITECTURE.md` "Operator lifecycle controls" |
 | Bare metal holds nothing at negotiation, commits its plan at acceptance, and that plan is the agreement settlement verifies; its seller chain is configured | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/configuration.md` |
-| Findings recorded under "Controls and routes (5B.8)" and in later sections | The substantive gaps in `docs/development/ROADMAP.md`'s Goal 1, 5, and 6 tables (unowned); the rest in `openspec/changes/resolve-compute-family-findings/proposal.md`; requirements over 500 characters with `shorten-long-requirements` |
+| Findings recorded under "Controls and routes (5B.8)" and in later sections | The substantive gaps in `docs/development/ROADMAP.md`'s Goal 1, 5, and 6 tables (unowned); the rest in `openspec/changes/resolve-compute-family-findings/proposal.md`, except API credits' administrator-route contract mismatch (5A.1), in `openspec/changes/kit-owned-storefront-auth-and-persistence/proposal.md`; requirements over 500 characters with `shorten-long-requirements` |
 | Every published package depends only on published packages | `docs/development/RELEASING.md`; `manifests/published-distributions.json`; enforced by `scripts/tests/test_publish_matrix.py` |
 | Roadmap currency | `docs/development/ROADMAP.md`: Goal 3's and Goal 4's negotiation gap rows, Goal 4's state and closed API-credit lane gap, Goal 7's state, and the open gaps above |
 | Campaign index currency | `openspec/changes/README.md`: this change's row (archived) and the Goal 3, 4, and 7 graphs; the rows of `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`, `apicredits-end-to-end-lane`, `unbacked-bare-metal-listings`, and `market-platform-compute-40-multi-domain-proof`; new rows for `isolate-end-to-end-lane-stacks` and `resolve-compute-family-findings` |
