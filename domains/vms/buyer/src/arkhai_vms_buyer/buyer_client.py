@@ -39,6 +39,7 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 from arkhai_vms import VmProvisionTerms
 
 from .escrow_client import encode_escrow_proposal
+from .settlement_composition import validate_buyer_acceptance
 
 
 def _validate_model(model_type, value):
@@ -141,6 +142,8 @@ def negotiate_with_seller(
     policy_params: Optional[dict[str, Any]] = None,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
+    validate_acceptance: Callable[[CoreNegotiationOutcome], None]
+    | None = validate_buyer_acceptance,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -148,6 +151,10 @@ def negotiate_with_seller(
     .negotiate_with_seller``: prices are per-hour rates, scaled to
     absolute amounts by the lease duration fixed in
     ``provision_terms.duration_seconds``.
+
+    ``validate_acceptance`` defaults to the purchase table's entry guard. An
+    introduction has no purchase entry and passes None; its command checks
+    the accepted plan itself.
     """
     duration_seconds: Optional[float] = None
     if resume is None:
@@ -194,6 +201,7 @@ def negotiate_with_seller(
         resume=resume,
         policy_params=policy_params,
         validate_advertised_plan=validate_advertised_plan,
+        validate_acceptance=validate_acceptance,
         resolve_seller_principals=resolve_seller_principals,
     )
     values = {

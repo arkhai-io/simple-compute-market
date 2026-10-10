@@ -248,8 +248,13 @@ class BareMetalComputeDealDriver:
 
     # -- lease and release --------------------------------------------------
 
-    def lease_view(self, escrow_uid: str) -> BareMetalDealLease:
-        return BareMetalDealLease(self.provisioning_client, self.site_capacity, escrow_uid)
+    def lease_view(self, deal_state: Any) -> BareMetalDealLease:
+        # Bare metal's Alkahest fulfillment commits its hold under the escrow.
+        return BareMetalDealLease(
+            self.provisioning_client,
+            self.site_capacity,
+            escrow_uid=deal_state.real_escrow_uid,
+        )
 
     def reserve_released_capacity(
         self, storefront_admin_client: Any, *, listing_id: str, escrow_uid: str

@@ -134,6 +134,7 @@ class ShapeState:
     listing_id: str | None = None
     provisioning_armed: bool = False
     escrow_uid: str | None = None
+    negotiation_id: str | None = None
     reservation_ids: tuple[str, ...] = ()
     site_id: str | None = None
     overridden: bool = False
@@ -294,15 +295,16 @@ class TestStage04_Buy:
         assert terminal is not None and terminal.get("status") == "ready", terminal
         assert terminal.get("listing_id") in (None, shape_state.listing_id)
         shape_state.escrow_uid = str(terminal["escrow_uid"])
+        shape_state.negotiation_id = str(terminal["negotiation_id"])
 
 
 class TestStage05_Commitment:
     def test_05a_the_reservation_holds_every_declared_quantity(
         self, site_capacity, shape_state
     ):
-        require_state(shape_state, "escrow_uid")
-        reservations = site_capacity.list_reservations(escrow_uid=shape_state.escrow_uid)
-        assert reservations, f"no reservation for escrow {shape_state.escrow_uid}"
+        require_state(shape_state, "negotiation_id")
+        reservations = site_capacity.reservations_for_negotiation(shape_state.negotiation_id)
+        assert reservations, f"no reservation for negotiation {shape_state.negotiation_id}"
         # The claim requests exactly the shape's quantities: no more, and no
         # dimension the shape omits.
         assert {r["dimensions"] == PUBLISHED for r in reservations} == {True}, reservations

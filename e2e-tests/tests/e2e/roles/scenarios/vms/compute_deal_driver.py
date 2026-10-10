@@ -200,9 +200,14 @@ class VmComputeDealDriver:
             f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
         )
 
-    def lease_view(self, escrow_uid: str) -> DealLease:
-        # Resolves the deal's site-ledger reservation by escrow.
-        return DealLease(self.provisioning_client, self.site_capacity, escrow_uid)
+    def lease_view(self, deal_state: Any) -> DealLease:
+        # VM holds and commits capacity under the deal's negotiation, whatever
+        # its settlement mechanism.
+        return DealLease(
+            self.provisioning_client,
+            self.site_capacity,
+            negotiation_id=deal_state.negotiation_id,
+        )
 
     def arm_teardown_gate(self) -> None:
         delete_mock_rules_if_present(self.provisioning_test_client, REMOVE_RULE_ID)

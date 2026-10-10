@@ -28,8 +28,7 @@ _PRINCIPAL = Identity(
 
 def _request(quantity: int = 10) -> CreditIssuanceRequest:
     return CreditIssuanceRequest.create(
-        obligation_ref="esc-1",
-        mechanism="alkahest.v1",
+        negotiation_id="esc-1",
         owner=_PRINCIPAL,
         service="test-service",
         resource_id="quota-main",
@@ -43,8 +42,7 @@ def _result_payload(request: CreditIssuanceRequest) -> dict:
         "schema": "arkhai.api-credits.issuance-result.v1",
         "fulfillment_id": request.fulfillment_id,
         "grant_id": request.fulfillment_id,
-        "obligation_ref": request.obligation_ref,
-        "mechanism": request.mechanism,
+        "negotiation_id": request.negotiation_id,
         "owner": request.owner.model_dump(mode="json"),
         "service": request.service,
         "resource_id": request.resource_id,
@@ -167,7 +165,7 @@ async def test_rollback_issuance_adjusts_and_revokes_a_new_key():
 
     client = _client(handle)
     result = await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={"key_id": "k1", "quantity": 10},
         key_mode="new",
     )
@@ -188,7 +186,7 @@ async def test_rollback_issuance_does_not_revoke_an_existing_key():
 
     client = _client(handle)
     await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={"key_id": "k1", "quantity": 10},
         key_mode="existing",
     )
@@ -203,7 +201,7 @@ async def test_rollback_issuance_is_a_no_op_with_nothing_to_roll_back():
 
     client = _client(handle)
     result = await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={},
         key_mode="new",
     )

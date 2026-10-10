@@ -347,13 +347,13 @@ async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(h
 async def test_a_refund_recorded_before_delivery_start_stops_delivery(harness):
     db = harness.runtime.db
     gate = asyncio.Event()
-    start = db.start_bare_metal_payment_lifecycle
+    start = db.ensure_bare_metal_fulfillment_lifecycle
 
     async def gated_start(**kwargs):
         await gate.wait()
         return await start(**kwargs)
 
-    db.start_bare_metal_payment_lifecycle = gated_start
+    db.ensure_bare_metal_fulfillment_lifecycle = gated_start
     harness.serve()
     settling = asyncio.create_task(harness.settle())
     await asyncio.sleep(0.05)

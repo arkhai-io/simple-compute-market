@@ -1,6 +1,6 @@
 ## Context
 
-The payments service's cross-product decisions are recorded in `arkhai-io/arkhai-payments` (`arkhai-payments/docs/issues/scm-settlement-port.md`); its wire contract is JSON Schema in that repository (`schema/payments.schema.json`) with test vectors, so this repository generates pydantic models rather than importing TypeScript.
+The payments service's cross-product decisions are recorded with that service; its published wire contract is JSON Schema with test vectors, so this repository generates pydantic models rather than importing TypeScript.
 
 A mandate is `{from, to, parts, deal, fee, authorities, nonce, expires}`. Parties and authorities are Arkhai account UUIDs. Each part is `once` with an asset, an amount and a hold. The transaction id is `sha256(JCS(mandate))`, so a retried approval converges on one transaction and one receipt. The receipt is Ed25519-signed with `kit/identity` framing (`arkhai.payments.receipt.v1`).
 
@@ -462,7 +462,7 @@ This change lands after `bare-metal-mock-provisioned-deal` on the development br
 
 Resolved against development head `4c55a328`, merged into this branch's head `cea7760a`.
 
-- **M1. Hosted Stripe is removed.** The hosted stack integrates the earlier `stripe-settlement-service`, which the Arkhai payments service supersedes, and the payments team confirmed the removal. Development's hosted code, packaging, workflows, Helm and Compose files, and real-Stripe e2e lane are removed, with the permanent requirements they promoted. Its four active hosted changes were archived as superseded on 2026-10-08, and `disburse-a-settlement-disposition` was re-scoped to Alkahest and contact exchange; its three archived ones stay as history.
+- **M1. Hosted Stripe is removed.** The hosted stack integrates the earlier hosted Stripe settlement service, which the Arkhai payments service supersedes, and the payments team confirmed the removal. Development's hosted code, packaging, workflows, Helm and Compose files, and real-Stripe e2e lane are removed, with the permanent requirements they promoted. Its four active hosted changes were archived as superseded on 2026-10-08, and `disburse-a-settlement-disposition` was re-scoped to Alkahest and contact exchange; its three archived ones stay as history.
   - Kept: the settlement runtime port's mechanism-scoped reclaim options, a general capability, and the provider-neutral conditional escrow client requirement without its hosted clauses.
   - For later work: a live payment qualification lane should adapt `gates.py`, `evidence.py` and `runtime.py` from the e2e harness's `hosted_real_stripe` package at `4c55a328`, and `kit-owned-storefront-shell` can take `kit/settlement-runtime/src/market_settlement_runtime/hosted_routes.py` from the same commit as a framework-free route-service precedent.
   - Data: VM's hosted migration created no tables, and no deployed VM storefront has open hosted deals. A development bare-metal database keeps an orphaned hosted lifecycle table; bare metal has not launched, so it stays.

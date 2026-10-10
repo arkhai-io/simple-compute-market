@@ -230,5 +230,6 @@ def test_a_disabled_section_is_still_configured():
 def test_a_contact_only_root_composes_its_obligation_worker(environment):
     runtime = build_runtime_from_environment()
 
-    assert runtime.alkahest_lifecycle is None
+    # Contact exchange declines its obligations; nothing services Alkahest.
+    assert set(runtime.obligation_servicing) == {"contact-exchange.v1"}
     assert runtime.settlement_worker is not None

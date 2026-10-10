@@ -62,7 +62,7 @@ async def test_a_resumed_deal_never_moves_its_lease():
     reservation_id = await _committed(capacity, fake)
 
     await _commit_recovered_reservation(
-        escrow_uid="0xwindow",
+        negotiation_id="neg-window",
         reservation_id=reservation_id,
         context={"duration_seconds": 3600},
         capacity_client=capacity.client(),

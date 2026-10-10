@@ -25,12 +25,17 @@ async def seed_thread(
     proposal: dict[str, Any],
     amount: int,
     terms: BareMetalTerms | None = None,
+    agreement_bytes: bytes | None = None,
+    settlement_data: dict[str, Any] | None = None,
     settlement_plan: dict[str, Any] | None = None,
 ) -> None:
     """Record an opening; with ``terms``, record it accepted at ``amount``.
 
-    ``settlement_plan`` is committed with the acceptance, before the thread is
-    successful, as the runtime commits the plan it built.
+    With ``agreement_bytes``, the acceptance also keeps the exact Agreement, the
+    selected mechanism's ``settlement_data`` if any, and records its settlement
+    identity, as every accepted runtime opening does. ``settlement_plan`` is
+    committed with the acceptance, before the thread is successful, as the
+    runtime commits the plan it built.
     """
 
     now = datetime.now(timezone.utc).isoformat()
@@ -81,8 +86,14 @@ async def seed_thread(
         negotiation_id=negotiation_id,
         agreed_price=amount,
         agreed_duration_seconds=message.duration_seconds,
+        agreement_bytes=agreement_bytes,
+        settlement_data=settlement_data,
     )
     await db.save_bare_metal_terms(negotiation_id=negotiation_id, terms=terms)
+    if agreement_bytes is not None:
+        await db.record_bare_metal_settlement_acceptance(
+            negotiation_id=negotiation_id, agreement_bytes=agreement_bytes
+        )
     if settlement_plan is not None:
         await db.commit_settlement_plan(
             negotiation_id=negotiation_id,

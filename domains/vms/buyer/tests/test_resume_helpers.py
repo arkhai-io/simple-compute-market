@@ -324,6 +324,10 @@ def test_load_deal_context_recovers_accepted_proposal_and_demands():
         listing_id="L",
         accepted_escrow_proposal=proposal,
         accepted_provision_terms=provision,
+        settlement_selection={
+            "mechanism": "alkahest.v1", "option_id": "a" * 64,
+            "expiration_unix": 1_800_000_000,
+        },
     )
 
     deal = load_deal_context(log.run_id, signer=BUYER_SIGNER)

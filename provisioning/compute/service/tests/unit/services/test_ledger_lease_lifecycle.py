@@ -264,7 +264,6 @@ def _storefront():
     sf.__aenter__ = AsyncMock(return_value=sf)
     sf.__aexit__ = AsyncMock(return_value=False)
     sf.notify_capacity_released = AsyncMock(return_value={})
-    sf.patch_resource = AsyncMock()
     return sf
 
 
@@ -312,7 +311,6 @@ async def test_an_expired_lease_is_torn_down_then_released_and_notified(session_
     assert kwargs["site_id"] == "default"
     assert kwargs["request_id"].startswith("capacity-release-")
     assert "resource_id" not in kwargs
-    sf.patch_resource.assert_not_awaited()
     events, _ = ledger.events_after(0)
     assert events[-1]["kind"] == "released"
 

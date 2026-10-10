@@ -334,13 +334,6 @@ async def test_buyer_route_response_contracts_are_scheme_neutral(
     [
         ("POST", "/api/v1/admin/pause", {}, "admin_pause", ""),
         (
-            "PATCH",
-            "/api/v1/admin/portfolio/resources/vm-1",
-            {"state": "available"},
-            "admin_patch_resource",
-            "vm-1",
-        ),
-        (
             "POST",
             "/api/v1/listings/listing-1/negotiations/neg-1/advance",
             {"action": "accept"},

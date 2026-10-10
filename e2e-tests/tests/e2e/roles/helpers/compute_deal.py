@@ -268,6 +268,19 @@ class SiteCapacity:
     def list_reservations(self, *, state: str | None = None, escrow_uid: str | None = None) -> list[dict]:
         return asyncio.run(self._client().list_reservations(state=state, escrow_uid=escrow_uid))
 
+    def reservations_for_negotiation(self, negotiation_id: str) -> list[dict]:
+        """Reservations a deal holds, found by the deal reference its hold names.
+
+        VM delivery holds and commits capacity under the deal's negotiation,
+        whatever its settlement mechanism, so a VM deal settled through escrow
+        has no escrow on its reservation.
+        """
+        return [
+            reservation
+            for reservation in self.list_reservations()
+            if (reservation.get("deal_ref") or {}).get("negotiation_id") == negotiation_id
+        ]
+
     def get_reservation(self, capacity_reservation_id: str) -> dict:
         return asyncio.run(self._client().get_reservation(capacity_reservation_id)) or {}
 
@@ -294,7 +307,8 @@ class DealLease:
     """One deal's lease: the temporal tail of its ledger reservation.
 
     The full-deal scenarios drive the expiry lifecycle through this
-    view — resolve the reservation by escrow, read it back in lease
+    view — resolve the reservation by the deal reference its hold names (the
+    negotiation for VM, the escrow for bare metal), read it back in lease
     vocabulary, back-date its end, and observe the watchdog release it
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
@@ -306,16 +320,29 @@ class DealLease:
     the scenario back-dates it.
     """
 
-    def __init__(self, provisioning_client, site_capacity: SiteCapacity, escrow_uid: str) -> None:
+    def __init__(
+        self,
+        provisioning_client,
+        site_capacity: SiteCapacity,
+        *,
+        negotiation_id: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> None:
+        if (negotiation_id is None) == (escrow_uid is None):
+            raise ValueError("a deal's lease is found by its negotiation or its escrow")
         self._leases = provisioning_client
         self._site = site_capacity
-        self.escrow_uid = escrow_uid
         self.is_ledger = True
-        reservations = self._site.list_reservations(escrow_uid=escrow_uid)
+        if negotiation_id is not None:
+            self.deal_field, self.deal_value = "negotiation_id", negotiation_id
+            reservations = self._site.reservations_for_negotiation(negotiation_id)
+        else:
+            self.deal_field, self.deal_value = "escrow_uid", str(escrow_uid)
+            reservations = self._site.list_reservations(escrow_uid=escrow_uid)
         live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
-            f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the deal's reservation committed with its escrow?"
+            f"No ledger reservation with a lease tail for {self.deal_field} "
+            f"{self.deal_value!r} — was the deal's hold committed into a lease?"
         )
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
@@ -324,9 +351,11 @@ class DealLease:
         lease = self._leases.get_lease(self.lease_id)
         row = self._site.get_reservation(self.lease_id)
         data = lease.model_dump(mode="json")
+        deal_ref = row.get("deal_ref") or {}
         return {
             "id": data.get("capacity_reservation_id") or self.lease_id,
-            "escrow_uid": row.get("escrow_uid"),
+            "negotiation_id": deal_ref.get("negotiation_id"),
+            "escrow_uid": row.get("escrow_uid") or deal_ref.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "host_id": row.get("host_id"),
             "executor_target": data.get("executor_target"),

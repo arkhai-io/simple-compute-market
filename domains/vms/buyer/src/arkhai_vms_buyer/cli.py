@@ -14,6 +14,7 @@ from market_core import (
     BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
     ImmutableBuyerCapability,
+    ImmutableSettlementCapability,
     MarketDomainContract,
 )
 
@@ -28,6 +29,7 @@ from .logs_cli import logs_app
 from .settlement_composition import (
     buyer_settlement_readiness,
     buyer_settlement_registry,
+    buyer_settlement_stages,
 )
 from .network_cli import network_app
 
@@ -113,7 +115,10 @@ def _buyer_market_domain() -> MarketDomainContract:
 
     return replace(
         base,
-        declared_capabilities=(base.declared_capabilities | {DomainCapability.BUYER}),
+        declared_capabilities=(base.declared_capabilities | {
+            DomainCapability.BUYER, DomainCapability.SETTLEMENT,
+        }),
+        settlement=ImmutableSettlementCapability(buyer_stages=buyer_settlement_stages()),
         buyer=ImmutableBuyerCapability(
             identity_injection_contract=BUYER_IDENTITY_INJECTION_CONTRACT,
             register_commands=register,

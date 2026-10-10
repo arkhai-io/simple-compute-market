@@ -95,7 +95,11 @@ from __future__ import annotations
 import logging
 
 import pytest
-from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.alkahest import (
+    get_alkahest_network,
+    get_recipient_arbiter,
+    resolve_alkahest_address_config,
+)
 from market_alkahest.dev_chain import anvil_address_book_path
 from registry_client import ValidatePublishRequest
 
@@ -165,21 +169,22 @@ OFFER_RESOURCE = {
 }
 # The canonical deal's token, at the asking rate every lane's listing advertises.
 DEMAND_RESOURCE = {"token": DEAL_TOKEN, "amount": LISTED_HOURLY_RATE}
-# Listing-side accepted_escrows advertisement. The escrow_address here is a
-# stub — the buyer sends the placeholder zero address on its EscrowProposal
-# (see negotiate_new's defaults), which skips the accepted-escrow
-# (chain, address) strict match; field-level equality on
-# literal_fields["token"] is what gates the proposal. The real
-# escrow_address used on-chain is what the buyer's CLI resolves through
-# alkahest at settle time.
+# Listing-side accepted_escrows. A fresh negotiation selects the listing's
+# Alkahest option, and the seller materializes the accepted escrow plan from
+# that option, so the advertised escrow_address is the one the deal settles
+# against. It is resolved from the dev chain's address book, as a real seller's
+# `market publish` resolves it.
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
+_ALKAHEST_CFG = resolve_alkahest_address_config(
+    get_alkahest_network("anvil"),
+    config_path=_ALKAHEST_ADDRESSES_PATH,
+)
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
-    "escrow_address": "0x" + "11" * 20,
+    "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
     "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
-
-_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:

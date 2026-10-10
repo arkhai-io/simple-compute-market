@@ -41,6 +41,7 @@ from market_site_client.fixtures.resource_pools import (
 import market_policy.negotiation_thread as thread_store
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import ContactExchangeClient
+from market_core.schemas import RateValue, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
@@ -181,7 +182,7 @@ class SettlementCompositionDouble:
 
     Clauses compile against the real configuration registry and settlement
     configuration. Artifact construction, which the real composition delegates to
-    mechanism clients, yields one accepted escrow per Alkahest clause; a
+    mechanism clients, yields one accepted escrow and its exact option per Alkahest clause; a
     contact-exchange clause, which needs no client, is built by the real
     registry, and so is acceptance. ``mechanism_fulfillment`` is the per-test
     declaration of which mechanisms VM fulfils through capacity.
@@ -252,6 +253,19 @@ class SettlementCompositionDouble:
             for clause in clauses or ()
             if clause.mechanism == "alkahest.v1"
         ]
+        # Each accepted escrow is also an exact option, in the shape the
+        # Alkahest kit publishes, so a buyer can select it explicitly.
+        for escrow in accepted:
+            body = {
+                "mechanism": "alkahest.v1",
+                "asset": escrow["literal_fields"]["token"],
+                "rates": [{**rate, "value": str(rate["value"])} for rate in escrow["rates"]],
+                "params": {"accepted_escrow": escrow},
+            }
+            option_id = derive_settlement_option_id(
+                **{**body, "rates": [RateValue.model_validate(rate) for rate in body["rates"]]}
+            )
+            options.append({"option_id": option_id, **body})
         return accepted, options, ()
 
 

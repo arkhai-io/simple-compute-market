@@ -190,6 +190,9 @@ class LeaseView(Protocol):
 
     lease_id: str
     is_ledger: bool
+    # The deal reference the lease was found by, and its value.
+    deal_field: str
+    deal_value: str
 
     def refresh(self) -> dict: ...
 
@@ -246,8 +249,8 @@ class ComputeDealDriver(Protocol):
         """Assert the ready settlement's result and access, where the domain
         delivers them."""
 
-    def lease_view(self, escrow_uid: str) -> LeaseView:
-        """The deal's lease."""
+    def lease_view(self, deal_state: ComputeDealState) -> LeaseView:
+        """The deal's lease, found by the deal reference its hold names."""
 
     def arm_teardown_gate(self) -> None:
         """Arm `teardown_rule_id` so provider teardown pauses before its result."""
@@ -567,8 +570,9 @@ class Stage00h_ProvisioningStorefrontLink:
 
         Two sub-checks from the provisioning health endpoint:
           - storefront      — GET {storefront_url}/health responded 200
-          - storefront_auth — GET {storefront_url}/api/v1/system/status with
-                              a signed request responded 200
+          - storefront_auth — GET {storefront_url}/api/v1/system/status, signed
+                              under the `service` role, responded 200 with a
+                              response signed by the pinned storefront principal
 
         If this fails with storefront='unconfigured': the provisioning
         service's storefront_url and service-peer identity are not configured.
@@ -588,7 +592,7 @@ class Stage00h_ProvisioningStorefrontLink:
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
-            "The lease watchdog will not be able to release resources when leases expire.\n"
+            "Provisioning will not be able to tell the storefront when a lease's capacity is released.\n"
             "Verify the provisioning service's storefront_url points to the "
             "storefront and both containers share the compose project's network.\n"
             f"Full health response: {health}"
@@ -597,7 +601,7 @@ class Stage00h_ProvisioningStorefrontLink:
         auth_check = checks.get("storefront_auth", "absent")
         assert auth_check == "ok", (
             f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
-            "The lease watchdog signs as the provisioning service; 'unauthorized'\n"
+            "Provisioning signs as its own service identity; 'unauthorized'\n"
             "means its principal is not the one the storefront pins as a\n"
             "service peer.\n"
             f"Full health response: {health}"
@@ -705,7 +709,7 @@ class Stage05a_EvaluateNegotiate:
 
 class Stage05b_NegotiationStartsAndVisible:
     def test_05b_buyer_starts_negotiation_and_thread_confirmed(
-        self, storefront_client, storefront_admin_client,
+        self, storefront_client, storefront_admin_client, registry_client,
         deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
         """Negotiation starts + visible + round-0 confirmed in event stream.
@@ -723,6 +727,16 @@ class Stage05b_NegotiationStartsAndVisible:
         # refuses the attestation over a one-second difference.
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
 
+        # A fresh negotiation names its settlement option explicitly; the
+        # seller accepts nothing it would have to infer from an escrow's shape.
+        (alkahest_option,) = [
+            dict(option)
+            for option in registry_client.get_listing(
+                deal_state.seller_listing_id
+            ).settlement_options
+            if dict(option)["mechanism"] == "alkahest.v1"
+        ]
+
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             initial_amount=BUYER_INITIAL_PRICE,
@@ -733,6 +747,11 @@ class Stage05b_NegotiationStartsAndVisible:
             # supplied later.
             provision_terms=deal_driver.provision_terms(),
             token=DEAL_TOKEN["contract_address"],
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": alkahest_option["option_id"],
+                "expiration_unix": deal_state._escrow_expiration_unix,
+            },
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
         assert neg_id, (
@@ -1157,14 +1176,18 @@ class Stage09c_LeaseRecorded:
         """
         require_state(
             deal_state,
+            "negotiation_id",
             "real_escrow_uid",
             "settlement_status",
             "fulfillment_id",
         )
 
-        lease_view = deal_driver.lease_view(deal_state.real_escrow_uid)
+        lease_view = deal_driver.lease_view(deal_state)
         lease = lease_view.refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get(lease_view.deal_field) == lease_view.deal_value, (
+            f"lease does not name the deal's {lease_view.deal_field} "
+            f"{lease_view.deal_value!r}: {lease}"
+        )
         assert lease.get("host_id") == deal_state._evaluate_settle_host_id, (
             f"lease bound to executor {lease.get('host_id')!r}; stage 08a's "
             f"evaluate_settle chose {deal_state._evaluate_settle_host_id!r}. "

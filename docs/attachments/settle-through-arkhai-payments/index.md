@@ -70,22 +70,7 @@ Two small repairs: `a64be320` removes imports that shadowed payment recovery's e
 
 ## Real-ledger setup and readiness
 
-Required/prepared target: local `/Users/mlegls/dev/arkhai/arkhai-payments`, unchanged source, checkout-owned compose project `payments-c5b735ea02d5`, Formance loopback `3168`, ledger `payments_dev`, payments HTTP `3180`. Development X-Account-ID auth: synthetic payer/payee ending 0011/0012, dispute authority 0013. No Cloud selectors or real funds. Existing idempotent seed and named volume reused without reset. Readiness observed: `podman info` reachable, exact compose container names, `/health` HTTP 200 with status ok. The trusted public receipt pin comes from the checkout's seed transaction before each new Agreement. Disposable receipt/operator keys are generated at launch, not recorded.
-
-Start in a foreground managed process; poll Podman readiness because machine start may return early:
-
-```sh
-podman machine start
-for i in {1..120}; do podman info >/dev/null 2>&1 && break; sleep 2; done
-podman info >/dev/null || exit 1
-cd ~/dev/arkhai/arkhai-payments
-export FORMANCE_PORT=3168
-bun run ledger:local
-NODE_ENV=development PAYMENTS_PORT=3180 \
-  ARKHAI_DISPUTE_AUTHORITY=00000000-0000-4000-8000-000000000013 \
-  RECEIPT_SIGNING_KEY=$(openssl rand -hex 32) \
-  DEV_OPERATOR_TOKEN=$(openssl rand -hex 24) bun run service
-```
+Target: a local development instance of the Arkhai payments service on loopback, backed by a local Formance ledger. Development account authentication with synthetic payer, payee and dispute-authority accounts; no cloud resources or real funds. Readiness observed: the service's `/health` returned HTTP 200 with status ok. The trusted receipt key is read from the service's seed transaction before each new Agreement; disposable receipt and operator keys are generated at launch, not recorded. Starting that service belongs to the service and is not reproduced here.
 
 After `make dist`, run bare metal from SCM root (preserve the same state between processes):
 
@@ -124,12 +109,11 @@ rm -r "$state"
 
 The VM replay remains `vm_smoke.py` with the analogous crash/resume phases, `--project domains/vms/storefront --find-links .dist --with "$PWD/.dist/arkhai_vms_buyer-0.7.0-py3-none-any.whl"`. Diagnostic entries were opened/run here; state and generated credentials are reproducible, not inherited setup requirements.
 
-Cleanup: stop both foreground services; `cd ~/dev/arkhai/arkhai-payments && FORMANCE_PORT=3168 ./scripts/ledger-local.sh down` stops only this checkout's containers and retains its named volume. The verification's services/containers and scratch baseline worktree are removed before handoff.
+Cleanup: stop both foreground services and the local ledger. The verification's services, containers and scratch baseline worktree are removed before handoff.
 
 ## Friction and failed attempts
 
 - Bare metal initially rejected an accepted wire amount string against the stored integer; fixed with typed Agreement comparison, redriven and 92 regressions passed.
 - API credits initially compared Agreement dictionary principals with Identity objects; fixed by canonical normalization, redriven and 70 regressions passed.
 - Harness corrections: API-credit SQLite listing resources require decoding; its HTTP client needs explicit direct AsyncHTTPTransport because inherited SOCKS proxy configuration can require absent socksio. Payments loopback requests already disable environment proxy trust. One simultaneous reinit temporarily removed a dependency while the diagnostic imported it; sequential use eliminated that setup race. These are not product receipt/issuance failures.
-- Managed process retention: existing issue `mlegls-pi/docs/issues/managed-process-retained-logs-disappear-during-test-run.md`; tee retained all suite counts here. Existing issue `mlegls-pi/docs/issues/managed-podman-start-exits-before-machine-remains-reachable.md`; readiness polling worked in this run.
 - Helm shim had no selected version and its script suppressed the diagnostic. [SCM #253](https://github.com/arkhai-io/simple-compute-market/issues/253) records the observation and successful mise exec workaround.

@@ -2,9 +2,9 @@
 
 The domain-neutral market-state persistence lives in
 ``core_storefront.sqlite_client``. This subclass adds
-``credit_deal_terms`` and the immutable public-row link to the shared
-settlement obligation. Quantity and key disposition are fixed at round
-zero and read back when settlement submits issuance.
+accepted credit terms, negotiation-bound settlement evidence and issuance
+progress. Source evidence, shared Alkahest servicing and private delivery
+results have separate repositories.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
+
+from apicredits_storefront.settlement_repository import SettlementRepository
+from market_core import SettlementEvidence
 
 from .config import settings
 from .migrations import APICREDITS_MIGRATIONS
@@ -48,34 +51,46 @@ class SQLiteClient(CoreSQLiteClient):
             """
         )
 
+    def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
+        for table, columns in {
+            "api_credit_settlement_evidence": {"negotiation_id", "mechanism", "agreement_digest", "settlement_ref", "status", "evidence"},
+            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref", "delivery_started_at"},
+        }.items():
+            actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
+            if not columns <= actual:
+                raise RuntimeError("incompatible API-credit settlement schema; explicitly reset the database")
+
+    async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)
+
+    async def load_settlement_evidence(self, *, negotiation_id: str) -> SettlementEvidence | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).get, negotiation_id)
+
+    async def load_issuance_progress(self, *, reference: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).progress, reference)
+
+    async def save_issuance_progress(self, *, negotiation_id: str, **fields: Any) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).checkpoint, negotiation_id, **fields)
+
+    async def claim_credit_delivery_start(self, *, negotiation_id: str) -> bool:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).claim_delivery_start, negotiation_id)
+
+    async def record_credit_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).record_refund_intent, negotiation_id)
+
+    async def abandon_credit_refund_intent(self, *, negotiation_id: str, prior_status: str) -> None:
+        await asyncio.to_thread(
+            SettlementRepository(self.db_path).abandon_refund_intent, negotiation_id, prior_status=prior_status,
+        )
+
+    async def complete_credit_refund(self, *, negotiation_id: str) -> None:
+        await asyncio.to_thread(SettlementRepository(self.db_path).complete_refund, negotiation_id)
+
     async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
-        """Accepted payment deals with no verified receipt, open credit issuance, or a refund left `refunding`.
-
-        The filter runs before the limit, so completed deals never crowd out an
-        unsettled one. A malformed Agreement is skipped, never fatal to the query.
-        """
-
-        def load() -> list[str]:
-            with sqlite3.connect(self.db_path) as conn:
-                rows = conn.execute(
-                    """
-                    SELECT t.negotiation_id
-                    FROM negotiation_threads t
-                    LEFT JOIN escrows e ON e.escrow_uid = t.negotiation_id
-                    WHERE t.terminal_state = 'success'
-                      AND t.agreement_bytes IS NOT NULL
-                      AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))
-                          THEN json_extract(CAST(t.agreement_bytes AS TEXT), '$.settlement.mechanism')
-                          END = ?
-                      AND (e.escrow_uid IS NULL OR e.status IN ('provisioning', 'refunding'))
-                    ORDER BY t.created_at ASC, t.negotiation_id ASC
-                    LIMIT ?
-                    """,
-                    (mechanism, limit),
-                ).fetchall()
-            return [str(row[0]) for row in rows]
-
-        return await asyncio.to_thread(load)
+        """Accepted deals of ``mechanism`` with no verified receipt, open credit issuance, or a refund left `refunding`."""
+        return await asyncio.to_thread(
+            SettlementRepository(self.db_path).unsettled_negotiations, mechanism=mechanism, limit=limit,
+        )
 
     async def save_credit_terms(
         self,

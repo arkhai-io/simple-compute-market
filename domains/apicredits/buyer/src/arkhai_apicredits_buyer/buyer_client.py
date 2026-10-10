@@ -15,6 +15,7 @@ from core_buyer.negotiation_client import (
 from arkhai_apicredits.negotiation import ApiCreditsProvisionTerms
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 from .escrow_client import encode_escrow_proposal
+from .settlement_composition import validate_buyer_acceptance
 
 
 def _validate_model(model_type, value):
@@ -68,6 +69,7 @@ class NegotiationOutcome(CoreNegotiationOutcome):
 def negotiate_with_seller(**kwargs) -> NegotiationOutcome:
     """Negotiate through core, then decode accepted Alkahest payloads."""
     kwargs.setdefault("encode_escrow_proposal", encode_escrow_proposal)
+    kwargs.setdefault("validate_acceptance", validate_buyer_acceptance)
     kwargs.setdefault(
         "decode_provision_terms",
         lambda value: _validate_model(ApiCreditsProvisionTerms, value),

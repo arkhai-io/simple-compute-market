@@ -12,13 +12,13 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 
 ## Dependencies
 
-- Payments `rate-parts` (arkhai-io/arkhai-payments): rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
-- `route-settlement-by-mechanism`: the continuation lives in the VM payment seller stage.
+- Payments service `rate-parts`: rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
+- `route-settlement-by-mechanism` (archived 2026-10-09): the continuation lives in the VM payment seller stage.
 - Snapshot verification. SCM verifies only the receipt embedded in a transaction snapshot, not the snapshot's own proof (`settle-through-arkhai-payments` design, R9). Funded-through times and stop events are snapshot state, so this change must first verify snapshot proofs and add a snapshot vector and receipt-kit fixture.
 
 ## Payments contract this builds on
 
-The payments `rate-parts` spec (`arkhai-payments/docs/issues/rate-parts.md`) settles the seller-side needs below:
+The payments service's `rate-parts` contract settles the seller-side needs below:
 - `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
 - `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the domain's teardown time, and the SDK supplies a default.
 - The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated, never future-dated, and any stop ends the whole transaction.

@@ -36,13 +36,43 @@ Operational inventory is authoritative service state, not a checked-in Ansible i
 
 The bare-metal storefront is a client of the accepted POOLS-7 scheduling and fulfillment contracts, not a second job repository or convergence worker. It derives one `SettlementResource` request from the immutable accepted listing/site/Physical Resource and agreed bare-metal terms, submits it to the provisioning authority bound to that site, and persists only returned reservation, settlement-resource, and fulfillment correlations.
 
+The storefront's seller table binds payment, Alkahest and fused contact stages;
+its purchase table binds payment only. Each seller persists one
+`bare_metal.settlement-evidence.v1` payload in negotiation-keyed
+`bare_metal_settlement_records`, bound to the exact Agreement digest and an
+immutable established reference. Verified source/delivery cannot be replaced.
+Physical lifecycle correlations, progress and private results remain separate.
+Contact evidence contains a reveal reference, not duplicated PII or a physical
+phase. No escrow row or payment chain-name sentinel is alternative authority.
+
+Common begin, recovery/status, access/result and teardown load verified evidence
+through the accepted entry. Payment rechecks the mandate and trusted signed
+receipt. Alkahest requires an active journal (pending reclaim/collection and
+ready mechanism status) and rechecks chain evidence against the persisted
+proposal, amount/duration, selected chain and exact obligation index. Local
+materialization is adoption history, not current chain authority.
+
 The scheduler's recorded resource kind, provider, and executor selection remain authoritative for begin, status, result, and teardown. The storefront never substitutes a process-global provisioner, buyer-supplied URL, or guessed adapter. It pulls normalized status and the versioned result envelope through the same recorded site client after restart; provisioning remains the authority for jobs, provider metadata, execution credentials, and teardown convergence.
 
 ### Signed payment receipt boundary
 
 Arkhai payment acceptance stores the seller-derived mandate in shared negotiation `settlement_data` beside exact Agreement bytes. The seller verifies the service-signed receipt against that mandate before selected-site reservation, scheduling, or fulfillment. Pending payment cannot create access or renew capacity. Equivalent retries reuse the accepted site, durable reservation, and fulfillment identity; recovery rechecks receipt evidence before physical effects.
 
-VM retains its existing provisioning progress and convergence lease under the negotiation ID, without a chain escrow or payment obligation. Bare-metal retains its selected-site lifecycle and public result. Lease expiry and revocation use provisioning-owned teardown convergence; capacity stays quarantined until authoritative release, independently of payment hold release or refund.
+VM retains negotiation-scoped settlement evidence and independent delivery
+progress/convergence claims without a chain escrow or payment obligation.
+Bare metal retains independent evidence and its selected-site lifecycle/public
+result. Neither common delivery path dispatches from a mechanism ID. Lease expiry and revocation use provisioning-owned teardown convergence; capacity stays quarantined until authoritative release, independently of payment hold release or refund.
+
+### Explicit storefront database reset
+
+Incompatible disposable bare-metal storefront databases require explicit reset
+while effects and recovery are quiesced. Confirm database ownership, use a new
+owned path or remove only that disposable database, bootstrap current migrations,
+then republish and renegotiate. Old receipt-only evidence and escrow-named
+lifecycle shapes fail startup; there is no silent copy/adoption or sentinel
+fallback. Rebuild `.dist` and reinstall consumers before use. Controlled HTTP
+settlement/contact entries use fresh pytest-owned SQLite and clean it afterward;
+this is not live hardware access/revocation qualification.
 
 ## Proof-driven release
 

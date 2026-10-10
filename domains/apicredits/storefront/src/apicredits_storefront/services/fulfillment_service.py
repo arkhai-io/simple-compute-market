@@ -1,4 +1,4 @@
-"""Credit fulfillment orchestration for settled escrows.
+"""Credit fulfillment orchestration from verified settlement evidence.
 
 Binds the concept module's ``fulfill_api_credits_obligation`` to this
 process's parts: settings, the capacity-hold lookup placed at
@@ -12,14 +12,23 @@ from typing import Any
 
 from arkhai_apicredits.settlement import fulfill_api_credits_obligation
 from core_storefront.stage_log import stage_event
-from market_identity import Identity
+from arkhai_apicredits.settlement.fulfillment import credit_delivery
+from market_core import SettlementEvidence
 from market_settlement_runtime import FailurePolicy
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
-from apicredits_storefront.services.payment_selection import selects_payments
+from apicredits_storefront.services.capacity_client import (
+    build_capacity_runtime,
+    capacity_binding_from_listing_resource,
+)
+from apicredits_storefront.services.publication_service import (
+    reopen_token_listings_after_capacity_change,
+)
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.settlement_stages import accepted_agreement
 from apicredits_storefront.utils.config import settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -37,14 +46,6 @@ async def _release_capacity_handler(
     db: Any,
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    from apicredits_storefront.services.capacity_client import (
-        build_capacity_runtime,
-        capacity_binding_from_listing_resource,
-    )
-    from apicredits_storefront.services.publication_service import (
-        reopen_token_listings_after_capacity_change,
-    )
-
     listing_id = str(context.get("listing_id") or "")
     row = await db.load_listing(listing_id=listing_id)
     if row is None:
@@ -55,7 +56,7 @@ async def _release_capacity_handler(
         binding,
         capacity_reservation_id=context.get("capacity_reservation_id"),
         deal_ref=(
-            {"escrow_uid": context["escrow_uid"]} if context.get("escrow_uid") else None
+            {"negotiation_id": context["negotiation_id"]} if context.get("negotiation_id") else None
         ),
         failure_reason=context.get("reason"),
         failure_message=context.get("message"),
@@ -116,8 +117,9 @@ async def _failure_webhook_handler(
 async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
     """Refund the buyer when this storefront's own issuance failed; opt-in.
 
-    Payment deals reverse their held payment only when nothing was issued. API
-    credits has no refund path for other mechanisms.
+    The accepted Agreement's seller stage decides: a stage with seller refunds
+    reverses only when nothing was issued, and any other stage records why it
+    skipped.
     """
     negotiation_id = str(context.get("negotiation_id") or context.get("escrow_uid") or "")
     thread = (
@@ -125,13 +127,18 @@ async def _refund_handler(db: Any, context: dict[str, Any]) -> dict[str, Any]:
         if negotiation_id
         else None
     )
-    if not selects_payments(thread):
+    try:
+        agreement, _raw = accepted_agreement(thread or {})
+    except (KeyError, TypeError, ValueError):
+        return {"action": "refund", "status": "skipped", "reason": "accepted_agreement_unavailable"}
+    stage = SELLER_STAGES.get(agreement.settlement.mechanism)
+    if stage is None:
         return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
-    composition = _container.resolved_settlement_composition
-    service = composition.payment_service(db) if composition is not None else None
-    if service is None:
-        return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}
-    return await service.refund_before_delivery(negotiation_id)
+    return await stage.refund_before_delivery(
+        db=db,
+        composition=_container.resolved_settlement_composition,
+        negotiation_id=negotiation_id,
+    )
 
 
 def build_api_credit_failure_policy() -> FailurePolicy:
@@ -150,7 +157,8 @@ def build_api_credit_failure_policy() -> FailurePolicy:
 async def _apply_fulfillment_failure_policy_adapter(
     *,
     capacity_reservation_id: str | None,
-    escrow_uid: str,
+    settlement_ref: str | None,
+    negotiation_id: str,
     listing_id: str | None,
     resource_id: str | None,
     reason: str,
@@ -166,7 +174,8 @@ async def _apply_fulfillment_failure_policy_adapter(
         get_sqlite_client(),
         {
             "capacity_reservation_id": capacity_reservation_id,
-            "escrow_uid": escrow_uid,
+            "settlement_ref": settlement_ref,
+            "negotiation_id": negotiation_id,
             "listing_id": listing_id,
             "resource_id": resource_id,
             "reason": reason,
@@ -179,61 +188,23 @@ async def _apply_fulfillment_failure_policy_adapter(
 
 
 async def fulfill_credit_obligation(
-    *,
-    client: Any | None,
-    escrow_uid: str,
-    order: dict[str, Any],
-    quantity: int,
-    key_mode: str = "new",
-    key_id: str | None = None,
-    buyer_principal: Identity,
-    listing_id: str | None = None,
-    negotiation_id: str | None = None,
-    mechanism: str = "alkahest.v1",
-    authoritative_gate: str = "alkahest_verified",
+    *, evidence: SettlementEvidence, retry_uncertain: bool = False,
+    db: Any | None = None, credits_client: Any | None = None,
 ) -> dict[str, Any]:
-    """Issue credits after the selected mechanism's verified settlement gate.
-
-    Any negotiation-time capacity hold accompanies the idempotent issuance
-    command. Alkahest additionally submits its on-chain fulfillment;
-    payment-backed deals use the signed receipt as their funding evidence.
-    """
-
-    from apicredits_storefront.domain_runtime import (
-        get_market_domain_contract,
-    )
-
-    held_reservation: dict | None = None
-    db = None
-    if negotiation_id:
-        db = get_sqlite_client()
-        hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
-        if hold:
-            held_reservation = dict(hold.get("payload") or {})
-            held_reservation.setdefault(
-                "capacity_reservation_id", hold.get("capacity_reservation_id")
-            )
-    listing = get_market_domain_contract().codecs.listing(order)
+    """Issue from verified delivery inputs, independently of their source mechanism."""
+    credit_delivery(evidence)
+    db = db if db is not None else get_sqlite_client()
+    hold = await db.load_capacity_hold(negotiation_id=evidence.negotiation_id)
+    held_reservation = None
+    if hold:
+        held_reservation = dict(hold.get("payload") or {})
+        held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
     result = await fulfill_api_credits_obligation(
-        client=client,
-        escrow_uid=escrow_uid,
-        listing_resource=listing.listing_resource.model_dump(mode="json"),
-        quantity=quantity,
-        key_mode=key_mode,
-        key_id=key_id,
-        buyer_principal=buyer_principal,
-        listing_id=listing_id,
-        credits_client=get_credits_service_client(),
-        stage_event=stage_event,
-        mechanism=mechanism,
-        authoritative_gate=authoritative_gate,
-        apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        evidence=evidence, retry_uncertain=retry_uncertain,
+        credits_client=credits_client or get_credits_service_client(),
+        stage_event=stage_event, apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,
     )
-    if (
-        db is not None
-        and held_reservation is not None
-        and result.get("status") != "pending"
-    ):
-        await db.delete_capacity_hold(negotiation_id=negotiation_id)
+    if held_reservation is not None and result.get("status") != "pending":
+        await db.delete_capacity_hold(negotiation_id=evidence.negotiation_id)
     return result

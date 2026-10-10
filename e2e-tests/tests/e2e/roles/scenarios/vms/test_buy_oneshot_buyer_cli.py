@@ -674,8 +674,10 @@ class TestStageB5_SellerAndLease:
 
         # DealLease resolves where the lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease = DealLease(provisioning_client, site_capacity, deal_state.real_escrow_uid).refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        lease = DealLease(
+            provisioning_client, site_capacity, negotiation_id=deal_state.negotiation_id
+        ).refresh()
+        assert lease.get("negotiation_id") == deal_state.negotiation_id
         # Not `resource_id`: the lease reports the executor it placed the deal
         # on, and physical identity is reported nowhere the commercial side
         # can read it -- the same strip that retired `resource_id` from the

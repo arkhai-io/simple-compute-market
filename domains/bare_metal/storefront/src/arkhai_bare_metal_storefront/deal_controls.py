@@ -195,7 +195,7 @@ def capacity_admin_routes(
             "fulfillment",
             "capacity_released",
             negotiation_id=str(lifecycle["negotiation_id"]),
-            escrow_uid=lifecycle.get("escrow_uid"),
+            escrow_uid=lifecycle.get("settlement_ref"),
             capacity_reservation_id=reservation_id,
             site_id=lifecycle["site_id"],
         )
