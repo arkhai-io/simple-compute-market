@@ -68,6 +68,13 @@ def test_seller_settlement_data_survives_buyer_acceptance(monkeypatch) -> None:
         "core_buyer.negotiation_client._authenticated_json",
         lambda *_args, **_kwargs: reply,
     )
+    accepted = []
+    observed = []
+
+    def validate_acceptance(outcome):
+        assert observed == []
+        accepted.append(outcome)
+
     outcome = negotiate_with_seller(
         seller_url="http://seller",
         principal=buyer.identity,
@@ -83,8 +90,13 @@ def test_seller_settlement_data_survives_buyer_acceptance(monkeypatch) -> None:
         escrow_proposal={},
         encode_escrow_proposal=lambda _proposal: {"fields": {"amount": 4200}},
         chain=[],
+        validate_acceptance=validate_acceptance,
+        on_round=lambda *_args: observed.append("accepted"),
     )
 
+    assert accepted == [outcome]
+    assert accepted[0] is outcome
+    assert observed == ["accepted"]
     assert outcome.settlement_data == settlement_data
     assert outcome.to_dict()["settlement_data"] == settlement_data
     assert _parse_settlement_data({}) is None

@@ -77,7 +77,7 @@ class Delivery:
             await self.release.wait()
         result = {
             "negotiation_id": context.negotiation_id,
-            "escrow_uid": context.escrow_uid,
+            "settlement_ref": context.settlement_ref,
             "site_id": context.site_id,
         }
         if self.fail:
@@ -86,7 +86,7 @@ class Delivery:
             await apply_fulfillment_failure_policy(
                 context.ports.repository,
                 FulfillmentFailureContext(
-                    escrow_uid=context.escrow_uid,
+                    negotiation_id=context.negotiation_id,
                     reason="provisioning_failed",
                     message="controlled failure",
                     source="settlement_provisioning",
@@ -156,7 +156,13 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, deposit: bool):
         status="open",
         created_at=now,
         updated_at=now,
-        listing_resource={"gpu_model": "H200", "gpu_count": 1, "offering_mode": "vm"},
+        listing_resource={
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "offering_mode": "vm",
+            "pool_id": "pool-test",
+            "resource_id": "resource-test",
+        },
         fulfillment_resource=None,
         max_duration_seconds=3600,
         storefront_url="http://test",
@@ -239,6 +245,7 @@ async def _harness(tmp_path, *, deposit=False, actions=("emit_event",)):
     _container.resolved_marketplace_signer = SELLER
     _container.resolved_settlement_composition = SimpleNamespace(
         payments_coordinator=coordinator,
+        seller_stages=domain.settlement.seller_stages,
         local_principal=SELLER.identity,
         arkhai_payments_stage=stage,
     )
@@ -314,7 +321,7 @@ async def test_an_impostor_receipt_is_refused_without_delivery_or_state(make):
     h.serve(signer=IMPOSTOR)
     assert await _status_code(h.settle) == 409
     assert h.delivery.starts == []
-    assert await h.db.load_vm_payment_record(negotiation_id=NEGOTIATION) is None
+    assert await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION) is None
 
 
 @pytest.mark.asyncio
@@ -382,6 +389,26 @@ async def test_refund_outcomes_without_held_funds_are_conflicts(make):
 
 
 @pytest.mark.asyncio
+async def test_a_mechanism_whose_entry_has_no_refund_is_a_conflict(make):
+    """The route refunds through the accepted Agreement's seller entry; an
+    Alkahest deal refunds through its own listing refund instead."""
+    import sqlite3
+
+    h = await make()
+    h.serve()
+    thread = await h.db.load_negotiation_thread_row(negotiation_id=NEGOTIATION)
+    agreement = json.loads(thread["agreement_bytes"])
+    agreement["settlement"]["mechanism"] = "alkahest.v1"
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id=?",
+            (json.dumps(agreement).encode(), NEGOTIATION),
+        )
+    assert await _status_code(h.refund) == 409
+    assert h.payments.count("reverse") == 0
+
+
+@pytest.mark.asyncio
 async def test_a_buyer_cannot_refund(make):
     h = await make()
     h.serve()
@@ -408,9 +435,12 @@ async def test_the_refund_failure_action_reverses_a_failed_payment_deal(make):
     await h.settle()
     await h.delivered()
     assert h.payments.count("reverse") == 1
-    escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
-    # The provisioning task's own failed write must not overwrite the refund.
-    assert escrow["status"] == "refunded"
+    # The refund lives on the evidence; the provisioning task's own failed
+    # write is recorded on the delivery beside it.
+    evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "refunded"
+    delivery = await h.db.load_vm_delivery(negotiation_id=NEGOTIATION)
+    assert delivery["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -421,7 +451,9 @@ async def test_without_the_refund_action_a_failed_deal_keeps_its_payment(make):
     await h.settle()
     await h.delivered()
     assert h.payments.count("reverse") == 0
-    assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "failed"
+    assert (await h.db.load_vm_delivery(negotiation_id=NEGOTIATION))["status"] == "failed"
+    evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "verified"
 
 
 # --- Accepted deals outlive configuration changes -----------------------------
@@ -461,21 +493,23 @@ async def test_an_accepted_deal_settles_and_refunds_after_payments_is_disabled(m
 @pytest.mark.asyncio
 async def test_a_refund_recorded_before_delivery_start_stops_delivery(make):
     h = await make()
-    gate = asyncio.Event()
-    claim = h.db.claim_delivery_start
+    insert = h.db.insert_vm_delivery
 
-    async def gated_claim(**kwargs):
-        await gate.wait()
-        return await claim(**kwargs)
+    async def refund_intent_first(**kwargs):
+        # Another process records refund intent after the receipt is verified
+        # and before this one starts delivery.
+        await h.db.record_vm_refund_intent(negotiation_id=NEGOTIATION)
+        return await insert(**kwargs)
 
-    h.db.claim_delivery_start = gated_claim
+    h.db.insert_vm_delivery = refund_intent_first
     h.serve()
-    await h.settle()
-    assert (await h.refund()).status == "refunded"
-    gate.set()
+    assert (await h.settle()).status == "refunded"
     await h.delivered()
     assert h.delivery.starts == []
-    assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "refunded"
+    assert h.payments.count("reverse") == 1
+    evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "refunded"
+    assert await h.db.load_vm_delivery(negotiation_id=NEGOTIATION) is None
 
 
 @pytest.mark.asyncio
@@ -488,10 +522,12 @@ async def test_a_refund_after_delivery_start_records_both(make):
     assert (await h.refund()).status == "refunded"
     h.delivery.release.set()
     await h.delivered()
-    escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
     assert h.delivery.starts == [NEGOTIATION]
-    assert escrow["status"] == "refunded"
-    assert escrow["fulfillment_uid"] == "vm-fulfillment-1"
+    evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "refunded"
+    delivery = await h.db.load_vm_delivery(negotiation_id=NEGOTIATION)
+    assert delivery["status"] == "ready"
+    assert delivery["fulfillment_uid"] == "vm-fulfillment-1"
 
 
 @pytest.mark.asyncio
@@ -499,11 +535,22 @@ async def test_an_interrupted_refund_completes_on_the_next_call(make):
     h = await make()
     h.serve()
     # State left by a crash after the service reversed but before the local write.
-    await h.db.record_refund_intent(escrow_uid=NEGOTIATION, negotiation_id=NEGOTIATION)
+    thread = await h.db.load_negotiation_thread_row(negotiation_id=NEGOTIATION)
+    entry = h.coordinator.domain.settlement.seller_stages["arkhai.payments.v1"]
+    await h.db.save_vm_settlement_evidence(
+        entry.verified_evidence(
+            raw=thread["agreement_bytes"],
+            order=await h.db.load_listing(listing_id=LISTING),
+            receipt=build_signed_receipt(signer=SERVICE, mandate=h.data.mandate),
+            data=h.data,
+        )
+    )
+    await h.db.record_vm_refund_intent(negotiation_id=NEGOTIATION)
     h.payments.reversed = True
     h.payments.reverse_error = "hold_not_reversible"
     assert (await h.refund()).status == "refunded"
-    assert (await h.db.load_escrow(escrow_uid=NEGOTIATION))["status"] == "refunded"
+    evidence = await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "refunded"
 
 
 @pytest.mark.asyncio
@@ -533,6 +580,7 @@ async def _restart(h, tmp_path, *, approved: bool):
     _container.resolved_domain_registry = registry
     _container.resolved_settlement_composition = SimpleNamespace(
         payments_coordinator=coordinator,
+        seller_stages=domain.settlement.seller_stages,
         local_principal=SELLER.identity,
         arkhai_payments_stage=stage,
     )
@@ -555,10 +603,11 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(mak
     await task
 
     assert restarted.delivery.starts == [NEGOTIATION]
-    record = await restarted.db.load_vm_payment_record(negotiation_id=NEGOTIATION)
-    assert record["receipt"] is not None
-    escrow = await restarted.db.load_escrow(escrow_uid=NEGOTIATION)
-    assert escrow["status"] == "ready"
+    evidence = await restarted.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "verified"
+    assert evidence.evidence["source"]["receipt"]
+    delivery = await restarted.db.load_vm_delivery(negotiation_id=NEGOTIATION)
+    assert delivery["status"] == "ready"
 
     # A later pass finds nothing left to do.
     await _reconcile_payment_deals()
@@ -575,7 +624,29 @@ async def test_reconciliation_leaves_an_unapproved_payment_pending(make, tmp_pat
     await _reconcile_payment_deals()
 
     assert restarted.delivery.starts == []
-    assert await restarted.db.load_escrow(escrow_uid=NEGOTIATION) is None
+    assert await restarted.db.load_vm_delivery(negotiation_id=NEGOTIATION) is None
+    evidence = await restarted.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "pending"
+
+
+def _complete(db_path: str, negotiation_id: str) -> None:
+    """Record a payment deal as verified and delivered, as settlement leaves it."""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO vm_settlement_evidence VALUES (?, 'arkhai.payments.v1', ?, ?, 'verified', '{}')",
+            (negotiation_id, "0" * 64, f"ref-{negotiation_id}"),
+        )
+        conn.execute(
+            "INSERT INTO vm_delivery_records (negotiation_id, status, created_at, updated_at) "
+            "VALUES (?, 'ready', '2000-01-01T00:00:00', '2000-01-01T00:00:00')",
+            (negotiation_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _clone_row(db_path: str, table: str, source: str, new_id: str, **columns) -> None:
@@ -604,10 +675,7 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(make):
             h.db.db_path, "negotiation_threads", NEGOTIATION, completed,
             created_at=f"2000-01-01T00:00:0{index}",
         )
-        await h.db.insert_escrow(
-            escrow_uid=completed, negotiation_id=completed, chain_name=None,
-            escrow_address=None, is_primary=True, status="ready",
-        )
+        _complete(h.db.db_path, completed)
     h.serve()
 
     done = await h.coordinator.reconcile_once(limit=1)

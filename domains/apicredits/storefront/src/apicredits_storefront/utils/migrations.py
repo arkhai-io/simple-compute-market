@@ -29,6 +29,30 @@ def _migrate_escrow_settlement_identity(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_issuance_evidence(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_credit_settlement_evidence (
+          negotiation_id TEXT PRIMARY KEY,
+          mechanism TEXT NOT NULL,
+          agreement_digest TEXT NOT NULL,
+          settlement_ref TEXT UNIQUE,
+          status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed', 'refunding', 'refunded')),
+          evidence TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_credit_issuance_progress (
+          negotiation_id TEXT PRIMARY KEY,
+          public_ref TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL CHECK(status IN ('provisioning', 'ready', 'failed')),
+          fulfillment_uid TEXT,
+          public_result TEXT NOT NULL DEFAULT '{}',
+          credentials_ref TEXT,
+          reason TEXT,
+          delivery_started_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+    """)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS api_credit_issuance_evidence (

@@ -36,7 +36,7 @@ from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
 
-from market_storefront.payment_repository import VmPaymentRepository
+from market_storefront.payment_repository import VmSettlementRepository, add_vm_settlement_records
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
@@ -48,7 +48,7 @@ from .migrations import (  # noqa: F401 — re-exported (tests import via here)
 logger = logging.getLogger(__name__)
 
 
-class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
+class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
 
     def __init__(
@@ -213,6 +213,7 @@ class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
             )
             """
         )
+        add_vm_settlement_records(cur)
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
         cur.execute(

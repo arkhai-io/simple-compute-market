@@ -252,12 +252,28 @@ def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
 
     Injects the opening amount only into scalar-amount shapes; exact
     escrows pass through unchanged (the pinned-shape guard is what
-    protects them from seller mutation).
+    protects them from seller mutation). A selection carries no shape of its
+    own, so it is scalar exactly when the listing option it selects bargains
+    an amount -- the same test the seller applies to it.
     """
     base = context.our_escrow_proposal or {}
-    if escrow_shape_uses_scalar_amount(base):
+    if escrow_shape_uses_scalar_amount(base) or _selects_scalar_option(
+        context.listing or {}, base
+    ):
         return _set_proposal_amount(base, _opening_amount(context))
     return dict(base)
+
+
+def _selects_scalar_option(listing: dict[str, Any], proposal: dict[str, Any]) -> bool:
+    """Whether ``proposal`` selects a listing option that bargains an amount.
+
+    An unmatched selection is not scalar here: the opening leaves it as it is
+    and the seller's selection guard refuses it.
+    """
+    if not isinstance(proposal.get("settlement_selection"), dict):
+        return False
+    option = _settlement_option_for_selection(listing, proposal)
+    return option is not None and option_uses_scalar_amount(option)
 
 
 @register_negotiation_middleware("bisection")

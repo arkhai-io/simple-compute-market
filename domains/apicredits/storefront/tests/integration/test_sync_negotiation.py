@@ -244,7 +244,7 @@ async def test_force_accept_records_what_a_negotiated_acceptance_records(
 
 async def test_payment_selection_places_quota_hold(db, monkeypatch):
     """A payment deal holds its quota between acceptance and the buyer's approval."""
-    from apicredits_storefront import negotiation_runtime as runtime_module
+    from apicredits_storefront import settlement_stages
 
     from tests._settings_overrides import settings_overrides
 
@@ -258,7 +258,7 @@ async def test_payment_selection_places_quota_hold(db, monkeypatch):
             }
 
     monkeypatch.setattr(
-        runtime_module,
+        settlement_stages,
         "build_capacity_runtime",
         lambda _factory: CapacityRuntime(),
     )

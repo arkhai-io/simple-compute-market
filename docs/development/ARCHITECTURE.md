@@ -42,7 +42,7 @@ Production permits independently operated registries and seller stacks. Buyers m
 
 ## Composition from above and below
 
-A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define only what at least two of buyer, seller, and registry read: settlement options and the accepted Agreement. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
+A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define settlement options, the accepted Agreement, immutable role-stage tables and settlement evidence. The table declares support without prescribing a mechanism API; evidence carries negotiation, mechanism, opaque reference, domain status and domain payload without interpreting financial state. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
 
 The schema-opaque market composition is:
 
@@ -52,7 +52,7 @@ evidence  = settle(agreement)
 result    = provision(evidence)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. The phases are handoffs, not a fixed actor order; seller-first and fused stages are valid. Accepted dispatch uses the Agreement's mechanism through an explicit role table, never proposal presence or a default escrow helper. The selected entry owns source revalidation and mechanism-specific continuations. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
 
 Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
@@ -93,7 +93,7 @@ repository-wide kit capabilities
 core carrier and role contracts
 ```
 
-Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
+Core carrier packages must not import domain vocabulary or concrete mechanism implementations. `market_core.settlement` ships the dependency-light `SettlementStageTable[StageT]` and `SettlementEvidence` exports with `py.typed`. Kits and domains may depend downward on these carriers; core does not require callable stages, shared stage methods or a kit lifecycle adapter. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
 
 A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
 
@@ -269,10 +269,10 @@ reinterpret accepted work.
 Settlement retains domain-neutral `StorefrontSettlementFulfillmentInput`: the
 immutable thread binding, buyer principal, schema-opaque domain input, and any
 fulfillment anchor. When servicing reaches delivery, core adds the accepted
-escrow identity and caller-owned authority ports to form
+settlement evidence and caller-owned authority ports to form
 `StorefrontFulfillmentContext`, then invokes the fulfillment hook on the exact
 contract resolved from the binding. Core validates that the returned
-negotiation, escrow, and site identities did not change. The VM hook alone
+negotiation, settlement reference, and site identities did not change. The VM hook alone
 translates the opaque domain input into VM executor arguments. Core and kit
 therefore own lifecycle and dispatch while each domain owns payload meaning
 and concrete fulfillment; a missing hook fails closed rather than becoming a
@@ -397,7 +397,8 @@ A domain that contributes routes to a service it does not compose declares their
 | Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
 | Escrow claims and obligation journal | Settlement-runtime and Alkahest kit | Domain codecs and fulfillment policy |
 | Payment transactions, ledger, hold release, fees, disputes, and cash movement | External Arkhai payments service | SCM consumes the published API and verified receipt, not provider state |
-| API keys, credit balances, grants, and consumption | API-credits service | Marketplace purchase ownership is distinct from bearer authorization for use |
+| Seller delivery authorization | Selected domain settlement stage | Revalidates authoritative source evidence; local materialization and buyer progress are not authority |
+| API keys, credit balances, grants, and consumption | API-credits service | Receives operator-authenticated neutral issuance intent, not raw settlement evidence or a mechanism allowlist |
 
 ### Deciding which party is authoritative
 
@@ -612,7 +613,15 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 | `pool_id` | Site-local operator slug for a pool; every durable or public reference keys on `(site_id, pool_id)`, never `pool_id` alone |
 
-Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Domain receipt and delivery progress remain linked to the negotiation ID. Legacy escrow rows are backfilled only where persisted plans provide neutral obligation identity.
+Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Seller SettlementEvidence is negotiation-keyed and bound to the exact Agreement
+digest, immutable established reference and versioned validated delivery facts.
+VM physical progress and API-credit issuance progress have independent domain
+records; bare-metal evidence and selected-site lifecycle remain separate.
+Payment progress never occupies an `escrows` row. API-credit grants derive one
+uniform fulfillment identity from negotiation ID, not mechanism or escrow UID.
+Buyer recovery retains opaque references and exact accepted inputs, not
+SettlementEvidence. Existing genuine escrow rows may be backfilled only where
+persisted plans provide neutral obligation identity.
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
@@ -656,13 +665,20 @@ exact Agreement bytes + opaque settlement_data
 
 ### Settlement servicing
 
-The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API.
+The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API. When the shared servicing worker reports an obligation ready or ended, the domain resolves the continuation from the seller entry the accepted Agreement selected; each entry declares its own servicing or declines it, so the worker's hooks hold no mechanism switch.
 
 `arkhai.payments.v1` is a stateless peer of Alkahest in VM, bare-metal, and API-credit compositions. Shared registration, typed configuration, and owner-scoped client provision live in `kit/arkhai-payments`'s `settlement_config.py`. Seller acceptance returns the derived mandate in opaque `settlement_data`, persisted next to exact `agreement_bytes` in `negotiation_threads`. Buyer `payer_account` travels in selection params and Agreement `settlement_params`, separately from marketplace identity.
 
-The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` routes a selected outcome with no escrow proposal to the domain's `agreement_settlement` hook.
+The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` dispatches the exact accepted outcome through the injected buyer-role table using `Agreement.settlement.mechanism`. Missing entries fail before effects; an escrow helper is reachable only from an explicitly bound entry.
 
-The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain receipt and delivery journals are local recovery state, not financial authority.
+The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain source evidence is the seller's verified delivery gate, distinct from
+mutable delivery journals and private results. Recovery resolves the same
+Agreement-selected stage and revalidates its source before protected effects.
+Common physical convergence and credit issuance read normalized facts only;
+attestation, claim binding, refunds and compensation return to the selected
+continuation. A journaled Alkahest materialization is adoption history, not
+current authority: recovery also checks active lifecycle and chain evidence.
+These records are not financial authority.
 
 ```text
 Alkahest: Agreement → SettlementPlan → active obligations → Receipt
@@ -778,7 +794,12 @@ One root `.python-version` fixes the interpreter for every environment and image
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 
-Schema changes are additive by default. Non-additive changes use expand/contract across releases. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
+Schema changes are additive by default. Non-additive changes use expand/contract
+across releases unless an explicit disposable-database reset contract applies.
+VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas
+require fresh owned databases when incompatible; startup rejects drift instead
+of silently copying/adopting old payment rows. Their capability architecture
+companions define quiesce, ownership and bootstrap boundaries. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 

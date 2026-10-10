@@ -29,13 +29,25 @@ Each installed mechanism explicitly registers its canonical ID, config key and s
 
 A composition root injects only the resources a registration declares. Alkahest may receive wallet and chain clients. Arkhai payments resolves owner-scoped WorkOS credentials and trusted receipt policy through `market_arkhai_payments.settlement_config`. The buyer's payer account is domain input, independent of marketplace identity and service policy: `[vms].payer_account` or `[apicredits].payer_account`. Seller clients use the accepted option's payee account. API-credit seller clients are request-scoped and close after polling, attachment, and any reversal; there is no startup-global payment account. Omitting a registration removes that mechanism from status, publication, and selection rather than installing a placeholder.
 
-Registration shares configuration, readiness, option construction, and selection, not a universal lifecycle. Arkhai payments leaves the conditional-escrow client factory and obligation hooks unset; domain composition consumes the exact Agreement and signed receipt. Alkahest and contact exchange use the shared obligation runtime.
+Registration shares configuration, readiness, option construction, and selection,
+not execution or a universal lifecycle. Fresh publication and buyer compatibility
+intersect registrations with the corresponding supported role table. Registration
+alone grants no execution support. Accepted work retains its Agreement-selected
+entry independently of current priority or enablement; unavailable accepted support
+refuses before effects rather than falling through to escrow.
+
+Arkhai payments leaves conditional-escrow client and obligation hooks unset;
+domain composition consumes the exact Agreement and signed receipt. Alkahest and
+contact exchange use the shared obligation runtime. A compatible kit may opt
+into a stage convention, whose kit home is chosen only when implemented. There
+is no required convention protocol or speculative adapter dependency, including
+for contact, seller-first or fused stages.
 
 ## Readiness, publication, and selection
 
 Preflight normalizes mechanism-owned checks into a public-safe result: canonical ID, configured, enabled, ready, blocker codes and messages, capabilities, and contract/schema versions. Mechanism detail is allowlisted. Status is observational: it does not publish, create transient browser actions, submit transactions, or mutate provider or settlement state.
 
-The storefront evaluates every enabled registration, then combines ready registrations with validated publication clauses. Only a clause owned by an enabled, ready mechanism can produce an option. Options follow configured mechanism priority and source clause order. One unready mechanism is suppressed and remains visible through sanitized status; a ready peer with a valid clause remains usable. An enabled mechanism without a clause does not inherit another mechanism's price or publish an implicit option. Arkhai payment clauses include the payee account and asset explicitly. The shared payment builder scales hourly prices from decimal major units by asset precision and accepts generic integer base-unit prices per unit without scaling. Domain adapters own unit vocabulary: API credits accepts `credit`, `token`, or `request`.
+The storefront evaluates every enabled registration, then combines ready registrations with validated publication clauses. Only a clause owned by an enabled, ready mechanism with a supported seller entry can produce an option. Options follow configured mechanism priority and source clause order. One unready mechanism is suppressed and remains visible through sanitized status; a ready peer with a valid clause remains usable. An enabled mechanism without a clause does not inherit another mechanism's price or publish an implicit option. Arkhai payment clauses include the payee account and asset explicitly. The shared payment builder scales hourly prices from decimal major units by asset precision and accepts generic integer base-unit prices per unit without scaling. Domain adapters own unit vocabulary: API credits accepts `credit`, `token`, or `request`.
 
 Priority is pre-acceptance policy only. The buyer first filters advertised options by installed/enabled compatibility and authoritative resource constraints. Explicit repeatable settlement clauses then act as ordered alternatives; every predicate in a clause must match one option. Configured priority ranks survivors only when no explicit clause supplies order. Accepted Terms pin one exact option. Later enablement, readiness, ordering, or clause changes cannot switch or reinterpret an accepted or in-flight obligation.
 

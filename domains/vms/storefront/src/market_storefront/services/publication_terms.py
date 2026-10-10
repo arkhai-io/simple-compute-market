@@ -31,6 +31,7 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+from market_storefront.domain_runtime import build_vm_seller_stages
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
@@ -395,12 +396,14 @@ def demands_for_publication_clauses(
     *,
     wallet_address: str,
 ) -> list[dict[str, Any]]:
-    chain_names = {
-        str(clause.mechanism_input["chain"])
-        for clause in clauses
-        if clause.mechanism == "alkahest.v1"
-        and isinstance(clause.mechanism_input.get("chain"), str)
-    }
+    # Each seller entry names the chains its own clauses publish against.
+    chain_names: set[str] = set()
+    for mechanism, stage in build_vm_seller_stages().items():
+        chain_names.update(
+            stage.publication_chains(
+                [clause for clause in clauses if clause.mechanism == mechanism]
+            )
+        )
     if not chain_names:
         return []
 

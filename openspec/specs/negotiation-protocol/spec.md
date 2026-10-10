@@ -196,6 +196,28 @@ carries no amount for such an option, and MUST refuse one that omits the amount 
 an option bargained through an `amount` rate; a rate on any other field does not
 make an option bargain an amount.
 
+A selection carries no shape of its own: whether a buyer's opening bargains an
+amount MUST be read from the advertised option it selects, as the seller's policies
+read it, so an opening that selects an option bargained through an `amount` rate
+MUST carry the amount. When the seller materializes a selection into a concrete
+mechanism plan, the buyer MUST check that plan against the selected option's entry
+before accepting it, rather than requiring the plan to repeat the option's
+parameters.
+
+#### Scenario: A buyer selects a priced option
+
+- **WHEN** a buyer opens a fresh negotiation with a selection of an advertised option
+  bargained through an `amount` rate
+- **THEN** the opening carries the amount, and the seller does not refuse it for a
+  missing amount
+
+#### Scenario: The seller materializes a selected Alkahest option
+
+- **WHEN** a seller accepts a selection of an Alkahest option with a concrete escrow
+  plan
+- **THEN** the buyer accepts the plan only if its chain, escrow contract, token and
+  arbiter match the selected entry
+
 #### Scenario: A non-scalar mechanism reaches acceptance
 
 - **WHEN** a buyer opens negotiation with a settlement selection for a mechanism that
@@ -251,6 +273,8 @@ MUST give the domain the buyer's pinned proposal when it asks for the reference 
 - **THEN** the seller's reference amount is derived from the configured negotiation floor
 
 ## Evidence
+
+- Selection-scalar openings and materialized-plan checks: `kit/policy/tests/unit/test_selection_scalar.py`, `kit/alkahest/tests/unit/test_selected_escrow_plan.py`, and, against the served storefront, `domains/vms/storefront/tests/integration/test_buyer_selection_negotiation.py`.
 
 - Synchronous new/continue HTTP behavior and lossless uint256-domain persistence: `domains/vms/storefront/tests/integration/test_negotiate_controller.py`.
 - Thread message ordering, terminal detection, exact message authorship, and uint256-domain storage: `domains/vms/storefront/tests/unit/test_negotiation_thread.py`.

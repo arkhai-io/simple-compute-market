@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from market_alkahest.schemas import EscrowProposal
+from market_alkahest.plans import escrow_terms_from_settlement_plan
+from market_alkahest.schemas import (
+    EscrowProposal,
+    accepted_demands,
+    accepted_token_address,
+)
 
 
 def escrow_proposal_from_accepted_entry(
@@ -43,6 +48,49 @@ def escrow_proposal_from_accepted_entry(
         demand=selected_demand,
         expiration_unix=expiration_unix,
     )
+
+
+def validate_selected_escrow_plan(
+    plan: Any,
+    *,
+    listing: dict[str, Any],
+    entry: dict[str, Any],
+) -> None:
+    """Check an accepted plan funds the escrow a buyer's selection names.
+
+    A selection names a listing's accepted-escrow entry rather than carrying
+    escrow terms, and the seller materializes it into one concrete
+    ``alkahest.v1`` obligation. That obligation must be on the entry's chain
+    and escrow contract, in its token, and collected through the arbiter the
+    listing's demand advertises for that chain. Amount and expiry are the
+    negotiation's and are checked by its caller. Raises ``ValueError``.
+    """
+    # Read through the wire form: the plan may be any model of the shared
+    # settlement-plan contract, not only this codec's.
+    terms = escrow_terms_from_settlement_plan(
+        plan.model_dump(mode="json") if hasattr(plan, "model_dump") else plan
+    )
+    if len(terms) != 1:
+        raise ValueError("selected Alkahest plan is not a single escrow obligation")
+    (term,) = terms
+    chain = entry.get("chain_name")
+    if term.chain_name != chain:
+        raise ValueError("selected Alkahest plan is on another chain")
+    if term.escrow_contract.lower() != str(entry.get("escrow_address", "")).lower():
+        raise ValueError("selected Alkahest plan names another escrow contract")
+    token = accepted_token_address(entry)
+    if token and str(term.obligation_data.get("token", "")).lower() != token.lower():
+        raise ValueError("selected Alkahest plan escrows another token")
+    demands = [
+        demand
+        for demand in accepted_demands(listing)
+        if not demand.get("chain_name") or demand.get("chain_name") == chain
+    ]
+    arbiter = demands[0].get("arbiter") if demands else None
+    if arbiter and str(term.obligation_data.get("arbiter", "")).lower() != str(
+        arbiter
+    ).lower():
+        raise ValueError("selected Alkahest plan names another arbiter")
 
 
 def proposal_is_oracle_gated(

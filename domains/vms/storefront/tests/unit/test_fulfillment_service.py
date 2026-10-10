@@ -5,24 +5,27 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
-from market_core import VersionedEnvelope
 import market_storefront.container as container
-from market_storefront.services import fulfillment_service
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services import fulfillment_service
+from market_storefront.settlement_stages import VmAlkahestSellerStage
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
-    FakeSite,
     TEST_MARKETPLACE_SIGNER,
     TEST_SITE_AUTHORITIES,
+    FakeSite,
     pump_events,
     site_capacity,
 )
 from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
-from tests._settings_overrides import settings_overrides
 
 _TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
 _TEST_PROVISIONING_AUTHORITIES = TEST_SITE_AUTHORITIES
@@ -46,7 +49,10 @@ def _identity_wiring(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "agent.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    return SQLiteClient(
+        db_path=str(tmp_path / "agent.db"),
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
 
 async def _seed_compute_pool(client: SQLiteClient) -> None:
@@ -158,21 +164,40 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
 
 
     await _seed_compute_pool(client)
-    await _seed_bound_listing(client, listing_id="listing-1", gpu_count=1)
+    lifecycle = await make_vm_lifecycle_fixture(
+        Path(client.db_path),
+        site_id="default",
+        pool_id="pool-h200-1",
+        with_context=False,
+        context_payload={
+            "order": _compute_listing(),
+            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
+        },
+    )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
     monkeypatch.setattr(
         fulfillment_service,
         "ComputeProvisioningClient",
         FakeProvisioningClient,
     )
+
+    async def controlled_provision(*args, on_job_submitted, **kwargs):
+        await on_job_submitted("physical-1")
+        return {"ssh": "ssh tenant@example"}
+
     monkeypatch.setattr(
         fulfillment_service,
         "_do_provision",
-        AsyncMock(return_value={"ssh": "ssh tenant@example"}),
+        controlled_provision,
     )
 
     alkahest = MagicMock()
@@ -188,19 +213,22 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
-            client=alkahest,
-            escrow_uid="escrow-1",
-            ssh_public_key="ssh-ed25519 AAAA",
-            order=_compute_listing(),
-            duration_seconds=3600,
-            listing_id="listing-1",
+            evidence=lifecycle.evidence,
+            site_id="default",
         )
 
-    # The VM is running, so a failed evidence publication defers the deal for
-    # the fulfillment resume pass rather than failing it.
-    assert result["status"] == "deferred"
-    assert "contract reverted" in result["message"]
-    assert result["connection_details"] is None
+    assert result["status"] == "fulfilled"
+    delivery = await client.load_vm_delivery(
+        negotiation_id=lifecycle.evidence.negotiation_id
+    )
+    with pytest.raises(RuntimeError, match="contract reverted"):
+        await VmAlkahestSellerStage(None).continue_delivery(
+            evidence=lifecycle.evidence,
+            db=client,
+            delivery=delivery,
+            connection_json=result["connection_details"],
+            client=alkahest,
+        )
     alkahest.oracle.request_arbitration.assert_not_called()
 
     # The VM exists and the lease was committed before the on-chain step
@@ -237,21 +265,45 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
             "vm_host": "host-1",
         },
     )
-    await _seed_compute_listings(client, max_gpu_count=4)
+    lifecycle = await make_vm_lifecycle_fixture(
+        Path(client.db_path),
+        listing_id="listing-2x",
+        site_id="default",
+        pool_id="pool-h200-1",
+        with_context=False,
+        context_payload={
+            "order": _compute_listing(gpu_count=2),
+            "required_attributes": {"gpu_model": "H200", "gpu_count": 2},
+        },
+    )
+    for gpu_count in (1, 3, 4):
+        await _seed_bound_listing(
+            client, listing_id=f"listing-{gpu_count}x", gpu_count=gpu_count
+        )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
-        "pool-h200-1", 4,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        4,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
     monkeypatch.setattr(
         fulfillment_service,
         "ComputeProvisioningClient",
         FakeProvisioningClient,
     )
+
+    async def controlled_provision(*args, on_job_submitted, **kwargs):
+        await on_job_submitted("physical-1")
+        return {"ssh": "ssh tenant@example"}
+
     monkeypatch.setattr(
         fulfillment_service,
         "_do_provision",
-        AsyncMock(return_value={"ssh": "ssh tenant@example"}),
+        controlled_provision,
     )
 
     with (
@@ -267,12 +319,8 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
-            client=None,
-            escrow_uid="escrow-2x",
-            ssh_public_key="ssh-ed25519 AAAA",
-            order=_compute_listing(gpu_count=2),
-            duration_seconds=3600,
-            listing_id="listing-2x",
+            evidence=lifecycle.evidence,
+            site_id="default",
         )
         # The poller delivers deltas in production; pump them here.
         await pump_events(aggregate, fake)
@@ -336,7 +384,8 @@ async def test_terminate_vm_lease_calls_the_same_client_as_registration(monkeypa
 
 @pytest.mark.asyncio
 async def test_do_provision_end_to_end_delivers_credentials_for_storage(
-    client, monkeypatch,
+    client,
+    monkeypatch,
 ):
     """Exercises the real _do_provision (schedule_resource -> begin_fulfillment
     -> poll -> get_fulfillment_result) through fulfill_vm_obligation's
@@ -347,18 +396,28 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     reach the storefront's existing credential store correctly."""
 
     await _seed_compute_pool(client)
-    await make_vm_lifecycle_fixture(
+    lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-e2e-1",
         negotiation_id="neg-e2e-1",
         listing_id="listing-1",
         site_id="default",
         pool_id="pool-h200-1",
+        with_context=False,
+        context_payload={
+            "order": _compute_listing(),
+            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
+        },
     )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
 
     fulfillment_client = SimpleNamespace(
@@ -366,7 +425,9 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
             return_value=SimpleNamespace(settlement_resource_id="host-1")
         ),
         begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(fulfillment_id="fulfillment-e2e-1", state="dispatching")
+            return_value=SimpleNamespace(
+                fulfillment_id="fulfillment-e2e-1", state="dispatching"
+            )
         ),
         get_fulfillment_status=AsyncMock(
             return_value=SimpleNamespace(state="active", failure_message=None)
@@ -377,7 +438,10 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
                 schema_version=1,
                 payload={
                     "provisioned_resources": [
-                        {"provisioned_resource_id": "provisioned-vm-e2e-1", "status": "active"}
+                        {
+                            "provisioned_resource_id": "provisioned-vm-e2e-1",
+                            "status": "active",
+                        }
                     ],
                     "domain_result": {
                         "kind": "compute.access-delivery",
@@ -432,12 +496,8 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     ):
         result = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
-            client=None,
-            escrow_uid="escrow-e2e-1",
-            ssh_public_key="ssh-ed25519 AAAA",
-            order=_compute_listing(),
-            duration_seconds=3600,
-            listing_id="listing-1",
+            evidence=lifecycle.evidence,
+            site_id="default",
         )
 
     assert result["status"] == "fulfilled"
@@ -447,7 +507,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
 
     # Real rows via the unchanged downstream credential-storage code --
     # verified here for real, not by field-name inspection alone.
-    stored = await client.get_credentials(listing_id="listing-1x", granted_to="self")
+    stored = await client.get_credentials(listing_id="listing-1", granted_to="self")
     roles = {row["role"]: row for row in stored}
     assert set(roles) == {"root", "tenant"}
     assert roles["root"]["password"] == "root-pw"
@@ -460,7 +520,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     # this call returns. This proves the identifiers round-trip correctly;
     # it does not by itself prove restart *resumption* -- nothing yet reads
     # these values back to resume an in-progress fulfillment after a crash.
-    escrow = await client.load_escrow(escrow_uid="escrow-e2e-1")
+    escrow = await client.load_vm_delivery(negotiation_id="neg-e2e-1")
     assert escrow["fulfillment_id"] == "fulfillment-e2e-1"
     assert escrow["settlement_resource_id"] == "host-1"
     assert escrow["capacity_reservation_id"]
@@ -476,18 +536,28 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     schedule/begin a second time)."""
 
     await _seed_compute_pool(client)
-    await make_vm_lifecycle_fixture(
+    lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-dup-1",
         negotiation_id="neg-dup-1",
         listing_id="listing-1",
         site_id="default",
         pool_id="pool-h200-1",
+        with_context=False,
+        context_payload={
+            "order": _compute_listing(),
+            "required_attributes": {"gpu_model": "H200", "gpu_count": 1},
+        },
     )
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
 
     envelope = VersionedEnvelope(
@@ -517,7 +587,9 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
             return_value=SimpleNamespace(settlement_resource_id="host-1")
         ),
         begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(fulfillment_id="fulfillment-dup-1", state="dispatching")
+            return_value=SimpleNamespace(
+                fulfillment_id="fulfillment-dup-1", state="dispatching"
+            )
         ),
         get_fulfillment_status=AsyncMock(
             return_value=SimpleNamespace(state="active", failure_message=None)
@@ -556,21 +628,22 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     ):
         first = await fulfillment_service.fulfill_compute_obligation(
             sqlite_client=client,
-            client=None, escrow_uid="escrow-dup-1", ssh_public_key="ssh-ed25519 AAAA",
-            order=_compute_listing(), duration_seconds=3600, listing_id="listing-1",
+            evidence=lifecycle.evidence,
+            site_id="default",
         )
         # A second, independent get_fulfillment_result read for the same
         # fulfillment (e.g. a caller re-checking status/result) must be
         # side-effect-free.
-        escrow = await client.load_escrow(escrow_uid="escrow-dup-1")
+        escrow = await client.load_vm_delivery(negotiation_id="neg-dup-1")
         second_envelope = await fulfillment_client.get_fulfillment_result(
-            "fulfillment-dup-1", capacity_reservation_id=escrow["capacity_reservation_id"],
+            "fulfillment-dup-1",
+            capacity_reservation_id=escrow["capacity_reservation_id"],
         )
 
     assert first["status"] == "fulfilled"
     assert second_envelope.payload == envelope.payload
 
-    stored = await client.get_credentials(listing_id="listing-1x", granted_to="self")
+    stored = await client.get_credentials(listing_id="listing-1", granted_to="self")
     # Exactly one tenant credential row -- INSERT OR IGNORE plus the
     # unique id per call means a genuinely repeated store_credential call
     # with the same content would still only be exercised once here since

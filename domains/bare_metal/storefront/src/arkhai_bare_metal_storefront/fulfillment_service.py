@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -20,9 +21,11 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import VersionedEnvelope
 from market_identity import Identity
+from market_core import SettlementEvidence
+from .settlement_evidence import EvidencePayload
+from .settlement_stages import SettlementRequestError
 
 from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
@@ -51,6 +54,7 @@ class BareMetalFulfillmentService:
     db: SQLiteClient
     capacity_client: Any
     fulfillment_client: Any
+    read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
 
     async def _owned_context(
         self,
@@ -79,37 +83,61 @@ class BareMetalFulfillmentService:
             raise BareMetalFulfillmentError("bare-metal negotiation is not accepted")
         return context
 
-    async def _verified_escrow(
+    async def _verified_evidence(
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str,
-    ) -> None:
-        escrow = await self.db.load_escrow(escrow_uid=escrow_uid)
-        if (
-            escrow is not None
-            and escrow.get("negotiation_id") == negotiation_id
-            and escrow.get("status") == "settlement_verified"
-        ):
-            return
-        record = await self.db.load_bare_metal_settlement_record(
-            negotiation_id=negotiation_id
+        buyer_principal: Identity,
+        context: dict[str, Any],
+        delivery_started: bool = False,
+    ) -> tuple[SettlementEvidence, Any]:
+        # A seller refund, or the mechanism collecting its settlement, may follow
+        # a delivery that had already started; that delivery is still read and
+        # torn down under the evidence it began with. A delivery that has not
+        # started requires currently verified, currently active evidence.
+        try:
+            evidence = await self.read_verified_evidence(
+                negotiation_id=negotiation_id,
+                buyer_principal=buyer_principal,
+                include_refunds=delivery_started,
+                delivery_started=delivery_started,
+            )
+            payload = EvidencePayload.model_validate(dict(evidence.evidence))
+        except (SettlementRequestError, ValueError) as exc:
+            raise BareMetalFulfillmentError(str(exc)) from exc
+        delivery = payload.delivery
+        admitted = (
+            {"settlement_verified", "refunding", "refunded"}
+            if delivery_started
+            else {"settlement_verified"}
         )
         if (
-            record is None
-            or record.get("status") != "settlement_verified"
-            or record.get("settlement_ref") != escrow_uid
+            evidence.negotiation_id != negotiation_id
+            or evidence.status not in admitted
+            or not evidence.settlement_ref
+            or delivery is None
         ):
             raise BareMetalFulfillmentError(
                 "bare-metal settlement is not authoritatively verified"
             )
+        if (
+            delivery.site_id != context["site_id"]
+            or delivery.physical_resource_id != context["physical_resource_id"]
+            or delivery.pool_id != context.get("pool_id")
+            or delivery.terms.host_id != context["host_id"]
+            or delivery.terms.physical_host_id != context["physical_host_id"]
+        ):
+            raise BareMetalFulfillmentError(
+                "settlement evidence conflicts with the trusted resource binding"
+            )
+        return evidence, delivery.terms
 
     async def _recover_reservation(
         self,
         *,
         site_id: str,
         negotiation_id: str,
-        escrow_uid: str,
+        settlement_ref: str,
     ) -> dict[str, Any] | None:
         site_client = self.capacity_client.site(site_id)
         reservations = await site_client.list_reservations()
@@ -119,7 +147,7 @@ class BareMetalFulfillmentService:
             if reservation.get("deal_ref")
             == {
                 "negotiation_id": negotiation_id,
-                "escrow_uid": escrow_uid,
+                "escrow_uid": settlement_ref,
             }
         ]
         if len(matching) > 1:
@@ -141,65 +169,36 @@ class BareMetalFulfillmentService:
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str | None = None,
+        settlement_ref: str | None = None,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
         context = await self._owned_context(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
-        if escrow_uid is None:
-            record = await self.db.load_bare_metal_settlement_record(
-                negotiation_id=negotiation_id
-            )
-            if record is not None and record.get("status") == "settlement_verified":
-                escrow_uid = str(record["settlement_ref"])
-            else:
-                primary = await self.db.load_primary_escrow_for_negotiation(
-                    negotiation_id=negotiation_id
-                )
-                if (
-                    primary is not None
-                    and primary.get("status") == "settlement_verified"
-                ):
-                    escrow_uid = str(primary["escrow_uid"])
-        if not escrow_uid:
-            raise BareMetalFulfillmentError(
-                "accepted bare-metal settlement is not verified"
-            )
-        await self._verified_escrow(
+        evidence, terms = await self._verified_evidence(
             negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
+            buyer_principal=buyer_principal,
+            context=context,
         )
-        terms = await self.db.load_bare_metal_terms(negotiation_id=negotiation_id)
-        if terms is None:
-            raise BareMetalFulfillmentError("accepted bare-metal terms are missing")
-        if (
-            terms.host_id != context["host_id"]
-            or terms.physical_host_id != context["physical_host_id"]
-        ):
+        if settlement_ref is not None and settlement_ref != evidence.settlement_ref:
             raise BareMetalFulfillmentError(
-                "accepted terms conflict with the trusted resource binding"
+                "requested settlement reference conflicts with verified evidence"
             )
+        settlement_ref = evidence.settlement_ref
 
-        identity = {
-            "negotiation_id": negotiation_id,
-            "escrow_uid": escrow_uid,
-            "site_id": str(context["site_id"]),
-            "physical_resource_id": str(context["physical_resource_id"]),
-        }
-        payment = await self.db.load_bare_metal_settlement_record(negotiation_id=negotiation_id)
-        if payment is not None and payment.get("mechanism") == ARKHAI_PAYMENTS_MECHANISM:
-            # Starting delivery is ordered against refund intent in one
-            # transaction, so a refund recorded first stops delivery here.
-            started = await self.db.start_bare_metal_payment_lifecycle(**identity)
-            if started is None:
-                raise BareMetalFulfillmentError(
-                    "the payment was refunded; delivery cannot start", status_code=409
-                )
-            lifecycle = started
-        else:
-            lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(**identity)
+        # Starting delivery is ordered against refund intent in one
+        # transaction, so a refund recorded first stops delivery here.
+        lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
+            negotiation_id=negotiation_id,
+            settlement_ref=settlement_ref,
+            site_id=str(context["site_id"]),
+            physical_resource_id=str(context["physical_resource_id"]),
+        )
+        if lifecycle is None:
+            raise BareMetalFulfillmentError(
+                "the settlement was refunded; delivery cannot start"
+            )
         if lifecycle.get("fulfillment_id"):
             return lifecycle
 
@@ -208,7 +207,7 @@ class BareMetalFulfillmentService:
             recovered = await self._recover_reservation(
                 site_id=str(context["site_id"]),
                 negotiation_id=negotiation_id,
-                escrow_uid=escrow_uid,
+                settlement_ref=settlement_ref,
             )
             try:
                 claim = whole_machine_claim(context)
@@ -220,7 +219,7 @@ class BareMetalFulfillmentService:
                 claim=claim,
                 deal_ref={
                     "negotiation_id": negotiation_id,
-                    "escrow_uid": escrow_uid,
+                    "escrow_uid": settlement_ref,
                 },
                 lease_duration_seconds=terms.duration_seconds,
             )
@@ -293,8 +292,8 @@ class BareMetalFulfillmentService:
                 lease_end_utc=(
                     lease_start + timedelta(seconds=terms.duration_seconds)
                 ).isoformat(),
-                idempotency_ref=escrow_uid,
-                deal_ref={"escrow_uid": escrow_uid},
+                idempotency_ref=settlement_ref,
+                deal_ref={"escrow_uid": settlement_ref},
                 site_id=str(context["site_id"]),
             )
         )
@@ -309,7 +308,7 @@ class BareMetalFulfillmentService:
             else committed_window
         )
         expected_materialization = BareMetalMaterialization(
-            escrow_uid=escrow_uid,
+            escrow_uid=settlement_ref,
             host_id=terms.host_id,
             physical_host_id=terms.physical_host_id,
             lease_start_utc=lease_start_utc,
@@ -374,13 +373,27 @@ class BareMetalFulfillmentService:
         negotiation_id: str,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
-        await self._owned_context(
+        context = await self._owned_context(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
         lifecycle = await self.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id
         )
+        evidence, _ = await self._verified_evidence(
+            negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+            context=context,
+            delivery_started=lifecycle is not None,
+        )
+        if lifecycle is not None and (
+            lifecycle["settlement_ref"] != evidence.settlement_ref
+            or lifecycle["site_id"] != context["site_id"]
+            or lifecycle["physical_resource_id"] != context["physical_resource_id"]
+        ):
+            raise BareMetalFulfillmentError(
+                "physical lifecycle conflicts with verified evidence"
+            )
         if lifecycle is None:
             raise BareMetalFulfillmentError(
                 "bare-metal fulfillment not found",
@@ -561,13 +574,24 @@ async def fulfill_bare_metal(
         raise BareMetalFulfillmentError(
             "fulfillment context conflicts with the durable negotiation binding"
         )
+    reader = (
+        context.domain_input.get("read_verified_evidence")
+        if isinstance(context.domain_input, Mapping)
+        else None
+    )
+    if not callable(reader):
+        raise BareMetalFulfillmentError(
+            "bare-metal fulfillment requires the caller-owned settlement boundary"
+        )
     service = BareMetalFulfillmentService(
         db=context.ports.repository,
         capacity_client=context.ports.capacity_client,
         fulfillment_client=context.ports.fulfillment_client,
+        read_verified_evidence=reader,
     )
-    return await service.begin(
+    lifecycle = await service.begin(
         negotiation_id=context.negotiation_id,
-        escrow_uid=context.escrow_uid,
+        settlement_ref=context.settlement_ref,
         buyer_principal=context.buyer_principal,
     )
+    return lifecycle

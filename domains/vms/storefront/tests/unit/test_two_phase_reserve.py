@@ -110,7 +110,7 @@ async def test_valid_hold_commits_before_provisioning():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     )
@@ -120,7 +120,7 @@ async def test_valid_hold_commits_before_provisioning():
     commit = capacity.commit_calls[0]
     assert commit["binding"] == _BINDING
     assert commit["capacity_reservation_id"] == "alloc-1"
-    assert commit["idempotency_ref"] == "0xesc"
+    assert commit["idempotency_ref"] == "neg-1"
     assert captured[0][1] == "capacity_hold_committed"
 
 
@@ -133,7 +133,7 @@ async def test_fresh_reservation_commits_before_provisioning():
         capacity=capacity,
         binding=_BINDING,
         reserved=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     )
@@ -142,7 +142,7 @@ async def test_fresh_reservation_commits_before_provisioning():
     assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["resource_id"] == "res-1"
     assert commit["binding"] == _BINDING
-    assert commit["idempotency_ref"] == "0xesc"
+    assert commit["idempotency_ref"] == "neg-1"
     assert captured[0][1] == "capacity_reservation_committed"
 
 
@@ -156,7 +156,7 @@ async def test_fresh_reservation_commit_failure_is_not_ignored():
             capacity=capacity,
             binding=_BINDING,
             reserved=_hold(),
-            escrow_uid="0xesc",
+            negotiation_id="neg-1",
             duration_seconds=3600,
             stage_event=stage_event,
         )
@@ -172,7 +172,7 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(hold_expires_at=past),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None
@@ -190,7 +190,7 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=_hold(),
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None
@@ -204,7 +204,7 @@ async def test_no_hold_means_no_commit():
         capacity=capacity,
         binding=_BINDING,
         held_reservation=None,
-        escrow_uid="0xesc",
+        negotiation_id="neg-1",
         duration_seconds=3600,
         stage_event=stage_event,
     ) is None

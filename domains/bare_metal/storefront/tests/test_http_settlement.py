@@ -6,14 +6,26 @@ import json
 import sqlite3
 import time
 import uuid
+import copy
+
+from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
+from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
+from market_identity import Ed25519Signer
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from storefront_client import StorefrontClient, StorefrontClientError
 from storefront_client.models import SettleResponse, SettleStatusResponse
-from market_core.schemas import SettlementPlan
+from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
 from market_core import VersionedEnvelope
+from arkhai_bare_metal_storefront.settlement_stages import legacy_alkahest_option
+from datetime import datetime, timezone
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     EMPTY_BODY,
@@ -221,23 +233,48 @@ async def _accepted_runtime(
         accepted_escrows=[],
     )
     negotiation_id = "neg-accepted"
-    proposal = {
-        "chain_name": "anvil",
-        "escrow_address": ESCROW_ADDRESS,
-        "fields": {"amount": "100"},
-        "expiration_unix": int(time.time()) + 3600,
-    }
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address=ESCROW_ADDRESS,
+        fields={"amount": "100"},
+        expiration_unix=int(time.time()) + 3600,
+    )
+    message = BareMetalMessage(
+        duration_seconds=3600,
+        ssh_public_key="ssh-ed25519 persisted-key",
+    )
+    settlement = legacy_alkahest_option(
+        proposal,
+        _plan(
+            proposal=proposal,
+            buyer_principal=BUYER_SIGNER.identity,
+            seller_principal=SELLER_SIGNER.identity,
+        )["settlement_plan"],
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id="listing-1",
+        listing_hash="0" * 64,
+        buyer=BUYER_SIGNER.identity.model_dump(mode="json"),
+        seller=SELLER_SIGNER.identity.model_dump(mode="json"),
+        settlement=settlement,
+        settlement_params={},
+        amount=100,
+        asset=settlement.asset,
+        duration_seconds=3600,
+        start_utc=now,
+        provision_terms=message.model_dump(mode="json", exclude_none=True),
+        accepted_at=now,
+    )
     await seed_thread(
         db,
         negotiation_id=negotiation_id,
         listing_id="listing-1",
         buyer_principal=BUYER_SIGNER.identity,
         seller_principal=runtime.seller_principal,
-        message=BareMetalMessage(
-            duration_seconds=3600,
-            ssh_public_key="ssh-ed25519 persisted-key",
-        ),
-        proposal=proposal,
+        message=message,
+        proposal=proposal.model_dump(mode="json"),
         amount=100,
         terms=BareMetalTerms(
             host_id="machine-1",
@@ -246,6 +283,7 @@ async def _accepted_runtime(
             ssh_public_key="ssh-ed25519 persisted-key",
             listing_ref="listing-1",
         ),
+        agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_plan=(
             _plan(
                 proposal=proposal,
@@ -324,7 +362,12 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert _settled(status) == expected
     assert conflict.value.status_code == 409
     assert "negotiation already has a primary escrow" in str(conflict.value)
-    assert len(calls) == 1
+    # Status re-checks the accepted escrow on chain before reporting it verified.
+    assert len(calls) == 2
+    assert (
+        calls[1]["alkahest_client"]
+        is restarted.settlement_composition.resources["clients"]["anvil"]
+    )
     assert calls[0]["agreed_duration_seconds"] == 3600
     assert calls[0]["agreed_price"] == 100
     assert "ssh_public_key" not in body
@@ -471,14 +514,14 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     )
     assert inserted
 
-    app = _app(runtime)
-    async with app.router.lifespan_context(app):
-        async with _buyer(app) as buyer:
-            with pytest.raises(StorefrontClientError) as refused:
-                await buyer.get_settle_status(ESCROW_UID)
+    with TestClient(_app(runtime)) as client:
+        response = client.get(
+            f"/api/v1/settle/{ESCROW_UID}/status",
+            headers=_headers("settle_status", ESCROW_UID, method="GET"),
+        )
 
-    assert refused.value.status_code == 409
-    assert "verified settlement lifecycle is inconsistent" in str(refused.value)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "settlement not found"
 
 
 class _FulfillmentSite:
@@ -620,6 +663,128 @@ def _fulfillment_client(base_url: str) -> BareMetalFulfillmentTransport:
             identities=(SELLER_SIGNER.identity,)
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "reclaim_state,mechanism_status,collection_state",
+    [
+        ("succeeded", "ready", "pending"),
+        ("in_progress", "ready", "pending"),
+        ("manual_required", "ready", "pending"),
+        ("pending", "reclaimed", "pending"),
+        ("pending", "expired", "pending"),
+        ("pending", "failed", "pending"),
+        ("pending", "ready", "succeeded"),
+    ],
+)
+async def test_alkahest_recovery_refuses_non_active_journal_before_physical_effects(
+    tmp_path, reclaim_state, mechanism_status, collection_state
+):
+    calls = []
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        return 1
+
+    path = str(tmp_path / "storefront.db")
+    runtime, negotiation_id = await _accepted_runtime(path, verifier)
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = replace(
+        runtime, capacity_client=capacity, fulfillment_client=provisioning
+    )
+    # Adopt without stepping the obligation, so the gate below is the first
+    # thing that could start delivery.
+    verified = await replace(
+        runtime.settlement_service(), service_obligation=None
+    ).verify(
+        escrow_uid=ESCROW_UID,
+        request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
+        buyer_principal=BUYER_SIGNER.identity,
+    )
+    aggregate = await runtime.settlement_runtime.get_status(negotiation_id)
+    obligation = next(
+        item for item in aggregate.obligations
+        if item.obligation_ref == verified.obligation_ref
+    )
+    changed = obligation.model_copy(update={
+        "reclaim_state": reclaim_state,
+        "mechanism_status": mechanism_status,
+        "collection_state": collection_state,
+    })
+    assert await runtime.settlement_repository.save_settlement_obligation(
+        changed.model_dump(mode="json"), expected_version=obligation.version
+    )
+    restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
+    with pytest.raises(BareMetalFulfillmentError, match="no longer active"):
+        await restarted.fulfillment_service().begin(
+            negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+        )
+    assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=negotiation_id
+    ) is None
+    assert capacity.reserve_calls == []
+    assert provisioning.begin_calls == []
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("invalid_index", [None, 0, True])
+async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
+    tmp_path, invalid_index
+):
+    calls = []
+    source_valid = True
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        if not source_valid:
+            if invalid_index is None:
+                raise ValueError("escrow revoked on chain")
+            return invalid_index
+        return 1
+
+    path = str(tmp_path / "storefront.db")
+    runtime, negotiation_id = await _accepted_runtime(path, verifier)
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = replace(
+        runtime, capacity_client=capacity, fulfillment_client=provisioning
+    )
+    # Adopt without stepping the obligation, so the gate below is the first
+    # thing that could start delivery.
+    await replace(runtime.settlement_service(), service_obligation=None).verify(
+        escrow_uid=ESCROW_UID,
+        request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
+        buyer_principal=BUYER_SIGNER.identity,
+    )
+    restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
+    source_valid = False
+    with pytest.raises(BareMetalFulfillmentError, match="stored escrow source"):
+        await restarted.fulfillment_service().begin(
+            negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+        )
+    assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=negotiation_id
+    ) is None
+    assert capacity.reserve_calls == []
+    assert provisioning.begin_calls == []
+
+    source_valid = True
+    first = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    repeated = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    assert repeated == first
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+    assert len(calls) == 4
+    assert all(call["escrow_uid"] == ESCROW_UID for call in calls)
+    assert all(call["agreed_price"] == 100 for call in calls)
+    assert all(call["agreed_duration_seconds"] == 3600 for call in calls)
+    assert (
+        calls[-1]["alkahest_client"]
+        is restarted.settlement_composition.resources["clients"]["anvil"]
+    )
+    assert calls[-1]["escrow_proposal"].escrow_address == ESCROW_ADDRESS
 
 
 async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
@@ -837,6 +1002,200 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
     assert [record.obligation for record in registered.obligations] == (
         SettlementPlan.model_validate(committed).model_dump(mode="json")["obligations"]
     )
+
+
+PAYER = "00000000-0000-4000-8000-000000000011"
+PAYEE = "00000000-0000-4000-8000-000000000012"
+
+
+async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
+    tmp_path,
+):
+    buyer = Ed25519Signer(bytes.fromhex("66" * 32))
+    seller = Ed25519Signer(bytes.fromhex("77" * 32))
+    receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
+    payments = FakePaymentsClient()
+    domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": ["arkhai.payments.v1"],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": "http://127.0.0.1:3180",
+                "development_auth": True,
+                "service_identity": receipt_signer.identity.model_dump(mode="json"),
+                "fee_bps": 0,
+                "dispute_authority": "00000000-0000-4000-8000-000000000013",
+            },
+        },
+        payments_client_for_owner=payments,
+    )
+    params = {
+        "payee_account": PAYEE,
+        "asset": "USD/2",
+        "window": "PT1H",
+        "deposit_agreement": False,
+    }
+    rates = [RateValue(field="amount", per="hour", value=100)]
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
+    await db.upsert_bare_metal_listing(
+        listing_id="listing-payment",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=seller.identity,
+        storefront_url="http://seller:8000",
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "capacity_backing": "backed",
+            **LISTING_HARDWARE,
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
+            "physical_host_id": "host-1",
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[],
+        settlement_options=[option.model_dump(mode="json")],
+    )
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = BareMetalStorefrontRuntime(
+        db=db,
+        domain=domain,
+        seller_principal=seller.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        marketplace_signer=seller,
+        settlement_composition=composition,
+        capacity_client=capacity,
+        fulfillment_client=provisioning,
+    )
+    negotiation_id = "neg-payment"
+    message = BareMetalMessage(
+        duration_seconds=3600, ssh_public_key="ssh-ed25519 payment-key"
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    agreement_bytes = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id="listing-payment",
+        listing_hash="0" * 64,
+        buyer=buyer.identity.model_dump(mode="json"),
+        seller=seller.identity.model_dump(mode="json"),
+        settlement=option,
+        settlement_params={"payer_account": PAYER},
+        amount=100,
+        asset="USD/2",
+        duration_seconds=3600,
+        start_utc=now,
+        provision_terms=message.model_dump(mode="json", exclude_none=True),
+        accepted_at=now,
+    ).model_dump_json(exclude_none=True).encode()
+    data = composition.arkhai_payments_stage().settlement_data(
+        json.loads(agreement_bytes)
+    )
+    await seed_thread(
+        db,
+        negotiation_id=negotiation_id,
+        listing_id="listing-payment",
+        buyer_principal=buyer.identity,
+        seller_principal=seller.identity,
+        message=message,
+        proposal={},
+        amount=100,
+        terms=BareMetalTerms(
+            host_id="machine-1",
+            physical_host_id="host-1",
+            duration_seconds=3600,
+            ssh_public_key="ssh-ed25519 payment-key",
+            listing_ref="listing-payment",
+        ),
+        agreement_bytes=agreement_bytes,
+        settlement_data=data.to_wire(),
+    )
+    request = BareMetalSettleRequest(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    delivery = runtime.fulfillment_service()
+    pending = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert (pending.status_code, pending.payload["status"]) == (202, "pending")
+    with pytest.raises(BareMetalFulfillmentError, match="not authoritatively verified"):
+        await delivery.begin(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert capacity.reserve_calls == [] and provisioning.begin_calls == []
+
+    payments.serve(build_signed_receipt(signer=receipt_signer, mandate=data.mandate))
+    verified = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert verified.status_code == 200
+    assert verified.payload["settlement_ref"] == data.transaction_id
+    # Settlement started delivery itself; a later begin is the same delivery.
+    first = await delivery.begin(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+    original = await runtime.settlement_service().verified_evidence(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    for change in (
+        {"mechanism": "alkahest.v1"},
+        {"settlement_ref": "changed-reference"},
+        {"evidence": {**dict(original.evidence), "agreement_sha256": "a" * 64}},
+        {"evidence": {**dict(original.evidence), "source": {"receipt": {}}}},
+    ):
+        with pytest.raises(RuntimeError, match="conflicts"):
+            await db.save_bare_metal_settlement_evidence(replace(original, **change))
+        assert (
+            await runtime.settlement_service().verified_evidence(
+                negotiation_id=negotiation_id, buyer_principal=buyer.identity
+            )
+            == original
+        )
+
+    restarted = replace(runtime, db=SQLiteClient(db.db_path, domain=domain))
+    repeated = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    ready = await restarted.fulfillment_service().status(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    assert repeated == first
+    assert ready["state"] == "active"
+    stored_result = await restarted.db.load_bare_metal_result(
+        negotiation_id=negotiation_id
+    )
+    assert "host" not in stored_result.model_dump()
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+    corrupt = copy.deepcopy(dict(original.evidence))
+    corrupt["source"]["receipt"]["proof"]["value"] = "A" * 86
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute(
+            "UPDATE bare_metal_settlement_records SET evidence_json=? WHERE negotiation_id=?",
+            (json.dumps(corrupt), negotiation_id),
+        )
+        assert conn.execute("SELECT count(*) FROM escrows").fetchone()[0] == 0
+    with pytest.raises(
+        BareMetalFulfillmentError, match="stored payment receipt is invalid"
+    ):
+        await restarted.fulfillment_service().status(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 
 
 async def test_verify_refuses_a_thread_with_no_committed_plan(tmp_path) -> None:

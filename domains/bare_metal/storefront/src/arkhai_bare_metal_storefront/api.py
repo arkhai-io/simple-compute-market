@@ -44,6 +44,7 @@ from fastapi.responses import JSONResponse
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
+    INTRODUCTION_ROUTE,
     AuthorizedIntroductionRequest,
     IntroductionRouteError,
     IntroductionStart,
@@ -326,7 +327,7 @@ async def start_introduction(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/api/v1/introductions/{obligation_ref}")
+@router.get(INTRODUCTION_ROUTE)
 async def read_introduction(
     obligation_ref: str,
     request: Request,
@@ -733,7 +734,7 @@ async def settle(
     response_model=RefundSettlementResponse,
 )
 async def refund_settlement(negotiation_id: str, request: Request) -> JSONResponse:
-    """Reverse an accepted payment deal's held funds; only the seller may ask."""
+    """Refund an accepted deal through its seller entry; only the seller may ask."""
     runtime = _runtime(request)
     await _seller(
         request=request,
@@ -742,7 +743,7 @@ async def refund_settlement(negotiation_id: str, request: Request) -> JSONRespon
         resource=negotiation_id,
     )
     try:
-        result = await runtime.settlement_service().refund_payment(
+        result = await runtime.settlement_service().refund(
             negotiation_id=negotiation_id
         )
     except SettlementRequestError as exc:
@@ -760,14 +761,13 @@ async def settle_status(
 ) -> BareMetalSettleStatusResponse:
     runtime = _runtime(request)
     try:
-        escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
         record = await runtime.db.load_bare_metal_settlement_record_by_ref(
             settlement_ref=escrow_uid
         ) or await runtime.db.load_bare_metal_settlement_record(negotiation_id=escrow_uid)
-        if escrow is None and record is None:
-            raise SettlementRequestError("escrow not found", status_code=404)
+        if record is None:
+            raise SettlementRequestError("settlement not found", status_code=404)
         thread = await runtime.db.load_negotiation_thread_row(
-            negotiation_id=str((escrow or record)["negotiation_id"]),
+            negotiation_id=str(record["negotiation_id"]),
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
@@ -830,7 +830,9 @@ async def fulfillment_status(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -939,7 +941,9 @@ async def teardown_fulfillment(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,

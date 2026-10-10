@@ -92,7 +92,11 @@ from importlib import resources
 import pytest
 from market_alkahest.dev_chain import anvil_address_book_path
 
-from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.alkahest import (
+    get_alkahest_network,
+    get_recipient_arbiter,
+    resolve_alkahest_address_config,
+)
 from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_HOST,
@@ -162,21 +166,22 @@ DEMAND_RESOURCE = {
     },
     "amount": 10 * 10**18,
 }
-# Listing-side accepted_escrows advertisement. The escrow_address here is a
-# stub — the buyer sends the placeholder zero address on its EscrowProposal
-# (see negotiate_new's defaults), which skips the accepted-escrow
-# (chain, address) strict match; field-level equality on
-# literal_fields["token"] is what gates the proposal. The real
-# escrow_address used on-chain is what the buyer's CLI resolves through
-# alkahest at settle time.
+# Listing-side accepted_escrows. A fresh negotiation selects the listing's
+# Alkahest option, and the seller materializes the accepted escrow plan from
+# that option, so the advertised escrow_address is the one the deal settles
+# against. It is resolved from the dev chain's address book, as a real seller's
+# `market publish` resolves it.
+_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
+_ALKAHEST_CFG = resolve_alkahest_address_config(
+    get_alkahest_network("anvil"),
+    config_path=_ALKAHEST_ADDRESSES_PATH,
+)
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
-    "escrow_address": "0x" + "11" * 20,
+    "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
     "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
 }]
-
-_ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:
@@ -872,7 +877,12 @@ class TestStage05a_EvaluateNegotiate:
 
 class TestStage05b_NegotiationStartsAndVisible:
     def test_05b_buyer_starts_negotiation_and_thread_confirmed(
-        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
+        self,
+        storefront_client,
+        storefront_admin_client,
+        registry_client,
+        buyer_config,
+        deal_state: DealState,
     ):
         """Negotiation starts + visible + round-0 confirmed in event stream.
 
@@ -888,6 +898,16 @@ class TestStage05b_NegotiationStartsAndVisible:
         # "now + an hour" at a different moment and settlement verification
         # refuses the attestation over a one-second difference.
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+
+        # A fresh negotiation names its settlement option explicitly; the
+        # seller accepts nothing it would have to infer from an escrow's shape.
+        (alkahest_option,) = [
+            dict(option)
+            for option in registry_client.get_listing(
+                deal_state.seller_listing_id
+            ).settlement_options
+            if dict(option)["mechanism"] == "alkahest.v1"
+        ]
 
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
@@ -906,6 +926,11 @@ class TestStage05b_NegotiationStartsAndVisible:
                 },
             },
             token=DEMAND_RESOURCE["token"]["contract_address"],
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": alkahest_option["option_id"],
+                "expiration_unix": deal_state._escrow_expiration_unix,
+            },
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
         assert neg_id, (
@@ -1557,6 +1582,7 @@ class TestStage09c_LeaseRecorded:
         """
         require_state(
             deal_state,
+            "negotiation_id",
             "real_escrow_uid",
             "settlement_status",
             "fulfillment_id",
@@ -1564,9 +1590,9 @@ class TestStage09c_LeaseRecorded:
 
         # DealLease resolves where this deal's lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease_view = DealLease(provisioning_client, deal_state.negotiation_id)
         lease = lease_view.refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get("negotiation_id") == deal_state.negotiation_id
         assert lease.get("host_id") == deal_state._evaluate_settle_host_id, (
             f"lease bound to executor {lease.get('host_id')!r}; stage 08a's "
             f"evaluate_settle chose {deal_state._evaluate_settle_host_id!r}. "

@@ -3,28 +3,22 @@
 from __future__ import annotations
 
 import sqlite3
-import time
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     IntroductionAdminClient,
+    IntroductionSellerClient,
     format_introduction_timestamp,
 )
 from market_core.schemas import derive_settlement_option_id
 from market_identity import (
-    EMPTY_BODY,
     Eip191Signer,
-    RequestEnvelope,
     TrustedIdentitySet,
-    canonical_body_hash,
-    sign_request,
 )
-from market_settlement_runtime import derive_obligation_ref
+from market_settlement_runtime import SettlementPublicationClause, derive_obligation_ref
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
@@ -50,39 +44,6 @@ OUTSIDER_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 
 _SELLER_CONTACT = {"telegram": "@capacity_broker"}
 _BUYER_CONTACT = {"email": "buyer@example.com"}
-
-
-def _headers(
-    signer: Eip191Signer,
-    role: str,
-    operation: str,
-    resource_id: str,
-    body: Any,
-    *,
-    method: str = "POST",
-) -> dict[str, str]:
-    signed = sign_request(
-        signer=signer,
-        envelope=RequestEnvelope(
-            role=role,
-            principal=signer.identity,
-            method=method,
-            operation=operation,
-            resource=resource_id,
-            request_id=f"test-{uuid.uuid4().hex}",
-            timestamp=int(time.time()),
-            body_hash=canonical_body_hash(body),
-        ),
-    )
-    return {
-        "X-Market-Signature-Version": signed.protocol,
-        "X-Market-Identity-Scheme": signed.principal.scheme.value,
-        "X-Market-Identity-Identifier": signed.principal.identifier,
-        "X-Market-Role": signed.role,
-        "X-Market-Request-ID": signed.request_id,
-        "X-Market-Timestamp": str(signed.timestamp),
-        "X-Market-Signature": signed.proof.value,
-    }
 
 
 def _contact_option() -> dict[str, Any]:
@@ -135,9 +96,9 @@ def _runtime(
         settlement_composition=(
             BareMetalStorefrontSettlementComposition.from_raw_config(
                 {
-                    "priority": [CONTACT_MECHANISM],
+                    "priority": [CONTACT_MECHANISM] if contact_enabled else [],
                     "contact": {
-                        "enabled": True,
+                        "enabled": contact_enabled,
                         "contact_payload": dict(_SELLER_CONTACT),
                         "profiles": {
                             "default": {
@@ -149,8 +110,6 @@ def _runtime(
                     },
                 }
             )
-            if contact_enabled
-            else None
         ),
         introduction_delivery=deliver,
     )
@@ -222,8 +181,8 @@ def _introductions(base_url: str, signer=BUYER_SIGNER) -> IntroductionTransport:
     )
 
 
-async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict]:
-    """Accept the contact listing and reveal, through the buyer's typed clients."""
+async def _negotiate_contact(base_url: str, option: dict) -> dict:
+    """Open a negotiation for the contact listing through the buyer's typed client."""
     opening = _opening(option)
     async with StorefrontClient(
         base_url,
@@ -231,7 +190,7 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
         caller_role="buyer",
         expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
     ) as storefront:
-        payload = await storefront.negotiate_new(
+        return await storefront.negotiate_new(
             listing_id=opening["listing_id"],
             initial_amount=None,
             provision_terms=opening["provision_terms"],
@@ -240,12 +199,23 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
             selection_only=True,
             buyer_agent_url=opening["buyer_agent_url"],
         )
+
+
+async def _accept_typed(base_url: str, option: dict) -> tuple[str, str]:
+    """Accept the contact listing through the buyer's typed client."""
+    payload = await _negotiate_contact(base_url, option)
     assert payload["action"] == "accept"
     negotiation_id = payload["negotiation_id"]
     plan = payload["settlement_plan"]
     obligation_ref = derive_obligation_ref(
         negotiation_id, 0, plan["obligations"][0]
     )
+    return negotiation_id, obligation_ref
+
+
+async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict]:
+    """Accept the contact listing and reveal, through the buyer's typed clients."""
+    negotiation_id, obligation_ref = await _accept_typed(base_url, option)
     started = _introductions(base_url).start(
         negotiation_id=negotiation_id,
         obligation_ref=obligation_ref,
@@ -254,10 +224,19 @@ async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict
     return negotiation_id, obligation_ref, started
 
 
+async def _seller_read(base_url: str, obligation_ref: str) -> dict:
+    """Re-read one introduction as its seller, through the seller's typed client."""
+    async with StorefrontClient(
+        base_url,
+        signer=SELLER_SIGNER,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    ) as seller:
+        reveal = await IntroductionSellerClient(seller).read_introduction(obligation_ref)
+    return reveal.model_dump(exclude_none=True)
+
+
 async def test_contact_options_publish_through_the_composition() -> None:
-
-    from market_settlement_runtime import SettlementPublicationClause
-
     composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         {
             "priority": [CONTACT_MECHANISM],
@@ -302,29 +281,26 @@ async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
             base_url, option
         )
         read = _introductions(base_url).read(obligation_ref=obligation_ref)
+        seller_read = await _seller_read(base_url, obligation_ref)
     assert projection["revealed"] is True
     assert projection["counterparty_contact"] == _SELLER_CONTACT
     assert projection["introduction"]["channel"] == "telegram"
     assert read["counterparty_contact"] == _SELLER_CONTACT
-
-    # Deferred debt, not an exemption: no typed client reads an introduction as
-    # the seller, so the seller's read is hand-built until one exists.
-    with TestClient(app) as client:
-        seller_read = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                SELLER_SIGNER,
-                "seller",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-    assert seller_read.status_code == 200
-    assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
+    assert seller_read["counterparty_contact"] == _BUYER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
+    evidence = await runtime.settlement_service().verified_evidence(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    assert evidence.settlement_ref == obligation_ref
+    assert evidence.evidence["delivery"] is None
+    assert evidence.evidence["source"] == {"obligation_ref": obligation_ref}
+    assert (
+        await runtime.db.load_bare_metal_fulfillment_lifecycle(
+            negotiation_id=negotiation_id
+        )
+        is None
+    )
 
 
 async def test_introduction_survives_a_storefront_restart(tmp_path) -> None:
@@ -337,6 +313,76 @@ async def test_introduction_survives_a_storefront_restart(tmp_path) -> None:
     with serving(_app(_runtime(path))) as base_url:
         read = _introductions(base_url).read(obligation_ref=obligation_ref)
     assert read["counterparty_contact"] == _SELLER_CONTACT
+
+
+@pytest.mark.parametrize("revealed_before_disable", [False, True])
+async def test_accepted_introduction_survives_contact_disable(
+    tmp_path, revealed_before_disable: bool
+) -> None:
+    path = str(tmp_path / "storefront.db")
+    runtime = _runtime(path)
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref = await _accept_typed(base_url, option)
+        if revealed_before_disable:
+            _introductions(base_url).start(
+                negotiation_id=negotiation_id,
+                obligation_ref=obligation_ref,
+                contact_payload=dict(_BUYER_CONTACT),
+            )
+
+    restarted = _runtime(path, contact_enabled=False)
+    publication = await restarted.settlement_composition.publication_payload(
+        candidate={"host_id": "machine-1", "site_id": "site-a"},
+        clauses=[
+            SettlementPublicationClause(
+                mechanism=CONTACT_MECHANISM,
+                asset="introduction",
+                mechanism_input={"profile": "default"},
+            )
+        ],
+    )
+    assert publication.settlement_options == ()
+    app = _app(restarted)
+    with serving(app) as base_url:
+        buyer = _introductions(base_url)
+        if revealed_before_disable:
+            read = buyer.read(obligation_ref=obligation_ref)
+            assert read["counterparty_contact"] == _SELLER_CONTACT
+
+        revealed = buyer.start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=dict(_BUYER_CONTACT),
+        )
+        assert revealed["counterparty_contact"] == _SELLER_CONTACT
+        assert (
+            buyer.start(
+                negotiation_id=negotiation_id,
+                obligation_ref=obligation_ref,
+                contact_payload=dict(_BUYER_CONTACT),
+            )
+            == revealed
+        )
+        assert buyer.read(obligation_ref=obligation_ref) == revealed
+
+        # Fresh contact work stays refused while the mechanism is disabled.
+        with pytest.raises(StorefrontClientError) as refused:
+            await _negotiate_contact(base_url, option)
+        assert refused.value.status_code == 400
+
+        # The seller re-reads the same persisted reveal after disablement.
+        seller_read = await _seller_read(base_url, obligation_ref)
+    assert seller_read["counterparty_contact"] == _BUYER_CONTACT
+    assert seller_read["obligation_ref"] == obligation_ref
+
+    status = await restarted.settlement_runtime.get_status(negotiation_id)
+    assert status.status == "complete"
+    evidence = await restarted.settlement_service().verified_evidence(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    assert evidence.settlement_ref == obligation_ref
+    assert evidence.evidence["source"] == {"obligation_ref": obligation_ref}
 
 
 async def test_reveal_refusals(tmp_path) -> None:

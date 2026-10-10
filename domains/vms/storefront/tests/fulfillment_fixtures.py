@@ -10,20 +10,21 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
 )
 from market_capacity_publication import CapacityBinding
+from market_core import SettlementEvidence
+from market_core import VersionedEnvelope
 from market_fulfillment import (
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
     build_fulfillment_result_envelope,
 )
-from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 from market_storefront.utils.sqlite_client import SQLiteClient
-
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x61" * 32).identity
 SELLER_PRINCIPAL = Ed25519Signer(b"\x62" * 32).identity
@@ -35,6 +36,7 @@ class VmLifecycleFixture:
     listing_binding: StorefrontListingBinding
     thread_binding: StorefrontThreadBinding
     capacity_binding: CapacityBinding
+    evidence: SettlementEvidence
 
     def reopen(self) -> SQLiteClient:
         return SQLiteClient(
@@ -54,6 +56,7 @@ async def make_vm_lifecycle_fixture(
     status: str = "provisioning",
     interruptible: bool = True,
     context_payload: Mapping[str, Any] | None = None,
+    with_context: bool = True,
 ) -> VmLifecycleFixture:
     """Persist the exact VM listing, thread, site, and escrow authority."""
 
@@ -95,7 +98,8 @@ async def make_vm_lifecycle_fixture(
             "region": "test-region",
             "offering_mode": "vm",
             "interruptible": interruptible,
-        },
+        }
+        | (context_payload or {}).get("order", {}).get("listing_resource", {}),
         fulfillment_resource=None,
         max_duration_seconds=7_200,
         storefront_url="http://seller.test",
@@ -130,7 +134,14 @@ async def make_vm_lifecycle_fixture(
     if not inserted:
         raise RuntimeError(f"duplicate lifecycle escrow {escrow_uid!r}")
 
-    payload = dict(context_payload or {})
+    payload = {
+        "fulfillment_request": {
+            "kind": "vm.fulfillment.request",
+            "schema_version": 1,
+            "payload": {"ssh_pubkey": "ssh-ed25519 test"},
+        },
+        **dict(context_payload or {}),
+    }
     authoritative = {
         "escrow_uid": escrow_uid,
         "listing_id": listing_id,
@@ -151,11 +162,93 @@ async def make_vm_lifecycle_fixture(
         escrow_uid=escrow_uid,
         fulfillment_context=json.dumps(context, sort_keys=True),
     )
+    evidence = vm_delivery_evidence(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        settlement_ref=escrow_uid,
+        **dict(context_payload or {}),
+    )
+    await db.save_vm_settlement_evidence(evidence)
+    await db.insert_vm_delivery(negotiation_id=negotiation_id)
+    plan = build_vm_fulfillment_plan(evidence=evidence)
+    payload.update(
+        {
+            "negotiation_id": negotiation_id,
+            "settlement_ref": escrow_uid,
+            "agreement_sha256": evidence.evidence["agreement_sha256"],
+            "required_attributes": plan.required_attributes,
+            "duration_seconds": plan.duration_seconds,
+            "start_utc": plan.start_utc,
+            "lease_end_utc": plan.lease_end_utc,
+        }
+    )
+    if with_context:
+        await db.update_vm_delivery(
+            negotiation_id=negotiation_id,
+            fulfillment_context=json.dumps(
+                db.bind_fulfillment_context(
+                    {
+                        "kind": "vm.storefront.fulfillment-context",
+                        "schema_version": 1,
+                        "payload": payload,
+                    },
+                    thread_binding=thread_binding,
+                ),
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
     return VmLifecycleFixture(
         db=db,
         listing_binding=listing_binding,
         thread_binding=thread_binding,
         capacity_binding=CapacityBinding(site_id, "vm", pool_id),
+        evidence=evidence,
+    )
+
+
+def vm_delivery_evidence(
+    *,
+    negotiation_id="neg-1",
+    listing_id="listing-1",
+    settlement_ref="escrow-1",
+    order=None,
+    required_attributes=None,
+    duration_seconds=3600,
+    start_utc="2026-01-01T00:00:00+00:00",
+    **_,
+):
+    return SettlementEvidence(
+        negotiation_id=negotiation_id,
+        mechanism="alkahest.v1",
+        settlement_ref=settlement_ref,
+        status="verified",
+        evidence={
+            "schema": "vm.settlement-evidence.v1",
+            "agreement_sha256": "1" * 64,
+            "source": {"escrow_uid": settlement_ref, "obligation_ref": "obligation-1"},
+            "delivery": {
+                "kind": "vm.delivery-facts",
+                "schema_version": 1,
+                "payload": {
+                    "listing_id": listing_id,
+                    "order": order if order is not None else {"listing_id": listing_id},
+                    "required_attributes": required_attributes or {},
+                    "duration_seconds": duration_seconds,
+                    "start_utc": start_utc,
+                    "lease_end_utc": "2026-01-01T01:00:00+00:00",
+                    "lease_bytes_hex": "0102",
+                    "provision_terms": {
+                        "kind": "compute.v1",
+                        "version": 1,
+                        "payload": {
+                            "ssh_public_key": "ssh-ed25519 test",
+                            "duration_seconds": duration_seconds,
+                        },
+                    },
+                },
+            },
+        },
     )
 
 
