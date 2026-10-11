@@ -74,10 +74,12 @@ path, with its own routes, clients, CLI, and precedence contract.
       passing with no skips. Alice's opt-out is absent and
       `test_multi_registry.py` imports no CSV. Alice's `resources_csv_path`
       and compose CSV mount remain and retire in task 5.4.
-- [ ] 1.7 Confirm `remove-dead-storefront-physical-surfaces` has landed before
+- [x] 1.7 Confirm `remove-dead-storefront-physical-surfaces` has landed before
       starting Sections 3–6, then re-check task 4.5's method list and
       migration `20260604_002`'s `compute_allocations` indexes against the
-      tree it leaves.
+      tree it leaves. Done 2026-10-11 after merging `dev`: archived
+      2026-10-08; `20260604_002` no longer creates allocation indexes; task
+      4.5's list is amended below (`design.md`, "Re-grounding against `dev`").
 
 ## 2. Retire `compute_allocations`
 
@@ -204,9 +206,15 @@ provisioning can trust two principals leaves it with no listing source.
       `resource_id` when `compute_pool_members` is absent; leave core
       `_migrate_listing_resource_timestamps` unchanged.
 - [ ] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
-      with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host`,
-      `get_resource`, `list_resources`, `apply_resource_transition`, and
-      `apply_resource_set_transition` once their callers are gone. The
+      with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host` with
+      `_host_row_to_dict`, `list_resources`, and `apply_resource_transition`
+      once their callers are gone (`get_resource` and
+      `apply_resource_set_transition` were already removed by
+      `remove-dead-storefront-physical-surfaces`). Retire
+      `tests/integration/test_resource_transitions.py` and the
+      release-transition case of
+      `tests/integration/test_compute_allocations_freeze.py`, keeping its
+      freeze cases. The
       transferred local cleanup and resource-count readers are among those
       callers and retire at the same cutover. With
       `remove-dead-storefront-physical-surfaces` landed first, the remaining
@@ -232,7 +240,9 @@ provisioning can trust two principals leaves it with no listing source.
       Amended 2026-10-11 (`design.md`, "Upgrades are fail-forward"): document
       in `docs/development/DEPLOYMENT_AND_CONFIG.md` that the upgrade is
       fail-forward with no supported downgrade, and that retained tables stay
-      for operator extraction until a later change drops them. Explain
+      for operator extraction until a later change drops them; name the frozen
+      inventory tables beside `compute_allocations` in the frozen-table
+      paragraph of "Migrations at startup". Explain
       extraction into provisioning in `docs/seller-quickstart.md`: retained
       data is historical and is reconciled against current provisioning state
       first; no automatic transfer machinery is added.
@@ -295,6 +305,11 @@ provisioning can trust two principals leaves it with no listing source.
       projection/provisioning-service seeding: the five VM scenario files
       named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`
       (re-grounded 2026-10-08; `test_multi_registry.py` is already migrated).
+      In `test_full_deal.py` and `test_full_deal_buyer_cli.py`, shared stage
+      `00f1` already seeds supply through provisioning
+      (`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`), so VM's
+      stage `00f` import and its `resource_count` assertion are deleted, not
+      migrated (re-grounded 2026-10-11).
       `test_compute_dynamic_listings.py`'s imported rows share pool
       identifiers with its projected pools, so its listings take SLA and
       region from the legacy tier today; declare them on the pool hint or a
@@ -349,7 +364,10 @@ provisioning can trust two principals leaves it with no listing source.
       `DROP`.
 - [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
-      Extend `domains/vms/storefront/tests/unit/test_migrations.py` to prove
+      Follow `tests/integration/test_compute_allocations_freeze.py`'s pattern
+      (a byte-level snapshot of retained schema, rows, triggers, and recorded
+      migration IDs across initialization) in a sibling integration test for
+      the inventory tables. Extend `domains/vms/storefront/tests/unit/test_migrations.py` to prove
       that fresh bootstrap omits retired schema and records none of the removed
       migration IDs, and that a populated upgrade and rerun preserve existing
       schema, row contents (including transition history), triggers, and
@@ -462,7 +480,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Projection is the only listing-candidate origination path; no local-table path or configuration option selects another source | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | The site-scoped store is the only storefront-override tier; the legacy home-site record retires with the import that wrote it, and its values are not carried over | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier", replacing "Storefront pool overrides are site-scoped and durable" |
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "Decision: retire the legacy override tier without carrying values over" |
-| Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
+| Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" frozen-table paragraph names the inventory tables beside `compute_allocations` |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the retired migrations leave the chain rather than being gated or emptied, and why `20260604_003` and the core timestamp migration stay | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
 | Retired settings are refused at chart render and by `config set`, as retired settlement settings are, and ignored at runtime | `openspec/specs/deployment-state/spec.md` (existing retired-values rule, no text change); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |

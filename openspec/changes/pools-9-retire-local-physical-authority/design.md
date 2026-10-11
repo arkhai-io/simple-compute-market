@@ -159,6 +159,59 @@ Drift from the earlier plan:
   modifies the requirement to drop the local-table clauses, and promotion
   corrects `ARCHITECTURE.md`.
 
+### Re-grounding against `dev` (2026-10-11)
+
+`dev` was merged after D1–D7 were decided. Nothing it delivered reverses a
+decision; it changes the following.
+
+- **`remove-dead-storefront-physical-surfaces` is archived (2026-10-08).** It
+  froze `compute_allocations`, removed migrations `20260604_001` and
+  `20260611_007` from `VM_MIGRATIONS`, and stopped migration `20260604_002`
+  creating allocation indexes. It removed the resource administration routes,
+  `get_resource`, `apply_resource_set_transition`, `list_hosts`,
+  `host_capacity_remaining`, `delete_resource`, and
+  `ensure_default_resources`, and narrowed `apply_resource_transition` to the
+  one transition `release_reservations`' local loop performs. The `SQLiteClient`
+  methods left for this change are `upsert_resource` with
+  `_sync_compute_pool_for_resource`, `list_resources`, `upsert_host`,
+  `get_host` with `_host_row_to_dict`, `apply_resource_transition`, and the CSV
+  upserts. It added `tests/integration/test_resource_transitions.py`, which
+  retires with `apply_resource_transition`, and
+  `tests/integration/test_compute_allocations_freeze.py`, whose
+  release-transition case retires with it while its freeze cases stay.
+- **The frozen-table rule is now permanent.** That change promoted to
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup" the
+  rule this change's D5 applies: a frozen table is never dropped, and a
+  migration whose only effect is on a frozen table leaves the chain with its
+  recorded ID inert and never reused. D5 therefore promotes no new mechanism;
+  the paragraph's closing sentence names the frozen inventory tables beside
+  `compute_allocations`.
+- **It deferred one guard here.** `dev` added task 5.7: once the import route
+  is gone, an application test asserts no route is mounted under
+  `/api/v1/admin/portfolio/resources`. This change's CSV pricing and retired-key
+  tasks are renumbered 5.8 and 5.9.
+- **The full-deal scenarios share compute deal stages.** VM and bare metal now
+  declare common stages from `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
+  Shared stage `00f1` already seeds supply through provisioning
+  (`deal_driver.seed_supply()`), so VM's own stage `00f` CSV import and its
+  `resource_count` assertion in both full-deal scenarios are redundant and are
+  deleted rather than migrated. The six CSV-dependent files are unchanged.
+- **Bare metal still reports `resource_count`.** The health builder moved
+  within `runtime.py` and `test_http_system.py` still asserts it; D4's edits
+  are unchanged.
+- **`ARCHITECTURE.md` gained scope and kind rules.** Nothing this change adds
+  creates a new edge. D6's deletion of escrow templates removes Alkahest-shaped
+  configuration from `kit/config`, which "Where the current tree diverges" lists
+  for carrying mechanism identifiers; the divergence paragraph names no
+  escrow-template item, so it needs no edit here.
+- **`storefront-publication` gained requirements** (the inventory guard before
+  every seller decision and acceptance, bare-metal deal readiness, settlement
+  servicing scenarios). None overlaps this change's delta, which still
+  validates against the merged baseline.
+- **`resolve-compute-family-findings` (proposed)** touches VM storefront
+  surfaces this change does not: the literal pool-override route path and the
+  unread `[provisioning] mode`.
+
 ## Goals / Non-Goals
 
 **Goals:** one listing source; no storefront physical authority; one storefront
@@ -233,6 +286,8 @@ Alternatives:
   reachable only by very old databases would stay.
 - *Empty the retired migrations' bodies and keep their IDs.* Rejected: it keeps
   dead entries in the chain and records IDs whose schema was never created.
+  `DEPLOYMENT_AND_CONFIG.md`'s frozen-table rule, promoted when
+  `compute_allocations` was frozen, now rules it out.
 - *Drop the tables now.* Rejected: their rows may still be needed for
   extraction into provisioning.
 
@@ -361,10 +416,10 @@ Alternatives:
   migration and should not wait on this cutover's operator and test work.
 
 Consequences: this change's freeze covers only the local inventory tables,
-since `compute_allocations` is already frozen when it starts. Task 4.5 deletes
-only the methods whose remaining callers this change removes:
-`release_reservations`' local loop, the status count, the validator, and the
-importers.
+since `compute_allocations` is already frozen. Task 4.5 deletes only the
+methods whose remaining callers this change removes: `release_reservations`'
+local loop, the status count, the validator, and the importers. The
+prerequisite landed on 2026-10-08 (see "Re-grounding against `dev`").
 
 ### The pool-override kit loses `inactive`
 
@@ -615,7 +670,7 @@ negotiation-pause behavior are unchanged. The permanent home is
    Done 2026-10-08; see "Re-grounding".
 2a. Land `remove-dead-storefront-physical-surfaces`, then re-check the
    `SQLiteClient` method list and migration `20260604_002` against the tree it
-   leaves.
+   leaves. Done 2026-10-11; see "Re-grounding against `dev`".
 3. Prepare provisioning-seeded tests and operator guidance together with
    retirement of local derivation, the flag, legacy overrides, CSV import and
    its pricing migration, startup seeding, deployment and CLI wiring, the
