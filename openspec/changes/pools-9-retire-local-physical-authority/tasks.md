@@ -275,7 +275,7 @@ provisioning can trust two principals leaves it with no listing source.
       `20260604_003` and make its `pool_id` backfill fall back to
       `resource_id` when `compute_pool_members` is absent; leave core
       `_migrate_listing_resource_timestamps` unchanged.
-- [ ] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
+- [x] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
       with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host` with
       `_host_row_to_dict`, `list_resources`, and `apply_resource_transition`
       once their callers are gone (`get_resource` and
@@ -292,7 +292,7 @@ provisioning can trust two principals leaves it with no listing source.
       and seeding, the validator, and the importers; task 1.7 re-checks this.
       Also delete `tests/unit/test_hosts.py`'s host CRUD and capacity-validator
       cases with the methods they test.
-- [ ] 4.5a Delete the code describing the retired inventory (`design.md`,
+- [x] 4.5a Delete the code describing the retired inventory (`design.md`,
       "Code describing the retired inventory leaves with it"): in
       `domains/vms/listings/src/arkhai_vms_listings/`, the adapters' storage
       half in `resources.py`, `get_supported_resource_types()`, `Host` and
@@ -308,7 +308,7 @@ provisioning can trust two principals leaves it with no listing source.
       adapter-join cases in `tests/unit/test_hosts.py`, keeping the wire-format
       cases. Run `kit/config`'s suite and confirm no other package imported
       the removed names.
-- [ ] 4.5b Move the test fixtures that still seed local rows through
+- [x] 4.5b Move the test fixtures that still seed local rows through
       `SQLiteClient.upsert_resource` onto the projection and site fakes the
       behaviour under test reads, or drop the seed where nothing reads it:
       `domains/vms/storefront/tests/integration/test_negotiate_controller.py`

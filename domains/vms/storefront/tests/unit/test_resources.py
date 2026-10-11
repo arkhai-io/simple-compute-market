@@ -10,8 +10,6 @@ from arkhai_vms_listings.models import (
     TokenResource,
 )
 from arkhai_vms_listings.resources import (
-    adapt_db_resource_to_domain_resource,
-    adapt_domain_resource_to_db_resource,
     parse_resource_from_dict,
     register_resource_adapter,
 )
@@ -92,49 +90,6 @@ class TestParseResourceFromDict:
 
 
 # ---------------------------------------------------------------------------
-# DB round-trip: from_domain_resource / to_domain_resource
-# ---------------------------------------------------------------------------
-
-class TestDbRoundTrip:
-    def test_compute_round_trip(self):
-        db_row = adapt_domain_resource_to_db_resource(
-            COMPUTE, resource_id="res-1", state="available"
-        )
-        assert db_row["resource_type"] == "compute.gpu"
-        assert db_row["resource_id"] == "res-1"
-        assert db_row["state"] == "available"
-        assert db_row["attributes"]["gpu_model"] == "H200"
-
-        restored = adapt_db_resource_to_domain_resource(db_row)
-        assert isinstance(restored, ComputeResource)
-        assert restored.gpu_model == COMPUTE.gpu_model
-        assert restored.gpu_count == COMPUTE.gpu_count
-        assert restored.sla == COMPUTE.sla
-        assert restored.region == COMPUTE.region
-
-    def test_token_round_trip(self):
-        db_row = adapt_domain_resource_to_db_resource(
-            TOKEN, resource_id="res-2", state="locked"
-        )
-        assert db_row["resource_type"] == "token.erc20"
-        assert db_row["resource_id"] == "res-2"
-        assert db_row["attributes"]["symbol"] == "USDT"
-
-        restored = adapt_db_resource_to_domain_resource(db_row)
-        assert isinstance(restored, TokenResource)
-        assert restored.token.symbol == TOKEN.token.symbol
-        assert restored.amount == TOKEN.amount
-
-    def test_unsupported_domain_type_raises(self):
-        with pytest.raises(ValueError, match="Unsupported domain resource type"):
-            adapt_domain_resource_to_db_resource(object(), resource_id="x")
-
-    def test_missing_resource_type_raises(self):
-        with pytest.raises(ValueError, match="missing resource_type"):
-            adapt_db_resource_to_domain_resource({"value": 1})
-
-
-# ---------------------------------------------------------------------------
 # Third-party / generic adapter registration
 # ---------------------------------------------------------------------------
 
@@ -159,30 +114,6 @@ class InformationNoteAdapter:
     def from_dict(self, data: dict[str, _Any]) -> InformationResource:
         return InformationResource(content=data["content"], format=data.get("format", "plaintext"))
 
-    def to_domain_resource(self, db_resource: dict[str, _Any]) -> InformationResource:
-        attrs = db_resource.get("attributes") or {}
-        return InformationResource(
-            content=attrs.get("content", ""),
-            format=attrs.get("format", "plaintext"),
-        )
-
-    def from_domain_resource(
-        self,
-        resource: InformationResource,
-        *,
-        resource_id: str,
-        state: str | None = None,
-    ) -> dict[str, _Any]:
-        return {
-            "resource_id": resource_id,
-            "resource_type": self.resource_type,
-            "resource_subtype": resource.format,
-            "unit": "document",
-            "value": 1,
-            "state": state,
-            "attributes": {"content": resource.content, "format": resource.format},
-        }
-
     def to_dict(self, resource: InformationResource) -> dict[str, _Any]:
         return {"resource_type": self.resource_type, "content": resource.content, "format": resource.format}
 
@@ -191,13 +122,10 @@ class TestThirdPartyAdapterRegistration:
     @pytest.fixture(autouse=True)
     def _register(self):
         resource_type_snapshot = dict(_resource_registry._RESOURCE_TYPE_TO_ADAPTER)
-        domain_type_snapshot = dict(_resource_registry._DOMAIN_TYPE_TO_ADAPTER)
         register_resource_adapter(InformationNoteAdapter())
         yield
         _resource_registry._RESOURCE_TYPE_TO_ADAPTER.clear()
         _resource_registry._RESOURCE_TYPE_TO_ADAPTER.update(resource_type_snapshot)
-        _resource_registry._DOMAIN_TYPE_TO_ADAPTER.clear()
-        _resource_registry._DOMAIN_TYPE_TO_ADAPTER.update(domain_type_snapshot)
 
     def test_parse_from_dict_via_resource_type(self):
         data = {"resource_type": "information.note", "content": "hello", "format": "markdown"}
@@ -211,14 +139,3 @@ class TestThirdPartyAdapterRegistration:
         result = parse_resource_from_dict(data)
         assert isinstance(result, InformationResource)
         assert result.content == "hello"
-
-    def test_db_round_trip(self):
-        resource = InformationResource(content="meeting notes", format="markdown")
-        db_row = adapt_domain_resource_to_db_resource(resource, resource_id="res-3", state="active")
-        assert db_row["resource_type"] == "information.note"
-        assert db_row["attributes"]["content"] == "meeting notes"
-
-        restored = adapt_db_resource_to_domain_resource(db_row)
-        assert isinstance(restored, InformationResource)
-        assert restored.content == "meeting notes"
-        assert restored.format == "markdown"

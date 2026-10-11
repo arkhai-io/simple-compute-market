@@ -27,11 +27,9 @@ from market_identity import Identity
 #         └── TokenResource         ERC-20 token payment
 #
 # Marketplace-layer types (defined here)
-# ├── Listing                       A published marketplace listing
-# │   ├── listing_resource: ComputeResource | TokenResource
-# │   └── accepted_escrows: list[AcceptedEscrow] | None
-# ├── Host                          Physical host metadata (capacity, hardware)
-# └── ComputeResourcePortfolio      Collection of ComputeResource slices
+# └── Listing                       A published marketplace listing
+#     ├── listing_resource: ComputeResource | TokenResource
+#     └── accepted_escrows: list[AcceptedEscrow] | None
 #
 # Enumerations
 # ├── GPUModel          Advisory string-enum of common NVIDIA models.
@@ -90,84 +88,6 @@ class OfferingMode(str, Enum):
     BARE_METAL = "bare_metal"
     VM = "vm"
     CONTAINER = "container"
-
-
-class Host(BaseModel):
-    """A physical host the seller owns. Source of truth for host hardware.
-
-    Mirrors provisioning-service's host inventory and adds marketing metadata
-    that the provisioning-service doesn't track (cpu_type, motherboard,
-    capacity totals, network specs, datacenter grade, etc.). Compute slice
-    resources reference a host by ``name`` via ``ComputeResource.vm_host``.
-
-    Capacity invariants enforced at publish time:
-      ``SUM(active_slices.gpu_count)  ≤ total_gpu_count``
-      ``SUM(active_slices.vcpu_count) ≤ host_cpu_cores``
-      ``SUM(active_slices.ram_gb)     ≤ host_ram_gb``
-      ``SUM(active_slices.disk_gb)    ≤ host_disk_gb``
-
-    Free-form provider-specific tags belong in ``attributes`` under the
-    ``tag.*`` namespace (e.g. ``attributes["tag.datacenter_tier"]``).
-    """
-
-    name: str = Field(
-        description="Host alias (matches provisioning-service host alias, e.g. 'kvm1')."
-    )
-    cpu_type: str | None = Field(
-        default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'"
-    )
-    host_cpu_cores: int | None = Field(
-        default=None, description="Total physical CPU cores on host"
-    )
-    host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
-    host_disk_gb: int | None = Field(
-        default=None, description="Host total disk capacity in GB"
-    )
-    host_disk_type: str | None = Field(
-        default=None,
-        description="Disk model string of the host's storage, e.g. 'Samsung MZTL3T8HEFK'",
-    )
-    motherboard: str | None = Field(
-        default=None, description="Motherboard model string"
-    )
-    total_gpu_count: int | None = Field(
-        default=None, description="Total GPUs on the host"
-    )
-    gpu_model: str | None = Field(
-        default=None, description="GPU model (assumes homogeneous GPUs per host in v1)"
-    )
-    gpu_interconnect: GpuInterconnect | None = Field(
-        default=None,
-        description="Host GPU-to-GPU interconnect (set by BIOS/NVSwitch domain; uniform across slices)",
-    )
-    nic_speed_gbps: int | None = Field(
-        default=None, description="Host NIC link speed in Gbps"
-    )
-    internet_download_mbps: int | None = Field(
-        default=None, description="Host internet downlink in Mbps"
-    )
-    internet_upload_mbps: int | None = Field(
-        default=None, description="Host internet uplink in Mbps"
-    )
-    static_ip: bool | None = Field(
-        default=None, description="Whether the host has a static public IP"
-    )
-    open_ports_count: int | None = Field(
-        default=None,
-        description="Number of externally-routable TCP ports the host exposes",
-    )
-    region: str | None = Field(
-        default=None, description="Geographic region of the host"
-    )
-    datacenter_grade: bool | None = Field(
-        default=None,
-        description="True for commercial datacenter hosting (vs home/colo)",
-    )
-    attributes: dict[str, Any] | None = Field(
-        default=None,
-        description="Free-form provider tags under the 'tag.*' namespace.",
-    )
-    enabled: bool = Field(default=True, description="Whether the host is active")
 
 
 class Resource(BaseModel):
@@ -407,7 +327,7 @@ class ComputeResource(ComputeDomainResource):
         ),
     )
 
-    # ---- Host context (denormalized at publish; sourced from hosts table) ----
+    # ---- Host context: the hardware of the host the slice runs on ----
     cpu_type: str | None = Field(
         default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'"
     )
@@ -471,110 +391,6 @@ class ComputeResource(ComputeDomainResource):
         if isinstance(data, dict) and data.get("asking_rate") is None:
             data.pop("asking_rate", None)
         return data
-
-
-class ComputeResourcePortfolio(BaseModel):
-    """Describes the resource portfolio of an Agent."""
-
-    resources: list[ComputeResource] = Field(
-        description="The resources in the portfolio"
-    )
-
-    def total_gpu_count(self, gpu_model: str | None = None) -> int:
-        """Calculate total GPU gpu_count, optionally filtered by model"""
-        if gpu_model:
-            return sum(r.gpu_count for r in self.resources if r.gpu_model == gpu_model)
-        return sum(r.gpu_count for r in self.resources)
-
-    def has_capacity(self, required: ComputeResource) -> bool:
-        """Check if portfolio has sufficient capacity for a required resource.
-
-        Mandatory match: gpu_model, region, gpu_count (>=), sla (>=).
-
-        Optional spec fields are enforced only when the demand side specifies
-        them (i.e., is not None). Numeric fields use >=; enum/string/bool
-        fields use exact equality. If the demand specifies a constraint and
-        the offered resource has the field as None, the resource is rejected
-        — an unknown spec can't be assumed to satisfy a stated requirement.
-        """
-        numeric_min_fields = (
-            "vcpu_count",
-            "ram_gb",
-            "disk_gb",
-            "host_cpu_cores",
-            "host_ram_gb",
-            "host_disk_gb",
-            "total_gpu_count",
-            "nic_speed_gbps",
-            "internet_download_mbps",
-            "internet_upload_mbps",
-            "open_ports_count",
-        )
-        equality_fields = (
-            "cpu_type",
-            "host_disk_type",
-            "motherboard",
-            "gpu_interconnect",
-            "offering_mode",
-            "static_ip",
-            "datacenter_grade",
-        )
-        for resource in self.resources:
-            if not (
-                resource.gpu_model == required.gpu_model
-                and resource.region == required.region
-                and resource.gpu_count >= required.gpu_count
-                and resource.sla >= required.sla
-            ):
-                continue
-            ok = True
-            for field in numeric_min_fields:
-                req_v = getattr(required, field)
-                if req_v is None:
-                    continue
-                res_v = getattr(resource, field)
-                if res_v is None or res_v < req_v:
-                    ok = False
-                    break
-            if not ok:
-                continue
-            for field in equality_fields:
-                req_v = getattr(required, field)
-                if req_v is None:
-                    continue
-                if getattr(resource, field) != req_v:
-                    ok = False
-                    break
-            if ok:
-                return True
-        return False
-
-    def add_resource(self, resource: ComputeResource) -> None:
-        """Add a resource to the portfolio"""
-        for existing in self.resources:
-            if (
-                existing.gpu_model == resource.gpu_model
-                and existing.region == resource.region
-                and existing.sla == resource.sla
-            ):
-                existing.gpu_count += resource.gpu_count
-                return
-        self.resources.append(resource)
-
-    def remove_resource(self, resource: ComputeResource) -> bool:
-        """Remove a resource from the portfolio. Returns True if successful."""
-        for existing in self.resources:
-            if (
-                existing.gpu_model == resource.gpu_model
-                and existing.region == resource.region
-                and existing.sla == resource.sla
-            ):
-                if existing.gpu_count >= resource.gpu_count:
-                    existing.gpu_count -= resource.gpu_count
-                    if existing.gpu_count == 0:
-                        self.resources.remove(existing)
-                    return True
-        return False
 
 
 _STOREFRONT_CAPACITY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
