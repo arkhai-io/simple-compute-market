@@ -24,12 +24,6 @@ from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
 )
 from core_storefront.sqlite_migrations import MigrationLike
-from arkhai_vms_listings.host_csv_importer import upsert_hosts_from_csv
-from arkhai_vms_listings.resource_csv_importer import (
-    SettlementClauseCompiler,
-    upsert_resources_from_csv,
-    upsert_resources_from_csv_content,
-)
 from market_contact_exchange import CONTACT_EXCHANGE_MIGRATIONS
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
@@ -453,63 +447,6 @@ class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_load)
-
-    async def upsert_resources_from_csv(
-        self,
-        *,
-        csv_path: str,
-        dry_run: bool = False,
-        templates: dict[str, Any] | None = None,
-        settlement_compiler: SettlementClauseCompiler | None = None,
-    ) -> dict[str, Any]:
-        """Import resources from CSV file and upsert rows into the resources table."""
-        report = await upsert_resources_from_csv(
-            csv_path=csv_path,
-            sqlite_client=self,
-            dry_run=dry_run,
-            templates=templates,
-            settlement_compiler=settlement_compiler,
-        )
-        return report.to_dict()
-
-    async def upsert_resources_from_csv_content(
-        self,
-        *,
-        csv_content: str,
-        source_label: str = "<inline>",
-        dry_run: bool = False,
-        templates: dict[str, Any] | None = None,
-        settlement_compiler: SettlementClauseCompiler | None = None,
-    ) -> dict[str, Any]:
-        """Import resources from a CSV string and upsert rows into the resources table.
-
-        Used when CSV content is delivered via config injection (e.g. the Helm
-        ``resources_csv_inline`` value in the per-agent Secret) rather than a
-        file path baked into the container image.
-        """
-        report = await upsert_resources_from_csv_content(
-            csv_content=csv_content,
-            source_label=source_label,
-            sqlite_client=self,
-            dry_run=dry_run,
-            templates=templates,
-            settlement_compiler=settlement_compiler,
-        )
-        return report.to_dict()
-
-    async def upsert_hosts_from_csv(
-        self,
-        *,
-        csv_path: str,
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        """Import hosts from CSV and upsert rows into the hosts table."""
-        report = await upsert_hosts_from_csv(
-            csv_path=csv_path,
-            sqlite_client=self,
-            dry_run=dry_run,
-        )
-        return report.to_dict()
 
     # ------------------------------------------------------------------
     # Hosts CRUD — physical hosts owned by the seller

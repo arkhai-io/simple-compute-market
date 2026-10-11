@@ -3,13 +3,11 @@
 Covers:
   - SQLiteClient.upsert_host / get_host
   - the host capacity check on resource upsert
-  - host_csv_importer.upsert_hosts_from_csv
   - ComputeGpuResourceAdapter.to_domain_resource(host_row=...) join behavior
 """
 import asyncio
 import os
 import tempfile
-import textwrap
 
 import pytest
 
@@ -109,55 +107,6 @@ class TestHostCrud:
                 "tag.datacenter_tier": "tier3",
                 "tag.billing_code": "DC-CA-001",
             }
-
-        asyncio.run(_run())
-
-
-# ---------------------------------------------------------------------------
-# CSV importer
-# ---------------------------------------------------------------------------
-
-
-class TestHostsCsvImport:
-    def test_imports_two_hosts(self, client, tmp_path):
-        csv = tmp_path / "hosts.csv"
-        csv.write_text(textwrap.dedent("""\
-            name,enabled,cpu_type,host_cpu_cores,host_ram_gb,total_gpu_count,gpu_model,attribute.tag.tier
-            h-01,true,AMD EPYC 9654,192,2048,8,H200,tier3
-            h-02,true,AMD EPYC 9354,32,512,2,H200,
-        """))
-
-        async def _run():
-            report = await client.upsert_hosts_from_csv(csv_path=str(csv), dry_run=False)
-            assert report["imported_count"] == 2
-            assert report["failed_count"] == 0
-            row1 = await client.get_host(name="h-01")
-            assert row1["cpu_type"] == "AMD EPYC 9654"
-            assert row1["host_cpu_cores"] == 192
-            assert row1["attributes"] == {"tag.tier": "tier3"}
-            row2 = await client.get_host(name="h-02")
-            assert row2["host_cpu_cores"] == 32
-
-        asyncio.run(_run())
-
-    def test_dry_run_doesnt_persist(self, client, tmp_path):
-        csv = tmp_path / "hosts.csv"
-        csv.write_text("name\nh-dry\n")
-
-        async def _run():
-            report = await client.upsert_hosts_from_csv(csv_path=str(csv), dry_run=True)
-            assert report["imported_count"] == 1
-            assert await client.get_host(name="h-dry") is None
-
-        asyncio.run(_run())
-
-    def test_missing_name_column_raises(self, client, tmp_path):
-        csv = tmp_path / "bad.csv"
-        csv.write_text("cpu_type\nAMD\n")
-
-        async def _run():
-            with pytest.raises(ValueError, match="required column: name"):
-                await client.upsert_hosts_from_csv(csv_path=str(csv), dry_run=False)
 
         asyncio.run(_run())
 
@@ -480,33 +429,5 @@ class TestCapacityEnforcement:
                 resource_subtype="h200", unit="count", value=1, state="available",
                 attributes=self._attrs("h"),
             )
-
-        asyncio.run(_run())
-
-    def test_csv_import_surfaces_capacity_error_per_row(self, client, tmp_path):
-        """An over-committed slice in CSV becomes a row-level error, not a fatal."""
-        hosts = tmp_path / "hosts.csv"
-        hosts.write_text(
-            "name,total_gpu_count,host_cpu_cores,host_ram_gb,host_disk_gb\nh,2,32,256,4000\n"
-        )
-        # Two slices each demanding 2 GPUs — the second over-commits by 2.
-        resources = tmp_path / "resources.csv"
-        resources.write_text(
-            "resource_id,resource_type,unit,value,state,attribute.gpu_model,attribute.sla,"
-            "attribute.region,attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
-            "attribute.disk_gb\n"
-            "ok,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
-            "bad,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
-        )
-
-        async def _run():
-            await client.upsert_hosts_from_csv(csv_path=str(hosts), dry_run=False)
-            report = await client.upsert_resources_from_csv(csv_path=str(resources), dry_run=False)
-            # The "ok" row imports; the "bad" row fails capacity but doesn't crash.
-            assert report["imported_count"] == 1
-            assert report["failed_count"] == 1
-            bad_rows = [r for r in report["rows"] if not r["imported"]]
-            assert len(bad_rows) == 1
-            assert any("over-committed" in e for e in bad_rows[0]["errors"])
 
         asyncio.run(_run())

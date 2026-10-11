@@ -931,20 +931,3 @@ class SettleWaitResponse:
             provisioning_job_id=d.get("provisioning_job_id"),
             elapsed_ms=int(d.get("elapsed_ms", 0)),
         )
-
-
-@dataclass
-class ImportResourcesResponse:
-    """Response from POST /api/v1/admin/portfolio/resources/import."""
-
-    imported_count: int = 0
-    failed_count: int = 0
-    total_rows: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ImportResourcesResponse":
-        return cls(
-            imported_count=int(d.get("imported_count", 0)),
-            failed_count=int(d.get("failed_count", 0)),
-            total_rows=int(d.get("total_rows", 0)),
-        )

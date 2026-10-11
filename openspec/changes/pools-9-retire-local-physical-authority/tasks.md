@@ -335,7 +335,7 @@ provisioning can trust two principals leaves it with no listing source.
 
 ## 5. Retire CSV import and its deployment contract
 
-- [ ] 5.1 Remove `startup.py`'s `_seed_resources_if_empty` and its
+- [x] 5.1 Remove `startup.py`'s `_seed_resources_if_empty` and its
       `seed_resources` startup step, `SystemService.seed_resources_if_empty`,
       `_DEFAULT_CSV_PATH`, and the `resources_csv_path`/`resources_csv_inline`
       settings including their `groups/config.py` documentation.
@@ -355,11 +355,16 @@ provisioning can trust two principals leaves it with no listing source.
       `domains/vms/storefront/pyproject.toml` and the `File`/`UploadFile`
       imports in `admin_controller.py`, then regenerate the affected locks
       with `make lock` (`docs/development/BUILD_AND_PACKAGING.md`).
-- [ ] 5.3 Remove the CLI surface: `cli_portfolio.py` and its `add_typer`
+      Amended 2026-10-11 (implementation): everything above is done except
+      dropping `python-multipart`. `make lock` cannot resolve while
+      `download.pytorch.org` is unreachable from the implementation
+      environment, and a hand-edited lock is not acceptable, so the dependency
+      stays declared until the locks can be regenerated, before closeout.
+- [x] 5.3 Remove the CLI surface: `cli_portfolio.py` and its `add_typer`
       registration in `cli.py`, and
       `domains/vms/storefront/scripts/import_resources_csv.py`, with
       `tests/unit/cli/test_portfolio.py`.
-- [ ] 5.4 Remove the deployment wiring: Helm `_helpers.tpl`'s
+- [x] 5.4 Remove the deployment wiring: Helm `_helpers.tpl`'s
       `resources_csv_inline` rendering (one site in the current tree),
       `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s
       `resourcesCsvInline` guidance and `resources_csv_path` config entry,
@@ -380,6 +385,11 @@ provisioning can trust two principals leaves it with no listing source.
       `resources.sample.csv`, and the compose comment in
       `domains/vms/compose.yml` that says Alice's startup still requires a CSV
       path.
+      Amended 2026-10-11 (implementation): with the CSVs gone the directory
+      holds no tracked file. The default database path is unaffected: the
+      storefront creates its parent directories on first start. The chart's
+      `config-<component>-secret.yml` key stays, rendering an empty mapping,
+      because the chart's smoke-test pod mounts it.
 - [ ] 5.5 Write operator migration guidance in `docs/seller-quickstart.md`
       covering how to move CSV inventory to the provisioning service's host
       inventory, pool definitions, and capacity declarations. This is
@@ -433,22 +443,27 @@ provisioning can trust two principals leaves it with no listing source.
       `test_buy_oneshot_buyer_cli.py`, `test_full_deal.py`, and
       `test_full_deal_buyer_cli.py` that cite
       `use_site_projection_for_listings`.
-- [ ] 5.7 Once 5.2 removes the import route, add an in-process application test
+- [x] 5.7 Once 5.2 removes the import route, add an in-process application test
       that the storefront mounts no route under `/api/v1/admin/portfolio/resources`.
       It is the route-level evidence for "Storefront holds no physical-resource
       authority". `remove-dead-storefront-physical-surfaces` deferred this guard
       here: while the import route remains, only a test of the specific paths it
       removed was possible, and that would record history rather than a contract.
 
-- [ ] 5.8 Retire the CSV pricing migration (`design.md`, "The CSV pricing
+- [x] 5.8 Retire the CSV pricing migration (`design.md`, "The CSV pricing
       migration retires with CSV import"): remove `--inventory` and its
       `--scope` checks from `groups/config.py`, `migrate_publication_csv` and
       any helper only it uses from `publication_migration.py`, and the CSV
       cases in `tests/unit/test_publication_migration.py`. Keep
       `migrate_publication_config` and its tests, including
       `tests/unit/cli/test_config.py`'s publication case, passing unchanged.
+      Amended 2026-10-11 (implementation): that publication case,
+      `test_publication_migration_compiles_a_payment_clause`, exercised
+      `_seller_publication_clause_compiler`, which only the CSV migration
+      called. Under "any helper only it uses" both are removed; the TOML
+      migration's own tests are unchanged.
 
-- [ ] 5.9 Refuse the retired settings where retired settlement settings are
+- [x] 5.9 Refuse the retired settings where retired settlement settings are
       refused (`design.md`, "Retired configuration keys follow the settlement
       retirement convention"): add `resources_csv_path`,
       `resources_csv_inline`, `escrow_templates`, and

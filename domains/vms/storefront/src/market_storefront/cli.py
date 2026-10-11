@@ -13,7 +13,6 @@ Subcommands:
     pool-override
                  Set, show, list, or delete the storefront's own terms and
                  listing shapes for one site's pool.
-    portfolio    Manage local resource portfolio data.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
 """
@@ -26,7 +25,6 @@ from pathlib import Path
 import typer
 
 from .cli_logs import logs_app
-from .cli_portfolio import portfolio_app
 from .cli_publish import register as register_publish_command
 from .groups.config import config_app
 from .groups.escrow import escrow_app
@@ -121,9 +119,6 @@ app.add_typer(
     network_app,
     name="network",
     help="Join the operator's ZeroTier network and list peers.",
-)
-app.add_typer(
-    portfolio_app, name="portfolio", help="Manage local resource portfolio data."
 )
 app.add_typer(
     config_app,

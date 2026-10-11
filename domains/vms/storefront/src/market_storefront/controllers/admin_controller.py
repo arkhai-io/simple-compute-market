@@ -31,7 +31,7 @@ from core_storefront.models.system_models import (
     IdentityStatusResponse,
 )
 from core_storefront.stage_log import stage_event
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
@@ -53,8 +53,6 @@ from market_storefront.models.capacity_admin_models import (
     FulfillmentEventResponse,
     FulfillmentFailedEventRequest,
     FulfillmentStartedEventRequest,
-    ImportResourcesResponse,
-    ImportRowError,
     InterruptDealRequest,
     InterruptDealResponse,
     ReleaseReservationsResponse,
@@ -86,10 +84,6 @@ from market_capacity_publication import (
     CapacityBindingError,
     remote_site_clients,
 )
-from market_storefront.settlement_composition import (
-    build_storefront_publication_clause_compiler,
-)
-from market_storefront.utils.config import ESCROW_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
@@ -547,89 +541,6 @@ class AdminController:
         except PoolOverrideRouteError as exc:
             raise self._http(exc) from exc
 
-    @router.post(
-        "/portfolio/resources/import",
-        response_model=ImportResourcesResponse,
-        summary="Bulk-import compute resources from a CSV file (admin)",
-    )
-    async def import_resources(
-        self,
-        file: UploadFile = File(  # noqa: B008
-            ..., description="Compute resource CSV file."
-        ),
-    ) -> ImportResourcesResponse:
-        """Upload a CSV file and upsert resource rows into the portfolio.
-
-        Upsert semantics: rows present in the file are inserted or updated;
-        rows absent from the file are not touched. Always upserts regardless
-        of whether the table is already populated — use this to force a
-        clobber of the current inventory.
-
-        The CSV must contain at minimum a ``resource_type`` column. Rows that
-        fail schema validation are counted in ``failed_count`` and skipped
-        without rolling back successfully imported rows. The first failing
-        rows surface via ``errors[]`` (capped at 50) so the caller doesn't
-        have to attach a debugger to see what went wrong.
-
-        Example::
-
-            curl -X POST http://localhost:8001/api/v1/admin/portfolio/resources/import \\
-                 -H "X-Admin-Key: <key>" \\
-                 -F "file=@/path/to/resources.csv"
-        """
-        try:
-            csv_content = (await file.read()).decode("utf-8")
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400, detail=f"Could not read uploaded file: {exc}"
-            ) from exc
-        try:
-            report = await self._db.upsert_resources_from_csv_content(
-                csv_content=csv_content,
-                source_label=f"admin-import:{file.filename or 'upload'}",
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        logger.info(
-            "[ADMIN] Resource import: %d imported, %d failed, %d total rows (file=%s)",
-            report.get("imported_count", 0),
-            report.get("failed_count", 0),
-            report.get("total_rows", 0),
-            file.filename,
-        )
-        # Surface up to 50 per-row failures so operators can see what's
-        # wrong without shell access. The full report.rows[] is also
-        # logged below, capped lower per line.
-        failed_rows = [
-            row for row in report.get("rows") or [] if not row.get("imported")
-        ]
-        errors_payload = [
-            ImportRowError(
-                row_number=int(row.get("row_number") or 0),
-                resource_id=row.get("resource_id"),
-                resource_type=row.get("resource_type"),
-                errors=list(row.get("errors") or []),
-            )
-            for row in failed_rows[:50]
-        ]
-        for row in failed_rows[:20]:
-            logger.warning(
-                "[ADMIN] CSV row %s (%s) failed: %s",
-                row.get("row_number"),
-                row.get("resource_id") or "<no id>",
-                "; ".join(row.get("errors") or []),
-            )
-        if report.get("imported_count"):
-            await self._mirror_resources_to_site_authority("import")
-        return ImportResourcesResponse(
-            imported_count=report.get("imported_count", 0),
-            failed_count=report.get("failed_count", 0),
-            total_rows=report.get("total_rows", 0),
-            errors=errors_payload,
-        )
-
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
@@ -763,18 +674,6 @@ class AdminController:
             return reservation, binding, listing_id
         source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
         return reservation, CapacityBinding(site_id, "vm", source_id), None
-
-    async def _mirror_resources_to_site_authority(self, source: str) -> None:
-        """Compatibility no-op for callers completing local admin mutations.
-
-        Provisioning inventory is authoritative and storefront projections are
-        pull-synchronized. Storefront admin mutations must not push inventory
-        into the provisioning ledger.
-        """
-        logger.debug(
-            "[ADMIN] Skipping deprecated storefront inventory push after %s",
-            source,
-        )
 
     async def _apply_fulfillment_event(
         self,

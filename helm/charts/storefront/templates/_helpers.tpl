@@ -391,12 +391,6 @@ reads it directly from identity.credentialSecret.
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
 # Deep-merged on top of storefront.json at runtime by dynaconf.
 
-{{- if $agent.secret.resourcesCsvInline }}
-resources_csv_inline = """
-{{ $agent.secret.resourcesCsvInline }}
-"""
-{{- end }}
-
 {{- if $agent.secret.registryAuthToken }}
 
 [registry.auth]

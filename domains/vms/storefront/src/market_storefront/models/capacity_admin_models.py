@@ -49,24 +49,6 @@ class ReserveCapacityResponse(BaseModel):
     closed_listing_ids: list[str] = Field(default_factory=list)
 
 
-class ImportRowError(BaseModel):
-    """One failed CSV row in an /admin/portfolio/resources/import response."""
-
-    row_number: int
-    resource_id: str | None = None
-    resource_type: str | None = None
-    errors: list[str]
-
-
-class ImportResourcesResponse(BaseModel):
-    """Response for POST /api/v1/admin/portfolio/resources/import."""
-
-    imported_count: int
-    failed_count: int
-    total_rows: int
-    errors: list[ImportRowError] = []
-
-
 class FulfillmentStartedEventRequest(BaseModel):
     capacity_reservation_id: str
     site_id: str

@@ -31,11 +31,6 @@ log_file_path   = ""
 log_level       = "INFO"
 
 
-# Resource auto-seeding — inline content wins over path
-resources_csv_inline = ""
-resources_csv_path   = ""
-
-
 # Registry discovery (seller-side)
 enable_registry_discovery = true
 registry_order_timeout    = 30
