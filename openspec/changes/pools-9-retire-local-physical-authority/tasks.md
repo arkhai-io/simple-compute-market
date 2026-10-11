@@ -30,8 +30,8 @@ resolved in `design.md` as "Status reports no resource count":
    Its surfaces read the tables this change stops creating.
 
 The re-grounding decisions are folded in: D2 into task 4.3, D3 into task 5.7,
-D4 into tasks 3.4 and 3.8, D5 into tasks 4.4, 4.6, 6.1, and 6.2, and D6 into
-task 4.5a.
+D4 into tasks 3.4 and 3.8, D5 into tasks 4.4, 4.6, 6.1, and 6.2, D6 into
+task 4.5a, and D7 into task 5.8.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -320,6 +320,20 @@ provisioning can trust two principals leaves it with no listing source.
       `migrate_publication_config` and its tests, including
       `tests/unit/cli/test_config.py`'s publication case, passing unchanged.
 
+- [ ] 5.8 Refuse the retired settings where retired settlement settings are
+      refused (`design.md`, "Retired configuration keys follow the settlement
+      retirement convention"): add `resources_csv_path`,
+      `resources_csv_inline`, `escrow_templates`, and
+      `capacity.use_site_projection_for_listings` to the any-spelling retired
+      config keys in `helm/charts/storefront/values.schema.json` and
+      `helm/values.schema.json`, and refuse `resourcesCsvInline` under an
+      agent's `secret` in both; cover each in
+      `helm/charts/storefront/tests/test_render.py`'s retired-key tests. Make
+      `market-storefront config set` in `groups/config.py` refuse the same
+      keys in any spelling with a removal message naming the seller
+      quickstart's upgrade section, with cases in
+      `tests/unit/cli/test_config.py`. Add no startup refusal.
+
 ## 6. Freeze migration and validation
 
 - [ ] 6.1 ~~Add the freeze-then-redirect migration.~~ Amended 2026-10-11: no
@@ -401,7 +415,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       physical-resource authority" and explain inert history in its
       `architecture.md` companion's "Seller-owned market state". Keep the
       fail-forward policy and extraction procedure in the operator documents
-      named in task 4.6.
+      named in task 4.6, and list the retired settings to remove, noting that
+      the chart and `config set` refuse them while the runtime ignores them.
 - [ ] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
@@ -443,6 +458,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the retired migrations leave the chain rather than being gated or emptied, and why `20260604_003` and the core timestamp migration stay | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
+| Retired settings are refused at chart render and by `config set`, as retired settlement settings are, and ignored at runtime | `openspec/specs/deployment-state/spec.md` (existing retired-values rule, no text change); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
+| Why retired settings are not refused at startup | This change's `design.md`, "Retired configuration keys follow the settlement retirement convention" |
 | Code describing the retired inventory, including the `Host` model and `[escrow_templates]` configuration, is deleted rather than left without a caller | This change's `design.md`, "Code describing the retired inventory leaves with it"; nothing permanent to promote once the code is gone |
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
 | `kit/pool-overrides` defines exactly the contract's four override states; its projection source is never `None` | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier"; companion `architecture.md` — "Storefront pool overrides"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Storefront listing shapes and pool overrides" |

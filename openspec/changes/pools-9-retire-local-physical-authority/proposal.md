@@ -103,6 +103,11 @@ extract retained inventory into provisioning.
   atomic" becomes TOML-only, and "Per-resource settlement input uses the
   common clause contract" is replaced by "Settlement input uses the common
   clause contract", which drops imported resource records.
+- Refuse the retired settings (`resources_csv_path`, `resources_csv_inline`,
+  `[escrow_templates]`, `capacity.use_site_projection_for_listings`, and the
+  chart's `secret.resourcesCsvInline`) where retired settlement settings are
+  refused: at chart render and by `market-storefront config set`. The runtime
+  ignores them, as it does retired settlement settings.
 - Remove the CLI import surface: `market-storefront portfolio import-csv`, its
   `cli_portfolio.py` module and `add_typer` registration in `cli.py`, and
   `domains/vms/storefront/scripts/import_resources_csv.py`.

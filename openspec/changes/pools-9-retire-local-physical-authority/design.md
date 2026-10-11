@@ -473,6 +473,45 @@ Alternatives:
 Consequence: `kit/config`, a repository-wide kit, loses code no other package
 imports; no consumer changes.
 
+### Retired configuration keys follow the settlement retirement convention
+
+The retired settings are `resources_csv_path`, `resources_csv_inline`,
+`[escrow_templates]`, `capacity.use_site_projection_for_listings`, and the
+chart's `secret.resourcesCsvInline` value. The storefront's loader ignores
+unknown root keys, so after upgrade they would be silently ignored at runtime.
+
+They are refused where the retired settlement settings are refused, and
+nowhere else:
+
+- **At chart render.** Both `helm/charts/storefront/values.schema.json` and
+  `helm/values.schema.json` already refuse retired config keys such as
+  `HostedSettlement` in any spelling. The retired keys join that list, under
+  `capacity` for the flag, and `resourcesCsvInline` is refused under an agent's
+  `secret`, as the retired private-key values are. This applies the existing
+  rule in `openspec/specs/deployment-state/spec.md` that a retired values shape
+  is refused at render, naming the key.
+- **At `market-storefront config set`.** Editing a retired key is refused with
+  a removal message, as `reject_legacy_settlement_path` refuses a retired
+  settlement path. Where the settlement message names a migration command,
+  this one names the seller quickstart's upgrade section, because no command
+  migrates inventory.
+
+There is no migration command to extend: inventory moves to provisioning by
+operator action, and the CSV pricing migration retires. Startup does not
+refuse the keys, matching the settlement retirement; a compose or hand-run
+deployment that keeps one still starts, and operator guidance names the keys
+to remove.
+
+Alternatives:
+
+- *Refuse at startup.* Rejected: it departs from the settlement convention,
+  which refuses at render and edit time only.
+- *Log a warning at startup.* Rejected for the same reason, and a log line is
+  where a silently empty storefront hides.
+- *No refusal anywhere.* Rejected: the chart already refuses retired keys, and
+  leaving these out would make it pass through configuration the storefront
+  ignores, against the deployment-state rule.
+
 ### Local diagnostics and cleanup retire with the cutover
 
 The design review of `remove-dead-storefront-physical-surfaces` transferred
@@ -549,10 +588,13 @@ negotiation-pause behavior are unchanged. The permanent home is
 - **An operator upgrades with legacy values still in effect** → a silent
   commercial change to the hint or configured default. Mitigated by the
   status report and the guidance; accepted rather than gated (see above).
-- **An operator upgrades with CSV configuration** → no inventory, no error.
-  Mitigated by migration guidance that names the provisioning-side
-  declaration path and by the seeding stack's removal making the
-  configuration keys unknown.
+- **An operator upgrades with CSV configuration** → no inventory, no error at
+  runtime, because the storefront's loader ignores unknown keys. Mitigated by
+  migration guidance that names the provisioning-side declaration path, by the
+  chart refusing the retired keys at render, and by `config set` refusing to
+  write them (see "Retired configuration keys follow the settlement retirement
+  convention"). A compose or hand-run deployment that keeps a key still
+  starts.
 - **Retained inventory is mistaken for current supply** → an unsafe
   provisioning seed. Guidance requires checking current site state before
   using the historical records; current storefront code never consults them.
@@ -598,5 +640,5 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-The decisions raised by the 2026-10-08 re-grounding (D1–D6) are all recorded
-above.
+The decisions raised by the 2026-10-08 re-grounding (D1–D6) and the
+retired-key handling it surfaced (D7) are all recorded above.
