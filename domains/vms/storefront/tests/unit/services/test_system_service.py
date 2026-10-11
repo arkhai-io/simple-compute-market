@@ -6,6 +6,7 @@ and avoids mock complexity for DB reads).
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -170,6 +171,23 @@ class TestSeedResourcesIfEmpty:
         svc = _make_service(db)
         with pytest.raises(FileNotFoundError):
             await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")
+
+
+# ---------------------------------------------------------------------------
+# get_health: no local inventory
+# ---------------------------------------------------------------------------
+
+class TestGetHealthReadsNoLocalInventory:
+    async def test_status_needs_no_local_resource_table(self, db):
+        """Status reports no resource count and reads no local inventory, so
+        a database without a ``resources`` table is still healthy."""
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute("DROP TABLE IF EXISTS resources")
+
+        result = await _make_service(db).get_health(include_registry=True)
+
+        assert "resource_count" not in result
+        assert result["checks"]["database"] == "ok"
 
 
 # ---------------------------------------------------------------------------

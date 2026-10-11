@@ -247,11 +247,6 @@ class SystemService:
                 for name, chain in CHAINS.items()
             }
             try:
-                resources = await self._db.list_resources()
-                result["resource_count"] = len(resources)
-            except Exception:
-                result["resource_count"] = None
-            try:
                 result["site_projections"] = self._projection_status_provider()
             except Exception:
                 result["site_projections"] = None

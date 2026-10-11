@@ -210,6 +210,10 @@ class TestHealthEndpoint:
         result = await admin_client.get_system_status()
         assert result.paused is False
 
+    async def test_system_status_reports_no_resource_count(self, admin_client):
+        result = await admin_client.get_system_status()
+        assert "resource_count" not in result.extra
+
     async def test_system_status_readable_by_service_peer(self, service_client):
         """A service peer reads status to confirm its own signing path works.
 
@@ -1244,57 +1248,41 @@ class TestStreamEvents:
 class TestReleaseReservations:
     """POST /api/v1/admin/portfolio/release-reservations, through the typed client.
 
-    No site authority is configured here, so these cover the local-row
-    cleanup: held local rows return to ``available`` on a database the
-    storefront created without an allocation ledger, and an allocation
-    ledger an older database still holds is left exactly as it was.
+    The route releases held reservations in each configured site's ledger and
+    touches no storefront table, including an allocation ledger an older
+    database still holds.
     """
 
-    async def _seed(self, db: SQLiteClient, resource_id: str, state: str) -> None:
-        await db.upsert_resource(
-            resource_id=resource_id, resource_type="compute.gpu", state=state
+    async def test_releases_every_held_site_reservation(self, client):
+        c, _db = client
+        from tests.fake_site import site_capacity
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            first = await _ledger_hold(capacity, gpu_count=1)
+            second = await _ledger_hold(capacity, gpu_count=2)
+
+            result = await c.admin_release_reservations()
+
+        assert sorted(result.resource_ids) == sorted(
+            [f"ledger:default:{first}", f"ledger:default:{second}"]
         )
-
-    @staticmethod
-    def _states(db: SQLiteClient) -> dict[str, str]:
-        with sqlite3.connect(db.db_path) as conn:
-            return dict(conn.execute("SELECT resource_id, state FROM resources"))
-
-    async def test_releases_held_rows_on_a_database_without_the_ledger(self, client):
-        c, db = client
-        await self._seed(db, "held-reserved", "reserved")
-        await self._seed(db, "held-leased", "leased")
-        await self._seed(db, "idle", "available")
-        await self._seed(db, "gone", "deleted")
-        with sqlite3.connect(db.db_path) as conn:
-            assert conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE name = 'compute_allocations'"
-            ).fetchone() is None
-
-        result = await c.admin_release_reservations()
-
-        assert sorted(result.resource_ids) == ["held-leased", "held-reserved"]
         assert result.released_count == 2
-        assert self._states(db) == {
-            "held-reserved": "available",
-            "held-leased": "available",
-            "idle": "available",
-            "gone": "deleted",
-        }
 
     async def test_a_second_call_releases_nothing_new(self, client):
-        c, db = client
-        await self._seed(db, "held", "leased")
-        await c.admin_release_reservations()
+        c, _db = client
+        from tests.fake_site import site_capacity
 
-        again = await c.admin_release_reservations()
+        with site_capacity(_fake_pool_site()) as capacity:
+            await _ledger_hold(capacity)
+            await c.admin_release_reservations()
+
+            again = await c.admin_release_reservations()
 
         assert again.released_count == 0
         assert again.resource_ids == []
 
     async def test_leaves_an_existing_allocation_ledger_untouched(self, client):
         c, db = client
-        await self._seed(db, "held", "leased")
         with sqlite3.connect(db.db_path) as conn:
             conn.execute(
                 "CREATE TABLE compute_allocations ("
@@ -1307,9 +1295,9 @@ class TestReleaseReservations:
             )
         before = self._allocations(db)
 
-        await c.admin_release_reservations()
+        result = await c.admin_release_reservations()
 
-        assert self._states(db)["held"] == "available"
+        assert result.released_count == 0
         assert self._allocations(db) == before == [("alloc-1", "held", 1, "leased", None)]
 
     @staticmethod

@@ -167,7 +167,6 @@ class HealthResponse:
     paused: bool | None = None  # present on /api/v1/system/status only
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
-    resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
     listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
     publication_derivation: dict[str, Any] | None = None  # per-site held pools and publication notices; present on /api/v1/system/status
@@ -189,7 +188,7 @@ class HealthResponse:
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
             "status", "checks", "paused", "agent_id", "chain_id",
-            "resource_count", "site_projections",
+            "site_projections",
             "listing_cardinality_mode_explanations",
             "publication_derivation",
             "provisioning_contract_version",
@@ -197,7 +196,6 @@ class HealthResponse:
             "settlement_manual_required",
         }
         raw_chain_id = d.get("chain_id")
-        raw_resource_count = d.get("resource_count")
         raw_manual = d.get("settlement_manual_required")
         return cls(
             status=d.get("status", "ok"),
@@ -205,7 +203,6 @@ class HealthResponse:
             paused=d.get("paused"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
-            resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             site_projections=d.get("site_projections"),
             listing_cardinality_mode_explanations=d.get(
                 "listing_cardinality_mode_explanations"

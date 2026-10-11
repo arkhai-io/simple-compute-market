@@ -117,7 +117,7 @@ Section 5's CSV contract. The site-ledger half of `release_reservations`
 remains supported. Status reports no resource count afterwards (`design.md`,
 "Status reports no resource count").
 
-- [ ] 3.3 Remove only the local-row normalization in
+- [x] 3.3 Remove only the local-row normalization in
       `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py`'s
       `release_reservations`; retain authoritative site-ledger release and
       correct its description. Update its focused cases in
@@ -128,7 +128,7 @@ remains supported. Status reports no resource count afterwards (`design.md`,
       resource") and the response's `resource_ids` description to name the
       released site reservations. The e2e teardown that calls the route
       (`e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`) needs no change.
-- [ ] 3.4 ~~Replace top-level `resource_count` with counts under
+- [x] 3.4 ~~Replace top-level `resource_count` with counts under
       `site_projections[site_id][family]`.~~ Superseded 2026-10-09 by
       `design.md`, "Status reports no resource count": remove `resource_count`
       from every storefront's status with no replacement count. Remove the
@@ -144,7 +144,7 @@ remains supported. Status reports no resource count afterwards (`design.md`,
       `count_open_bare_metal_resources` in `sqlite_client.py`. Leave
       `ProjectionFamilyStatus`, the site projection protocol, liveness health,
       and global pause unchanged.
-- [ ] 3.8 ~~Verify counts and state together.~~ Superseded 2026-10-09 with
+- [x] 3.8 ~~Verify counts and state together.~~ Superseded 2026-10-09 with
       task 3.4: assert `resource_count` is absent from VM and bare-metal
       status through the typed client
       (`domains/vms/storefront/tests/integration/test_admin_api.py` and

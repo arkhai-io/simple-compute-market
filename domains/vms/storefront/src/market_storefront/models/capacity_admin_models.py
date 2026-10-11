@@ -11,7 +11,12 @@ class ReleaseReservationsResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/release-reservations."""
 
     released_count: int
-    resource_ids: list[str]
+    resource_ids: list[str] = Field(
+        description=(
+            "The released site reservations, each as "
+            "``ledger:<site>:<capacity_reservation_id>``."
+        ),
+    )
 
 
 class ReserveCapacityRequest(BaseModel):

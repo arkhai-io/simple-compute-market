@@ -93,11 +93,7 @@ from market_storefront.utils.config import ESCROW_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
-# States that the release-reservations endpoints transition back to
-# ``available``. ``reserved`` is the in-flight provisioning hold;
-# ``leased`` is the post-fulfillment hold for the duration of the lease.
-# Anything else (``available``, ``deleted``, etc.) is a no-op.
-_HELD_STATES = frozenset({"reserved", "leased"})
+# Site-ledger reservation states that still hold capacity.
 _INTERRUPTIBLE_HELD_STATES = frozenset(
     {"reserved", "provisioning", "leased", "releasing"}
 )
@@ -1213,16 +1209,13 @@ class AdminController:
     @router.post(
         "/portfolio/release-reservations",
         response_model=ReleaseReservationsResponse,
-        summary="Release every held compute resource back to available (admin)",
+        summary="Release every held site reservation (admin)",
     )
     async def release_reservations(self) -> ReleaseReservationsResponse:
-        """Release every held reservation and reset held local rows.
+        """Release every held reservation at every configured site.
 
         Releases each ``reserved``, ``provisioning``, ``leased``, or
-        ``releasing`` reservation at every configured site, then returns
-        local resource rows still ``reserved`` or ``leased`` to
-        ``available`` so the local listing view stops advertising them as
-        held. Rows in any other state are left alone, and repeating the call
+        ``releasing`` reservation in each site's ledger. Repeating the call
         releases nothing new.
 
         This is fleet-wide cleanup: end-to-end teardown between runs against
@@ -1230,23 +1223,11 @@ class AdminController:
         holds is known to be gone. A single reservation is released by the
         provisioning service's ``capacity_released`` event instead.
         """
-        released = list(await self._release_site_ledger_holds())
-
-        for r in await self._db.list_resources():
-            if r.get("state") not in _HELD_STATES:
-                continue
-            resource_id = str(r["resource_id"])
-            await self._db.apply_resource_transition(
-                resource_id=resource_id,
-                event_type="reservation_released_by_admin",
-                idempotency_key=f"admin-release:{resource_id}:{r.get('updated_at', '')}",
-                set_state="available",
-            )
-            released.append(resource_id)
+        released = await self._release_site_ledger_holds()
 
         if released:
             logger.info(
-                "[ADMIN] Released %d held resource(s): %s",
+                "[ADMIN] Released %d site reservation(s): %s",
                 len(released),
                 released,
             )

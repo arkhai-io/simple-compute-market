@@ -178,7 +178,7 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
         "fulfillment": "unavailable",
     }
     assert health.paused is False
-    assert health.resource_count == 0
+    assert "resource_count" not in health.extra
     assert health.site_projections == {}
 
 
