@@ -254,7 +254,7 @@ provisioning can trust two principals leaves it with no listing source.
       Add the delta scenario "A home-site pool has no override" as a
       derivation test against a database that still holds a legacy
       `compute_capacity_pools` row.
-- [ ] 4.4 Freeze `resources`, `hosts`, `compute_pool_members`, and
+- [x] 4.4 Freeze `resources`, `hosts`, `compute_pool_members`, and
       `resource_transition_events`, and `compute_capacity_pools` as a whole
       (its commercial columns retire with the tier in 4.3, and
       `total_gpu_count` was always physical): stop creating them, their
@@ -479,12 +479,12 @@ provisioning can trust two principals leaves it with no listing source.
 
 ## 6. Freeze migration and validation
 
-- [ ] 6.1 ~~Add the freeze-then-redirect migration.~~ Amended 2026-10-11: no
+- [x] 6.1 ~~Add the freeze-then-redirect migration.~~ Amended 2026-10-11: no
       new migration is added; the freeze is task 4.4's bootstrap and chain
       removal. `compute_allocations` is already frozen by
       `remove-dead-storefront-physical-surfaces` (archived 2026-10-08). No
       `DROP`.
-- [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
+- [x] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
       Follow `tests/integration/test_compute_allocations_freeze.py`'s pattern
       (a byte-level snapshot of retained schema, rows, triggers, and recorded

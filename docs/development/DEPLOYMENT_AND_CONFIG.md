@@ -566,7 +566,12 @@ stays recorded wherever it was applied, because the migration engine skips
 recorded IDs it no longer lists. The ID is never reused. A database that had
 not yet applied it never does, so the frozen table keeps whichever shape it
 already had. The VM storefront's `compute_allocations` table is frozen this
-way.
+way, as are its retired inventory tables: `resources`, `hosts`,
+`resource_transition_events`, `compute_pool_members`, and
+`compute_capacity_pools` (or `compute_inventory_pools`, on a database that
+never applied the rename). Their rows stay as an operator's input for
+declaring the same inventory at provisioning; the storefront neither reads nor
+writes them.
 
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
