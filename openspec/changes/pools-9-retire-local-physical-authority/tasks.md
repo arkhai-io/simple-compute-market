@@ -332,6 +332,10 @@ provisioning can trust two principals leaves it with no listing source.
       first; no automatic transfer machinery is added.
 - [ ] 4.7 Run the full storefront suite and the VM e2e scenarios after the
       combined Sections 3–6 fileset is ready, not against a partial retirement.
+      Done in part 2026-10-11: storefront unit (993 passed, 1 skipped) and
+      integration (375 passed; the 2 `test_alkahest.py` failures need a live
+      chain environment and predate this change). The VM e2e scenarios are
+      unrun; see 7.9.
 
 ## 5. Retire CSV import and its deployment contract
 
@@ -519,14 +523,23 @@ provisioning can trust two principals leaves it with no listing source.
       Amended 2026-10-11: the affected suites are also `core/storefront`,
       `kit/pool-overrides`, `kit/config`, the bare-metal storefront,
       `helm/charts/storefront/tests/`, `scripts/tests/`, and the smoke suite.
-- [ ] 6.4 Run `openspec validate --all --strict` against the baseline current
+      Done in part 2026-10-11: storefront, `core/storefront`,
+      `core/storefront-client`, `kit/pool-overrides`, `kit/config`, the VM buyer
+      and domain packages, the bare-metal and API-credits storefronts,
+      `scripts/tests/`, and the chart render tests pass (rendered through a
+      containerised `helm`); e2e modules collect. The VM e2e scenarios and
+      the smoke suite are unrun; see 7.9.
+- [x] 6.4 Run `openspec validate --all --strict` against the baseline current
       at implementation time.
+      Done 2026-10-11: this change validates; the 15 failures in
+      `validate --all --strict` are all in other active changes this branch
+      does not touch.
 
 ## 7. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the
+- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the
       touched docstrings directly as well: several — `_local_pool_pricing`,
       `_place_capacity_hold` (`negotiation_runtime.py`), and the reconciler
       entry points' "local-table path" paragraphs — describe an
@@ -535,19 +548,26 @@ Per `openspec/README.md#plan-closeout-requirements`.
       cleanup and its operator description are part of this cutover;
       `patch_resource` is already gone, removed by
       `remove-dead-storefront-physical-surfaces`.
-- [ ] 7.2 **Import placement.** Review imports this change adds or touches;
+      Done 2026-10-11: `make check-comment-hygiene` passes; touched docstrings
+      re-read, and the VM publication adapter's "local inventory" wording
+      corrected.
+- [x] 7.2 **Import placement.** Review imports this change adds or touches;
       relocate function-level imports where no genuine circular import or
       documented lazy-load reason applies, verified against the real suite.
-- [ ] 7.3 **Documentation compliance.** Re-check accepted decisions against
+      Done 2026-10-11: no function-level import added in production code.
+- [x] 7.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement rules. Confirm the legacy tier's
       retirement landed as the replacement of `storefront-publication`'s
       site-scoped override requirement and nowhere in
       `resource-pool-management` — see `design.md`, "Commercial rows are
       storefront-owned".
+      Done 2026-10-11: the delta touches `storefront-publication` only.
 - [ ] 7.4 **Narrative compression.** Compress completed-task notes to final
       behavior, validation evidence, and promotion destinations.
-- [ ] 7.5 **Roadmap currency.** Update Goal 1's current-state description and
+- [x] 7.5 **Roadmap currency.** Update Goal 1's current-state description and
       gap mapping in `docs/development/ROADMAP.md`.
+      Done 2026-10-11: Goal 1's current state and gap table updated; the
+      retired-table drop stays a later follow-up.
 - [ ] 7.6 **Promotion.** Complete the design-promotion record below. Widen
       `openspec/specs/storefront-publication/spec.md`'s rule that an unbacked
       listing is derived only from the site projection to every listing, and correct
@@ -587,21 +607,27 @@ Per `openspec/README.md#plan-closeout-requirements`.
       fail-forward policy and extraction procedure in the operator documents
       named in task 4.6, and list the retired settings to remove, noting that
       the chart and `config set` refuse them while the runtime ignores them.
-- [ ] 7.7 **Campaign index currency** (part seven, added when
+- [x] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
       rather than replace implementation history. Update this change's row, and its
       campaign's dependency graph, in `openspec/changes/README.md` to match its state at
       completion, or record the disposition here if its status and campaign placement are
       both unchanged.
+      Done 2026-10-11: the row reads implemented and awaiting review; its
+      place in the campaign graph is unchanged.
 
-- [ ] 7.8 **Documentation citations.** Run
+- [x] 7.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=pools-9-retire-local-physical-authority` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
       cross-reference rule, and the target also rejects a citation whose
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
+      Done 2026-10-11: every citation in this change's documents resolves.
+      Permanent `storefront-publication` Evidence entries still name
+      `test_resource_csv_importer.py` and the removed flag test; 7.6
+      promotion reconciles them.
 - [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
@@ -611,10 +637,17 @@ Per `openspec/README.md#plan-closeout-requirements`.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
-- [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      Blocked 2026-10-11: the implementation environment cannot build the
+      e2e images. Its network policy denies `install.zerotier.com`, which the
+      storefront image installs from, and the image builds cannot reach the
+      Debian mirrors; dev-chain state generation also failed to start its
+      chain. Every validation this gates is unrun, not passed.
+- [x] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
       the root declaration.
+      Done 2026-10-11: `make check-packaging` passes. `python-multipart` is
+      still declared (see 5.2), so no lock changed.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
