@@ -37,8 +37,8 @@ from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
@@ -854,11 +854,6 @@ class AdminController:
     def _capacity(self) -> Any:
         return self._runtime().client()
 
-    def _site_topology(self) -> tuple[str | None, int]:
-        """Return the configured home site and exact site count."""
-        sites = self._runtime().site_ids
-        return next(iter(sites), None), len(sites)
-
     async def _member_availability(self) -> dict | None:
         """Aggregated site availability, or None when unobtainable.
 
@@ -885,23 +880,21 @@ class AdminController:
         from arkhai_vms_listings.reconciler import stale_open_listing_ids
 
 
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
         await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        projection = site_pool_projection()
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             configured_sites=self._runtime().site_ids,
             member_availability=availability,
             # The same source publication derives from, so reconciliation here
             # cannot close a listing publication would keep.
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            site_capacity_buckets=site_capacity_buckets(),
             backed_only=True,
             shape_feasible=vm_shape_feasibility(),
         )
@@ -919,20 +912,18 @@ class AdminController:
         from arkhai_vms_listings.reconciler import closed_available_listing_ids
 
 
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
         await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        projection = site_pool_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             member_availability=availability,
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            site_capacity_buckets=site_capacity_buckets(),
             shape_feasible=vm_shape_feasibility(),
             configured_sites=self._runtime().site_ids,
         )

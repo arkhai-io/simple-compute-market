@@ -354,7 +354,6 @@ async def client(db, monkeypatch):
                 _SELLER_SIGNER.identity.model_dump(mode="json"),
             ],
             "wallet.address": _RECIPIENT,
-            "capacity.use_site_projection_for_listings": True,
         }
     ), _patch.dict(
         site_projection_cache._caches,

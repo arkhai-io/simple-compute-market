@@ -164,7 +164,7 @@ the two-storefront scenario's second storefront derives from local tables
 because provisioning does not trust it, and deleting that path before
 provisioning can trust two principals leaves it with no listing source.
 
-- [ ] 4.1 Delete `_pool_rows_from_local_tables`, `_pool_rows_from_capacity_pools`,
+- [x] 4.1 Delete `_pool_rows_from_local_tables`, `_pool_rows_from_capacity_pools`,
       `_pool_rows_from_legacy_resources`, `_project_legacy_resource_row`, and
       `_legacy_resource_columns`; make `available_compute_slices` read the
       projection unconditionally.
@@ -184,7 +184,7 @@ provisioning can trust two principals leaves it with no listing source.
       derivation cases (fungible pool across members, member availability,
       member at another site) and the pre-compute-inventory migration case,
       keep the capacity-hold round trip, and rename the file for what remains.
-- [ ] 4.2 Delete `use_site_projection_for_listings` and its reads in
+- [x] 4.2 Delete `use_site_projection_for_listings` and its reads in
       `capacity_client.py` and `listing_sources.py`, plus its `settings.toml`
       entry, the `storefront.alice.toml` opt-out, and the config-loader tests.
       The prerequisite owns removing Alice's opt-out; verify its absence
@@ -195,7 +195,7 @@ provisioning can trust two principals leaves it with no listing source.
       (`tests/publication_app.py`, `test_negotiate_controller.py`,
       `test_admin_api.py`, `test_pool_overrides_api.py`,
       `test_listing_source_check.py`, `test_remote_capacity_client.py`).
-- [ ] 4.2a Make the projection a required argument of every derivation entry
+- [x] 4.2a Make the projection a required argument of every derivation entry
       point in `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`
       and of the storefront wrappers in `services/publication_service.py`;
       reduce `listing_source_projection()` in `services/capacity_client.py`
@@ -213,7 +213,7 @@ provisioning can trust two principals leaves it with no listing source.
       `_projection_enabled()` and the "backed when disabled" branches of
       `resolve_source_backing` and `current_source_backing`; in
       `services/listing_source_check.py`, drop the local-path distinction.
-- [ ] 4.3 Retire the legacy home-site override tier: delete
+- [x] 4.3 Retire the legacy home-site override tier: delete
       `_local_pool_pricing`, the legacy arm of `_tier()` and the `region`
       legacy fallback beside it, the `legacy_overrides_in_effect` derivation
       report, and its system-status field; drop the `inactive` override
@@ -235,7 +235,7 @@ provisioning can trust two principals leaves it with no listing source.
       legacy-row wording in `arkhai_vms_listings/pool_descriptors.py` and
       `pricing_resolution.py`. Remove `legacy_overrides_in_effect` from
       `_SiteDerivationReport`, its `as_dict()`, and its log line.
-- [ ] 4.3a Focused tests: a home-site pool with a legacy row and no
+- [x] 4.3a Focused tests: a home-site pool with a legacy row and no
       site-scoped override resolves each commercial field from the pool hint
       then the configured default; system status no longer reports a legacy
       value or an `inactive` override; the two removed scenarios' tests are

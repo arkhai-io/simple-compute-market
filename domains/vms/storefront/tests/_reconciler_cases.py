@@ -26,10 +26,8 @@ from market_site.projections import resource_pool_projection
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
     PoolHintResolutionSettings,
-    _accumulate_capacity_pool_member,
     _fungible_availability_from_buckets,
     _member_available_units,
-    _project_legacy_resource_row,
     _projected_pool_rows as _projected_pool_rows_impl,
     _SiteDerivationReport,
     _projected_resource_usage,
@@ -114,12 +112,10 @@ def _vm_pool(pool: dict) -> dict:
 
 
 def _available_vm_slices(db_path: str, **kwargs):
-    projection = kwargs.get("site_pool_projection")
-    if projection is not None:
-        kwargs["site_pool_projection"] = {
-            site_id: [_vm_pool(pool) for pool in pools]
-            for site_id, pools in projection.items()
-        }
+    kwargs["site_pool_projection"] = {
+        site_id: [_vm_pool(pool) for pool in pools]
+        for site_id, pools in kwargs["site_pool_projection"].items()
+    }
     return available_compute_slices(db_path, **kwargs)
 
 
@@ -189,35 +185,6 @@ def db_path(tmp_path) -> str:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE compute_capacity_pools (
-              pool_id TEXT PRIMARY KEY,
-              resource_type TEXT,
-              gpu_model TEXT,
-              region TEXT,
-              sla REAL,
-              total_gpu_count INTEGER,
-              status TEXT,
-              min_price TEXT,
-              token TEXT,
-              max_duration_seconds INTEGER,
-              accepted_escrows TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE compute_pool_members (
-              pool_id TEXT,
-              resource_id TEXT,
-              gpu_count INTEGER,
-              status TEXT,
-              attributes TEXT,
-              site TEXT
-            )
-            """
-        )
         migrate_storefront_domain_bindings_schema(conn)
         migrate_listing_binding_capacity_backing(conn)
         migrate_listing_binding_capacity_backing_required(conn)
@@ -226,76 +193,6 @@ def db_path(tmp_path) -> str:
     finally:
         conn.close()
     return path
-
-
-def _seed_fungible_pool(
-    db_path: str,
-    *,
-    pool_id: str = "gpu-pool",
-    member_gpu_counts: tuple[int, ...] = (2, 2),
-    pool_status: str = "active",
-    member_status: str = "active",
-):
-    """A pool with more than one member, so available_compute_slices
-    treats it as genuinely fungible (pool-keyed) rather than collapsing
-    to a single-resource-keyed pool -- see is_fungible_pool."""
-    total = sum(member_gpu_counts)
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT INTO compute_capacity_pools(
-              pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
-              status, min_price, token, max_duration_seconds, accepted_escrows
-            ) VALUES (?, 'compute.gpu', 'H100', 'us-east', 99.9, ?, ?, '10', '0xtoken', 3600, '[]')
-            """,
-            (pool_id, total, pool_status),
-        )
-        for i, count in enumerate(member_gpu_counts):
-            conn.execute(
-                """
-                INSERT INTO compute_pool_members(
-                  pool_id, resource_id, gpu_count, status, attributes, site
-                ) VALUES (?, ?, ?, ?, '{}', NULL)
-                """,
-                (pool_id, f"resource-{i}", count, member_status),
-            )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _seed_pool(
-    db_path: str,
-    *,
-    pool_id: str = "gpu-pool",
-    resource_id: str = "resource-1",
-    gpu_count: int = 4,
-    pool_status: str = "active",
-    member_status: str = "active",
-):
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT INTO compute_capacity_pools(
-              pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
-              status, min_price, token, max_duration_seconds, accepted_escrows
-            ) VALUES (?, 'compute.gpu', 'H100', 'us-east', 99.9, ?, ?, '10', '0xtoken', 3600, '[]')
-            """,
-            (pool_id, gpu_count, pool_status),
-        )
-        conn.execute(
-            """
-            INSERT INTO compute_pool_members(
-              pool_id, resource_id, gpu_count, status, attributes, site
-            ) VALUES (?, ?, ?, ?, '{}', NULL)
-            """,
-            (pool_id, resource_id, gpu_count, member_status),
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def _seed_listing_binding(
@@ -453,10 +350,21 @@ def _declared_pool(
     }
 
 
+def _gpu_pool_projection(
+    *member_gpu_counts: int, site_id: str = "site-a", pool_id: str = "gpu-pool"
+) -> dict:
+    """One site's projection holding one backed, fungible H100 pool whose members
+    declare, and have free, the given GPU counts."""
+    members = [
+        (f"resource-{index}", count, count)
+        for index, count in enumerate(member_gpu_counts)
+    ]
+    return {site_id: [_declared_pool(pool_id, members, tags=_BACKED)]}
+
+
 def _slices(db_path, pools, *, holds=None):
     return available_compute_slices(
         db_path,
-        home_site="site-a",
         site_pool_projection={"site-a": pools},
         holds=holds,
     )
@@ -505,7 +413,6 @@ def _shaped_pool(
 def _shape_slices(db_path, pools, *, buckets=None, holds=None):
     return available_compute_slices(
         db_path,
-        home_site="site-a",
         site_pool_projection={"site-a": pools},
         site_capacity_buckets=None if buckets is None else {"site-a": buckets},
         holds=holds,
@@ -528,7 +435,7 @@ _SMALL_SHAPE = {"gpu": {"count": 1, "model": "H100"}, "cpu": {"count": 8},
 _TWO_GPU_SHAPE = {"gpu": {"count": 2, "model": "H100"}, "memory": {"gib": 128}}
 
 
-def _override_rows(pool, *, override=None, local_pricing=None, site_id="site-a", **kwargs):
+def _override_rows(pool, *, override=None, site_id="site-a", **kwargs):
     """One pool's rows with ``override`` as its site-scoped override, and the
     site report the pass recorded into."""
     report = _SiteDerivationReport()
@@ -536,8 +443,6 @@ def _override_rows(pool, *, override=None, local_pricing=None, site_id="site-a",
     rows = _projected_pool_rows(
         pool,
         site_id=site_id,
-        home_site="site-a",
-        local_pricing=local_pricing or {},
         member_availability=None,
         capacity_buckets=None,
         override=override,

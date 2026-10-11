@@ -48,10 +48,8 @@ def test_settings_toml_provides_baseline_defaults():
     assert list(s.pricing.settlements) == []
     packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
     assert "storefront_domains" not in packaged
-    # On by default -- the projection path has parity with the local-table
-    # path it supersedes. A staged/canary rollout sets this false
-    # explicitly rather than relying on a default that no longer matches.
-    assert s.capacity.use_site_projection_for_listings is True
+    # Listings derive only from site projections; no setting selects a source.
+    assert "use_site_projection_for_listings" not in packaged.get("capacity", {})
 
 
 def test_structured_settlement_publication_defaults_are_validated() -> None:
@@ -120,20 +118,6 @@ def test_structured_publication_defaults_reject_partial_or_secret_input() -> Non
 
     with pytest.raises(ValueError, match="not public metadata"):
         agent_config.settlement_publication_defaults(source)
-
-
-def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
-    tmp_path,
-    monkeypatch,
-):
-    """The default flip doesn't remove the ability to opt back out for a
-    staged/canary rollout -- an explicit override still wins."""
-    monkeypatch.setenv(
-        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS",
-        "false",
-    )
-    cfg = _build_isolated(tmp_path, [])
-    assert cfg.capacity.use_site_projection_for_listings is False
 
 
 def test_public_identity_defaults_do_not_include_secret_or_wallet_values():

@@ -52,7 +52,7 @@ from market_core import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
-from market_storefront.utils.config import get_provisioning_authorities, settings
+from market_storefront.utils.config import get_provisioning_authorities
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +113,9 @@ def _capacity_reconciler(
             reopen_available_compute_listings_after_capacity_change,
         )
 
-        home_site = context.projections[0].site_id
         db = sqlite_client_factory()
-        projection = listing_source_projection()
-        buckets = site_capacity_buckets() if projection is not None else None
+        projection = site_pool_projection()
+        buckets = site_capacity_buckets()
         delta = context.delta
         close = (
             delta is None
@@ -132,7 +131,6 @@ def _capacity_reconciler(
             closed = await close_stale_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                home_site=home_site,
                 configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
@@ -151,7 +149,6 @@ def _capacity_reconciler(
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                home_site=home_site,
                 configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
@@ -505,25 +502,6 @@ def build_fulfillment_client(
     return aggregate
 
 
-
-
-def listing_source_projection() -> dict[str, list[dict[str, Any]]] | None:
-    """The projection listings derive from, or ``None`` on the local-table path.
-
-    Publication, capacity reconciliation, and the inventory guard all select
-    their source through this, so they never disagree about which one applies.
-    """
-    if not bool(
-        getattr(
-            getattr(settings, "capacity", None),
-            "use_site_projection_for_listings",
-            False,
-        )
-    ):
-        return None
-    return site_pool_projection()
-
-
 def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     """Resource-pool projection rows per site, from the storefront's own
     background poller cache (``site_projection_cache``).
@@ -534,8 +512,11 @@ def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     that is an authoritative "this site has zero pools" answer, distinct from
     "this site's answer is not known". Derivation holds the listings of every
     configured site absent here rather than reading it as empty, and an empty
-    mapping derives nothing: it never selects the local tables, which only
-    configuration does.
+    mapping derives nothing.
+
+    Publication, capacity reconciliation, the inventory guard, and override
+    status all read listing sources through this, so they never disagree about
+    which sites are known.
     """
     from market_storefront.services.site_projection_cache import projection_caches
 

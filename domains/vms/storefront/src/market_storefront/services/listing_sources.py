@@ -13,21 +13,10 @@ from typing import Any
 
 from market_resource_pools import SiteDeclarations, read_site_declarations
 from market_storefront.services.site_projection_cache import projection_caches
-from market_storefront.utils.config import settings
 
 
 class ListingSourceUnavailable(ValueError):
     """The source's site does not currently declare it as publishable."""
-
-
-def _projection_enabled() -> bool:
-    return bool(
-        getattr(
-            getattr(settings, "capacity", None),
-            "use_site_projection_for_listings",
-            False,
-        )
-    )
 
 
 def _site_pools(site_id: str) -> Sequence[Mapping[str, Any]] | None:
@@ -64,13 +53,10 @@ def resolve_source_backing(
 ) -> str:
     """The backing a listing from this source binds with, or refuse.
 
-    Local-table sources can express only capacity-backed supply. A projected
-    source must be a pool its site currently declares enabled and advertisable
-    for ``offering_mode``, under that site generation's declaration rule;
-    anything else is refused rather than classified.
+    The source must be a pool its site currently declares enabled and
+    advertisable for ``offering_mode``, under that site generation's declaration
+    rule; anything else is refused rather than classified.
     """
-    if not _projection_enabled():
-        return "backed"
     pools = _site_pools(site_id)
     if pools is None:
         raise ListingSourceUnavailable(
@@ -109,8 +95,6 @@ def current_source_backing(
     resource_id: str | None,
 ) -> str | None:
     """The backing the source's site declares now, or ``None`` if unreadable."""
-    if not _projection_enabled():
-        return "backed"
     pools = _site_pools(site_id)
     if pools is None:
         return None

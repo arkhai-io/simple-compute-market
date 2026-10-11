@@ -455,20 +455,6 @@ async def _seed_dynamic_listing_pool_rows(
     *,
     site_id: str = "default",
 ) -> None:
-    await db.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=4,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-            "offering_mode": "vm",
-        },
-    )
     for gpu_count in range(1, 5):
         listing_id = f"listing-{gpu_count}x"
         await db.upsert_listing(
@@ -541,18 +527,6 @@ async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     return str(reserved["capacity_reservation_id"])
 
 
-@pytest.fixture
-def local_table_derivation():
-    """Listings derive from the storefront's local tables, as these tests seed them.
-
-    Reconciliation reads the same source publication does; a test that seeds
-    local-table listings therefore configures local-table derivation rather than
-    relying on a projection-configured storefront reading its local tables.
-    """
-    with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
-        yield
-
-
 class TestFulfillmentEvents:
     """Deal-scoped event endpoints over the site-authority ledger.
 
@@ -562,7 +536,6 @@ class TestFulfillmentEvents:
     through the capacity client.
     """
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
@@ -689,7 +662,6 @@ class TestFulfillmentEvents:
 
         assert "409" in str(exc_info.value)
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
@@ -804,7 +776,6 @@ class TestFulfillmentEvents:
 
         assert "502" in str(exc_info.value)
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_usage_started_closes_oversized_listings(
         self, db, service_client
     ):
@@ -832,7 +803,6 @@ class TestFulfillmentEvents:
         # provisioning service's to advance.
         assert fake.reservations[capacity_reservation_id]["state"] == "reserved"
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_capacity_released_releases_and_reopens(
         self, db, service_client
     ):
@@ -873,7 +843,6 @@ class TestFulfillmentEvents:
         assert fake.reservations[capacity_reservation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_manual_compute_listings_reopen_after_release(
         self, db, service_client
     ):
@@ -1083,7 +1052,6 @@ class TestRealOrchestrationCacheToReconciliation:
             settings_overrides(
                 enable_registry_discovery=False,
                 registry__urls=[],
-                **{"capacity.use_site_projection_for_listings": True},
             ),
         ):
             # Aggregate subscription is the public capacity-publication hook:

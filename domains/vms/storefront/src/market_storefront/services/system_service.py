@@ -56,9 +56,8 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
     producer predating the pool declarations, which pools and members are
     unresolvable and held, which members declare no GPU count or no resource
     type, which pools state shapes the VM vocabulary cannot read, which stated
-    shapes no member is feasible for, which pools publish nothing because
-    their listings claim an attribute no member declares, and which fields
-    each pool still takes from its legacy storefront override row.
+    shapes no member is feasible for, and which pools publish nothing because
+    their listings claim an attribute no member declares.
     """
     from arkhai_vms_listings.reconciler import derivation_reports
 

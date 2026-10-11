@@ -161,15 +161,6 @@ authority_url    = ""
 poll_interval    = 5
 placement        = "fill_first"
 hold_ttl_seconds = 0
-# Structural capacity source for listing derivation: local tables
-# (compute_capacity_pools/compute_pool_members) unless this is set,
-# in which case the site-resource-pool projection is used instead
-# wherever the storefront's own cache has a loaded value. On by
-# default -- the projection path has parity with local tables,
-# including bucket-sourced fungible capacity, multi-member
-# specific-resource listings, and listing-mode hints. Set to false
-# to fall back to local tables for a staged/canary rollout.
-use_site_projection_for_listings = true
 # The publication loop's interval between cycles, in seconds. A change a site
 # declares wakes it sooner, and a loop pause reaches it at once whatever this
 # is; deterministic callers hold the loop and advance it with run-cycle rather
