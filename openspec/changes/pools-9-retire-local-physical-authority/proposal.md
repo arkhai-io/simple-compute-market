@@ -20,8 +20,9 @@ compose CSV wiring) stays a supported contract that has no site-side equivalent
 and never expressed multi-dimensional capacity.
 
 This change removes the local path and everything that exists only to feed
-it. Rollback past it is a code rollback, and the change is sized so that is a
-deliberate decision rather than an accident: the schema is frozen, not dropped.
+it. The upgrade is fail-forward: no downgrade to a version with the local path
+is supported. The schema is frozen, not dropped, so operators can still
+extract retained inventory into provisioning.
 
 ## What Changes
 
@@ -57,15 +58,16 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
   such field.
 - Remove `resource_capacity_validator.py` with its only caller,
   `upsert_resource`.
-- Freeze, do not drop: the migration stops creating the retired tables,
-  columns, triggers, and indexes on fresh databases. Upgraded databases retain
-  existing schema and rows unchanged as inert rollback data or an operator
-  source for seeding provisioning. Current storefront code neither reads nor
-  writes them. Retained data is historical and must be reconciled against live
-  site state before reuse; no automatic transfer or overwrite is added.
-  A schema `DROP` is a
-  later change, after a deployment cycle confirms the freeze never needed
-  rolling back.
+- Freeze, do not drop: storefront bootstrap stops creating the retired
+  tables, triggers, and indexes, and the VM migrations that exist only for
+  them (`20260604_002`, `20260611_006`, `20260716_008`, `20260813_010`) leave
+  the chain. Upgraded databases retain existing schema, rows, and recorded
+  migration IDs unchanged as an operator source for extraction into
+  provisioning. Current storefront code neither reads nor writes them.
+  Retained data is historical and must be reconciled against live site state
+  before reuse; no automatic transfer or overwrite is added. A schema `DROP`
+  is a later change, once operators have had a release to extract what they
+  need.
 
 ### Retire CSV import and its deployment contract
 
@@ -220,7 +222,7 @@ None.
   authority, and derives every listing candidate from the site projection —
   `openspec/specs/storefront-publication/spec.md`.
 - Fresh databases omit retired physical schema; upgraded databases preserve
-  inert history for rollback or operator provisioning seeding, without current
+  inert history for operator extraction into provisioning, without current
   storefront reads or writes — `openspec/specs/storefront-publication/spec.md`
   and its architecture companion. Safe reuse requires checking live site state
   — operator deployment documentation and `docs/seller-quickstart.md`.
@@ -229,10 +231,10 @@ None.
   exists — `openspec/specs/storefront-publication/spec.md`, "Storefront pool
   overrides are the only override tier" (replacing "Storefront pool overrides
   are site-scoped and durable").
-- Rollback past the retirement is a code rollback, not a configuration flip —
-  operator deployment documentation.
+- The upgrade past the retirement is fail-forward; no downgrade is
+  supported — operator deployment documentation.
 - Why legacy values are not carried over, and why the schema is frozen rather
-  than dropped — this change's `design.md`.
+  than dropped (extraction, not downgrade) — this change's `design.md`.
 - Status reports no resource count. Inventory readiness is per-site,
   per-family projection state; sellable supply is listings and publication
   diagnostics; import outcomes are provisioning's —

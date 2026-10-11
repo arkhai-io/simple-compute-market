@@ -132,7 +132,8 @@ Drift from the earlier plan:
   `trg_resources_updated_at` on every startup, so it would change retained
   schema unless it stops touching the retired tables. The migration runner
   already supports `Migration.required_tables`, which skips a migration
-  without recording it when a table is absent (open decision D5).
+  without recording it when a table is absent (decided: "Freeze, do not
+  `DROP`; retained data is extraction input").
 - **More CSV consumers.** `resources_csv_path` in both seller TOMLs and Alice's
   compose mount; `domains/vms/storefront/Makefile` and `helm/Makefile`
   `RESOURCES_CSV_FILE` wiring; `helm/fixtures/eip191-evm-values.yaml` and the
@@ -159,8 +160,8 @@ Drift from the earlier plan:
 ## Goals / Non-Goals
 
 **Goals:** one listing source; no storefront physical authority; one storefront
-override tier; no operator contract that fills retired tables; a freeze an
-operator can roll back from by reverting code.
+override tier; no operator contract that fills retired tables; retained data an
+operator can still extract into provisioning.
 
 **Non-Goals:** a per-pool commercial write path (exists); carrying legacy
 values forward; dropping schema; the zero-caller surfaces and the provider
@@ -169,31 +170,69 @@ retires here).
 
 ## Decisions
 
-### Freeze, then redirect; no `DROP`
+### Upgrades are fail-forward
 
-The migration stops creating and writing the retired tables, columns,
-triggers, and indexes and redirects every read to the projection. The schema
-stays so a code rollback or an operator seeding provisioning finds its data.
-Fresh databases omit the retired schema; upgraded databases preserve existing
-tables, columns, triggers, indexes, and rows unchanged. Current storefront code
-does not read or write that data for any purpose, including startup and status.
-A `DROP` is a later change, after a
-deployment cycle shows the freeze never needed reverting. This matches the
-additive-only posture of every other schema change in the campaign.
+Upgrading past this change is one-way. There is no supported downgrade to a
+version with the local listing path; a defect after upgrade is fixed forward.
+The repository is pre-1.0, and keeping a downgrade path working would mean
+keeping the retired schema creatable and its migrations runnable for code
+whose only purpose is the path this change removes.
 
-Rollback past this change is a code operation, not a configuration flip;
-operator documentation says so explicitly. Retention preserves historical
-data, not a current inventory snapshot: once provisioning changes physical
-state, an operator must reconcile the retained data against current site state
-before resuming an older storefront version or using it to seed provisioning.
-Restoring stale inventory alone does not establish safe availability.
+No design choice here is justified by downgrade safety. Operator documentation
+states the policy for this change; whether it becomes a repository-wide
+pre-1.0 rule is a separate decision for `DEPLOYMENT_AND_CONFIG.md`.
 
-Retained rows can inform an operator's provisioning host inventory, pool
-definitions, and capacity declarations through the existing provisioning
-administration surfaces. This does not add an automatic transfer command or
-overwrite live site state. Commercial values still follow the independent
-override decision below; retaining mixed historical rows does not keep their
-commercial tier active.
+### Freeze, do not `DROP`; retained data is extraction input
+
+The retired tables are `resources`, `hosts`, `resource_transition_events`,
+`compute_capacity_pools`, and `compute_pool_members`. Fresh databases never
+create them; upgraded databases keep their schema and rows exactly as they
+were. Current storefront code neither reads nor writes them for any purpose,
+including startup and status.
+
+The tables are not dropped because their rows may still need to be extracted
+into provisioning's inventory: host inventory, pool definitions, and capacity
+declarations entered through provisioning's administration surfaces. That is
+an operator task, not automatic transfer, and retained rows are historical:
+an operator reconciles them against live site state before using them. A
+`DROP` is a later change, once operators have had a release to extract what
+they need. Commercial values follow the separate override decision below;
+retaining mixed rows does not keep their commercial tier active.
+
+Mechanics:
+
+- **Bootstrap.** `_ensure_domain_tables` and `_ensure_domain_indexes` stop
+  creating or touching `resources`, `hosts`, `resource_transition_events`,
+  their triggers, and their indexes, including the per-startup drop and
+  recreation of `trg_resources_updated_at` and the commercial-column `ALTER`s.
+- **VM migrations.** The migrations that exist only for the retired tables
+  leave `VM_MIGRATIONS` with their functions: `20260604_002` (creates the pool
+  tables and backfills them from `resources`), `20260611_006` (pool member
+  sites), `20260716_008` (pool table rename), and `20260813_010` (settlement
+  columns on `resources` and pools), together with `_backfill_compute_pools`
+  and `_resource_attrs`. The runner ignores recorded IDs it no longer ships, so
+  an upgraded database keeps its history unchanged and a fresh one never
+  records them. A database old enough to have one still pending keeps that
+  table as it is, which is what extraction needs.
+- **Migration `20260604_003` stays.** It adds and backfills
+  `derived_compute_listings.pool_id`, which the legacy listing-binding
+  adapter (`config migrate --scope storefront-domains`) requires. Its backfill
+  reads `compute_pool_members`; it must fall back to `resource_id`, as it
+  already does per row, when that table is absent.
+- **Core `_migrate_listing_resource_timestamps` stays.** It belongs to the
+  shared core chain, also covers `listings`, and already skips an absent
+  `resources` table. Only a database older than it would see timestamp columns
+  added to a retained `resources` table, which loses no data.
+
+Alternatives:
+
+- *Gate the retired migrations with `required_tables`.* Rejected: a pending
+  legacy migration would still rewrite retained rows on upgrade, and code
+  reachable only by very old databases would stay.
+- *Empty the retired migrations' bodies and keep their IDs.* Rejected: it keeps
+  dead entries in the chain and records IDs whose schema was never created.
+- *Drop the tables now.* Rejected: their rows may still be needed for
+  extraction into provisioning.
 
 The terminal contract prohibits active storefront physical authority, rather
 than requiring all historical physical records to be absent. Its fresh-boot
@@ -469,9 +508,11 @@ negotiation-pause behavior are unchanged. The permanent home is
   Mitigated by migration guidance that names the provisioning-side
   declaration path and by the seeding stack's removal making the
   configuration keys unknown.
-- **Retained inventory is mistaken for current supply** → an unsafe rollback
-  or provisioning seed. Guidance requires checking current site state before
+- **Retained inventory is mistaken for current supply** → an unsafe
+  provisioning seed. Guidance requires checking current site state before
   using the historical records; current storefront code never consults them.
+- **A defect surfaces after upgrade** → no downgrade path; it is fixed forward
+  (see "Upgrades are fail-forward").
 - **The zero-caller removal lands later than expected** → this cutover's
   implementation waits; design and planning continue against the current
   tree, and planning re-grounds the method list after it lands.
@@ -488,17 +529,18 @@ negotiation-pause behavior are unchanged. The permanent home is
 2a. Land `remove-dead-storefront-physical-surfaces`, then re-check the
    `SQLiteClient` method list and migration `20260604_002` against the tree it
    leaves.
-3. Prepare projection counts, provisioning-seeded tests, and operator guidance
-   together with retirement of local derivation, the flag, legacy overrides,
-   CSV import, startup seeding, deployment and CLI wiring, and local cleanup.
+3. Prepare provisioning-seeded tests and operator guidance together with
+   retirement of local derivation, the flag, legacy overrides, CSV import and
+   its pricing migration, startup seeding, deployment and CLI wiring, the
+   status count, and local cleanup.
 4. Apply the fresh-schema freeze in the same coordinated cutover, preserving
    existing historical data. No partial retirement is an independently
    deployable outcome.
 5. Validate fresh and populated databases, the affected suites, packaging,
    and the end-to-end pipeline; complete the planned closeout.
 
-Rollback requires earlier code and reconciliation of retained historical data
-with current site state before trading resumes; no `DROP` has happened.
+The upgrade is fail-forward. Retained tables stay in upgraded databases for
+operator extraction into provisioning; no `DROP` has happened.
 
 ## Open Questions
 
@@ -511,13 +553,9 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-Open decisions raised by the 2026-10-08 re-grounding (D1–D4 are decided
+Open decisions raised by the 2026-10-08 re-grounding (D1–D5 are decided
 above). Each gates the tasks named; no task prescribes an answer until the
 decision is recorded above.
 
-- **D5 — freeze mechanics.** How fresh databases skip the retired tables'
-  migrations and bootstrap, and what an upgraded database with a pending
-  legacy migration does. Gates tasks 4.4 and 6.1–6.2 and the delta's upgrade
-  scenario.
 - **D6 — code left without a caller.** Whether models and adapter code that
   only the importers use retire here. Gates task 4.5.

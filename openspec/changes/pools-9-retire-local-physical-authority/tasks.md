@@ -29,10 +29,10 @@ resolved in `design.md` as "Status reports no resource count":
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-Tasks 4.4, 4.5, 6.1, and 6.2 are gated on the open decisions D5 and D6 in
-`design.md`'s Open Questions; they are amended when each decision is
-recorded. D2 is decided and folded into task 4.3, D3 into task 5.7, and D4
-into tasks 3.4 and 3.8.
+Task 4.5 is gated on the open decision D6 in `design.md`'s Open Questions; it
+is amended when that decision is recorded. D2 is decided and folded into task
+4.3, D3 into task 5.7, D4 into tasks 3.4 and 3.8, and D5 into tasks 4.4, 4.6,
+6.1, and 6.2.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -194,6 +194,16 @@ provisioning can trust two principals leaves it with no listing source.
       write the retained data. Name and verify the affected bootstrap and
       migration functions in
       `domains/vms/storefront/src/market_storefront/utils/migrations.py`.
+      Per `design.md`, "Freeze, do not `DROP`; retained data is extraction
+      input": remove the retired tables, triggers (including the per-startup
+      drop and recreation of `trg_resources_updated_at`), `ALTER`s, and
+      indexes from `_ensure_domain_tables` and `_ensure_domain_indexes` in
+      `utils/sqlite_client.py`; remove `20260604_002`, `20260611_006`,
+      `20260716_008`, and `20260813_010` from `VM_MIGRATIONS` with their
+      functions, `_backfill_compute_pools`, and `_resource_attrs`; keep
+      `20260604_003` and make its `pool_id` backfill fall back to
+      `resource_id` when `compute_pool_members` is absent; leave core
+      `_migrate_listing_resource_timestamps` unchanged.
 - [ ] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
       with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host`,
       `get_resource`, `list_resources`, `apply_resource_transition`, and
@@ -203,12 +213,14 @@ provisioning can trust two principals leaves it with no listing source.
       `remove-dead-storefront-physical-surfaces` landed first, the remaining
       callers are `release_reservations`' local loop, `SystemService`'s count
       and seeding, the validator, and the importers; task 1.7 re-checks this.
-- [ ] 4.6 Document, for operators, that rollback past this section is a code
-      rollback rather than a configuration change in
-      `docs/development/DEPLOYMENT_AND_CONFIG.md`. Retained data is historical;
-      reconcile it against current provisioning state before an older version
-      resumes trading. Explain operator use for provisioning seeding in
-      `docs/seller-quickstart.md` without adding automatic transfer machinery.
+- [ ] 4.6 ~~Document that rollback past this section is a code rollback.~~
+      Amended 2026-10-11 (`design.md`, "Upgrades are fail-forward"): document
+      in `docs/development/DEPLOYMENT_AND_CONFIG.md` that the upgrade is
+      fail-forward with no supported downgrade, and that retained tables stay
+      for operator extraction until a later change drops them. Explain
+      extraction into provisioning in `docs/seller-quickstart.md`: retained
+      data is historical and is reconciled against current provisioning state
+      first; no automatic transfer machinery is added.
 - [ ] 4.7 Run the full storefront suite and the VM e2e scenarios after the
       combined Sections 3–6 fileset is ready, not against a partial retirement.
 
@@ -295,16 +307,21 @@ provisioning can trust two principals leaves it with no listing source.
 
 ## 6. Freeze migration and validation
 
-- [ ] 6.1 Add the freeze-then-redirect migration covering every table and
-      column frozen in Section 4. `compute_allocations` is already frozen by
-      `remove-dead-storefront-physical-surfaces`, which lands first. Stop
-      writing; redirect reads; no `DROP`.
+- [ ] 6.1 ~~Add the freeze-then-redirect migration.~~ Amended 2026-10-11: no
+      new migration is added; the freeze is task 4.4's bootstrap and chain
+      removal. `compute_allocations` is already frozen by
+      `remove-dead-storefront-physical-surfaces`, which lands first. No
+      `DROP`.
 - [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
       Extend `domains/vms/storefront/tests/unit/test_migrations.py` to prove
-      that fresh bootstrap omits retired schema and a populated upgrade and
-      rerun preserve existing schema and row contents, including transition
-      history. Verify normal startup and status do not recreate or mutate it
+      that fresh bootstrap omits retired schema and records none of the removed
+      migration IDs, and that a populated upgrade and rerun preserve existing
+      schema, row contents (including transition history), triggers, and
+      recorded migration IDs. Cover `20260604_003` on a legacy database with
+      and without `compute_pool_members`. Retire the tests of the removed
+      migrations (`test_rename_migration_preserves_data_and_pool_members_fk`
+      and any backfill cases). Verify normal startup and status do not recreate or mutate it
       through the storefront integration suite.
 - [ ] 6.3 Run every affected suite — storefront unit and integration,
       `core/storefront-client`, `domains/vms/listings`, and the VM e2e
@@ -367,8 +384,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       Promote the fresh-versus-upgraded persistence boundary to
       `openspec/specs/storefront-publication/spec.md`'s "Storefront holds no
       physical-resource authority" and explain inert history in its
-      `architecture.md` companion's "Seller-owned market state". Keep rollback
-      and seeding procedures in the operator documents named in task 4.6.
+      `architecture.md` companion's "Seller-owned market state". Keep the
+      fail-forward policy and extraction procedure in the operator documents
+      named in task 4.6.
 - [ ] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
@@ -407,8 +425,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Projection is the only listing-candidate origination path; no local-table path or configuration option selects another source | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
 | The site-scoped store is the only storefront-override tier; the legacy home-site record retires with the import that wrote it, and its values are not carried over | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier", replacing "Storefront pool overrides are site-scoped and durable" |
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "Decision: retire the legacy override tier without carrying values over" |
-| Fresh databases omit retired schema; upgrades retain inert schema and rows for rollback or operator provisioning seeding, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
-| Rollback requires earlier code and reconciliation against live site state; retained rows are historical seeding input, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
+| Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
+| ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
+| Why the retired migrations leave the chain rather than being gated or emptied, and why `20260604_003` and the core timestamp migration stay | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
 | `kit/pool-overrides` defines exactly the contract's four override states; its projection source is never `None` | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier"; companion `architecture.md` — "Storefront pool overrides"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Storefront listing shapes and pool overrides" |
 | Why the kit drops `inactive` rather than tolerating `None` | This change's `design.md`, "The pool-override kit loses `inactive`" |

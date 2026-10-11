@@ -11,9 +11,9 @@ per-pool commercial values keyed by a projected pool identity.
 
 Fresh storefront databases MUST NOT create the retired local inventory or
 physical-allocation tables, columns, triggers, or indexes. An upgraded database
-MAY retain pre-existing schema and rows as inert historical data for code
-rollback or operator-directed provisioning seeding. The retirement MUST NOT
-drop that schema or delete or rewrite its retained rows. Current storefront
+MAY retain pre-existing schema and rows as inert historical data an operator
+can extract into provisioning. The retirement MUST NOT drop that schema or
+delete or rewrite its retained rows. Current storefront
 code MUST NOT read or write the retired data, including during startup,
 publication, negotiation, diagnostics, or reservation cleanup.
 
@@ -47,7 +47,7 @@ a storefront inventory read path or overwrite live site state automatically.
 - **WHEN** provisioning's physical state changes while historical storefront
   rows remain in the database
 - **THEN** the historical rows remain unchanged and cannot be used as evidence
-  of current availability for rollback or provisioning seeding
+  of current availability when seeding provisioning
 
 #### Scenario: Provisioning reports a physical lifecycle transition
 
@@ -117,7 +117,7 @@ Individual-resource publication consumes `site_resource_pools`, which carries th
 
 A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
 
-Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation. Reverting to a local-inventory path is a code change rather than a configuration change.
+Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation.
 
 #### Scenario: One projection refresh fails
 - **WHEN** a storefront cannot refresh one site projection after previously loading a complete generation
@@ -127,9 +127,9 @@ Projection-backed candidate derivation SHALL be a storefront's only listing-cand
 - **WHEN** a storefront derives publishable listing candidates
 - **THEN** they come from the site projections, with no local-table path available and no configuration option to select one
 
-#### Scenario: Operator seeks to revert to local inventory
+#### Scenario: Operator seeks to derive from local inventory
 - **WHEN** an operator wants a storefront to derive candidates from local inventory
-- **THEN** no configuration value produces that behavior and reverting requires deploying an earlier version
+- **THEN** no configuration value produces that behavior
 
 #### Scenario: Grouped capacity is used for publication
 - **WHEN** a storefront publishes from the capacity-bucket projection
