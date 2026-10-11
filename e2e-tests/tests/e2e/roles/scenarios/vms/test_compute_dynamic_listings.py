@@ -3,7 +3,7 @@
 This scenario isolates storefront listing reconciliation from the full
 buyer/settlement flow:
 
-1. Import one 4x GPU resource.
+1. Declare one 4x GPU resource at the site.
 2. Create one live listing for each 1x, 2x, 3x, and 4x slice.
 3. Admin-reserve 2 GPUs and verify 3x/4x listings close.
 4. Mark usage started, then capacity released, and verify 3x/4x reopen.
@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, field
 
 import pytest
+from market_pool_overrides import SyncPoolOverrideClient
 
 from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
@@ -37,21 +38,7 @@ pytestmark = pytest.mark.e2e_compute_dynamic_listings
 #: sharing one would let adding a scenario change how another publishes.
 DYNAMIC_POOL_ID = "compute-e2e-dynamic-pool"
 DYNAMIC_RESOURCE_ID = "compute-e2e-dynamic-4x"
-#: `attribute.pool_id` matches the capacity declaration below, which places
-#: this resource in the pool as a `specific_resource` member. Without it the
-#: listing carried no pool provenance, its durable binding recorded none, and
-#: a reservation had no membership to report -- the fungible case declared it
-#: and the resource-keyed case did not.
-DYNAMIC_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-dynamic-4x,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-dynamic-pool,H200,99.0,"California, US",kvm1
-"""
-
 FUNGIBLE_POOL_ID = "compute-e2e-fungible-pool"
-FUNGIBLE_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-fungible-a,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
-compute-e2e-fungible-b,compute.gpu,h200,count,4,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,compute-e2e-fungible-pool,H200,99.0,"California, US",kvm1
-"""
-
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
@@ -62,7 +49,7 @@ ACCEPTED_ESCROWS = [{
 
 @dataclass
 class DynamicListingState:
-    resources_seeded: bool = False
+    supply_declared: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     capacity_reservation_id: str | None = None
     reserve_closed_listing_ids: list[str] = field(default_factory=list)
@@ -71,7 +58,7 @@ class DynamicListingState:
 
 @dataclass
 class FungiblePoolState:
-    resources_seeded: bool = False
+    supply_declared: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     reservation_2x_id: str | None = None
     reservation_4x_id: str | None = None
@@ -123,6 +110,22 @@ def _pool_offer(gpu_count: int) -> dict:
     }
 
 
+def _declare_pool_sla(storefront_admin_client, pool_id: str) -> None:
+    """State the pool's SLA as the storefront's own term for it.
+
+    A pool's own `sla` hint is consulted only by a storefront configured to
+    trust it, so the storefront states the SLA these listings advertise.
+    """
+    SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
+        {
+            "site_id": capacity_site_id(),
+            "pool_id": pool_id,
+            "offering_mode": "vm",
+            "terms": {"sla": 99.0},
+        }
+    )
+
+
 def _listing_statuses(storefront_admin_client, ids_by_gpu_count: dict[int, str]) -> dict[int, str]:
     return {
         gpu_count: storefront_admin_client.get_listing(listing_id).status
@@ -149,26 +152,11 @@ class TestComputeDynamicListings:
         """
         dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
 
-    def test_00_imports_4x_compute_resource(
-        self, storefront_admin_client, dynamic_state: DynamicListingState
-    ):
-        result = storefront_admin_client.admin_import_resources(
-            DYNAMIC_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-dynamic-listings.csv",
-        )
-
-        assert result.failed_count == 0, (
-            f"Dynamic resource import failed for {result.failed_count} row(s): {result}"
-        )
-        assert result.imported_count >= 1
-        dynamic_state.resources_seeded = True
-        log.info("[dynamic] imported resource %s", DYNAMIC_RESOURCE_ID)
-
     def test_00a_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
         site_capacity_admin_client, dynamic_state: DynamicListingState,
     ):
-        """Register the executor host the seeded resources sit on.
+        """Declare this scenario's resource at the site, with its executor host.
 
         The site authority projects capacity by iterating host rows, so with no
         host registered the projection is empty and `test_02`'s reserve is
@@ -180,12 +168,12 @@ class TestComputeDynamicListings:
         state no scenario declares. The projection pull that follows is asserted
         rather than slept out.
         """
-        require_state(dynamic_state, "resources_seeded")
+        require_state(dynamic_state, "storefront_paused")
 
         # `reserve` matches CapacityBucket rows, which only a capacity declaration
         # creates — the host-derived projection is a different store. The
-        # declaration's attributes mirror the seeded CSV so a claim built from the
-        # listing matches by equality.
+        # declaration's attributes mirror the listing so a claim built from it
+        # matches by equality.
         host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
@@ -194,6 +182,7 @@ class TestComputeDynamicListings:
             sellable_units=4,
             pool_id=DYNAMIC_POOL_ID,
             listing_mode="specific_resource",
+            region="California, US",
             attributes={
                 "gpu_model": "H200",
                 "region": "California, US",
@@ -206,6 +195,8 @@ class TestComputeDynamicListings:
         )
 
         sites = refresh_storefront_projections(storefront_admin_client)
+        _declare_pool_sla(storefront_admin_client, DYNAMIC_POOL_ID)
+        dynamic_state.supply_declared = True
 
         # The cardinality hint above was declared under `listing_mode`, the
         # deprecated ingestion spelling, which makes this pool an unupgraded
@@ -251,7 +242,7 @@ class TestComputeDynamicListings:
         seller_wallet: str,
         dynamic_state: DynamicListingState,
     ):
-        require_state(dynamic_state, "resources_seeded")
+        require_state(dynamic_state, "supply_declared")
 
         for gpu_count in range(1, 5):
             resp = storefront_seller_client.create_listing(
@@ -364,20 +355,6 @@ class TestComputeDynamicListings:
 
 
 class TestFungibleComputeDynamicListings:
-    def test_00_imports_two_member_pool(
-        self, storefront_admin_client, fungible_state: FungiblePoolState
-    ):
-        result = storefront_admin_client.admin_import_resources(
-            FUNGIBLE_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-fungible-dynamic-listings.csv",
-        )
-
-        assert result.failed_count == 0, (
-            f"Fungible resource import failed for {result.failed_count} row(s): {result}"
-        )
-        assert result.imported_count >= 2
-        fungible_state.resources_seeded = True
-
     def test_00a_registers_executor_hosts_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
         site_capacity_admin_client, fungible_state: FungiblePoolState,
@@ -399,8 +376,6 @@ class TestFungibleComputeDynamicListings:
         state no scenario declares. The projection pull that follows is asserted
         rather than slept out.
         """
-        require_state(fungible_state, "resources_seeded")
-
         members = ("compute-e2e-fungible-a", "compute-e2e-fungible-b")
         hosts = []
         for host_name, member in zip(E2E_FUNGIBLE_HOSTS, members):
@@ -412,6 +387,7 @@ class TestFungibleComputeDynamicListings:
                 sellable_units=4,
                 pool_id=FUNGIBLE_POOL_ID,
                 listing_mode="fungible",
+                region="California, US",
                 attributes={
                     "gpu_model": "H200",
                     "region": "California, US",
@@ -426,8 +402,9 @@ class TestFungibleComputeDynamicListings:
             )
 
         sites = refresh_storefront_projections(storefront_admin_client)
+        _declare_pool_sla(storefront_admin_client, FUNGIBLE_POOL_ID)
 
-        fungible_state.executor_host_registered = True
+        fungible_state.supply_declared = True
         log.info(
             "[fungible] executor hosts %s registered (gpus=%s each); "
             "projections confirmed for %s",
@@ -440,7 +417,7 @@ class TestFungibleComputeDynamicListings:
         seller_wallet: str,
         fungible_state: FungiblePoolState,
     ):
-        require_state(fungible_state, "resources_seeded")
+        require_state(fungible_state, "supply_declared")
 
         for gpu_count in range(1, 5):
             resp = storefront_seller_client.create_listing(

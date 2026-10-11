@@ -36,7 +36,8 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
   - Registry `/health` returns `status: ok`.
   - Bob and Alice storefront `/health` return `status: ok`.
   - Bob `/api/v1/system/status` has `registry: ok`, `registry_auth: ok`,
-    populated `agent_id`, `chain_id: 31337`, and `resource_count >= 1`.
+    populated `agent_id`, `chain_id: 31337`, and every configured site's
+    `site_projections` families `loaded`.
   - Provisioning `/api/v1/system/status` has `storefront: ok`,
     `storefront_auth: ok`, and `lease_watchdog: running`. Its
     `fulfillment_recovery` object reports sweep/claim/provider-failure counters,

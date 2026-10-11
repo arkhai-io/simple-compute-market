@@ -219,8 +219,8 @@ publish_priceless            = false
 # capability a storefront operator must opt into, not something already
 # trusted today.
 accept_pool_declared_sla     = false
-# Storefront's own default SLA when neither a per-pool override
-# (compute_capacity_pools.sla) nor a trusted pool hint applies.
+# Storefront's own default SLA when neither a site-scoped pool override
+# nor a trusted pool hint states one.
 default_sla                  = 0.0
 
 # Per-GPU-model listing-term defaults and per-family rates: the lowest tier

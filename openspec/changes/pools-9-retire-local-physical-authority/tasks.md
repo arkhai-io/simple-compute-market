@@ -320,7 +320,7 @@ provisioning can trust two principals leaves it with no listing source.
       the renamed `tests/unit/test_compute_allocations.py`. A test that only
       passes with the row present is reporting a real dependency on local
       inventory: stop and record it in `design.md` before changing behaviour.
-- [ ] 4.6 ~~Document that rollback past this section is a code rollback.~~
+- [x] 4.6 ~~Document that rollback past this section is a code rollback.~~
       Amended 2026-10-11 (`design.md`, "Upgrades are fail-forward"): document
       in `docs/development/DEPLOYMENT_AND_CONFIG.md` that the upgrade is
       fail-forward with no supported downgrade, and that retained tables stay
@@ -390,7 +390,7 @@ provisioning can trust two principals leaves it with no listing source.
       storefront creates its parent directories on first start. The chart's
       `config-<component>-secret.yml` key stays, rendering an empty mapping,
       because the chart's smoke-test pod mounts it.
-- [ ] 5.5 Write operator migration guidance in `docs/seller-quickstart.md`
+- [x] 5.5 Write operator migration guidance in `docs/seller-quickstart.md`
       covering how to move CSV inventory to the provisioning service's host
       inventory, pool definitions, and capacity declarations. This is
       required, not optional: seeding silently skips when it finds no source,
@@ -406,7 +406,7 @@ provisioning can trust two principals leaves it with no listing source.
       declarations, after reconciling their historical contents against live
       site state. Use supported provisioning administration surfaces and do not
       prescribe automatic overwrite of live declarations or storefront reads.
-- [ ] 5.6 Migrate the six CSV-dependent test files to
+- [x] 5.6 Migrate the six CSV-dependent test files to
       projection/provisioning-service seeding: the five VM scenario files
       named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`
       (re-grounded 2026-10-08; `test_multi_registry.py` is already migrated).
@@ -443,6 +443,16 @@ provisioning can trust two principals leaves it with no listing source.
       `test_buy_oneshot_buyer_cli.py`, `test_full_deal.py`, and
       `test_full_deal_buyer_cli.py` that cite
       `use_site_projection_for_listings`.
+      Amended 2026-10-11 (implementation): `test_non_erc20_settlement.py`'s
+      import was not vestigial in effect: nothing declared its two resources
+      at provisioning, so its listings had no projected source. It now
+      declares one executor and pool per case through
+      `provision_e2e_executor`. In `test_compute_dynamic_listings.py` region
+      moves onto each pool hint, and SLA becomes a site-scoped override term,
+      because the storefront reads a pool's `sla` hint only with
+      `accept_pool_declared_sla` on. The smoke check asserts every site's
+      projection families are loaded; status carries no count to check
+      declarations against, and provisioning's own smoke covers its hosts.
 - [x] 5.7 Once 5.2 removes the import route, add an in-process application test
       that the storefront mounts no route under `/api/v1/admin/portfolio/resources`.
       It is the route-level evidence for "Storefront holds no physical-resource

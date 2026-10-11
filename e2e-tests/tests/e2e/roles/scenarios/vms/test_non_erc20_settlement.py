@@ -30,6 +30,12 @@ from tests.e2e.roles.helpers.compute_deal import (
 )
 from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
 from tests.e2e.roles.scenarios.vms.conftest import _signer, capacity_source_for
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_NON_ERC20_HOST,
+    E2E_NON_ERC20_POOL_ID,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +51,6 @@ pytestmark = [
 _CHAIN_NAME = "anvil"
 _ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
-_MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _ANVIL_GOD_PRIVATE_KEY = (
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 )
@@ -163,21 +168,6 @@ def _settlement_cases() -> list[SettlementCase]:
             token_id=1155_001,
         ),
     ]
-
-
-def _resource_csv(cases: list[SettlementCase]) -> str:
-    lines = [
-        "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-        "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-        "attribute.vm_host"
-    ]
-    for index, case in enumerate(cases, start=1):
-        lines.append(
-            f'{case.resource_id},compute.gpu,rtx5080,count,1,available,'
-            f'{_SELLER_RATE},{_MOCK_ERC20_A},,RTX 5080,90.0,'
-            f'"California, US",kvm{index}'
-        )
-    return "\n".join(lines) + "\n"
 
 
 def _offer(case: SettlementCase) -> dict[str, Any]:
@@ -306,6 +296,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     storefront_admin_client, storefront_seller_client,
     provisioning_client,
     provisioning_test_client,
+    site_capacity_admin_client,
     buyer_config,
     seller_wallet,
 ):
@@ -315,11 +306,19 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     pause_storefront(storefront_admin_client)
     _assert_services_ready(storefront_admin_client, provisioning_client)
 
-    import_result = storefront_admin_client.admin_import_resources(
-        _resource_csv([case]).encode("utf-8"),
-        filename=f"{case.name}-settlement-resource.csv",
+    # Each case sells its own resource, declared at the site: the listing's
+    # source must be in the projection the storefront checks it against, and
+    # one executor carries one declaration.
+    provision_e2e_executor(
+        provisioning_client,
+        site_capacity_admin_client,
+        host=f"{E2E_NON_ERC20_HOST}-{case.name}",
+        pool_id=f"{E2E_NON_ERC20_POOL_ID}-{case.name}",
+        resource_id=case.resource_id,
+        sellable_units=1,
+        attributes={"gpu_model": "RTX 5080", "region": "California, US", "sla": "90.0"},
     )
-    assert import_result.failed_count == 0, import_result
+    refresh_storefront_projections(storefront_admin_client)
 
     listing_resp = storefront_seller_client.create_listing(
         listing_resource=_offer(case),
