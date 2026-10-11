@@ -234,8 +234,9 @@ keeping the retired schema creatable and its migrations runnable for code
 whose only purpose is the path this change removes.
 
 No design choice here is justified by downgrade safety. Operator documentation
-states the policy for this change; whether it becomes a repository-wide
-pre-1.0 rule is a separate decision for `DEPLOYMENT_AND_CONFIG.md`.
+states the policy for this change only. Promoting fail-forward to a
+repository-wide pre-1.0 rule was considered and deliberately deferred
+(2026-10-11); nothing in this change states or implies one.
 
 ### Freeze, do not `DROP`; retained data is extraction input
 

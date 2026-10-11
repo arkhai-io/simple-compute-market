@@ -195,6 +195,8 @@ None.
   `scripts/tests/test_multi_storefront_compose.py`;
   `docs/development/VALIDATION_RUNBOOK.md` and
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- Packaging: the storefront drops `python-multipart`, whose only consumer was
+  the import route, and its locks are regenerated.
 - Deployment: Helm, compose, both seller TOMLs, the storefront and Helm
   Makefiles, and the seller quickstart lose the CSV contract.
 - `kit/config` loses `[escrow_templates]` support (`EscrowTemplate`,
