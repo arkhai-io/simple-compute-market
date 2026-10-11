@@ -8,7 +8,7 @@
 |---|---|
 | [System overview](#system-overview) | Marketplace purpose and production shape |
 | [Composition from above and below](#composition-from-above-and-below) | Core, kit, domain, and composition-root ownership |
-| [Package and dependency layers](#package-and-dependency-layers) | Enforceable one-way package rules |
+| [Package and dependency layers](#package-and-dependency-layers) | Layer, scope, and kind: the one-way package rules, and where the tree still diverges |
 | [Runtime service map](#runtime-service-map) | Processes, authorities, and principal calls |
 | [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state, and how authority is decided |
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
@@ -77,25 +77,59 @@ See the [market composition specification](../../openspec/specs/market-compositi
 
 ## Package and dependency layers
 
+Three questions decide whether a package is in the right place, and they are independent:
+
+- **Direction.** May this package depend on that one? A reusable capability must not depend on an application or on a concrete market. This is the **layer** question, and a dependency graph answers it.
+- **Knowledge.** May this package know about that family, domain, or mechanism? Market-neutral code must not learn a market by accident. This is the **scope** question, and a dependency graph answers it.
+- **Ownership.** Does this package hold the right responsibilities, even where every edge points a permitted way? A storefront that imports an authority's matching predicate, a kit that reads a user's configuration file, a composition root whose non-root modules name a contribution — each passes the first two questions. This one is architectural judgement, and review answers it.
+
+The first two are stated below as rules a check can hold; the third is stated as placement tests. A package's **kind** names what it defines and, for a few kinds that exist to be light, bounds what it may depend on.
+
 ### Repository layers
 
 ```text
-composition roots / deployed services
+composition      roles, storefronts, buyers, deployed services — where composing happens
         ↓
-domain packages and role implementations
+specialization   what a family or domain supplies to be composed — vocabulary, contracts,
+        ↓        clients, codecs, policies, adapters, family kits
+kit              reusable capabilities that compose nothing and discover nothing
         ↓
-family kits
-        ↓
-family vocabulary packages
-        ↓
-repository-wide kit capabilities
-        ↓
-core carrier and role contracts
+core             carriers with no internal dependencies
 ```
+
+A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Any import is a dependency — at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except` — so every layer shares one definition of "depends on", and a boundary check walks every import, not only module-level ones. A distribution a package imports is declared in its `pyproject.toml`; an internal distribution declared but never imported is suspect and is either removed or carries a stated runtime reason (an entry point, a driver, an optional extra).
+
+The layer names what a package may do, not where it lives: a kit is depended on and composes nothing; a specialization is composed and composes nothing; a composition is the only place wiring happens. Role implementations such as the buyer and storefront roles are compositions, as are the deployed services and every market domain's executables. Repository-wide contracts and typed clients are kits; a family's or a domain's contracts and clients are specializations.
 
 Core carrier packages must not import domain vocabulary or concrete mechanism implementations. `market_core.settlement` ships the dependency-light `SettlementStageTable[StageT]` and `SettlementEvidence` exports with `py.typed`. Kits and domains may depend downward on these carriers; core does not require callable stages, shared stage methods or a kit lifecycle adapter. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
 
 A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
+
+### Scope
+
+A package's scope is the set of specific things it is permitted to know: nothing, a market family, a domain within that family, a settlement mechanism, or several of these. Scope is a set rather than a position, because one package may know a domain and a mechanism at once — a VM Alkahest codec does — and a storefront knows its domain and every mechanism it composes. A domain implies its family.
+
+One rule follows: **a package may depend only on packages whose scope is a subset of its own.** A package that knows nothing specific depends on nothing specific; a family package never depends on one of its domains; sibling domains never import each other; a mechanism-neutral kit never imports a mechanism kit; a domain codec may import its mechanism's kit because its scope names the mechanism.
+
+Scope is permission, declared independently of the imports it governs, and the declaration is the package's place in the tree: a package under a domain's directory is scoped to that domain, a package under a family's directory to that family, a kit to nothing — or to the one mechanism it *is* — and a specialization that knows a mechanism carries the mechanism in its name. A composition is scoped to the domain it lives under and composes only that domain; a composition under a family directory composes that family's domains, which is what makes it a family composition root rather than a label making it one. The one knowledge a package does not declare is which mechanisms a composition installs: a storefront's mechanisms are whatever mechanism kits it composes, bounded to the domain it lives under.
+
+Placing a package is therefore the same act as declaring its scope. A package that serves one domain goes under that domain; one that several domains of a family share goes under the family; one that knows no market goes under `kit/`; one that composes goes with the domain or family it composes. A contracts, client, or plugin package carries that kind in its name. Nothing elsewhere — a label in `pyproject.toml`, a comment at an import — may widen what the path grants.
+
+Consequences worth stating: a kit that comes to know a family is a specialization in the wrong directory; a kit that comes to know two mechanisms cannot exist, because the knowledge is either a mechanism-neutral abstraction or composition logic; a specialization that knows nothing specific is a kit in the wrong directory; a composition under one domain that imports a sibling domain is composing something it does not live with. The family-kit placement tests below are the scope rule applied to the compute family.
+
+### Kind
+
+Kind names what a package defines. Most packages are a **library** of mechanisms, vocabulary, codecs, or policies, and their kind adds no rule beyond their layer. An **executable** is a composition's entry point. Three kinds exist to be light, and their constraint is that they stay so:
+
+- **contracts** define an API — wire models, route declarations, versions — and depend on nothing heavier than core, foundation kits, and their own family's vocabulary. A contract's scope is that of its widest consumer, so a contract the compute family's storefronts all call is a family contract even when one service serves it; cross-scope use is the signal to widen the contract, not to import across.
+- **client** wraps one API and depends on its contracts, core carriers, the identity kit, and an HTTP library.
+- **plugin** registers a non-console entry point and is imported by nobody; a composition that discovers a group never names one of its members.
+
+The tree carries kind in a package's name — `kit/site-client`, `kit/resource-pools-contracts`, `domains/vms/storefront` — and is converging on that convention; the exact conventions a check reads, and the budgets it holds the light kinds to, are owned by the enforcement change in the [change index](../../openspec/changes/README.md).
+
+### Where the current tree diverges
+
+The rules above are the contract; the tree does not yet meet all of it, and no complete audit against them has run. The divergences known from review are owned by changes in the [change index](../../openspec/changes/README.md); none is a sanctioned edge, and no new dependency of the same shape should be added while one stands. In outline: the compute family kit and the repository-wide roles and clients sit under directories that say the wrong layer; `core/storefront` is a composition that two kits and both compute vocabulary packages depend on, and it imports distributions it does not declare, as do five other packages; two foundation kits and the storefront kit depend on `kit/alkahest`, `kit/alkahest` reads `kit/config`, and `kit/config` imports the settlement runtime and carries mechanism identifiers; `kit/site` imports the pool authority (see "Kit areas" below), and three read-only pool declaration modules sit in that authority rather than in its contracts package; `market_core.schemas` carries Alkahest-shaped escrow fields. The enforcement change in the change index owns the complete, audited list; this paragraph is the outline.
 
 ### Family kits
 
@@ -103,11 +137,11 @@ A family kit owns reusable mechanism, authority, and optionally persistence for 
 
 A capability belongs in a family kit when it belongs intrinsically to the family: several sibling domains use it, or it is the family's single cross-domain authority. Code that merely looks similar across domains does not qualify. A family kit stays meaningful independently of any one domain, and a new sibling domain consumes it by contributing values, codecs, hooks, or registrations, never by adding domain-specific branches to it. It carries no concrete domain's listing schema, policy, result meaning, domain-specific infrastructure choices, or composition wiring, so it belongs to no sibling domain.
 
-A family kit may own durable state, workers, and authority lifecycles for its family. It may depend on its family's vocabulary package, repository-wide kit capabilities, core contracts, and lower-level family-kit distributions of the same family. Dependencies among a family's kit distributions must be acyclic: an optional implementation distribution may depend on the family's base mechanisms and authorities, and those base distributions must not depend back on an optional implementation. A family kit must not depend on a concrete domain, another family's packages, a concrete role implementation, or a deployed service. The permitted edges point downward only: a repository-wide kit must never depend on a family kit. Any import is a dependency, whether at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except`, so every tier shares one definition of "depends on" and boundary checks walk every import, not only module-level ones.
+A family kit is a specialization with the family alone in its scope, so the scope rule says what it may depend on: its family's vocabulary package, repository-wide kits, core, and lower-level family-kit distributions of the same family — never a concrete domain, another family, a role implementation, or a deployed service. It may own durable state, workers, and authority lifecycles for its family. Dependencies among a family's kit distributions must be acyclic: an optional implementation distribution may depend on the family's base mechanisms and authorities, and those base distributions must not depend back on an optional implementation.
 
-Domains define the values, codecs, hooks, and registrations a family kit consumes; composition roots select and assemble those contributions, provide configuration and external resources, and wire runtime instances. A family kit never discovers or imports its domains. A family may split its kit into more than one distribution where dependency weight or an optional implementation technology would otherwise force unrelated consumers to install dependencies they do not use; such optional implementation distributions are not a further architectural tier.
+Domains define the values, codecs, hooks, and registrations a family kit consumes; composition roots select and assemble those contributions, provide configuration and external resources, and wire runtime instances. A family kit never discovers or imports its domains. A family may split its kit into more than one distribution where dependency weight or an optional implementation technology would otherwise force unrelated consumers to install dependencies they do not use; such optional implementation distributions are not a further layer.
 
-Family vocabulary packages stay the lower and narrower layer: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
+Family vocabulary packages are specializations of kind `vocabulary`: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
 
 Placement tests, applied in order:
 
@@ -129,14 +163,16 @@ Executor selection is one table. `(offering_mode, action)` resolves to one compl
 
 A rule installed for one domain therefore never matches another domain's jobs. Mock output passes through the same codec a real run's output does. The mechanism serves the compute family only and is not a foundation kit.
 
-### Kit layers
+### Kit areas
 
-Repository-wide kit is not a flat peer group. It has an explicit one-way hierarchy:
+The kit layer is not a flat peer group. Within it, capabilities fall into areas with an explicit one-way order, which is the acyclicity the layer rule requires stated as a map of where a capability lives. Mechanism kits — `kit/alkahest`, `kit/arkhai-payments`, `kit/contact-exchange` — sit beside the foundation area rather than in this order: each is the one kit whose scope holds its mechanism, each depends on the foundation only, and only specializations and compositions depend on them. Thin client kits — `kit/site-client`, `kit/resource-pools-client`, `core/registry-client`, `core/storefront-client` — depend on their contracts and the identity kit, whatever area their server belongs to.
 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, and `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
-4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It may depend only on core storefront contracts and foundation capabilities.
+4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It may depend only on core storefront contracts and foundation capabilities; its Alkahest client construction makes it depend on `kit/alkahest`, a divergence listed under "Where the current tree diverges".
+
+`kit/capacity-publication` and `kit/pool-overrides` are storefront-side kits in the same area as `kit/storefront`: composed by storefronts, never by a site or a buyer.
 
 ```text
 kit/fulfillment
@@ -151,7 +187,7 @@ kit/storefront
     └──> foundation only
 ```
 
-Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
+Dependencies never point upward. Kit packages never import deployed services or domain adapters.
 
 `kit/pool-overrides` is a storefront-side kit beside `kit/capacity-publication`: the durable, site-scoped storefront pool override store and its reader, the write checked against a site's live projection, override status, the signed-resource contract, a typed client extension, and a framework-free route service each storefront binds with its own router and administrator authentication. It depends only on the identity kit, the site client, and pydantic. Each market contributes its vocabulary per offering mode — the VM and bare-metal storefronts both do — and its typed client wraps any transport exposing the core client's generic `authenticated_request`, so the core storefront client carries no market's vocabulary. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#storefront-pool-overrides).
 
@@ -159,7 +195,7 @@ Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count 
 
 What stays in a core package is universal to every market. `market_core.identifier_encoding` is: it encodes operator-chosen identifiers unambiguously for any market that joins them into a key. So is `market_core.VersionedEnvelope`, the carrier for every provider-specific payload that crosses a domain or persistence boundary (see "Fulfillment" below). `arkhai-core` ships it with only pydantic, so the fulfillment kit, the compute contracts, and the domains all take it from there.
 
-One edge does not match this hierarchy: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. The exception is tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added while it stands.
+One edge does not match this order: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. Under the scope rule the pool authority — provider, playbook, and host routing — is compute-family knowledge, so the edge is also a kit depending on something family-specific. It is listed under "Where the current tree diverges" and tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added while it stands.
 
 The settlement-runtime distribution is
 `arkhai-kit-settlement-runtime`, imported as

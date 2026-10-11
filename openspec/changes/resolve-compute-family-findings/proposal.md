@@ -82,6 +82,20 @@ Placement and test reliability:
 - Bare metal's listing recheck and publication read each site's projection live,
   where VM reads the projections its storefront holds; API credits'
   `credit_quota_guard` could move onto the kit's listing-source verdict.
+- The provisioning service's `db/database.py` and `db/migrations.py` import
+  `vm_provisioning_adapter.db` (`AnsiblePoolConfig`, `Base`) and
+  `vm_provisioning_adapter.legacy_backfill`. VM table metadata and the legacy VM
+  lease backfill are adapter-bundle contributions the composition root should
+  receive from the bundle, as it receives executors and routers, rather than
+  modules the service names; the service's boundary-test allowlist then shrinks to
+  `runtime` and `routers`. The service's scope legitimately contains both compute
+  domains, so no architecture check reports this; it is a wiring judgement under
+  `ARCHITECTURE.md`'s "wiring" placement test.
+- `kit/policy`'s `market-policy` console script (`market_policy/cli.py`) is the RL
+  train/eval/export lifecycle and shells out to `domains/vms/training/`. It is VM
+  tooling in a foundation kit, found by the 2026-10-04 architecture review. Move the
+  entry point to `domains/vms/negotiation`, which owns the RL strategies, or to the
+  training project.
 
 State: **proposed; design not started.** Design decides, per item, fix or record
 as accepted.

@@ -9,6 +9,43 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
 - `MechanismRegistration` shrinks to publication, readiness and buyer compatibility. `client_factory`, `accepted_obligation_builder` and `settlement_verifier` leave it. Each registration declares a typed resource model, replacing the untyped `resources: Mapping[str, Any]` bag.
 - The legacy path for negotiations without a `SettlementOption` is deleted. Every accepted deal has an Agreement.
 - Rename the kit/site quota ledger's `escrow_uid` correlation API/persistence coordinate to a neutral name with its owning ledger and all consumers changed together. Credits issuance currently supplies its negotiation-derived fulfillment ID there, not an escrow or grant alias; domain-local renaming must not create another compatibility projection. This includes shared capacity `deal_ref` consumers, not just the credits service.
+- Escrow-shaped code leaves the foundation kits and the buyer core, so that no kit
+  other than Alkahest's holds Alkahest in its scope (`ARCHITECTURE.md`, "Where the
+  current tree diverges"):
+  - `kit/policy/scalar_policies.py` splits. The scalar-amount half — bisection,
+    listed price, counter guards, wire-amount parsing, `selected_settlement_artifact`
+    — is mechanism-neutral (Arkhai payments uses it; contact exchange declines it)
+    and stays in `kit/policy`. The escrow-kind half — `proposal_escrow_kind`, whose
+    function-local `market_alkahest.address_to_slot` import is `kit/policy`'s only
+    upward edge, `_escrow_kind_lookup_keys`, `_normalize_demands_for_chain`,
+    `_normalize_selected_demand`, `_accepted_escrow_for_proposal`,
+    `make_escrow_kind_dispatch_middleware`, and the verbatim-extraction compatibility
+    shim — moves to `market_alkahest.policies`.
+  - `core_buyer.negotiation_client` builds its chain with
+    `make_escrow_kind_dispatch_middleware(policies_by_kind, chain_config_paths=…)`:
+    the buyer core dispatches policy by Alkahest escrow kind and threads chain
+    configuration paths to do it. Per-kind dispatch is one case of dispatch by the
+    selected settlement option, which the shrunken `MechanismRegistration` carries:
+    `kit/policy` owns a registration-keyed dispatch middleware, the Alkahest
+    registration contributes the kind resolver, and `core_buyer` composes from
+    installed registrations without knowing chains.
+  - `kit/alkahest/aggregation.py`'s `resolve_best_price_timeout` imports
+    `market_config` function-locally to read `[aggregation].best_price_timeout` from
+    the user's configuration — the kit's only upward edge, with one consumer,
+    `arkhai_vms_buyer/aggregation.py`. The buyer resolves the timeout and passes it;
+    the kit stops reading configuration.
+  - `core_storefront`'s `refund.py`, `token_transfer.py`, and `escrow_identity.py`
+    are Alkahest and EVM helpers in the storefront role package, the first two
+    importing `market_alkahest.schemas` and `web3` without declaring them. They move
+    to `kit/alkahest`, in coordination with
+    `kit-owned-storefront-auth-and-persistence`, which decides what remains of
+    `core_storefront`.
+  - The Alkahest client factory, `kit/storefront/alkahest_clients.py`, and the
+    `build_alkahest_clients` callback on `core_storefront.app_lifecycle`, become
+    the Alkahest registration's typed resource model; see
+    `kit-owned-storefront-shell`'s design for which change lands the lifespan step.
+  - `market_core.schemas`'s Alkahest-named escrow fields leave with
+    `SettlementObligation`'s, which the first bullet above already moves.
 
 ## Capabilities
 

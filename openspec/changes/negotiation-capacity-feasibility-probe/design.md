@@ -129,6 +129,27 @@ lose the early check and fail at acceptance as they do today.
   into a shape recommender, which needs `capacity-shape-envelope`'s range query and a
   negotiation vocabulary for suggestions. Deferrable and better decided once shape
   counter-offers exist.
+- **The VM storefront's dependency on the site authority package.** *Gates the
+  "admissibility is evaluated first" step.* `domains/vms/storefront` declares
+  `arkhai-kit-site` and imports `market_site.dict_resource_satisfies_claim` in two
+  places: `services/shape_feasibility.py` (the local feasibility check this change
+  replaces with the probe) and `services/capacity_client.py` (the
+  `AggregateCapacityClient` site-ranking matcher). `kit/site` is the server-side
+  authority — FastAPI router, SQLAlchemy ledger, YAML definitions — and a storefront
+  installing it for one predicate is the enforcement-level matcher leaking into the
+  storefront, which `ARCHITECTURE.md`'s "Layered placement ownership" says must
+  *not* be shared: the ranking matcher is "deliberately a coarse, best-effort hint,
+  not shared code with the enforcement-level predicates". The edge passes the layer
+  and scope rules, so no check will ever report it; this change is where it is
+  decided. Suggested resolution: state as an outcome that the VM storefront drops
+  `arkhai-kit-site`. `shape_feasibility.py`'s use goes with the probe;
+  `capacity_client.py`'s ranking uses a storefront-local coarse matcher, or the
+  admissibility capability `capacity-shape-envelope` adds, accepting the divergence
+  the document licenses — and stating the matcher's contract where it lives: it
+  ranks sites by a hint and never decides admission, so a false positive costs one
+  fall-through and a false negative costs one site skipped for one request. If one shared predicate is wanted after all, it moves to a
+  pydantic-only home (`kit/capability-shape` or `kit/resource-pools-contracts`) and
+  is never imported from `kit/site`.
 
 ## Placement
 
