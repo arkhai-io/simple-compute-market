@@ -149,7 +149,9 @@ Drift from the earlier plan:
   supplies those pools' SLA and region. The other imports' pool identifiers
   match no projected pool and look vestigial; planning confirms each.
 - **Dead models and adapters.** Once import retires, models and adapter code
-  that only the importers use may have no caller left (open decision D6).
+  that only the importers use have no caller left, and two models describing
+  the retired physical model already had none (decided: "Code describing the
+  retired inventory leaves with it").
 - **Local-table wording elsewhere.** "A site whose projection is not held holds
   its listings" and `ARCHITECTURE.md`'s "Storefront capacity boundary" still
   contrast projection derivation with local tables. The statements stay true
@@ -428,6 +430,49 @@ Operator guidance says to run any CSV pricing migration on the current version
 before upgrading if its output is wanted as a reference for re-entering
 values through `pool-override set`.
 
+### Code describing the retired inventory leaves with it
+
+Code whose only callers this change removes is deleted here, and so is code
+that already had no caller but describes the physical model this change
+retires.
+
+Dead as a direct result of this change:
+
+- The storage half of the resource adapters in
+  `arkhai_vms_listings/resources.py`: `to_domain_resource()` (including its
+  `host_row` join) and `from_domain_resource()` on both adapters, the matching
+  `ResourceAdapter` protocol methods, and `adapt_db_resource_to_domain_resource()`
+  and `adapt_domain_resource_to_db_resource()`. The wire half —
+  `from_dict()`/`to_dict()`, the adapter registry, and
+  `parse_resource_from_dict()`, used by `listing_service.py` — stays, and
+  `_COMPUTE_HOST_CONTEXT_FIELDS` stays only if the wire half still reads it.
+- `[escrow_templates]` configuration, whose only consumer was the CSV
+  `accepted_escrows` DSL: `ESCROW_TEMPLATES`, `_build_escrow_templates`, and
+  `_coerce_templates_table` in the VM storefront's `utils/config.py`, and
+  `EscrowTemplate`, `RateSlot`, and `escrow_templates_from_config` in
+  `kit/config`. No packaged configuration, chart, or document sets the table.
+- `build_storefront_publication_clause_compiler()` in
+  `settlement_composition.py`, called only by import and startup seeding.
+
+Already without a caller, and describing the retired model:
+
+- `Host` in `arkhai_vms_listings/models.py`, the schema of the retired `hosts`
+  table, whose docstring calls it the source of truth for host hardware —
+  false under "Storefront holds no physical-resource authority".
+- `ComputeResourcePortfolio`, a local-portfolio capacity check.
+- `get_supported_resource_types()`.
+
+Alternatives:
+
+- *Delete only what this change makes dead.* Rejected: `Host`'s docstring would
+  contradict the new requirement, and the other two describe the same retired
+  model.
+- *Keep `[escrow_templates]` in `kit/config` for reuse.* Rejected: a
+  configuration surface with no consumer and no planned one.
+
+Consequence: `kit/config`, a repository-wide kit, loses code no other package
+imports; no consumer changes.
+
 ### Local diagnostics and cleanup retire with the cutover
 
 The design review of `remove-dead-storefront-physical-surfaces` transferred
@@ -553,9 +598,5 @@ retirement. Each self-hosting operator still selects their deployment time
 after preparing site inventory and commercial overrides; there is no
 fleet-wide rollout signal to wait for.
 
-Open decisions raised by the 2026-10-08 re-grounding (D1–D5 are decided
-above). Each gates the tasks named; no task prescribes an answer until the
-decision is recorded above.
-
-- **D6 — code left without a caller.** Whether models and adapter code that
-  only the importers use retire here. Gates task 4.5.
+The decisions raised by the 2026-10-08 re-grounding (D1–D6) are all recorded
+above.

@@ -29,10 +29,9 @@ resolved in `design.md` as "Status reports no resource count":
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-Task 4.5 is gated on the open decision D6 in `design.md`'s Open Questions; it
-is amended when that decision is recorded. D2 is decided and folded into task
-4.3, D3 into task 5.7, D4 into tasks 3.4 and 3.8, and D5 into tasks 4.4, 4.6,
-6.1, and 6.2.
+The re-grounding decisions are folded in: D2 into task 4.3, D3 into task 5.7,
+D4 into tasks 3.4 and 3.8, D5 into tasks 4.4, 4.6, 6.1, and 6.2, and D6 into
+task 4.5a.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -213,6 +212,22 @@ provisioning can trust two principals leaves it with no listing source.
       `remove-dead-storefront-physical-surfaces` landed first, the remaining
       callers are `release_reservations`' local loop, `SystemService`'s count
       and seeding, the validator, and the importers; task 1.7 re-checks this.
+- [ ] 4.5a Delete the code describing the retired inventory (`design.md`,
+      "Code describing the retired inventory leaves with it"): in
+      `domains/vms/listings/src/arkhai_vms_listings/`, the adapters' storage
+      half in `resources.py`, `get_supported_resource_types()`, `Host` and
+      `ComputeResourcePortfolio` in `models.py`, and their exports in
+      `__init__.py`; in `domains/vms/storefront/src/market_storefront/`,
+      `ESCROW_TEMPLATES`, `_build_escrow_templates`, and
+      `_coerce_templates_table` in `utils/config.py`, and
+      `build_storefront_publication_clause_compiler()` in
+      `settlement_composition.py`; in `kit/config/src/market_config/config_loader.py`,
+      `EscrowTemplate`, `RateSlot`, and `escrow_templates_from_config` with
+      their cases in `kit/config/tests/unit/test_config_loader.py`. Retire the
+      storage round-trip cases in `tests/unit/test_resources.py` and the
+      adapter-join cases in `tests/unit/test_hosts.py`, keeping the wire-format
+      cases. Run `kit/config`'s suite and confirm no other package imported
+      the removed names.
 - [ ] 4.6 ~~Document that rollback past this section is a code rollback.~~
       Amended 2026-10-11 (`design.md`, "Upgrades are fail-forward"): document
       in `docs/development/DEPLOYMENT_AND_CONFIG.md` that the upgrade is
@@ -428,6 +443,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state" |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the retired migrations leave the chain rather than being gated or emptied, and why `20260604_003` and the core timestamp migration stay | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
+| Code describing the retired inventory, including the `Host` model and `[escrow_templates]` configuration, is deleted rather than left without a caller | This change's `design.md`, "Code describing the retired inventory leaves with it"; nothing permanent to promote once the code is gone |
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
 | `kit/pool-overrides` defines exactly the contract's four override states; its projection source is never `None` | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier"; companion `architecture.md` — "Storefront pool overrides"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Storefront listing shapes and pool overrides" |
 | Why the kit drops `inactive` rather than tolerating `None` | This change's `design.md`, "The pool-override kit loses `inactive`" |

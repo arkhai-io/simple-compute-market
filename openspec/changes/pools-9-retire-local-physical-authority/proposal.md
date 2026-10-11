@@ -192,6 +192,11 @@ None.
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - Deployment: Helm, compose, both seller TOMLs, the storefront and Helm
   Makefiles, and the seller quickstart lose the CSV contract.
+- `kit/config` loses `[escrow_templates]` support (`EscrowTemplate`,
+  `RateSlot`, `escrow_templates_from_config`), whose only consumer was the CSV
+  `accepted_escrows` DSL; the VM listings package loses the `Host` and
+  `ComputeResourcePortfolio` models and the resource adapters' storage half
+  (`design.md`, "Code describing the retired inventory leaves with it").
 - `kit/pool-overrides` loses the `inactive` state: `OVERRIDE_INACTIVE` is
   deleted and its projection source is never `None` (`design.md`, "The
   pool-override kit loses `inactive`").
