@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Collection, Mapping
@@ -31,7 +32,12 @@ from core_storefront.sqlite_migrations import MigrationLike
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
 )
-from market_core import MarketDomainContract, validate_domain_contract
+from market_core import (
+    MarketDomainContract,
+    SettlementEvidence,
+    validate_domain_contract,
+)
+from market_core.schemas import Agreement
 from market_identity import Identity
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
@@ -39,6 +45,7 @@ from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
+from .settlement_evidence import EvidencePayload
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -76,6 +83,19 @@ class SQLiteClient(CoreSQLiteClient):
             local_listing_principal=local_listing_principal,
             expected_legacy_sellers=expected_legacy_sellers,
         )
+        required_columns = {
+            "bare_metal_settlement_records": "evidence_json",
+            "bare_metal_fulfillment_lifecycle": "settlement_ref",
+        }
+        with sqlite3.connect(self.db_path) as conn:
+            for table, required_column in required_columns.items():
+                columns = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                if required_column not in columns:
+                    raise RuntimeError(
+                        f"{table} schema requires an explicit database reset"
+                    )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
         return (
@@ -513,61 +533,11 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str,
-        site_id: str,
-        physical_resource_id: str,
-    ) -> dict[str, Any]:
-        def _save() -> dict[str, Any]:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            try:
-                with conn:
-                    conn.execute(
-                        """
-                        INSERT OR IGNORE INTO bare_metal_fulfillment_lifecycle(
-                          negotiation_id, escrow_uid, site_id,
-                          physical_resource_id, state
-                        ) VALUES (?, ?, ?, ?, 'planning')
-                        """,
-                        (
-                            negotiation_id,
-                            escrow_uid,
-                            site_id,
-                            physical_resource_id,
-                        ),
-                    )
-                row = conn.execute(
-                    "SELECT * FROM bare_metal_fulfillment_lifecycle "
-                    "WHERE negotiation_id = ?",
-                    (negotiation_id,),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError("bare-metal fulfillment lifecycle is missing")
-                result = dict(row)
-                expected = {
-                    "escrow_uid": escrow_uid,
-                    "site_id": site_id,
-                    "physical_resource_id": physical_resource_id,
-                }
-                if any(result[key] != value for key, value in expected.items()):
-                    raise RuntimeError(
-                        "bare-metal fulfillment lifecycle identity conflict"
-                    )
-                return result
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_save)
-
-    async def start_bare_metal_payment_lifecycle(
-        self,
-        *,
-        negotiation_id: str,
-        escrow_uid: str,
+        settlement_ref: str,
         site_id: str,
         physical_resource_id: str,
     ) -> dict[str, Any] | None:
-        """Start a payment deal's delivery only while its settlement is verified.
+        """Start a deal's delivery only while its settlement evidence is verified.
 
         The lifecycle row is the delivery-start marker: it is inserted in the same
         transaction that checks the settlement record, so refund intent recorded
@@ -587,18 +557,22 @@ class SQLiteClient(CoreSQLiteClient):
                     ).fetchone()
                     if row is None:
                         record = conn.execute(
-                            "SELECT status FROM bare_metal_settlement_records "
+                            "SELECT status, settlement_ref FROM bare_metal_settlement_records "
                             "WHERE negotiation_id = ?",
                             (negotiation_id,),
                         ).fetchone()
                         if record is None or record["status"] != "settlement_verified":
                             conn.execute("ROLLBACK")
                             return None
+                        if record["settlement_ref"] != settlement_ref:
+                            raise RuntimeError(
+                                "bare-metal fulfillment lifecycle identity conflict"
+                            )
                         conn.execute(
                             "INSERT INTO bare_metal_fulfillment_lifecycle("
-                            "negotiation_id, escrow_uid, site_id, physical_resource_id, state"
+                            "negotiation_id, settlement_ref, site_id, physical_resource_id, state"
                             ") VALUES (?, ?, ?, ?, 'planning')",
-                            (negotiation_id, escrow_uid, site_id, physical_resource_id),
+                            (negotiation_id, settlement_ref, site_id, physical_resource_id),
                         )
                         row = conn.execute(
                             "SELECT * FROM bare_metal_fulfillment_lifecycle "
@@ -607,11 +581,12 @@ class SQLiteClient(CoreSQLiteClient):
                         ).fetchone()
                     conn.execute("COMMIT")
                 except BaseException:
-                    conn.execute("ROLLBACK")
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
                     raise
                 result = dict(row)
                 expected = {
-                    "escrow_uid": escrow_uid,
+                    "settlement_ref": settlement_ref,
                     "site_id": site_id,
                     "physical_resource_id": physical_resource_id,
                 }
@@ -626,7 +601,7 @@ class SQLiteClient(CoreSQLiteClient):
     async def record_bare_metal_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
         """Record refund intent before reversing; report whether delivery had started.
 
-        Serialized against ``start_bare_metal_payment_lifecycle``: whichever
+        Serialized against ``ensure_bare_metal_fulfillment_lifecycle``: whichever
         commits first decides whether delivery precedes the refund.
         """
 
@@ -780,10 +755,10 @@ class SQLiteClient(CoreSQLiteClient):
     @staticmethod
     def _decode_bare_metal_settlement_record(row: sqlite3.Row) -> dict[str, Any]:
         record = dict(row)
-        receipt_json = record.pop("receipt_json")
-        record["receipt"] = (
-            json.loads(receipt_json) if receipt_json is not None else None
-        )
+        payload = EvidencePayload.model_validate_json(record.pop("evidence_json"))
+        if payload.agreement_sha256 != record["agreement_sha256"]:
+            raise RuntimeError("settlement evidence changed its Agreement binding")
+        record["evidence"] = payload.model_dump(mode="json")
         return record
 
     async def load_bare_metal_settlement_record(
@@ -812,6 +787,7 @@ class SQLiteClient(CoreSQLiteClient):
     ) -> dict[str, Any] | None:
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
             try:
                 row = conn.execute(
                     "SELECT * FROM bare_metal_settlement_records WHERE settlement_ref = ?",
@@ -827,14 +803,24 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
-    async def record_bare_metal_payment_acceptance(
-        self, *, negotiation_id: str, mechanism: str, agreement_sha256: str
+    async def record_bare_metal_settlement_acceptance(
+        self, *, negotiation_id: str, agreement_bytes: bytes
     ) -> None:
-        """Record an accepted payment deal's settlement identity, once.
+        """Record an accepted deal's settlement identity and unverified evidence, once.
 
-        Settlement and refund read this record; a second acceptance naming a
+        Every accepted Agreement gets one record, whatever its mechanism:
+        settlement, recovery and refund read it. A second acceptance naming a
         different mechanism or Agreement is a conflict, not an update.
         """
+
+        agreement = Agreement.model_validate_json(agreement_bytes)
+        if agreement.settlement is None:
+            raise ValueError("accepted Agreement has no selected settlement")
+        mechanism = agreement.settlement.mechanism
+        agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
+        evidence_json = EvidencePayload(
+            agreement_sha256=agreement_sha256
+        ).model_dump_json()
 
         def _record() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -842,9 +828,9 @@ class SQLiteClient(CoreSQLiteClient):
                 with conn:
                     conn.execute(
                         "INSERT OR IGNORE INTO bare_metal_settlement_records("
-                        "negotiation_id, mechanism, agreement_sha256, status) "
-                        "VALUES (?, ?, ?, 'accepted')",
-                        (negotiation_id, mechanism, agreement_sha256),
+                        "negotiation_id, mechanism, agreement_sha256, status, "
+                        "evidence_json) VALUES (?, ?, ?, 'accepted', ?)",
+                        (negotiation_id, mechanism, agreement_sha256, evidence_json),
                     )
                     stored = conn.execute(
                         "SELECT mechanism, agreement_sha256 "
@@ -852,7 +838,9 @@ class SQLiteClient(CoreSQLiteClient):
                         (negotiation_id,),
                     ).fetchone()
                 if stored != (mechanism, agreement_sha256):
-                    raise RuntimeError("accepted settlement record conflicts with Agreement")
+                    raise RuntimeError(
+                        "accepted settlement record conflicts with Agreement"
+                    )
             finally:
                 conn.close()
 
@@ -864,7 +852,10 @@ class SQLiteClient(CoreSQLiteClient):
         negotiation_id: str,
         settlement_ref: str,
     ) -> dict[str, Any]:
-        """Record a seller refund; terminal, so delivery can no longer begin."""
+        """Record a seller refund; terminal, so delivery can no longer begin.
+
+        Only the status moves: the verified evidence the refund reversed is kept.
+        """
 
         def _save() -> dict[str, Any]:
             conn = sqlite3.connect(self.db_path)
@@ -894,65 +885,80 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_save)
 
-    async def mark_bare_metal_settlement_verified(
-        self,
-        *,
-        negotiation_id: str,
-        settlement_ref: str,
-        mechanism: str,
-        agreement_sha256: str,
-        receipt: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        receipt_json = json.dumps(
-            dict(receipt),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-            allow_nan=False,
-        )
+    async def save_bare_metal_settlement_evidence(
+        self, evidence: SettlementEvidence
+    ) -> None:
+        payload = EvidencePayload.model_validate(dict(evidence.evidence))
+        if evidence.status == "settlement_verified" and not evidence.settlement_ref:
+            raise ValueError("verified settlement requires a reference")
+        if evidence.status in ("refunding", "refunded"):
+            raise ValueError("refund status moves only through the refund transitions")
+        encoded = payload.model_dump_json()
 
-        def _save() -> dict[str, Any]:
+        def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
-                with conn:
-                    conn.execute(
-                        "UPDATE bare_metal_settlement_records SET settlement_ref = ?, "
-                        "status = 'settlement_verified', receipt_json = ?, "
-                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                        "WHERE negotiation_id = ? AND mechanism = ? "
-                        "AND agreement_sha256 = ? "
-                        "AND status IN ('accepted', 'settlement_verified')",
-                        (
-                            settlement_ref,
-                            receipt_json,
-                            negotiation_id,
-                            mechanism,
-                            agreement_sha256,
-                        ),
-                    )
+                conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
-                    (negotiation_id,),
+                    (evidence.negotiation_id,),
                 ).fetchone()
                 if row is None:
                     raise RuntimeError("accepted settlement record is missing")
-                record = self._decode_bare_metal_settlement_record(row)
+                stored = self._decode_bare_metal_settlement_record(row)
                 if (
-                    record["mechanism"] != mechanism
-                    or record["agreement_sha256"] != agreement_sha256
-                    or record["settlement_ref"] != settlement_ref
-                    or record["status"] != "settlement_verified"
-                    or record["receipt"] != dict(receipt)
+                    stored["mechanism"] != evidence.mechanism
+                    or stored["agreement_sha256"] != payload.agreement_sha256
+                    or (
+                        stored["settlement_ref"] is not None
+                        and stored["settlement_ref"] != evidence.settlement_ref
+                    )
+                    or (
+                        stored["status"] == "settlement_verified"
+                        and (
+                            evidence.status != stored["status"]
+                            or stored["evidence"] != payload.model_dump(mode="json")
+                        )
+                    )
+                    # Refund statuses follow verified evidence; nothing may
+                    # replace evidence a refund already acted on.
+                    or stored["status"] in ("refunding", "refunded")
                 ):
                     raise RuntimeError(
                         "settlement evidence conflicts with accepted state"
                     )
-                return record
+                accepted = conn.execute(
+                    "SELECT agreement_bytes FROM negotiation_threads WHERE negotiation_id = ?",
+                    (evidence.negotiation_id,),
+                ).fetchone()
+                if (
+                    accepted is None
+                    or hashlib.sha256(accepted[0]).hexdigest()
+                    != payload.agreement_sha256
+                ):
+                    raise RuntimeError(
+                        "settlement evidence is bound to another Agreement"
+                    )
+                conn.execute(
+                    "UPDATE bare_metal_settlement_records SET settlement_ref = ?, status = ?, "
+                    "evidence_json = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                    "WHERE negotiation_id = ?",
+                    (
+                        evidence.settlement_ref,
+                        evidence.status,
+                        encoded,
+                        evidence.negotiation_id,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
-        return await asyncio.to_thread(_save)
+        await asyncio.to_thread(_save)
 
 
     async def load_bare_metal_lease_ready_evidence(

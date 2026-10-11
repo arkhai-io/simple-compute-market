@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import market_policy.negotiation_thread as thread_module
 import pytest
+from apicredits_storefront import negotiation_runtime as runtime_module
+from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store
 
@@ -12,7 +15,6 @@ from tests.integration.credit_negotiation import FakeCapacity, seed_listing
 @pytest.fixture
 def fake_capacity(monkeypatch):
     capacity = FakeCapacity()
-    from apicredits_storefront import negotiation_runtime as runtime_module
 
     monkeypatch.setattr(
         runtime_module,
@@ -29,17 +31,12 @@ def key_records(monkeypatch):
     async def _lookup(key_id: str):
         return records.get(key_id)
 
-    from apicredits_storefront import negotiation_runtime as runtime_module
-
     monkeypatch.setattr(runtime_module, "lookup_key_record", _lookup)
     return records
 
 
 @pytest.fixture
 async def db(tmp_path):
-    import market_policy.negotiation_thread as thread_module
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
-
     client = SQLiteClient(db_path=str(tmp_path / "credits-storefront.db"))
     thread_module._thread_store = None
     get_thread_store(

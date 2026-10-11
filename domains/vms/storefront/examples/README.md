@@ -1,7 +1,7 @@
 # VM payments first use
 
 `payment_smoke.py` uses the real buyer approval stage, seller receipt verifier,
-SQLite evidence/progress records, and signed seller HTTP settlement route. The
+SQLite evidence/progress records, the verified-facts VM planner, and signed seller HTTP settlement route. The
 payments HTTP service and VM delivery are controlled in-process. It creates and
 removes its own temporary database; no account credentials or running services
 are needed.
@@ -17,8 +17,11 @@ uv run --project domains/vms/storefront --locked --find-links .dist \
   python domains/vms/storefront/examples/payment_smoke.py
 ```
 
+The delivery double receives only verified settlement evidence; the planner reads
+its accepted VM facts without interpreting the mechanism or loading an escrow.
 The observed sequence is `pending` with zero deliveries before approval,
-`provisioning` after approval, and `ready` with one delivery on retry. This is a
+`provisioning` after approval, and `ready` with one delivery on retry. The final
+SQLite inspection observes zero `escrows` rows. This is a
 local diagnostic, not a live ledger or VM acceptance run. For the real payments
 service setup see [`kit/arkhai-payments/README.md`](../../../../kit/arkhai-payments/README.md#local-first-use).
 
@@ -77,5 +80,7 @@ authenticated `buyer_principal` for payments. It derives the transaction ID from
 the accepted mandate, waits for a matching signed receipt, and then invokes the
 existing selected-site VM fulfillment path. Retried approval uses the same
 mandate; retried settlement resumes the same durable physical request. VM
-progress uses the existing local progress table without a chain, escrow address,
-settlement plan, or settlement obligation.
+progress uses `vm_delivery_records`, keyed by negotiation, independently of
+`vm_settlement_evidence`. Neither record creates an escrow or settlement obligation.
+Existing databases from the payment-record schema require an explicit reset;
+there is no startup adoption or copy migration.

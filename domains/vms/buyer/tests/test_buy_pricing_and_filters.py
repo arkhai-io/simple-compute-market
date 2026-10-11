@@ -13,7 +13,7 @@ from unittest import mock
 import pytest
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
-from identity_helpers import BUYER_SIGNER, seller_principals
+from identity_helpers import BUYER_SIGNER, seller_principals, accepted_alkahest_agreement
 from market_core.schemas import (
     EscrowProposal,
     EscrowTerms,
@@ -468,6 +468,9 @@ def _agree_negotiate_factory(price: int = 100):
             rounds=2,
             reason=None,
             negotiation_id="neg-id",
+            agreement=accepted_alkahest_agreement(
+                "neg-id", "seller-1", price, provision_terms, escrow_proposal,
+            ),
             duration_seconds=(
                 provision_terms.duration_seconds
                 if provision_terms is not None

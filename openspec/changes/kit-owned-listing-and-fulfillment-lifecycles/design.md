@@ -31,10 +31,32 @@ Design phase; not planned.
   `bare-metal-mock-provisioned-deal` (2026-10-07)" below proposes them here, as the step
   this change's convergence starts from; a split would put them in a sibling change this
   one depends on.
+- **The listing-lifecycle module's position among the kit areas.** It will depend
+  on `kit/capacity-publication`'s binding and `kit/settlement-runtime`. Whether it
+  is a module of `kit/capacity-publication` or of `kit/storefront` should be
+  decided against `ARCHITECTURE.md`'s kit areas, which place both in the storefront
+  area.
 
 ## Decisions
 
-None yet.
+### Fulfillment convergence is compute-family code
+
+Decided 2026-10-11; `proposal.md` says the same.
+The restart-safe convergence this change extracts — obligation resumption,
+terminal-state driving, executor-result reconciliation, teardown independence —
+exists in the VM and bare-metal storefronts and nowhere else: the API-credits
+storefront has no convergence code and imports neither
+`compute_provisioning_client` nor `compute_provisioning_contracts`. A
+repository-wide kit may know no family, and convergence cannot be written
+without the compute provisioning client, so the extraction target is a module of
+the compute family kit (beside `job_fulfillment.py`, `hosts/`, and `jobs/`),
+depending on `arkhai-compute-provisioning-client` and never on the family kit's
+persistence. The alternative — a family-neutral convergence mechanism over
+injected ports — was considered and set aside: there is no third consumer to
+make the ports' shape honest, and the first draft of this note assumed the reuse
+boundary it should have proved. The *listing* lifecycle half of this change is
+unaffected: close, pause, reopen, and successor carry-over are schema-opaque and
+stay in `kit/capacity-publication`.
 
 ## Input from `bare-metal-mock-provisioned-deal` (2026-10-07)
 

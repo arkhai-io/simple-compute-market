@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import tempfile
 import time
 import uuid
@@ -43,6 +44,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 PAYER = "00000000-0000-4000-8000-000000000011"
@@ -65,13 +67,16 @@ async def main():
     )
 
     async def deliver(*, context):
+        plan = build_vm_fulfillment_plan(evidence=context.settlement_evidence)
+        assert plan.provision_terms.ssh_public_key
+        assert plan.order_id == context.thread_binding.listing_id
         deliveries.append(context.negotiation_id)
-        await context.ports.repository.update_escrow(
-            escrow_uid=context.escrow_uid, fulfillment_id="vm-demo"
+        await context.ports.repository.update_vm_delivery(
+            negotiation_id=context.negotiation_id, fulfillment_id="vm-demo"
         )
         return {
             "negotiation_id": context.negotiation_id,
-            "escrow_uid": context.escrow_uid,
+            "settlement_ref": context.settlement_ref,
             "site_id": context.site_id,
             "state": "fulfilled",
             "fulfillment_id": "vm-demo",
@@ -139,6 +144,7 @@ async def main():
             created_at=now,
             updated_at=now,
             listing_resource={
+                "pool_id": "pool-demo",
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "offering_mode": "vm",
@@ -184,6 +190,7 @@ async def main():
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(
             payments_coordinator=coordinator,
+            seller_stages=domain.settlement.seller_stages,
             local_principal=seller.identity,
             arkhai_payments_stage=stage,
         )
@@ -239,6 +246,11 @@ async def main():
             print("after approval:", (await settle())["status"])
             await coordinator.tasks["payment-demo"]
             print("retry:", (await settle())["status"], "deliveries:", len(deliveries))
+            with sqlite3.connect(db.db_path) as sql:
+                escrow_count = sql.execute("SELECT COUNT(*) FROM escrows").fetchone()[0]
+                print("payment escrow rows:", escrow_count)
+                assert escrow_count == 0
+            assert deliveries == ["payment-demo"]
         await coordinator.stop()
         container.clear_lifespan_state(registry=registry)
 

@@ -73,6 +73,38 @@ Design phase; not planned.
 - **Loop registration.** Whether a domain keeps registering its loops with the kit
   loop controller, or the kit runtimes register their own loops and the domain
   supplies only timings.
+- **A mechanism-named seam on the neutral lifespan.** *Gates the executable-assembly
+  step.* `core_storefront.app_lifecycle.StorefrontLifecycleCallbacks` has a
+  `build_alkahest_clients` field, and every storefront root fills it by reading its
+  own `[Settlement].alkahest` section and wallet configuration and calling
+  `market_storefront_kit.build_alkahest_clients`
+  (`vms/storefront/server.py`, `apicredits/storefront/server.py`,
+  `bare_metal/storefront/runtime.py`). That factory, `kit/storefront/alkahest_clients.py`,
+  is why `kit/storefront` declares `arkhai-kit-alkahest` and `alkahest-py`, which the
+  kit-areas text forbids and `ARCHITECTURE.md` records as a divergence: a kit that is
+  not the Alkahest kit holds Alkahest in its scope. Arkhai payments and contact
+  exchange have no such slot; they are composed through `MechanismRegistration` and
+  each storefront's `settlement_composition.py`. Suggested resolution:
+  `move-escrow-into-alkahest` gives each registration "a typed resource model,
+  replacing the untyped `resources` bag", and that model is the slot. The lifespan
+  builds each enabled registration's resources in configured mechanism order and
+  the container holds them under the mechanism ID; `alkahest_clients.py` moves to
+  `market_alkahest.clients` and the Alkahest registration's resource model is its
+  chain-client map. `kit/storefront` then drops both dependencies, the three
+  duplicated prologues collapse into one Alkahest-owned function, and the kit-areas
+  sentence becomes true as written. Decide whether the lifespan step lands here or
+  in `move-escrow-into-alkahest`, which owns the registration's shape; this change
+  must not design a second resource mechanism. If the edge is kept, the kit-areas
+  item for `kit/storefront` is amended to say "foundation capabilities and mechanism
+  kits" so the document and the code agree.
+- **The VM storefront's import name and stale dependencies.** The VM storefront's
+  package is `market_storefront`, the only domain package with a market-neutral
+  name, beside the shell's own `market_storefront_kit`. When the VM storefront
+  becomes a contribution plus an entry point, rename it `arkhai_vms_storefront` to
+  match its siblings. Its `pyproject.toml` declares `arkhai-bare-metal` and
+  `arkhai-bare-metal-storefront` with no source import of either; drop both in the
+  same step. Both are rows in `enforce-package-layers`'s exceptions table owned by
+  this change.
 
 ## Decisions
 

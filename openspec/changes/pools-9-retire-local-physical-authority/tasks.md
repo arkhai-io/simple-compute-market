@@ -29,9 +29,9 @@ resolved in `design.md` as "Status reports no resource count":
    (decided 2026-10-08; `design.md`, "The zero-caller removal lands first").
    Its surfaces read the tables this change stops creating.
 
-The re-grounding decisions are folded in: D2 into task 4.3, D3 into task 5.7,
+The re-grounding decisions are folded in: D2 into task 4.3, D3 into task 5.8,
 D4 into tasks 3.4 and 3.8, D5 into tasks 4.4, 4.6, 6.1, and 6.2, D6 into
-task 4.5a, and D7 into task 5.8.
+task 4.5a, and D7 into task 5.9.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,
@@ -81,13 +81,13 @@ path, with its own routes, clients, CLI, and precedence contract.
 
 ## 2. Retire `compute_allocations`
 
-Owned by [`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/tasks.md),
-tasks 2.1–2.5 under the same numbers. That change lands before this one.
+Delivered by [`remove-dead-storefront-physical-surfaces`](../archive/2026-10-08-remove-dead-storefront-physical-surfaces/tasks.md)
+(archived 2026-10-08), tasks 2.1–2.6 under the same numbers.
 
 ## 3. Remove dead physical surfaces
 
-Tasks 3.1, 3.2, and 3.5–3.7 belong to the same change under the same
-numbers and land before this change.
+Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change under the same
+numbers.
 Former tasks 3.3 (local-row reservation cleanup) and 3.4 (`resource_count`)
 are transferred here and retire with Section 4's local listing path and
 Section 5's CSV contract. The site-ledger half of `release_reservations`
@@ -311,8 +311,14 @@ provisioning can trust two principals leaves it with no listing source.
       `test_multi_registry.py`'s Alice seeding and removed her local-path opt-out.
       Preserve that completed work and migrate the remaining CSV consumers
       identified by re-grounding, including Bob's local import where it remains.
+- [ ] 5.7 Once 5.2 removes the import route, add an in-process application test
+      that the storefront mounts no route under `/api/v1/admin/portfolio/resources`.
+      It is the route-level evidence for "Storefront holds no physical-resource
+      authority". `remove-dead-storefront-physical-surfaces` deferred this guard
+      here: while the import route remains, only a test of the specific paths it
+      removed was possible, and that would record history rather than a contract.
 
-- [ ] 5.7 Retire the CSV pricing migration (`design.md`, "The CSV pricing
+- [ ] 5.8 Retire the CSV pricing migration (`design.md`, "The CSV pricing
       migration retires with CSV import"): remove `--inventory` and its
       `--scope` checks from `groups/config.py`, `migrate_publication_csv` and
       any helper only it uses from `publication_migration.py`, and the CSV
@@ -320,7 +326,7 @@ provisioning can trust two principals leaves it with no listing source.
       `migrate_publication_config` and its tests, including
       `tests/unit/cli/test_config.py`'s publication case, passing unchanged.
 
-- [ ] 5.8 Refuse the retired settings where retired settlement settings are
+- [ ] 5.9 Refuse the retired settings where retired settlement settings are
       refused (`design.md`, "Retired configuration keys follow the settlement
       retirement convention"): add `resources_csv_path`,
       `resources_csv_inline`, `escrow_templates`, and
@@ -339,7 +345,7 @@ provisioning can trust two principals leaves it with no listing source.
 - [ ] 6.1 ~~Add the freeze-then-redirect migration.~~ Amended 2026-10-11: no
       new migration is added; the freeze is task 4.4's bootstrap and chain
       removal. `compute_allocations` is already frozen by
-      `remove-dead-storefront-physical-surfaces`, which lands first. No
+      `remove-dead-storefront-physical-surfaces` (archived 2026-10-08). No
       `DROP`.
 - [ ] 6.2 Validate migration behavior as `TESTING.md` requires: fresh
       bootstrap, idempotent rerun, drift detection.
@@ -368,7 +374,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       arrangement that no longer exists, and stale docstrings are what kept
       these surfaces alive past their callers. `release_reservations`' local
       cleanup and its operator description are part of this cutover;
-      `patch_resource` belongs to `remove-dead-storefront-physical-surfaces`.
+      `patch_resource` is already gone, removed by
+      `remove-dead-storefront-physical-surfaces`.
 - [ ] 7.2 **Import placement.** Review imports this change adds or touches;
       relocate function-level imports where no genuine circular import or
       documented lazy-load reason applies, verified against the real suite.

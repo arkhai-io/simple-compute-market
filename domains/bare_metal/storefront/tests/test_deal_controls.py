@@ -123,27 +123,42 @@ async def test_evaluate_previews_the_reservation_settlement_would_make(tmp_path)
 
 
 async def test_wait_returns_once_the_settled_lease_is_active(tmp_path) -> None:
-    runtime, negotiation_id, _capacity = await _runtime(tmp_path)
+    class Provisioning(_ProvisioningClient):
+        state = "dispatching"
+
+        async def get_fulfillment_status(self, fulfillment_id, **request):
+            status = await super().get_fulfillment_status(fulfillment_id, **request)
+            status.state = self.state
+            return status
+
+    provisioning = Provisioning()
+    runtime, negotiation_id, capacity = await _runtime(
+        tmp_path, provisioning=provisioning
+    )
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_pause_lifecycle_loops()
             before = await admin.wait_for_settlement(ESCROW_UID, timeout=0.1)
             async with _buyer(app) as buyer:
                 await buyer.settle_evm(
                     ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
                 )
-            # Settlement stepped the worker, which began the fulfillment; the
-            # status read records it active.
-            await runtime.fulfillment_service().status(
-                negotiation_id=negotiation_id,
-                buyer_principal=(await runtime.settlement_runtime.get_status(
-                    negotiation_id
-                )).obligations[1].payer_principal,
-            )
+            pending = await admin.wait_for_settlement(ESCROW_UID, timeout=0.1)
+            provisioning.state = "active"
             after = await admin.wait_for_settlement(ESCROW_UID, timeout=1.0)
+            observed = await runtime.db.load_bare_metal_fulfillment_lifecycle(
+                negotiation_id=negotiation_id
+            )
+            assert observed["state"] == "active"
+            assert not observed.get("lease_ready_evidence_digest")
+            serviced = await admin.admin_run_lifecycle_cycle("settlement-servicing")
 
     assert before.ready is False
+    assert pending.ready is False and pending.status == "settlement_verified"
     assert after.ready is True and after.status == "ready"
+    assert serviced["processed"] == 1
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
 
 
 async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
@@ -185,3 +200,27 @@ async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> 
     assert forged.value.status_code == 403
     assert unknown.value.status_code == 404
     assert other_site.value.status_code == 403
+
+
+async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(
+    tmp_path,
+) -> None:
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path)
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_SIGNER, "service") as site:
+            with pytest.raises(StorefrontClientError):
+                await site.notify_capacity_released("reservation-x", site_id="site-a")
+            await site.notify_capacity_released("reservation-a", site_id="site-a")
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            events = await admin.get_events(stage="fulfillment")
+
+    released = [event for event in events.events if event.event == "capacity_released"]
+    assert len(released) == 1, events.events
+    assert released[0].data["capacity_reservation_id"] == "reservation-a"
+    assert released[0].data["negotiation_id"] == negotiation_id
+    assert released[0].data["site_id"] == "site-a"

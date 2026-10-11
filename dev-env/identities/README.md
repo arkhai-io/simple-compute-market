@@ -5,10 +5,9 @@ value**. None of it is secret, none of it was ever secret, and none of it may
 ever be used on a public network or against a real chain, registry, or
 settlement authority.
 
-The directory exists because `docker-compose.yml`, `compose.vms.yml`, and
-`domains/apicredits/compose.yml` guard their signer and wallet mounts with
-`${VAR:?...}`, so `docker compose up` refuses to start until each one is
-supplied. Committing the development values is what lets anyone — a
+The directory exists because the compose files guard their signer and wallet
+mounts with `${VAR:?...}`, so `docker compose up` refuses to start until each
+one is supplied. Committing the development values is what lets anyone — a
 contributor, a fork, or a CI job with no repository secrets — run
 `make -C e2e-tests test-e2e`.
 
@@ -29,11 +28,16 @@ is consumed as shell-format key/value pairs, it carries the statement inline.
 
 ## What this directory has to satisfy
 
-`docker compose up` resolves `include:` transitively, so the required variables
-come from five files, not from the root `docker-compose.yml` alone:
-`docker-compose.yml`, `compose.vms.yml`, `compose.dev.yml`,
-`domains/vms/compose.yml`, and `domains/apicredits/compose.yml`. `make e2e-dev-identities-env` supplies all required variables, including
-the identity overlay bindings.
+`docker compose up` resolves `include:` transitively and merges every `-f`
+overlay, so each stack's required variables come from all of its files. Each
+stack has its own environment target, which supplies all of them:
+
+| Stack | Files | Values |
+|---|---|---|
+| VM lane | `compose.vms.yml` (with `compose.dev.yml` and `domains/vms/compose.yml`), `compose.vms-local.yml` | `make e2e-vms-dev-env` |
+| API-credit lane | `compose.apicredits.yml` (with `compose.dev.yml` and `domains/apicredits/compose.yml`), `compose.apicredits-local.yml`, `compose.apicredits-lane.yml` | `make e2e-apicredits-dev-env` |
+| Bare-metal lane | `compose.bare-metal.yml`, `compose.dev.yml`, `compose.bare-metal-local.yml` | `make e2e-bare-metal-dev-env` |
+| Full local stack | `docker-compose.yml`, `compose.vms-local.yml`, `compose.apicredits-local.yml` | `make e2e-dev-identities-env` |
 
 Not all are paths. `VMS_REGISTRY_ADMIN_API_KEY` and
 `VMS_REGISTRY_BOOTSTRAP_API_KEY` are bearer tokens for `registry-b`, which runs
@@ -62,7 +66,7 @@ interchangeable:
 | `bob.env` | 2 (`0x3c44cddd…`) | `storefront.bob.toml` |
 | `alice.env` | 4 (`0x15d34aaf…`) | `storefront.alice.toml` |
 | `buyer.eip191` | 1 (`0x70997970…`) | not pinned; the buyer declares its own profile |
-| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | `compose.local-identities.yml` `PROVISIONING_ADMIN_IDENTITY__IDENTIFIER` |
+| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | `compose.vms-local.yml` `PROVISIONING_ADMIN_IDENTITY__IDENTIFIER` |
 | `storefront-bob-admin.eip191` | 6 (`0x976ea740…`) | `storefront.bob.toml` `[Identity.administrators.operator]` |
 | `storefront-alice-admin.eip191` | 7 (`0x14dc7996…`) | `storefront.alice.toml` `[Identity.administrators.operator]` |
 | `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
@@ -85,8 +89,9 @@ registry signs `ed25519` as `_NUDEN…`. The shared name prefix makes them easy 
 conflate, and `create_signer` refuses the wrong scheme outright rather than
 producing a subtly wrong signature.
 
-`bob.storefront.secrets.toml` and `buyer.config.toml` are configuration rather
-than identity, and both carry their own explanation inline.
+`bob.storefront.secrets.toml`, `buyer.config.toml`, and
+`api-credits-buyer.config.toml` are configuration rather than identity, and each
+carries its own explanation inline.
 
 `api-credits-registry.ed25519` is the one value that had to be generated. The
 identity previously pinned in the compose files had no committed private half
@@ -99,9 +104,10 @@ so any reader can reproduce it and confirm no secret is involved:
       ).rstrip(b'=').decode())"
 
 Its public identifier `_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho` is pinned in
-`docker-compose.yml`, `compose.apicredits.yml`, and
-`domains/apicredits/storefront/storefront.credits.toml`. All three must agree or
-the registry fails startup on the identity assertion.
+`compose.apicredits-local.yml`, `domains/apicredits/storefront/storefront.credits.toml`,
+and the buyers' pins (`api-credits-buyer.config.toml` and the e2e settings). The
+registry fails startup unless its credential derives the identifier the overlay
+binds, and the storefront and buyers refuse a registry that answers as another.
 
 ## The API-credits site authority and its gated application
 
@@ -172,6 +178,26 @@ declare their own pools against the provisioning mock profile), and placeholders
 for files the stack requires but the lane never uses — each explaining itself
 inline.
 
+## The API-credit lane
+
+The API-credit end-to-end lane (`make -C e2e-tests test-e2e-apicredits`) is a
+separate stack on its own dev chain. Its credits scenario routes discovery by
+schema across two registries, so the lane runs a compute-schema registry of its
+own, `compute-registry`, declared in `compose.apicredits-lane.yml`, beside the
+API-credit registry. It reuses a committed credential rather than adding one:
+
+| File | Anvil account | API-credit lane role |
+|---|---|---|
+| `registry-a.eip191` | 3 (`0x90f79bf6…`) | `compute-registry`, authority `compute-registry` |
+
+Anvil 3 is also the credits storefront's principal, as it is in the full local
+stack, where VM's `registry` signs with the same key: a registry and a storefront
+authenticate different roles, so sharing a development key does not let either
+stand in for the other. `make e2e-apicredits-dev-env` binds the credential, and
+the lane's settings in `e2e-tests/config/config-docker.yml` pin the same
+identifier. The full local stack has VM's compute registry and never layers
+`compose.apicredits-lane.yml`.
+
 ## Alice's provisioning authority
 
 `provisioning-alice.identity.env` contains a public deterministic Ed25519 seed:
@@ -179,7 +205,7 @@ SHA-256 of the UTF-8 string `arkhai-development-alice-provisioning-v1`, encoded
 as unpadded base64url. It must never be used on a public network. Its public
 identifier is `3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw`.
 
-`compose.local-identities.yml`, Alice's storefront profile, and the Docker test
+`compose.vms-local.yml`, Alice's storefront profile, and the Docker test
 profile pin that identity. Alice's authority trusts Alice's seller principal
 (Anvil 4) and the provisioning administrator (Anvil 5); Bob's authority retains
 its own signer (Anvil 0). The two services have separate databases, process-local job queues,

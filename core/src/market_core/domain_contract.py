@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
+from .settlement import SettlementStageTable
+
 
 class DomainIdentity(str):
     """Stable identifier for a market domain, independent of plugin API version."""
@@ -136,16 +138,16 @@ class ImmutablePublicationCapability:
 
 @runtime_checkable
 class SettlementCapability(Protocol):
-    """Domain settlement verification and plan construction hooks."""
+    """Explicit role support; stage values and their APIs belong to the domain."""
 
-    verify: DomainCallable
-    build_plan: DomainCallable
+    buyer_stages: SettlementStageTable[Any] | None
+    seller_stages: SettlementStageTable[Any] | None
 
 
 @dataclass(frozen=True)
 class ImmutableSettlementCapability:
-    verify: DomainCallable
-    build_plan: DomainCallable
+    buyer_stages: SettlementStageTable[Any] | None = None
+    seller_stages: SettlementStageTable[Any] | None = None
 
 
 @runtime_checkable
@@ -203,7 +205,7 @@ _CAPABILITY_HOOKS: dict[DomainCapability, tuple[str, ...]] = {
     ),
     DomainCapability.STOREFRONT: ("run_negotiation_policy",),
     DomainCapability.PUBLICATION: (),
-    DomainCapability.SETTLEMENT: ("verify", "build_plan"),
+    DomainCapability.SETTLEMENT: (),
     DomainCapability.FULFILLMENT: ("fulfill",),
     DomainCapability.COMPUTE_PROVISIONING: ("provision",),
 }
@@ -284,6 +286,27 @@ def validate_domain_contract(
             for hook in ("source_factory", "publish")
         ):
             missing.append("source_factory or publish")
+        if capability is DomainCapability.SETTLEMENT:
+            tables = tuple(
+                getattr(implementation, name, None)
+                for name in ("buyer_stages", "seller_stages")
+            )
+            if not any(table is not None for table in tables) or any(
+                table is not None
+                and (not isinstance(table, SettlementStageTable) or not table)
+                for table in tables
+            ):
+                raise DomainContractValidationError(
+                    f"domain {contract.identity!s} settlement requires non-empty role tables"
+                )
+            for role in ("buyer", "storefront"):
+                table_name = "buyer_stages" if role == "buyer" else "seller_stages"
+                if getattr(contract, role) is not None and getattr(
+                    implementation, table_name, None
+                ) is None:
+                    raise DomainContractValidationError(
+                        f"domain {contract.identity!s} settlement has no {table_name}"
+                    )
         if missing:
             raise DomainContractValidationError(
                 f"domain {contract.identity!s} capability {capability.value!r} "

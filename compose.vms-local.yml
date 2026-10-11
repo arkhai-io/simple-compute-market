@@ -1,0 +1,112 @@
+# Development overlay for the VM end-to-end lane: the signer, wallet, and
+# buyer-path bindings of the VM services.
+#
+# Layered over compose.vms.yml, which includes compose.dev.yml for the dev
+# chain:
+#
+#     docker compose -p simple-market-service --env-file <file> \
+#       -f compose.vms.yml -f compose.vms-local.yml up -d
+#
+# `make -C e2e-tests test-e2e-vm` does exactly this, with the values
+# `make e2e-vms-dev-env` prints. The full local stack layers this file and
+# compose.apicredits-local.yml over docker-compose.yml instead; see that file.
+#
+# This is an overlay, applied with `-f`, not an `include`, because an
+# including file cannot redefine a service it imported, while later `-f` files
+# merge over earlier ones. The base topology stays `include`d: each domain file
+# resolves its relative paths against its own directory. Every path below
+# arrives as an absolute value from the environment file, so this file has no
+# relative paths of its own and is indifferent to the project directory.
+#
+# Every value it binds is a well-known development value that must never be
+# used on a public network; see dev-env/identities/README.md.
+
+services:
+  registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=registry-a
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8080
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+    volumes:
+      - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  registry-b:
+    environment:
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_ID=registry-b
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x15d34aaf54267db7d7c367839aaf71a00a2c6a65
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8082
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local Private VM Compute Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+      - REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER=http://localhost:8082/docs#/admin/create_api_key
+    volumes:
+      - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  bob-storefront:
+    env_file:
+      - ${VMS_BOB_EVM_WALLET_ENV_FILE:?set Bob EVM wallet environment file}
+      - ${VMS_BOB_IDENTITY_ENV_FILE:?set Bob signer credential environment file}
+    environment:
+    # The wallet env files above carry `AGENT_PRIV_KEY`, which the buyer-side
+    # loader in `kit/config` understands. This service resolves its EVM
+    # credential through Dynaconf under the `STOREFRONT` prefix instead, so
+    # that name never reaches it and the Alkahest mechanism builds no clients
+    # at all. Supplied here under the name the storefront reads. `@str` for
+    # the reason given under `provisioning` below: a bare `0x...` is a valid
+    # TOML integer literal and arrives as a decimal.
+      - STOREFRONT_WALLET__PRIVATE_KEY=@str 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+  alice-storefront:
+    env_file:
+      - ${VMS_ALICE_IDENTITY_ENV_FILE:?set Alice signer credential environment file}
+      - ${VMS_ALICE_EVM_WALLET_ENV_FILE:?set Alice EVM wallet environment file}
+    environment:
+      - STOREFRONT_WALLET__PRIVATE_KEY=@str 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a
+  provisioning:
+    env_file:
+      - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
+    environment:
+    # `@str` is not decoration. This service loads configuration through
+    # Dynaconf, which parses each environment value as TOML before handing it
+    # over -- and `0x9965...` is a valid TOML hexadecimal integer literal, so
+    # an eip191 address arrives as a 48-digit decimal and fails identity
+    # validation. `@str` is Dynaconf's marker for "take this verbatim".
+    #
+    # The registries above need no marker: `core/registry` reads its settings
+    # with `pydantic_settings`, which does no TOML parsing. Anything reaching
+    # a Dynaconf-loaded service as a bare `0x...` value does need one.
+      - PROVISIONING_IDENTITY__SCHEME=eip191
+      - PROVISIONING_IDENTITY__IDENTIFIER=@str 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=eip191
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - PROVISIONING_ADMIN_IDENTITY__SCHEME=eip191
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+  alice-provisioning:
+    env_file:
+      - ${VMS_ALICE_PROVISIONING_IDENTITY_ENV_FILE:?set Alice provisioning signer credential environment file}
+    environment:
+      - PROVISIONING_IDENTITY__SCHEME=ed25519
+      - PROVISIONING_IDENTITY__IDENTIFIER=3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw
+      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=eip191
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str 0x15d34aaf54267db7d7c367839aaf71a00a2c6a65
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - PROVISIONING_ADMIN_IDENTITY__SCHEME=eip191
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+  buyer-cli:
+    image: ${VMS_BUYER_IMAGE:-arkhai:e2e-tests}
+    profiles: [buyer]
+    user: "${VMS_BUYER_UID:-1000}:${VMS_BUYER_GID:-1000}"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ${VMS_BUYER_CONFIG_PATH:?set buyer public config path}:/etc/arkhai/config.toml:ro
+      - ${VMS_BUYER_PROFILE_DIR:?set persistent buyer profile directory}:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ${VMS_BUYER_STATE_DIR:?set persistent buyer run-state directory}:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ${VMS_BUYER_CREDENTIAL_FILE:?set strict buyer credential file}:/run/secrets/arkhai/buyer-credential:ro

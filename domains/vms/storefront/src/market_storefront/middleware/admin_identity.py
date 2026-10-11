@@ -304,14 +304,6 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
             "admin_interrupt_deal", path[len(prefix) : -len("/interrupt")], body
         )
 
-    prefix = "/api/v1/admin/portfolio/resources/"
-    if path.startswith(prefix) and "/" not in path[len(prefix) :]:
-        resource = path[len(prefix) :]
-        if method == "GET":
-            return AdminRouteContract("admin_get_resource", resource, EMPTY_BODY)
-        if method == "PATCH":
-            return AdminRouteContract("admin_patch_resource", resource, body)
-
     prefix = "/api/v1/listings/"
     if method == "GET" and path.startswith(prefix):
         suffix = path[len(prefix) :]

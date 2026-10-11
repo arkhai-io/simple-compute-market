@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from compute_provisioning_contracts import (
     AccessDelivery,
     AccessEndpoint,
+    CreateJobResult,
     DeliveredCredential,
     DeliveryEvidence,
 )
@@ -62,8 +63,6 @@ def test_a_delivery_carries_no_resource_list_or_lease_window():
 
 
 def test_a_create_result_carries_evidence_or_none_and_a_detail():
-    from compute_provisioning_contracts import CreateJobResult
-
     with_evidence = CreateJobResult.model_validate({
         "evidence": {"endpoints": [_ENDPOINT], "ready_at": _READY.isoformat()},
         "detail": {"vm_name": "guest-1"},

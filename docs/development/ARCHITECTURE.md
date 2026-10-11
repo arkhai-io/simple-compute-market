@@ -8,7 +8,7 @@
 |---|---|
 | [System overview](#system-overview) | Marketplace purpose and production shape |
 | [Composition from above and below](#composition-from-above-and-below) | Core, kit, domain, and composition-root ownership |
-| [Package and dependency layers](#package-and-dependency-layers) | Enforceable one-way package rules |
+| [Package and dependency layers](#package-and-dependency-layers) | Layer, scope, and kind: the one-way package rules, and where the tree still diverges |
 | [Runtime service map](#runtime-service-map) | Processes, authorities, and principal calls |
 | [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state, and how authority is decided |
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
@@ -42,7 +42,7 @@ Production permits independently operated registries and seller stacks. Buyers m
 
 ## Composition from above and below
 
-A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define only what at least two of buyer, seller, and registry read: settlement options and the accepted Agreement. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
+A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define settlement options, the accepted Agreement, immutable role-stage tables and settlement evidence. The table declares support without prescribing a mechanism API; evidence carries negotiation, mechanism, opaque reference, domain status and domain payload without interpreting financial state. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
 
 The schema-opaque market composition is:
 
@@ -52,7 +52,7 @@ evidence  = settle(agreement)
 result    = provision(evidence)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. The phases are handoffs, not a fixed actor order; seller-first and fused stages are valid. Accepted dispatch uses the Agreement's mechanism through an explicit role table, never proposal presence or a default escrow helper. The selected entry owns source revalidation and mechanism-specific continuations. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
 
 Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
@@ -77,25 +77,59 @@ See the [market composition specification](../../openspec/specs/market-compositi
 
 ## Package and dependency layers
 
+Three questions decide whether a package is in the right place, and they are independent:
+
+- **Direction.** May this package depend on that one? A reusable capability must not depend on an application or on a concrete market. This is the **layer** question, and a dependency graph answers it.
+- **Knowledge.** May this package know about that family, domain, or mechanism? Market-neutral code must not learn a market by accident. This is the **scope** question, and a dependency graph answers it.
+- **Ownership.** Does this package hold the right responsibilities, even where every edge points a permitted way? A storefront that imports an authority's matching predicate, a kit that reads a user's configuration file, a composition root whose non-root modules name a contribution — each passes the first two questions. This one is architectural judgement, and review answers it.
+
+The first two are stated below as rules a check can hold; the third is stated as placement tests. A package's **kind** names what it defines and, for a few kinds that exist to be light, bounds what it may depend on.
+
 ### Repository layers
 
 ```text
-composition roots / deployed services
+composition      roles, storefronts, buyers, deployed services — where composing happens
         ↓
-domain packages and role implementations
+specialization   what a family or domain supplies to be composed — vocabulary, contracts,
+        ↓        clients, codecs, policies, adapters, family kits
+kit              reusable capabilities that compose nothing and discover nothing
         ↓
-family kits
-        ↓
-family vocabulary packages
-        ↓
-repository-wide kit capabilities
-        ↓
-core carrier and role contracts
+core             carriers with no internal dependencies
 ```
 
-Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
+A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Any import is a dependency — at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except` — so every layer shares one definition of "depends on", and a boundary check walks every import, not only module-level ones. A distribution a package imports is declared in its `pyproject.toml`; an internal distribution declared but never imported is suspect and is either removed or carries a stated runtime reason (an entry point, a driver, an optional extra).
+
+The layer names what a package may do, not where it lives: a kit is depended on and composes nothing; a specialization is composed and composes nothing; a composition is the only place wiring happens. Role implementations such as the buyer and storefront roles are compositions, as are the deployed services and every market domain's executables. Repository-wide contracts and typed clients are kits; a family's or a domain's contracts and clients are specializations.
+
+Core carrier packages must not import domain vocabulary or concrete mechanism implementations. `market_core.settlement` ships the dependency-light `SettlementStageTable[StageT]` and `SettlementEvidence` exports with `py.typed`. Kits and domains may depend downward on these carriers; core does not require callable stages, shared stage methods or a kit lifecycle adapter. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
 
 A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
+
+### Scope
+
+A package's scope is the set of specific things it is permitted to know: nothing, a market family, a domain within that family, a settlement mechanism, or several of these. Scope is a set rather than a position, because one package may know a domain and a mechanism at once — a VM Alkahest codec does — and a storefront knows its domain and every mechanism it composes. A domain implies its family.
+
+One rule follows: **a package may depend only on packages whose scope is a subset of its own.** A package that knows nothing specific depends on nothing specific; a family package never depends on one of its domains; sibling domains never import each other; a mechanism-neutral kit never imports a mechanism kit; a domain codec may import its mechanism's kit because its scope names the mechanism.
+
+Scope is permission, declared independently of the imports it governs, and the declaration is the package's place in the tree: a package under a domain's directory is scoped to that domain, a package under a family's directory to that family, a kit to nothing — or to the one mechanism it *is* — and a specialization that knows a mechanism carries the mechanism in its name. A composition is scoped to the domain it lives under and composes only that domain; a composition under a family directory composes that family's domains, which is what makes it a family composition root rather than a label making it one. The one knowledge a package does not declare is which mechanisms a composition installs: a storefront's mechanisms are whatever mechanism kits it composes, bounded to the domain it lives under.
+
+Placing a package is therefore the same act as declaring its scope. A package that serves one domain goes under that domain; one that several domains of a family share goes under the family; one that knows no market goes under `kit/`; one that composes goes with the domain or family it composes. A contracts, client, or plugin package carries that kind in its name. Nothing elsewhere — a label in `pyproject.toml`, a comment at an import — may widen what the path grants.
+
+Consequences worth stating: a kit that comes to know a family is a specialization in the wrong directory; a kit that comes to know two mechanisms cannot exist, because the knowledge is either a mechanism-neutral abstraction or composition logic; a specialization that knows nothing specific is a kit in the wrong directory; a composition under one domain that imports a sibling domain is composing something it does not live with. The family-kit placement tests below are the scope rule applied to the compute family.
+
+### Kind
+
+Kind names what a package defines. Most packages are a **library** of mechanisms, vocabulary, codecs, or policies, and their kind adds no rule beyond their layer. An **executable** is a composition's entry point. Three kinds exist to be light, and their constraint is that they stay so:
+
+- **contracts** define an API — wire models, route declarations, versions — and depend on nothing heavier than core, foundation kits, and their own family's vocabulary. A contract's scope is that of its widest consumer, so a contract the compute family's storefronts all call is a family contract even when one service serves it; cross-scope use is the signal to widen the contract, not to import across.
+- **client** wraps one API and depends on its contracts, core carriers, the identity kit, and an HTTP library.
+- **plugin** registers a non-console entry point and is imported by nobody; a composition that discovers a group never names one of its members.
+
+The tree carries kind in a package's name — `kit/site-client`, `kit/resource-pools-contracts`, `domains/vms/storefront` — and is converging on that convention; the exact conventions a check reads, and the budgets it holds the light kinds to, are owned by the enforcement change in the [change index](../../openspec/changes/README.md).
+
+### Where the current tree diverges
+
+The rules above are the contract; the tree does not yet meet all of it, and no complete audit against them has run. The divergences known from review are owned by changes in the [change index](../../openspec/changes/README.md); none is a sanctioned edge, and no new dependency of the same shape should be added while one stands. In outline: the compute family kit and the repository-wide roles and clients sit under directories that say the wrong layer; `core/storefront` is a composition that two kits and both compute vocabulary packages depend on, and it imports distributions it does not declare, as do five other packages; two foundation kits and the storefront kit depend on `kit/alkahest`, `kit/alkahest` reads `kit/config`, and `kit/config` imports the settlement runtime and carries mechanism identifiers; `kit/site` imports the pool authority (see "Kit areas" below), and three read-only pool declaration modules sit in that authority rather than in its contracts package; `market_core.schemas` carries Alkahest-shaped escrow fields. The enforcement change in the change index owns the complete, audited list; this paragraph is the outline.
 
 ### Family kits
 
@@ -103,11 +137,11 @@ A family kit owns reusable mechanism, authority, and optionally persistence for 
 
 A capability belongs in a family kit when it belongs intrinsically to the family: several sibling domains use it, or it is the family's single cross-domain authority. Code that merely looks similar across domains does not qualify. A family kit stays meaningful independently of any one domain, and a new sibling domain consumes it by contributing values, codecs, hooks, or registrations, never by adding domain-specific branches to it. It carries no concrete domain's listing schema, policy, result meaning, domain-specific infrastructure choices, or composition wiring, so it belongs to no sibling domain.
 
-A family kit may own durable state, workers, and authority lifecycles for its family. It may depend on its family's vocabulary package, repository-wide kit capabilities, core contracts, and lower-level family-kit distributions of the same family. Dependencies among a family's kit distributions must be acyclic: an optional implementation distribution may depend on the family's base mechanisms and authorities, and those base distributions must not depend back on an optional implementation. A family kit must not depend on a concrete domain, another family's packages, a concrete role implementation, or a deployed service. The permitted edges point downward only: a repository-wide kit must never depend on a family kit. Any import is a dependency, whether at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except`, so every tier shares one definition of "depends on" and boundary checks walk every import, not only module-level ones.
+A family kit is a specialization with the family alone in its scope, so the scope rule says what it may depend on: its family's vocabulary package, repository-wide kits, core, and lower-level family-kit distributions of the same family — never a concrete domain, another family, a role implementation, or a deployed service. It may own durable state, workers, and authority lifecycles for its family. Dependencies among a family's kit distributions must be acyclic: an optional implementation distribution may depend on the family's base mechanisms and authorities, and those base distributions must not depend back on an optional implementation.
 
-Domains define the values, codecs, hooks, and registrations a family kit consumes; composition roots select and assemble those contributions, provide configuration and external resources, and wire runtime instances. A family kit never discovers or imports its domains. A family may split its kit into more than one distribution where dependency weight or an optional implementation technology would otherwise force unrelated consumers to install dependencies they do not use; such optional implementation distributions are not a further architectural tier.
+Domains define the values, codecs, hooks, and registrations a family kit consumes; composition roots select and assemble those contributions, provide configuration and external resources, and wire runtime instances. A family kit never discovers or imports its domains. A family may split its kit into more than one distribution where dependency weight or an optional implementation technology would otherwise force unrelated consumers to install dependencies they do not use; such optional implementation distributions are not a further layer.
 
-Family vocabulary packages stay the lower and narrower layer: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
+Family vocabulary packages are specializations of kind `vocabulary`: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
 
 Placement tests, applied in order:
 
@@ -118,16 +152,27 @@ Placement tests, applied in order:
 
 Another market family needing apparently similar behaviour is a signal to evaluate extraction into a repository-wide kit, not an automatic promotion. Promotion is right only when the capability's vocabulary and authority semantics can be made family-neutral without depending on either family's identity or domain meaning; otherwise two family kits are correct.
 
-In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, and job-backed fulfillment support. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The compute provisioning service is the composition root that wires them.
+In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, job-backed fulfillment support, and the mock mechanism. The family kit has three further distributions. `provisioning/compute/ansible` (`compute_provisioning_ansible`) is its optional Ansible implementation distribution: the SSH connection codec, the Ansible process and inventory mechanics, the Ansible job executor and its mock runner, and connectivity probes. It depends on the base kit's job, executor, and host contracts, never the reverse, so a consumer of jobs or hosts installs no Ansible. `provisioning/compute/contracts` (`compute_provisioning_contracts`) holds the family's wire models and route contracts, and `provisioning/compute/client` (`compute_provisioning_client`) the typed sync and async clients built on them. Both are thin, so a caller does not install the kit to call the service, and they are split so that the server never depends on its own client. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The compute provisioning service is the composition root that wires them.
 
-### Kit layers
+Executor selection is one table. `(offering_mode, action)` resolves to one complete job executor. Composition fills the table from each adapter bundle's contributions, refuses a key registered twice, and freezes it before the service accepts traffic. The job engine resolves a job's executor from the job's persisted offering mode and action, and it knows no playbook, inventory, or connection detail. Under the service's mock profile, each adapter composes its own mock executor. Every mock is built on the compute-family mock mechanism, `compute_provisioning.jobs.executor_mock`, which provides:
 
-Repository-wide kit is not a flat peer group. It has an explicit one-way hierarchy:
+- rules matched against a job's opaque parameters;
+- pause gates that report deterministically when a job is held;
+- an evaluate-job dry run;
+- a framework-free rule route service, which each adapter binds under its own `/test` prefix.
+
+A rule installed for one domain therefore never matches another domain's jobs. Mock output passes through the same codec a real run's output does. The mechanism serves the compute family only and is not a foundation kit.
+
+### Kit areas
+
+The kit layer is not a flat peer group. Within it, capabilities fall into areas with an explicit one-way order, which is the acyclicity the layer rule requires stated as a map of where a capability lives. Mechanism kits — `kit/alkahest`, `kit/arkhai-payments`, `kit/contact-exchange` — sit beside the foundation area rather than in this order: each is the one kit whose scope holds its mechanism, each depends on the foundation only, and only specializations and compositions depend on them. Thin client kits — `kit/site-client`, `kit/resource-pools-client`, `core/registry-client`, `core/storefront-client` — depend on their contracts and the identity kit, whatever area their server belongs to.
 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, and `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
-4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks, and owns the storefront loop controller every storefront holds its timer loops with, and may depend only on core storefront contracts and foundation capabilities.
+4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It may depend only on core storefront contracts and foundation capabilities; its Alkahest client construction makes it depend on `kit/alkahest`, a divergence listed under "Where the current tree diverges".
+
+`kit/capacity-publication` and `kit/pool-overrides` are storefront-side kits in the same area as `kit/storefront`: composed by storefronts, never by a site or a buyer.
 
 ```text
 kit/fulfillment
@@ -142,13 +187,15 @@ kit/storefront
     └──> foundation only
 ```
 
-Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
+Dependencies never point upward. Kit packages never import deployed services or domain adapters.
 
 `kit/pool-overrides` is a storefront-side kit beside `kit/capacity-publication`: the durable, site-scoped storefront pool override store and its reader, the write checked against a site's live projection, override status, the signed-resource contract, a typed client extension, and a framework-free route service each storefront binds with its own router and administrator authentication. It depends only on the identity kit, the site client, and pydantic. Each market contributes its vocabulary per offering mode — the VM and bare-metal storefronts both do — and its typed client wraps any transport exposing the core client's generic `authenticated_request`, so the core storefront client carries no market's vocabulary. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#storefront-pool-overrides).
 
-What stays in a core package is universal to every market. `market_core.identifier_encoding` is: it encodes operator-chosen identifiers unambiguously for any market that joins them into a key.
+`kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, the declaration hints and their shared resolver, and the pool route declarations as plain data, and it depends only on pydantic and the shape kit. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
 
-One edge does not match this hierarchy: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. The exception is tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added while it stands.
+What stays in a core package is universal to every market. `market_core.identifier_encoding` is: it encodes operator-chosen identifiers unambiguously for any market that joins them into a key. So is `market_core.VersionedEnvelope`, the carrier for every provider-specific payload that crosses a domain or persistence boundary (see "Fulfillment" below). `arkhai-core` ships it with only pydantic, so the fulfillment kit, the compute contracts, and the domains all take it from there.
+
+One edge does not match this order: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. Under the scope rule the pool authority — provider, playbook, and host routing — is compute-family knowledge, so the edge is also a kit depending on something family-specific. It is listed under "Where the current tree diverges" and tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added while it stands.
 
 The settlement-runtime distribution is
 `arkhai-kit-settlement-runtime`, imported as
@@ -158,7 +205,11 @@ check/collect/reclaim transitions, durable servicing, and ordered failure
 dispatch. Storefront composition roots inject database repositories,
 mechanism clients, domain fulfillment and projection callables, and real
 failure actions. The kit does not import a storefront, domain, mechanism, or
-provider SDK.
+provider SDK. Its framework-free settlement deal controls are settle verify and
+evaluate-settle, which are dry runs over per-domain hooks, and settle wait.
+`kit/capacity-publication` holds the capacity deal controls, admin reserve and
+the capacity-released callback, which act through a listing's capacity binding.
+Each storefront binds the controls it offers behind its own authentication.
 
 The negotiation-runtime distribution is
 `arkhai-kit-negotiation-runtime`, imported as
@@ -169,11 +220,18 @@ injects authoritative opening and continuation resolvers plus codecs, seller
 policy, agreement and artifact construction, and domain persistence/effect
 hooks. The runtime treats the selected domain binding and every payload as
 opaque; it never imports a domain or guesses one from a listing, terms, or
-proposal shape.
+proposal shape. Two administrative operations run through the same pipeline.
+`preview_opening` runs an opening's resolution, decoding, validation, checks,
+and round-zero policy, then stops before anything is written.
+`accept_administratively` accepts a recorded thread at an administrator's
+amount through the same commit a negotiated acceptance takes, so the domain's
+hold, if it places one, and its accepted artifacts are always recorded. The kit's evaluate-negotiate and force-accept
+route services call them, and no storefront records negotiation state any
+other way.
 
 The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fulfillment`. It owns both scheduling and provider-neutral fulfillment contracts. Keeping those contracts together avoids a reverse dependency from resource-pool administration into provisioning execution while preserving module-level separation between pure carriers and operational scheduling.
 
-Within `market_fulfillment`, carrier modules such as identifiers, envelopes, requests, resources, and provider protocols must not import concrete services. Scheduler implementations may depend on the site and resource-pool authorities explicitly permitted by this layer.
+Within `market_fulfillment`, carrier modules such as identifiers, requests, resources, results, and provider protocols must not import concrete services. The versioned envelope these modules carry belongs to `arkhai-core`. Scheduler implementations may depend on the site and resource-pool authorities explicitly permitted by this layer.
 
 ### Marketplace identity
 
@@ -269,25 +327,44 @@ reinterpret accepted work.
 Settlement retains domain-neutral `StorefrontSettlementFulfillmentInput`: the
 immutable thread binding, buyer principal, schema-opaque domain input, and any
 fulfillment anchor. When servicing reaches delivery, core adds the accepted
-escrow identity and caller-owned authority ports to form
+settlement evidence and caller-owned authority ports to form
 `StorefrontFulfillmentContext`, then invokes the fulfillment hook on the exact
 contract resolved from the binding. Core validates that the returned
-negotiation, escrow, and site identities did not change. The VM hook alone
-translates the opaque domain input into VM executor arguments. Core and kit
-therefore own lifecycle and dispatch while each domain owns payload meaning
-and concrete fulfillment; a missing hook fails closed rather than becoming a
-no-op.
+negotiation, settlement reference, and site identities did not change. Only
+the domain's hook interprets the opaque domain input. Core and kit therefore own lifecycle
+and dispatch while each domain owns payload meaning and concrete fulfillment;
+a missing hook fails closed rather than becoming a no-op.
+
+Bare metal's settle path starts fulfillment. The buyer makes one settle call,
+as in every domain, and there is no separate begin route. The bare-metal
+storefront starts fulfillment through the same idempotent fulfillment service
+its contract's hook wraps, by one of two paths:
+
+- **Alkahest.** The deal starts through the storefront's one
+  mechanism-neutral settlement servicing worker. Settle verify adopts the
+  escrow's obligation and steps it once through the worker's own path. The
+  worker's ready hook resolves its continuation from the seller entry the
+  obligation's accepted Agreement selected, comparing no mechanism ID, and
+  starts or resumes the fulfillment. Only the worker retries a ready obligation whose
+  fulfillment has not started.
+- **Arkhai payments.** The mechanism creates no obligation. Fulfillment starts
+  from the settle path, or from its reconciliation loop, once the signed
+  receipt verifies.
+
+An Alkahest fulfillment publishes only its lease-ready evidence's digest on
+chain, as a string obligation that references the escrow. The evidence body
+names the deal's parties, so it stays in the storefront behind an
+authenticated read. The chain does not deduplicate that submission, so the
+step records its intent before submitting and records the attestation UID
+before completing. An evidence submission whose outcome is unknown is never
+repeated: it parks its obligation for an operator, and the storefront's status
+counts the parked obligations.
 
 Legacy single-domain databases cross this boundary only through an explicit
 contribution migration adapter. Check mode validates the complete population.
 Write mode uses a restrictive backup and atomic replacement; ambiguity,
 orphaned provenance, cross-domain rows, or unsupported versions abort without
-partial state. The bare-metal contribution currently supplies codecs and
-publication semantics but not the production fulfillment hook. Complete live
-VM/bare-metal restart, teardown, and capacity-restoration proof remains gated
-on that external production contribution and its selected-site POOLS-7
-lifecycle; the shared shell does not manufacture evidence or substitute a
-no-op.
+partial state.
 
 ### Settlement configuration
 
@@ -397,7 +474,8 @@ A domain that contributes routes to a service it does not compose declares their
 | Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
 | Escrow claims and obligation journal | Settlement-runtime and Alkahest kit | Domain codecs and fulfillment policy |
 | Payment transactions, ledger, hold release, fees, disputes, and cash movement | External Arkhai payments service | SCM consumes the published API and verified receipt, not provider state |
-| API keys, credit balances, grants, and consumption | API-credits service | Marketplace purchase ownership is distinct from bearer authorization for use |
+| Seller delivery authorization | Selected domain settlement stage | Revalidates authoritative source evidence; local materialization and buyer progress are not authority |
+| API keys, credit balances, grants, and consumption | API-credits service | Receives operator-authenticated neutral issuance intent, not raw settlement evidence or a mechanism allowlist |
 
 ### Deciding which party is authoritative
 
@@ -487,7 +565,7 @@ backed pool may advertise only what it delivers, and an unbacked pool delivers
 nothing, which keeps it out of every capacity path through the deliverable
 recheck each execution layer already performs rather than through new backing
 checks. Readers of the resource-pool projection resolve both declarations through
-the pool kit's shared resolver. See the
+the shared resolver in `kit/resource-pools-contracts`. See the
 [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md).
 
 The site authority, fulfillment scheduler, and fulfillment orchestrator all use
@@ -612,7 +690,15 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 | `pool_id` | Site-local operator slug for a pool; every durable or public reference keys on `(site_id, pool_id)`, never `pool_id` alone |
 
-Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Domain receipt and delivery progress remain linked to the negotiation ID. Legacy escrow rows are backfilled only where persisted plans provide neutral obligation identity.
+Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Seller SettlementEvidence is negotiation-keyed and bound to the exact Agreement
+digest, immutable established reference and versioned validated delivery facts.
+VM physical progress and API-credit issuance progress have independent domain
+records; bare-metal evidence and selected-site lifecycle remain separate.
+Payment progress never occupies an `escrows` row. API-credit grants derive one
+uniform fulfillment identity from negotiation ID, not mechanism or escrow UID.
+Buyer recovery retains opaque references and exact accepted inputs, not
+SettlementEvidence. Existing genuine escrow rows may be backfilled only where
+persisted plans provide neutral obligation identity.
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
@@ -633,6 +719,27 @@ thread, re-establishes the exact listing and canonical buyer/seller binding,
 then lets the selected domain validate its persisted terms before a policy or
 acceptance effect can run. Domain policy remains the only component that
 interprets the provision-term and proposal schemas.
+
+Before every seller decision (opening and counter) and before any write of an
+acceptance (buyer accept and administrative acceptance), the runtime checks
+the listing against the declaration it was published from. Each domain
+contributes the check. A domain whose listings derive from no declaration,
+such as API credits, contributes none. The runtime applies the verdict after
+the policy chain, so the chain's guards still refuse a malformed request for
+its own reason first:
+
+- a declared mismatch or an unavailable source rejects the round or refuses
+  the acceptance;
+- a source that cannot be verified is a retryable refusal;
+- an exit is never checked, so a buyer can always leave.
+
+The runtime records a thread's terminal `success` only after its agreed terms,
+any hold, and its settlement plan are recorded, on every acceptance path.
+Settlement reads only successful threads, so it never sees a partial
+agreement. A thread is resumed only when its transcript ends with the seller's
+counter and nothing agreed is recorded. A crash mid-acceptance therefore
+leaves a thread that the buyer may exit and the negotiation watchdog abandons,
+and that is never accepted again.
 
 Normal buyer commands apply two separate constraint layers in fixed order: one filter-spec-typed resource query is pushed to the registry, then zero or more settlement clauses are evaluated locally against installed, enabled, compatible advertised options. Every comparison in one settlement clause must match the same option; repeated clauses are alternatives in command order. Explanation stops before negotiation and reports registry-owned predicates, local settlement rejections, and survivor counts without making a physical indexing claim.
 
@@ -656,13 +763,20 @@ exact Agreement bytes + opaque settlement_data
 
 ### Settlement servicing
 
-The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API.
+The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API. When the shared servicing worker reports an obligation ready or ended, the domain resolves the continuation from the seller entry the accepted Agreement selected; each entry declares its own servicing or declines it, so the worker's hooks hold no mechanism switch.
 
 `arkhai.payments.v1` is a stateless peer of Alkahest in VM, bare-metal, and API-credit compositions. Shared registration, typed configuration, and owner-scoped client provision live in `kit/arkhai-payments`'s `settlement_config.py`. Seller acceptance returns the derived mandate in opaque `settlement_data`, persisted next to exact `agreement_bytes` in `negotiation_threads`. Buyer `payer_account` travels in selection params and Agreement `settlement_params`, separately from marketplace identity.
 
-The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` routes a selected outcome with no escrow proposal to the domain's `agreement_settlement` hook.
+The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` dispatches the exact accepted outcome through the injected buyer-role table using `Agreement.settlement.mechanism`. Missing entries fail before effects; an escrow helper is reachable only from an explicitly bound entry.
 
-The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain receipt and delivery journals are local recovery state, not financial authority.
+The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain source evidence is the seller's verified delivery gate, distinct from
+mutable delivery journals and private results. Recovery resolves the same
+Agreement-selected stage and revalidates its source before protected effects.
+Common physical convergence and credit issuance read normalized facts only;
+attestation, claim binding, refunds and compensation return to the selected
+continuation. A journaled Alkahest materialization is adoption history, not
+current authority: recovery also checks active lifecycle and chain evidence.
+These records are not financial authority.
 
 ```text
 Alkahest: Agreement → SettlementPlan → active obligations → Receipt
@@ -720,7 +834,7 @@ VM and bare-metal payment delivery requires a matching signed receipt before any
 
 Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 
-Provider-specific dictionaries crossing domain or persistence boundaries use a versioned envelope with a non-empty `kind`, positive `schema_version`, and typed or explicitly validated payload. Readers reject unknown `(kind, schema_version)` pairs rather than guessing.
+Provider-specific dictionaries crossing domain or persistence boundaries use a versioned envelope (`market_core.VersionedEnvelope`) with a non-empty `kind`, positive `schema_version`, and typed or explicitly validated payload. Readers reject unknown `(kind, schema_version)` pairs rather than guessing.
 
 The current round-robin scheduling policy is deterministic for the same candidate order and state. Multidimensional fit checks every requested dimension; a candidate missing a requested dimension has zero availability for that dimension.
 
@@ -734,7 +848,21 @@ Push-based result delivery (provisioning notifying the storefront rather than th
 
 Physical release is proof-driven and split across two cooperating state machines with distinct retry ownership. Lease lifecycle (site/provisioning-lease layer) owns `releasing`/`released` and the final capacity-return decision; it never dispatches a second teardown operation itself. Fulfillment convergence (see "Recovery workers" below) owns dispatch, requeue, and recovery of the teardown states themselves (`teardown_dispatch_pending` → `tearing_down` → `torn_down`/`teardown_failed`). Lease-side retry re-observes the same fulfillment aggregate by its durable `fulfillment_id` rather than resubmitting a teardown.
 
-A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it reads the fulfillment aggregate's teardown state (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending); other offering modes continue to resolve through the shared job queue unchanged. Capacity is never returned to scheduling until the aggregate reaches `torn_down` or an operator explicitly force-releases after external verification; the audit state distinguishes forced release from proven teardown.
+Every offering mode releases through the fulfillment aggregate. A lease delivers nothing; fulfillment does, and the aggregate already knows its provider through the pool. So the lease lifecycle is mode-agnostic, and one provider-neutral release executor and status port in `compute_provisioning.release` serve every mode. Release follows the state of the reservation's aggregate:
+
+| Aggregate | Release |
+|---|---|
+| `active`, or teardown already begun | Begin or adopt teardown; the lease is `releasing` with the fulfillment as its handle |
+| `torn_down` | Free the capacity directly |
+| Absent, `assigned`, or `abandoned`, when provenance proves nothing was dispatched | Free the capacity directly, abandoning an `assigned` aggregate on the way |
+| `dispatch_pending` or `dispatching` | Wait for the create to settle, then follow the new state |
+| `failed`, or undelivered without that proof | `release_failed`, for an operator to verify and force-release |
+
+The proof that nothing was dispatched is that the reservation records no create handle and no job is bound to it.
+
+Capacity is freed only behind a release guard. `kit/site`'s ledger consults a `CapacityReleaseGuard` inside every transaction that reclaims capacity: a release, a lapsed TTL hold, and a resize's supersede step. A refused reclaim changes nothing. The site cannot see what was delivered, so the guard is supplied by the provisioning composition. That guard, `FulfillmentReleaseGuard`, permits a `torn_down` aggregate, or an undelivered one whose provenance proof holds. Capacity therefore never returns to scheduling, whoever asks, until teardown is proven, nothing was dispatched, or an operator explicitly force-releases after external verification. The audit state distinguishes forced release from proven teardown.
+
+Storefront teardown goes through lease termination. A storefront never frees a delivered reservation's capacity itself. Buyer teardown at the bare-metal storefront terminates the lease at the reservation's site, which is the release path expiry takes. A repeated teardown finds the same `releasing` or `released` lease. The storefront marks its own lifecycle released only on the site's capacity-released callback.
 
 `begin_fulfillment_teardown(fulfillment_id)` is the whole-fulfillment teardown entrypoint: it resolves the aggregate, reuses an already-prepared teardown operation when present (as legacy-backfilled rows carry) or prepares one via the provider when a native row reaches teardown for the first time, then hands off to convergence for dispatch — it never dispatches to the provider inline.
 
@@ -778,7 +906,12 @@ One root `.python-version` fixes the interpreter for every environment and image
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 
-Schema changes are additive by default. Non-additive changes use expand/contract across releases. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
+Schema changes are additive by default. Non-additive changes use expand/contract
+across releases unless an explicit disposable-database reset contract applies.
+VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas
+require fresh owned databases when incompatible; startup rejects drift instead
+of silently copying/adopting old payment rows. Their capability architecture
+companions define quiesce, ownership and bootstrap boundaries. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
@@ -798,7 +931,9 @@ The compute provisioner runs three independent timer-driven workers, composed on
 
 Long-running lifecycle workers may expose authenticated one-cycle controls when deterministic recovery, testability, or customer-issue diagnosis requires them. A manual cycle must invoke the same production handler as the timer-driven worker; it must not implement alternate lifecycle transitions. Diagnostic responses are bounded and may expose aggregate state counts, claim ages, and failure counts, but not credentials or unbounded provider payloads.
 
-Each storefront process holds its timer loops with one loop controller from `kit/storefront`. Every loop registers with it, bound to the step that runs one cycle, so the pause route holds every loop at a cycle boundary without cancelling it and each `run-cycle` route runs exactly the operation the loop's timer runs. A loop gates on entry and immediately before its work, and waits between cycles through the controller, which returns on a pause request, so a pause is observed within its bounded wait whatever the interval; a loop's reported state comes from what it has acknowledged at its gate. Kits below `kit/storefront` take the gate and wait as injected callables. The loop pause is process-local and separate from the trading pause. Each storefront binds the controller's framework-free route service behind its own administrator authentication. See [market composition](../../openspec/specs/market-composition/spec.md).
+Each storefront process holds its timer loops with one loop controller from `kit/storefront`. Every loop registers with it, bound to the step that runs one cycle, so the pause route holds every loop at a cycle boundary without cancelling it and each `run-cycle` route runs exactly the operation the loop's timer runs. A loop gates on entry and immediately before its work, and waits between cycles through the controller, which returns on a pause request, so a pause is observed within its bounded wait whatever the interval; a loop's reported state comes from what it has acknowledged at its gate. Kits below `kit/storefront` take the gate and wait as injected callables. Each storefront binds the controller's framework-free route service behind its own administrator authentication.
+
+Beside the loop controller, `kit/storefront` owns the trading pause, which refuses new negotiations and leaves the loops running. The negotiation runtime reads it, and system status reports it. Each storefront binds the pause's framework-free route service at its admin pause and resume routes. The two pauses are separate, and both are process-local: a restarted storefront trades and runs its loops again, which suits an operator who is actively correcting an issue. See [market composition](../../openspec/specs/market-composition/spec.md).
 
 ## Testing strategy
 

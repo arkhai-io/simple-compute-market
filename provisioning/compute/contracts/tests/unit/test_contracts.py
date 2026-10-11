@@ -3,6 +3,7 @@
 import re
 import pytest
 from pydantic import ValidationError
+import compute_provisioning_contracts as contracts
 from compute_provisioning_contracts import (
     PROVISIONING_ROUTE_CONTRACTS,
     LeaseTermination,
@@ -100,6 +101,4 @@ def test_every_fulfillment_route_is_a_family_route():
 def test_no_contract_registers_a_lease():
     """No route writes a lease: commit records its window, provisioning its
     target at activation, and the lease lifecycle its release."""
-    import compute_provisioning_contracts as contracts
-
     assert not hasattr(contracts, "LeaseRegistration")

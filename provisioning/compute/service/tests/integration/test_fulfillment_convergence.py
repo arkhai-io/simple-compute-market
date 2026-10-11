@@ -29,7 +29,12 @@ from market_core import VersionedEnvelope
 from market_fulfillment.db import Base, SettlementRecord
 from market_core import envelope
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
+from market_site.db import Base as SiteBase, CapacityReservation
 from market_site.ledger import CapacityConflictError
+from vm_provisioning_adapter.db import Base as VmBase, Relay, RelayPortLease
+from vm_provisioning_adapter.services.relay_port_allocator import (
+    fulfillment_lease_owner_is_released,
+)
 
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
@@ -1362,9 +1367,6 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
 
 
 def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
-    from vm_provisioning_adapter.db import Base as VmBase
-    from vm_provisioning_adapter.db import Relay, RelayPortLease
-
     VmBase.metadata.create_all(session_factory.kw["bind"])
     with session_factory() as db:
         db.add(
@@ -1390,8 +1392,6 @@ def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
 
 
 def _held(session_factory) -> list[int]:
-    from vm_provisioning_adapter.db import RelayPortLease
-
     with session_factory() as db:
         return sorted(
             row.remote_port
@@ -1493,12 +1493,6 @@ async def test_a_successful_create_keeps_its_relay_port(session_factory, repo):
 
 
 def _released(session_factory, *, state=None):
-    from market_site.db import Base as SiteBase
-    from market_site.db import CapacityReservation
-    from vm_provisioning_adapter.services.relay_port_allocator import (
-        fulfillment_lease_owner_is_released,
-    )
-
     SiteBase.metadata.create_all(session_factory.kw["bind"])
     if state is not None:
         with session_factory() as db:

@@ -10,6 +10,15 @@ API credits and bare metal each carry a 146- and 149-line `response_auth` and re
 the rest through core directly, so the three storefronts authenticate the same routes
 by three arrangements.
 
+The arrangements already disagree on the wire. API credits' administrator
+dependency, `require_admin_principal`, derives the signed operation from the route's
+name and the resource from the full request path, while the canonical storefront
+client signs explicit contracts: `admin_advance_negotiation` over
+`<listing_id>/<negotiation_id>`, and `admin_pause_listing` and `admin_resume_listing`
+over `<listing_id>`. The canonical client therefore cannot authenticate to API
+credits' negotiation-advance, listing-pause, or listing-resume routes, and the kit's
+route services do not own the signed contracts their routes are called under.
+
 Persistence: core's domain-neutral SQLite client and migrations (4,824 and 2,062
 lines) own listings, negotiations, escrows, claims, and publications, yet each
 storefront keeps its own client and migrations beside them (VM 1,845 lines, bare
@@ -25,6 +34,10 @@ access to core-owned market state, and the boundary between the two is not state
   only tables the domain's contract introduces. Reduce each storefront's client and
   migrations to that, moving any core-state access it reimplements into core.
 - Compose all three domains and remove every domain-local copy in this change.
+- Authenticate every administrator route against the operation and resource the
+  canonical client signs for it, declared once with the route rather than derived
+  from a route name or a request path, so API credits' advance, pause, and resume
+  routes accept the canonical client.
 - Record, per concern, where the copies diverged and which behavior was chosen.
 
 ## Capabilities
@@ -41,14 +54,18 @@ None.
 ## Non-Goals
 
 - Do not change any authentication scheme, principal model, or wire signature; the
-  same requests authenticate the same way.
+  same requests authenticate the same way, except API credits' advance, pause, and
+  resume routes, which today refuse the canonical client's correctly signed requests
+  and accept it once they check the contracts it signs.
 - Do not migrate persisted data; the boundary is stated and code moves, tables stay.
 - Do not extract the shell or the lifecycles — sibling changes.
 
 ## Impact
 
 - Code: VM `middleware/{seller_auth,admin_identity,service_peer_auth,buyer_auth}.py`,
-  API-credit and bare-metal `response_auth.py`; every storefront's `utils/sqlite_client.py`
+  API-credit and bare-metal `response_auth.py`, API credits'
+  `middleware/admin_auth.py` and the administrator routes in its
+  `controllers/listings_controller.py` and `controllers/negotiations_controller.py`; every storefront's `utils/sqlite_client.py`
   and `utils/migrations.py`; core's `auth.py` and `sqlite_client.py`.
 - Tests: middleware and persistence suites collapse into core or kit suites plus
   per-domain table coverage.

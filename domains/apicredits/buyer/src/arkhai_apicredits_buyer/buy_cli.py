@@ -25,8 +25,7 @@ from core_buyer import (
     run_buy,
 )
 from core_buyer.deal_helpers import is_negotiation_complete
-from core_buyer.orchestration import make_negotiate_hook, make_settle_hook
-from core_buyer.orchestrator import BuyResult
+from core_buyer.orchestration import make_negotiate_hook, make_settle_hook, make_escrow_settle_hook
 from core_buyer.run_log import RunLog
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
@@ -44,13 +43,9 @@ from arkhai_apicredits.negotiation import (
 from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
-from .payments import (
-    configured_payer_account,
-    payment_selection_for_listing,
-    settle_api_credit_negotiation,
-)
+from .payments import configured_payer_account
 from .settle_cli import render_credentials, run_settle_from_log
-from .settlement_composition import resolve_buyer_settlement_policy
+from .settlement_composition import BUYER_STAGES, resolve_buyer_settlement_policy, validate_buyer_acceptance, select_buyer_proposal
 
 
 def _confirm_settlement_interactive(
@@ -491,17 +486,13 @@ def register(credits_app: typer.Typer) -> None:
         from .escrow_selection import select_escrow_entry
 
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | Any | None:
-            payment_selection = payment_selection_for_listing(
-                buyer_settlement,
-                match,
-                expiration_unix=expiration_unix,
+            return select_buyer_proposal(
+                buyer_settlement, match, expiration_unix=expiration_unix,
                 payer_account=payer_account,
-                prefer_payment=not alkahest_available,
+                alkahest=(lambda: alkahest_proposal(match)) if alkahest_available else None,
             )
-            if payment_selection is not None:
-                return payment_selection
-            if not alkahest_available:
-                return None
+
+        def alkahest_proposal(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
                 match,
                 chain_name=selected_chain_name,
@@ -623,12 +614,13 @@ def register(credits_app: typer.Typer) -> None:
             decode_provision_terms=ApiCreditsProvisionTerms.model_validate,
             decode_escrow_proposal=EscrowProposal.model_validate,
             decode_escrow_terms=EscrowTerms.model_validate,
+            validate_acceptance=validate_buyer_acceptance,
         )
         alkahest_settle_hook = None
         if alkahest_available:
             if build_escrow_terms is None or create_escrow is None:
                 raise RuntimeError("Alkahest settlement adapters were not initialized")
-            alkahest_settle_hook = make_settle_hook(
+            alkahest_settle_hook = make_escrow_settle_hook(
                 config=config,
                 unit_count=float(quantity),
                 duration_seconds=0,
@@ -646,40 +638,25 @@ def register(credits_app: typer.Typer) -> None:
                 sleep=time.sleep,
             )
 
-        def settle_hook(negotiation, on_event):
-            outcome = getattr(negotiation, "outcome", None)
-            selection = getattr(outcome, "settlement_selection", None)
-            if selection is not None and selection.mechanism == "arkhai.payments.v1":
-                payment_confirmation = None
-                if not assume_yes and os.isatty(0):
-
-                    def confirm_payment(mandate, transaction_id):
-                        return _confirm_payment_interactive(
-                            mandate=mandate,
-                            transaction_id=transaction_id,
-                            listing=negotiation.match or {},
-                            quantity=int(quantity),
-                            console=console,
-                        )
-
-                    payment_confirmation = confirm_payment
-                return settle_api_credit_negotiation(
-                    negotiation=negotiation,
-                    buyer=identity,
-                    buy_config=config,
-                    settlement_config=buyer_settlement.config,
-                    payer_account=payer_account,
-                    poll_interval=poll_interval,
-                    total_timeout=settlement_timeout,
-                    on_event=on_event,
-                    confirm_payment=payment_confirmation,
+        def invoke_stage(stage, negotiation, on_event):
+            payment_confirmation = None
+            if not assume_yes and os.isatty(0):
+                payment_confirmation = lambda mandate, transaction_id: _confirm_payment_interactive(
+                    mandate=mandate, transaction_id=transaction_id,
+                    listing=negotiation.match or {}, quantity=int(quantity), console=console,
                 )
-            if alkahest_settle_hook is None:
+            return stage.settle(
+                negotiation, on_event, alkahest=alkahest_settle_hook,
+                payment={
+                    "buyer": identity, "buy_config": config,
+                    "settlement_config": buyer_settlement.config,
+                    "payer_account": payer_account, "poll_interval": poll_interval,
+                    "total_timeout": settlement_timeout,
+                    "confirm_payment": payment_confirmation,
+                },
+            )
 
-                return BuyResult(
-                    status="exited", reason="no compatible settlement mechanism"
-                )
-            return alkahest_settle_hook(negotiation, on_event)
+        settle_hook = make_settle_hook(stages=BUYER_STAGES, invoke=invoke_stage)
 
         try:
             result = run_buy(

@@ -1,8 +1,8 @@
 """Unit tests for the hosts table, host CRUD, and adapter host-context join.
 
 Covers:
-  - SQLiteClient.upsert_host / get_host / list_hosts
-  - SQLiteClient.host_capacity_remaining (capacity bookkeeping)
+  - SQLiteClient.upsert_host / get_host
+  - the host capacity check on resource upsert
   - host_csv_importer.upsert_hosts_from_csv
   - ComputeGpuResourceAdapter.to_domain_resource(host_row=...) join behavior
 """
@@ -92,17 +92,6 @@ class TestHostCrud:
 
         asyncio.run(_run())
 
-    def test_list_hosts_filters_disabled(self, client):
-        async def _run():
-            await client.upsert_host(name="active1", enabled=True)
-            await client.upsert_host(name="dormant", enabled=False)
-            active_only = await client.list_hosts(enabled_only=True)
-            all_hosts = await client.list_hosts(enabled_only=False)
-            assert {h["name"] for h in active_only} == {"active1"}
-            assert {h["name"] for h in all_hosts} == {"active1", "dormant"}
-
-        asyncio.run(_run())
-
     def test_get_missing_host_returns_none(self, client):
         async def _run():
             assert await client.get_host(name="ghost") is None
@@ -120,87 +109,6 @@ class TestHostCrud:
                 "tag.datacenter_tier": "tier3",
                 "tag.billing_code": "DC-CA-001",
             }
-
-        asyncio.run(_run())
-
-
-# ---------------------------------------------------------------------------
-# Capacity bookkeeping
-# ---------------------------------------------------------------------------
-
-
-class TestCapacityRemaining:
-    def test_full_host_listing_consumes_all(self, client):
-        async def _run():
-            await client.upsert_host(
-                name="h", total_gpu_count=8, host_cpu_cores=192,
-                host_ram_gb=2048, host_disk_gb=20000,
-            )
-            await client.upsert_resource(
-                resource_id="r1",
-                resource_type="compute.gpu",
-                resource_subtype="h200",
-                unit="count",
-                value=8,
-                state="available",
-                attributes={"gpu_model": "H200", "sla": 99.0, "region": "California, US",
-                            "vm_host": "h", "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000},
-            )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["limits"] == {"gpu_count": 8, "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000}
-            assert cap["used"] == {"gpu_count": 8, "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000}
-            assert all(v == 0 for v in cap["remaining"].values())
-
-        asyncio.run(_run())
-
-    def test_partial_slice_leaves_remainder(self, client):
-        async def _run():
-            await client.upsert_host(
-                name="h", total_gpu_count=2, host_cpu_cores=32,
-                host_ram_gb=512, host_disk_gb=8000,
-            )
-            await client.upsert_resource(
-                resource_id="slice1",
-                resource_type="compute.gpu",
-                resource_subtype="h200",
-                unit="count",
-                value=1,
-                state="available",
-                attributes={"gpu_model": "H200", "sla": 95.0, "region": "California, US",
-                            "vm_host": "h", "vcpu_count": 16, "ram_gb": 256, "disk_gb": 4000},
-            )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["used"] == {"gpu_count": 1, "vcpu_count": 16, "ram_gb": 256, "disk_gb": 4000}
-            assert cap["remaining"] == {"gpu_count": 1, "vcpu_count": 16, "ram_gb": 256, "disk_gb": 4000}
-
-        asyncio.run(_run())
-
-    def test_deleted_resources_excluded_from_used(self, client):
-        async def _run():
-            await client.upsert_host(name="h", total_gpu_count=4, host_cpu_cores=64)
-            await client.upsert_resource(
-                resource_id="active",
-                resource_type="compute.gpu", resource_subtype="h200",
-                unit="count", value=2, state="available",
-                attributes={"gpu_model": "H200", "sla": 99.0, "region": "California, US",
-                            "vm_host": "h", "vcpu_count": 32},
-            )
-            await client.upsert_resource(
-                resource_id="gone",
-                resource_type="compute.gpu", resource_subtype="h200",
-                unit="count", value=2, state="deleted",
-                attributes={"gpu_model": "H200", "sla": 99.0, "region": "California, US",
-                            "vm_host": "h", "vcpu_count": 32},
-            )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["used"]["gpu_count"] == 2
-            assert cap["used"]["vcpu_count"] == 32
-
-        asyncio.run(_run())
-
-    def test_unknown_host_returns_none(self, client):
-        async def _run():
-            assert await client.host_capacity_remaining(name="ghost") is None
 
         asyncio.run(_run())
 
@@ -398,8 +306,15 @@ class TestCapacityEnforcement:
                 unit="count", value=1, state="available",
                 attributes=self._attrs("h"),
             )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["used"]["gpu_count"] == 1
+            # The slice counts against the host: the rest of it is three GPUs.
+            with pytest.raises(CapacityExceededError) as exc:
+                await client.upsert_resource(
+                    resource_id="s2", resource_type="compute.gpu",
+                    resource_subtype="h200", unit="count", value=4, state="available",
+                    attributes=self._attrs("h", vcpu=0, ram=0, disk=0),
+                )
+            (violation,) = exc.value.violations
+            assert (violation.dimension, violation.used_excluding_this) == ("gpu_count", 1)
 
         asyncio.run(_run())
 
@@ -419,8 +334,16 @@ class TestCapacityEnforcement:
                 resource_subtype="h200", unit="count", value=2, state="available",
                 attributes=self._attrs("h", vcpu=32, ram=256, disk=4000),
             )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["remaining"] == {"gpu_count": 0, "vcpu_count": 0, "ram_gb": 0, "disk_gb": 0}
+            # Both slices pass, and together they fill every dimension.
+            with pytest.raises(CapacityExceededError) as exc:
+                await client.upsert_resource(
+                    resource_id="s3", resource_type="compute.gpu",
+                    resource_subtype="h200", unit="count", value=1, state="available",
+                    attributes=self._attrs("h", vcpu=1, ram=1, disk=1),
+                )
+            assert {
+                v.dimension: v.used_excluding_this for v in exc.value.violations
+            } == {"gpu_count": 4, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 8000}
 
         asyncio.run(_run())
 
@@ -476,8 +399,15 @@ class TestCapacityEnforcement:
                 resource_subtype="h200", unit="count", value=2, state="available",
                 attributes=attrs,
             )
-            cap = await client.host_capacity_remaining(name="h")
-            assert cap["used"]["gpu_count"] == 2
+            # The re-upserted slice is counted once.
+            with pytest.raises(CapacityExceededError) as exc:
+                await client.upsert_resource(
+                    resource_id="s2", resource_type="compute.gpu",
+                    resource_subtype="h200", unit="count", value=1, state="available",
+                    attributes=self._attrs("h"),
+                )
+            (violation,) = exc.value.violations
+            assert (violation.dimension, violation.used_excluding_this) == ("gpu_count", 2)
 
         asyncio.run(_run())
 
@@ -520,6 +450,34 @@ class TestCapacityEnforcement:
             await client.upsert_resource(
                 resource_id="s1", resource_type="compute.gpu",
                 resource_subtype="h200", unit="count", value=1, state="deleted",
+                attributes=self._attrs("h"),
+            )
+
+        asyncio.run(_run())
+
+    def test_deleted_slices_do_not_consume_capacity(self, client):
+        """A deleted slice no longer counts against its host."""
+        async def _run():
+            await client.upsert_host(name="h", total_gpu_count=2)
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            await client.upsert_resource(
+                resource_id="s2", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            await client.upsert_resource(
+                resource_id="s2", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="deleted",
+                attributes=self._attrs("h"),
+            )
+            # Fits only because the deleted slice is left out of the host's total.
+            await client.upsert_resource(
+                resource_id="s3", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
                 attributes=self._attrs("h"),
             )
 

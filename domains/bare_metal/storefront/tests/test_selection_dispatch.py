@@ -25,7 +25,13 @@ from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
+from market_core import SettlementStageTable
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from arkhai_bare_metal_storefront.settlement_stages import (
+    SellerStage,
+    verify_contact,
+    revalidate_contact,
+)
 from market_identity import Eip191Signer
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
@@ -102,6 +108,16 @@ def _intro_registration() -> MechanismRegistration:
         clause_fields=(),
         publication_input_model=DemoIntroConfig,
         publication_input_validator=lambda section, value, role: value,
+    )
+
+
+def _intro_stages():
+    return SettlementStageTable(
+        {
+            INTRO_MECHANISM: SellerStage(
+                _intro_registration, verify_contact, revalidate_contact, False
+            )
+        }
     )
 
 
@@ -198,7 +214,7 @@ async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
         trading_pause=TradingPause(),
         plan_builder=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
-        mechanism_fulfillment={INTRO_MECHANISM: False},
+        seller_stages=_intro_stages(),
     )
     return _Opening(db, runtime), option
 
@@ -285,6 +301,7 @@ async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
 def test_composition_dispatch_exposes_only_priority_builders() -> None:
     composition = BareMetalStorefrontSettlementComposition(
         registry=SettlementConfigurationRegistry((_intro_registration(),)),
+        seller_stages=_intro_stages(),
         config=SettlementConfig(
             priority=(INTRO_MECHANISM,),
             mechanisms={"demo_intro": DemoIntroConfig(enabled=True)},
@@ -308,6 +325,17 @@ def _payment_option() -> dict[str, Any]:
         rates=rates,
         params={},
     ).model_dump(mode="json")
+
+
+def _payment_stages():
+    """A seller entry that provisions the listed machine and settles from the Agreement."""
+    return SettlementStageTable(
+        {
+            PAYMENT_MECHANISM: SellerStage(
+                _intro_registration, verify_contact, revalidate_contact, True
+            )
+        }
+    )
 
 
 async def _payment_service(tmp_path, settlement_data_calls: list) -> tuple[_Opening, dict[str, Any]]:
@@ -351,7 +379,7 @@ async def _payment_service(tmp_path, settlement_data_calls: list) -> tuple[_Open
         # Composed with no obligation builder: it settles from the Agreement.
         accepted_obligation_dispatch={PAYMENT_MECHANISM: None},
         settlement_data_dispatch={PAYMENT_MECHANISM: settlement_data},
-        mechanism_fulfillment={PAYMENT_MECHANISM: True},
+        seller_stages=_payment_stages(),
     )
     return _Opening(db, runtime), option
 

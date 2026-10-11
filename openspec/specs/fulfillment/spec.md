@@ -15,7 +15,7 @@ The fulfillment capability owns:
 - provider-neutral create, status, and teardown contracts;
 - provider registration and resolution;
 - structured validation and stable generic fulfillment errors;
-- versioned envelopes for provider/domain dictionaries that cross persistence or package boundaries;
+- the use of core's versioned envelopes (`market_core.VersionedEnvelope`) for provider/domain dictionaries that cross persistence or package boundaries;
 - the durable settlement/fulfillment aggregate's schema, state machine, equivalence checks, and repository.
 
 It does not own:
@@ -37,7 +37,7 @@ Provider-neutral scheduling and provider execution contracts live together in th
 
 ### Requirement: Dependency boundary
 
-`market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site` and `market_resource_pools`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
+`market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site`, `market_resource_pools` and its wire contracts `market_resource_pools_contracts`, and the core carrier package `market_core`, which provides `VersionedEnvelope`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
 
 Carrier modules for IDs, envelopes, requests, requirements, resources, and provider protocols MUST remain independent of concrete service implementations. Scheduler modules MAY depend on site and resource-pool service interfaces required to enumerate and bind eligible resources.
 
@@ -355,7 +355,7 @@ identities, or when a registered provider declares differently from it.
 
 ### Requirement: Versioned envelopes
 
-Generic dictionaries crossing a domain, provider, process, or persistence boundary MUST be wrapped in `VersionedEnvelope` or a more specific typed model.
+Generic dictionaries crossing a domain, provider, process, or persistence boundary MUST be wrapped in `VersionedEnvelope` or a more specific typed model. `VersionedEnvelope` is provided by the dependency-light `arkhai-core` distribution (`market_core`), so a wire-contract package can carry one without depending on this fulfillment kit; fulfillment uses that one implementation and defines no envelope of its own.
 
 An envelope contains:
 
@@ -376,6 +376,11 @@ This contract applies to prepared provider inputs, provider metadata snapshots, 
 
 - **WHEN** a generic envelope is parameterized with a typed payload model and required payload fields are missing
 - **THEN** validation fails before dispatch or persistence
+
+#### Scenario: A wire-contract package carries an envelope
+
+- **WHEN** a thin contracts package declares a model with a `VersionedEnvelope` field
+- **THEN** it depends on `arkhai-core` alone for it, not on the fulfillment kit
 
 ### Requirement: Stable error taxonomy
 
@@ -514,7 +519,6 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 
 ## Evidence
 
-
 - Identifier generation and ordering: `kit/fulfillment/tests/unit/test_ids.py`.
 - Request and multidimensional validation: `kit/fulfillment/tests/unit/test_settlement_types.py`.
 - Deterministic scheduler behavior: `kit/fulfillment/tests/unit/test_scheduler.py`.
@@ -532,4 +536,3 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
 - Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
-

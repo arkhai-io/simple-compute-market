@@ -24,7 +24,8 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_source_for, pause_storefront, require_state
+from tests.e2e.roles.helpers.compute_deal import pause_storefront
+from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_source_for, require_state
 
 log = logging.getLogger(__name__)
 

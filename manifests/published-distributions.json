@@ -2,6 +2,21 @@
   "_comment": "Every distribution this repository publishes, in dependency order. One declaration read by every publication path: the registry push and the public index workflow both derive their set from here, because two lists kept in agreement by hand diverge silently and the copy that diverges is discovered by consumers. Order matters -- a distribution must appear after everything it depends on.",
   "distributions": [
     {
+      "key": "kit-identity",
+      "path": "kit/identity",
+      "dist": "arkhai-kit-identity"
+    },
+    {
+      "key": "core",
+      "path": "core",
+      "dist": "arkhai-core"
+    },
+    {
+      "key": "kit-settlement-runtime",
+      "path": "kit/settlement-runtime",
+      "dist": "arkhai-kit-settlement-runtime"
+    },
+    {
       "key": "kit-alkahest",
       "path": "kit/alkahest",
       "dist": "arkhai-kit-alkahest"
@@ -12,19 +27,9 @@
       "dist": "arkhai-kit-config"
     },
     {
-      "key": "kit-identity",
-      "path": "kit/identity",
-      "dist": "arkhai-kit-identity"
-    },
-    {
       "key": "kit-policy",
       "path": "kit/policy",
       "dist": "arkhai-kit-policy"
-    },
-    {
-      "key": "kit-settlement-runtime",
-      "path": "kit/settlement-runtime",
-      "dist": "arkhai-kit-settlement-runtime"
     },
     {
       "key": "kit-negotiation-runtime",
@@ -32,14 +37,19 @@
       "dist": "arkhai-kit-negotiation-runtime"
     },
     {
-      "key": "core",
-      "path": "core",
-      "dist": "arkhai-core"
-    },
-    {
       "key": "kit-arkhai-payments",
       "path": "kit/arkhai-payments",
       "dist": "arkhai-kit-arkhai-payments"
+    },
+    {
+      "key": "core-registry-client",
+      "path": "core/registry-client",
+      "dist": "arkhai-core-registry-client"
+    },
+    {
+      "key": "kit-delivery",
+      "path": "kit/delivery",
+      "dist": "arkhai-kit-delivery"
     },
     {
       "key": "core-buyer",
@@ -57,14 +67,24 @@
       "dist": "arkhai-core-storefront-client"
     },
     {
-      "key": "core-registry-client",
-      "path": "core/registry-client",
-      "dist": "arkhai-core-registry-client"
-    },
-    {
       "key": "core-registry",
       "path": "core/registry",
       "dist": "arkhai-core-registry"
+    },
+    {
+      "key": "kit-capability-shape",
+      "path": "kit/capability-shape",
+      "dist": "arkhai-kit-capability-shape"
+    },
+    {
+      "key": "kit-resource-pools-contracts",
+      "path": "kit/resource-pools-contracts",
+      "dist": "arkhai-kit-resource-pools-contracts"
+    },
+    {
+      "key": "kit-resource-pools",
+      "path": "kit/resource-pools",
+      "dist": "arkhai-kit-resource-pools"
     },
     {
       "key": "kit-site",
@@ -87,19 +107,14 @@
       "dist": "arkhai-kit-contact-exchange"
     },
     {
-      "key": "kit-delivery",
-      "path": "kit/delivery",
-      "dist": "arkhai-kit-delivery"
-    },
-    {
       "key": "kit-fulfillment",
       "path": "kit/fulfillment",
       "dist": "arkhai-kit-fulfillment"
     },
     {
-      "key": "kit-resource-pools",
-      "path": "kit/resource-pools",
-      "dist": "arkhai-kit-resource-pools"
+      "key": "kit-resource-pools-client",
+      "path": "kit/resource-pools-client",
+      "dist": "arkhai-kit-resource-pools-client"
     },
     {
       "key": "kit-storefront",
@@ -107,9 +122,34 @@
       "dist": "arkhai-kit-storefront"
     },
     {
+      "key": "compute",
+      "path": "domains/compute",
+      "dist": "arkhai-compute"
+    },
+    {
       "key": "bare-metal",
       "path": "domains/bare_metal",
       "dist": "arkhai-bare-metal"
+    },
+    {
+      "key": "kit-delivery-apprise",
+      "path": "kit/delivery-apprise",
+      "dist": "arkhai-kit-delivery-apprise"
+    },
+    {
+      "key": "kit-pool-overrides",
+      "path": "kit/pool-overrides",
+      "dist": "arkhai-kit-pool-overrides"
+    },
+    {
+      "key": "compute-provisioning-contracts",
+      "path": "provisioning/compute/contracts",
+      "dist": "arkhai-compute-provisioning-contracts"
+    },
+    {
+      "key": "compute-provisioning-client",
+      "path": "provisioning/compute/client",
+      "dist": "arkhai-compute-provisioning-client"
     },
     {
       "key": "bare-metal-storefront",
@@ -117,9 +157,24 @@
       "dist": "arkhai-bare-metal-storefront"
     },
     {
+      "key": "compute-provisioning",
+      "path": "provisioning/compute",
+      "dist": "arkhai-compute-provisioning"
+    },
+    {
+      "key": "compute-provisioning-ansible",
+      "path": "provisioning/compute/ansible",
+      "dist": "arkhai-compute-provisioning-ansible"
+    },
+    {
       "key": "bare-metal-provisioning-adapter",
       "path": "domains/bare_metal/provisioning/adapter",
       "dist": "arkhai-bare-metal-provisioning-adapter"
+    },
+    {
+      "key": "kit-capability-pricing",
+      "path": "kit/capability-pricing",
+      "dist": "arkhai-kit-capability-pricing"
     },
     {
       "key": "vms",
@@ -127,10 +182,30 @@
       "dist": "arkhai-vms"
     },
     {
+      "key": "vms-listings",
+      "path": "domains/vms/listings",
+      "dist": "arkhai-vms-listings"
+    },
+    {
+      "key": "vms-negotiation",
+      "path": "domains/vms/negotiation",
+      "dist": "arkhai-vms-negotiation"
+    },
+    {
+      "key": "vms-settlement",
+      "path": "domains/vms/settlement",
+      "dist": "arkhai-vms-settlement"
+    },
+    {
       "key": "vms-buyer",
       "path": "domains/vms/buyer",
       "dist": "arkhai-vms-buyer",
       "wheel_only": true
+    },
+    {
+      "key": "vms-provisioning-operator-client",
+      "path": "domains/vms/provisioning/client",
+      "dist": "arkhai-vms-provisioning-operator-client"
     },
     {
       "key": "vms-provisioning-adapter",
@@ -173,16 +248,6 @@
       "key": "apicredits-service",
       "path": "domains/apicredits/service",
       "dist": "arkhai-apicredits-service"
-    },
-    {
-      "key": "vms-provisioning-operator-client",
-      "path": "domains/vms/provisioning/client",
-      "dist": "arkhai-vms-provisioning-operator-client"
-    },
-    {
-      "key": "compute-provisioning",
-      "path": "provisioning/compute",
-      "dist": "arkhai-compute-provisioning"
     },
     {
       "key": "bare-metal-buyer",

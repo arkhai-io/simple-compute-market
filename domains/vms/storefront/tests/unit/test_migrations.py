@@ -7,7 +7,9 @@ from __future__ import annotations
 import sqlite3
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from market_core import SettlementEvidence
 import pytest
 
 from core_storefront.domain_registry import (
@@ -20,6 +22,8 @@ from market_identity import Ed25519Signer
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils import sqlite_client as sqlite_module
+
+from tests.fulfillment_fixtures import vm_delivery_evidence
 
 from market_storefront.utils.migrations import (
     _migrate_rename_compute_capacity_pools,
@@ -358,3 +362,43 @@ def test_settings_singleton_rejects_a_different_registry_owner(
         match="different storefront domain registry object",
     ):
         sqlite_module.get_sqlite_client(registry=second_registry)
+
+
+@pytest.mark.asyncio
+async def test_evidence_and_delivery_bindings_survive_restart_without_payment_escrows(tmp_path):
+    registry = build_vm_storefront_registry(build_vm_storefront_domain())
+    path = str(tmp_path / "evidence.db")
+    db = SQLiteClient(path, registry=registry)
+    pending = SettlementEvidence(
+        negotiation_id="payment-1", mechanism="arkhai.payments.v1", settlement_ref="transaction-1",
+        status="pending", evidence={"schema": "vm.settlement-evidence.v1", "agreement_sha256": "1" * 64},
+    )
+    await db.save_vm_settlement_evidence(pending)
+    with pytest.raises(ValueError, match="requires verified"):
+        await db.insert_vm_delivery(negotiation_id="payment-1")
+    verified = replace(
+        vm_delivery_evidence(negotiation_id="payment-1", settlement_ref="transaction-1"),
+        mechanism=pending.mechanism,
+    )
+    await db.save_vm_settlement_evidence(verified)
+    assert await db.insert_vm_delivery(negotiation_id="payment-1")
+    await db.update_vm_delivery(negotiation_id="payment-1", fulfillment_id="physical-1")
+    db = SQLiteClient(path, registry=registry)
+    await db.save_vm_settlement_evidence(verified)
+    assert not await db.insert_vm_delivery(negotiation_id="payment-1")
+    assert (await db.load_vm_delivery(negotiation_id="payment-1"))["fulfillment_id"] == "physical-1"
+    for changed in (replace(verified, mechanism="other.v1"), replace(verified, settlement_ref="other-transaction"),
+                    replace(verified, evidence={**verified.evidence, "agreement_sha256": "2" * 64})):
+        with pytest.raises(ValueError, match="conflicts"):
+            await db.save_vm_settlement_evidence(changed)
+    with pytest.raises(ValueError, match="cannot change"):
+        await db.update_vm_delivery(negotiation_id="payment-1", fulfillment_id="replacement")
+    expiry = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+    assert await db.claim_vm_delivery(negotiation_id="payment-1", owner="worker-a", lease_until=expiry)
+    assert not await db.claim_vm_delivery(negotiation_id="payment-1", owner="worker-b", lease_until=expiry)
+    await db.release_vm_delivery(negotiation_id="payment-1", owner="worker-b")
+    assert not await db.claim_vm_delivery(negotiation_id="payment-1", owner="worker-b", lease_until=expiry)
+    await db.release_vm_delivery(negotiation_id="payment-1", owner="worker-a")
+    assert await db.claim_vm_delivery(negotiation_id="payment-1", owner="worker-b", lease_until=expiry)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM escrows").fetchone()[0] == 0

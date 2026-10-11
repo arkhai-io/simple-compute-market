@@ -29,6 +29,28 @@ A phase remains separate when core-owned machinery or a typed invariant lies bet
 
 These carriers are intentionally less expressive than every domain model. Domain-specific meaning travels in validated, versioned envelopes and is interpreted only by the owning domain or mechanism codec.
 
+`market_core.settlement` owns `SettlementStageTable[StageT]` and
+`SettlementEvidence`, exported by the dependency-light carrier wheel. The table
+is an immutable mapping of canonical mechanism IDs to opaque domain-owned
+values, with no callable bound or required stage methods. A settlement
+capability declares independent `buyer_stages` and `seller_stages`; startup
+validates non-empty support for its supplied roles, not mechanism payloads.
+Escrow plan builders are explicitly injected helpers, not universal capability
+methods.
+
+Evidence carries only negotiation ID, mechanism, optional opaque settlement
+reference, non-empty domain status and a domain-owned payload mapping. Carrier
+fields and the copied mapping are immutable; nested payload values remain
+opaque. Core checks identity continuity without defining a financial state
+machine. Pending evidence can lack a reference. The seller's selected stage,
+not buyer-local progress, owns the protected delivery gate.
+
+The arrows describe handoffs, not an actor schedule. Seller-first, buyer-first
+and fused settlement/delivery stages are equally valid. The selected domain
+stage owns source revalidation and any post-delivery attestation, claim binding
+or compensation. Core does not serialize continuations or choose them from
+current priority.
+
 ## Package ownership
 
 Dependency direction protects substitutability and testability:
@@ -70,6 +92,19 @@ A verified-only domain may register and adopt a pre-materialized obligation
 without installing a servicing worker. Full servicing begins only after the
 composition can bind a real immutable fulfillment reference; a no-op executor
 would falsely advertise collectability.
+
+Each domain composes independent buyer and seller role tables. Registrations
+control fresh admission; accepted work resolves its recorded Agreement through
+the table even when publication is disabled. VM and API-credit tables bind
+Alkahest and payments; bare-metal purchase binds payments while its seller also
+binds Alkahest and fused contact exchange. Delivery consumes validated source
+and domain facts, not the mechanism ID or an escrow-shaped progress row.
+
+Compatible kits may opt into a stage convention, but no shared convention or
+adapter is required or implemented. Its package is chosen when concrete reuse
+justifies implementation: a kit, never core or either mechanism package. Contact,
+seller-first and fused stages need no adapter. The obligation runtime is not an
+assumed home for a convention consumed by non-escrow mechanisms.
 
 ## Settlement configuration registration
 
@@ -138,11 +173,11 @@ reservation, fulfillment, and recovery.
 Settlement servicing keeps a domain-neutral
 `StorefrontSettlementFulfillmentInput` with the accepted thread binding, buyer
 principal, opaque domain input, and optional fulfillment anchor. At delivery,
-core constructs `StorefrontFulfillmentContext` by adding the accepted escrow
-identity and caller-owned authority ports, resolves the exact contract from the
+core constructs `StorefrontFulfillmentContext` by adding the selected stage's
+evidence and caller-owned authority ports, resolves the exact contract from the
 same frozen registry, invokes only that contract's fulfillment hook, and
-rejects a result that changes the negotiation, escrow, or site identity. The
-VM hook translates the opaque input into VM executor arguments; core and kit
+rejects a result that changes the negotiation, settlement reference, or site
+identity. The VM hook translates the opaque input into VM executor arguments; core and kit
 own lifecycle and dispatch, while the domain owns interpretation and the
 concrete effect.
 
@@ -161,7 +196,7 @@ selector, or no-op fulfillment implementation.
 
 ## Agreement-based payment composition
 
-Core defines only shared-reader carriers: public settlement options and accepted Agreements. Mechanism status, refunds, and provisioning translation stay in the supporting domain/kit composition. `make_settle_hook` routes a selected outcome with no escrow proposal to the domain's `agreement_settlement` hook.
+Core defines shared-reader carriers: public settlement options, accepted Agreements, role tables and settlement evidence. Mechanism status, refunds and provisioning translation stay in the supporting domain/kit composition. `make_settle_hook` looks up `Agreement.settlement.mechanism` in the injected buyer table and passes the exact negotiation to its domain-owned invoker. Missing entries fail before effects. `make_escrow_settle_hook` is an explicit helper for an applicable entry, never a default.
 
 Acceptance fixes exact Agreement bytes and puts the seller-derived mandate in opaque `settlement_data`; both are committed together in `negotiation_threads` and carried in responses and outcomes. VM, bare-metal, and API-credit sellers load the mandate by negotiation ID, poll its deterministic transaction ID, verify the signed receipt, and only then provision or issue. Pending evidence is retryable, completed calls are idempotent, and nonterminal domain work is re-driven. Receipt evidence and physical/grant progress remain domain-owned.
 
@@ -174,8 +209,6 @@ Composition roots resolve public identity and secret credential material separat
 Chain and provider dependencies enter only after a composition root selects a concrete mechanism. The selected domain or settlement adapter owns wallet derivation, chain preflight, RPC clients, and provider SDKs; a no-wallet Arkhai payment composition consequently does not instantiate an Alkahest client or import those dependencies into scheme-neutral orchestration.
 
 Arkhai payment authentication is independent of marketplace request signing: headless calls use owner-scoped WorkOS API keys, and receipts use the service's Ed25519 `arkhai.payments.receipt.v1` framing. Generated wire models and identity-kit verification preserve the published service boundary without importing service code.
-
-
 
 ## Current limits
 

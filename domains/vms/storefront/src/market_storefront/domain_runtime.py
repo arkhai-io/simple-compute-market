@@ -7,16 +7,15 @@ from dataclasses import replace
 from typing import Any
 
 from arkhai_vms.domain_runtime import market_domain
-from core_storefront.domain_plugins import StorefrontDomainContribution
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontSettlementBuildContext,
 )
+from core_storefront.domain_plugins import StorefrontDomainContribution
 from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
 )
-from market_alkahest import create_alkahest_registration
 from arkhai_vms_negotiation.storefront_round import default_seller_round_hook
 from market_core import (
     DomainCapability,
@@ -32,6 +31,7 @@ from market_core import (
 
 from market_storefront.negotiation_runtime import build_vm_accepted_artifacts
 from market_storefront.services.fulfillment_service import fulfill_compute_obligation
+from market_storefront.settlement_stages import vm_seller_stages
 
 VM_STOREFRONT_DOMAIN_IDENTITY = DomainIdentity("compute.v1")
 _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
@@ -63,6 +63,11 @@ def _build_vm_settlement_plan(
     )
 
 
+def build_vm_seller_stages():
+    """Bind the VM seller declaration without reconstructing a domain contract."""
+    return vm_seller_stages(_build_vm_settlement_plan)
+
+
 async def _fulfill_vm_context(
     *,
     context: StorefrontFulfillmentContext,
@@ -72,31 +77,14 @@ async def _fulfill_vm_context(
     raw = context.domain_input
     if not isinstance(raw, Mapping):
         raise TypeError("VM fulfillment requires a domain_input mapping")
-    required = (
-        "ssh_public_key",
-        "order",
-        "duration_seconds",
-        "listing_id",
-        "settlement_mechanism",
-    )
-    missing = tuple(key for key in required if raw.get(key) is None)
-    if missing:
-        raise ValueError("VM fulfillment input is missing " + ", ".join(missing))
     result = await fulfill_compute_obligation(
         sqlite_client=context.ports.repository,
-        client=context.ports.fulfillment_client,
-        escrow_uid=context.escrow_uid,
-        ssh_public_key=str(raw["ssh_public_key"]),
-        order=raw["order"],
-        duration_seconds=int(raw["duration_seconds"]),
-        start_utc=raw.get("start_utc"),
-        listing_id=str(raw["listing_id"]),
-        negotiation_id=context.negotiation_id,
+        evidence=context.settlement_evidence,
         site_id=context.site_id,
-        settlement_mechanism=str(raw["settlement_mechanism"]),
+        failure_policy=raw.get("failure_policy"),
     )
     result = dict(result or {})
-    order = raw["order"] if isinstance(raw["order"], Mapping) else {}
+    order = context.settlement_evidence.evidence["delivery"]["payload"]["order"]
     listing_resource = order.get("listing_resource")
     if not isinstance(listing_resource, Mapping):
         listing_resource = {}
@@ -105,19 +93,19 @@ async def _fulfill_vm_context(
         physical_resource_id = listing_resource.get("resource_id")
     return {
         "negotiation_id": context.negotiation_id,
-        "escrow_uid": context.escrow_uid,
+        "settlement_ref": context.settlement_ref,
         "site_id": context.site_id,
         "state": str(result.get("status") or "failed"),
         "physical_resource_id": physical_resource_id,
         "capacity_reservation_id": result.get("capacity_reservation_id"),
         "settlement_resource_id": result.get("settlement_resource_id"),
-        "fulfillment_id": result.get("fulfillment_uid")
-        or result.get("fulfillment_id"),
+        "fulfillment_id": result.get("fulfillment_uid") or result.get("fulfillment_id"),
         "failure_reason": result.get("message")
         if result.get("status") != "fulfilled"
         else None,
         "domain_result": result,
     }
+
 
 def build_vm_storefront_domain() -> MarketDomainContract:
     """Construct the ordinary VM contract used by the storefront executable."""
@@ -133,8 +121,7 @@ def build_vm_storefront_domain() -> MarketDomainContract:
                 run_negotiation_policy=default_seller_round_hook,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=create_alkahest_registration().settlement_verifier,
-                build_plan=_build_vm_settlement_plan,
+                seller_stages=build_vm_seller_stages(),
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=_fulfill_vm_context,
@@ -186,9 +173,7 @@ def validate_vm_storefront_domain(domain: object) -> MarketDomainContract:
             "VM storefront requires domain "
             f"{VM_STOREFRONT_DOMAIN_IDENTITY!s}, got {validated.identity!s}"
         )
-    missing = (
-        _REQUIRED_VM_STOREFRONT_CAPABILITIES - validated.declared_capabilities
-    )
+    missing = _REQUIRED_VM_STOREFRONT_CAPABILITIES - validated.declared_capabilities
     if missing:
         names = ", ".join(sorted(capability.value for capability in missing))
         raise DomainContractValidationError(

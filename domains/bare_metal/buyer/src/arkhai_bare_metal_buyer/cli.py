@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import base64
 import os
 import time
 import webbrowser
@@ -56,6 +55,7 @@ from .fulfillment import BareMetalFulfillmentTransport
 from market_arkhai_payments import PaymentApproval
 
 from .arkhai_payments import BareMetalSettlementTransport
+from .settlement_composition import BUYER_STAGES
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
@@ -353,14 +353,18 @@ def buy_bare_metal(
     if len(matches) != 1:
         raise typer.BadParameter("option_id must identify one advertised option")
     selected = matches[0]
-    if selected.mechanism != "arkhai.payments.v1" or len(selected.rates) != 1:
-        raise typer.BadParameter("buy requires one priced arkhai.payments.v1 option")
-    rate = selected.rates[0]
-    if rate.per != "hour":
+    try:
+        stage = BUYER_STAGES[selected.mechanism]
+        stage.validate_option(selected)
+    except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
-            "bare-metal purchase currently requires an hourly option"
-        )
+            "buy requires a supported priced settlement option"
+        ) from exc
+    rate = selected.rates[0]
     amount = compute_rate_total(rate, duration_seconds)
+    payment_approval = PaymentApproval(
+        buyer_config.arkhai_payments, buyer_config.payer_account
+    )
     run_log = RunLog.start(
         profile_id=identity.profile_id,
         principal=identity.principal,
@@ -401,20 +405,15 @@ def buy_bare_metal(
         ),
         settlement_selection=selection,
         max_rounds=buyer_config.default_max_rounds,
+        validate_acceptance=lambda accepted: stage.validate_acceptance(
+            accepted, payment_approval
+        ),
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
         run_log.end("exited", reason=outcome.reason)
         _json({"run_id": run_log.run_id, **outcome.to_dict()})
         return
-    if (
-        outcome.agreement is None
-        or outcome.settlement_data is None
-        or not outcome.agreement_bytes
-    ):
-        raise RuntimeError(
-            "accepted payment negotiation omitted its Agreement or mandate"
-        )
-    agreement_bytes = base64.b64decode(outcome.agreement_bytes, validate=True)
+    stage.validate_acceptance(outcome, payment_approval)
     run_log.event(
         "agreement_accepted",
         negotiation_id=outcome.negotiation_id,
@@ -427,14 +426,6 @@ def buy_bare_metal(
             plan=outcome.settlement_plan,
         ),
     )
-    transaction = PaymentApproval(
-        buyer_config.arkhai_payments, buyer_config.payer_account
-    ).approve(
-        agreement_bytes,
-        outcome.settlement_data,
-        timeout=payment_timeout_seconds,
-    )
-    run_log.event("payment_approved", transaction_id=transaction)
     settlement = BareMetalSettlementTransport(
         seller_url=listing.storefront_url,
         principal=identity.principal,
@@ -442,19 +433,13 @@ def buy_bare_metal(
         resolve_seller_principals=lambda: listing.publisher_principals,
         timeout=buyer_config.timeout_seconds,
     )
-    # Settlement starts delivery once the seller verifies the receipt; the buyer
-    # retries while the seller reports no payment evidence yet.
-    deadline = time.monotonic() + payment_timeout_seconds
-    while True:
-        fulfillment = settlement.settle(outcome.negotiation_id)
-        if fulfillment.get("status") != "pending":
-            break
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("seller has not observed the verified payment receipt")
-        time.sleep(min(1.0, remaining))
-    if fulfillment.get("settlement_ref") != transaction:
-        raise RuntimeError("seller settled a different payment transaction")
+    transaction, fulfillment = stage.settle(
+        outcome=outcome,
+        approval=payment_approval,
+        transport=settlement,
+        timeout=payment_timeout_seconds,
+        run_log=run_log,
+    )
     run_log.end(
         "agreed",
         negotiation_id=outcome.negotiation_id,

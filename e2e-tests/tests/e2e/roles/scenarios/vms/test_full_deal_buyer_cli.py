@@ -103,17 +103,21 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import (
+from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
-    DealState,
-    _signer,
+    advance_fulfillment_to,
     advance_storefront,
-    capacity_site_id,
-    capacity_source_for,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    one_site,
     pause_storefront,
+    wait_for_stage_event,
+)
+from tests.e2e.roles.scenarios.vms.conftest import (
+    DealState,
+    _signer,
+    capacity_site_id,
+    capacity_source_for,
+    one_site,
     require_state,
     signed_listing_read_headers,
 )
@@ -481,33 +485,39 @@ class TestStage00h_ProvisioningStorefrontLink:
     ):
         """GET /api/v1/system/status → checks.storefront=ok, checks.storefront_auth=ok.
 
-        Validates that the provisioning service's lease watchdog can reach and
-        authenticate to the storefront admin API. This is the connectivity path
-        the watchdog uses when it releases leases at expiry:
+        Validates that the provisioning service can reach and authenticate to
+        the storefront. This is the path a released lease's capacity takes back
+        to the storefront that sold it:
 
-            provisioning LeaseWatchdog
-              → PATCH {storefront_url}/api/v1/admin/portfolio/resources/{id}
+            provisioning lease lifecycle
+              → signed service-peer `capacity_released` event
+              → POST {storefront_url}/api/v1/admin/fulfillment/events/capacity-released
 
         Two sub-checks from the provisioning health endpoint:
           - storefront      — GET {storefront_url}/health responded 200
-          - storefront_auth — GET {storefront_url}/api/v1/system/status with
-                              a signed request responded 200
+          - storefront_auth — GET {storefront_url}/api/v1/system/status, signed
+                              under the `service` role, responded 200 with a
+                              response signed by the pinned storefront principal
 
         If this fails with storefront='unconfigured':
-          - For deploy-docker: ensure storefront_url and the service-peer identity
-            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
+          - For deploy-docker: ensure storefront_url is set in
+            provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
-            bob storefront Service; provisioning.storefront.adminKey defaults
-            to global.adminApiKey.
+            bob storefront Service.
 
         If this fails with storefront='unreachable':
           - Both services must be on the same Docker network.
           - Check that the storefront container is running and healthy (00a/00c).
 
-        If this fails with storefront_auth='unauthorized':
-          - The admin key in config-docker.yml / provisioning-secrets must
-            match the principal pinned in storefront.bob.toml.
+        If this fails with storefront_auth='unauthorized' or
+        'configuration_error':
+          - The provisioning service's signing identity must be the principal
+            storefront.bob.toml pins under
+            [Identity.service_peers.provisioning_default].
+          - The storefront principal provisioning pins
+            (PROVISIONING_STOREFRONT_IDENTITY__*, or the chart's
+            storefrontIdentity) must be the storefront's own signer.
         """
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
@@ -517,7 +527,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
-            "The lease watchdog will not be able to release resources when leases expire.\n"
+            "Provisioning will not be able to tell the storefront when a lease's capacity is released.\n"
             "For deploy-docker: verify storefront_url in "
             "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
@@ -528,7 +538,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         auth_check = checks.get("storefront_auth", "absent")
         assert auth_check == "ok", (
             f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
-            "The lease watchdog signs as the provisioning service; 'unauthorized'\n"
+            "Provisioning signs as its own service identity; 'unauthorized'\n"
             "means its principal is not the one storefront.bob.toml pins as a\n"
             "service peer.\n"
             f"Full health response: {health}"
@@ -1108,9 +1118,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             "[08b] settle_submitted event body: %s", {k: submitted.get(k) for k in ("ts", "body")}
         )
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(
+        wait_for_stage_event(
             storefront_admin_client,
             "provision",
             "job_submitted",
@@ -1353,7 +1361,9 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
 
 
 class TestStage09c_LeaseRecorded:
-    def test_09c_provisioning_lease_recorded(self, provisioning_client, deal_state: DealState):
+    def test_09c_provisioning_lease_recorded(
+        self, provisioning_client, site_capacity, deal_state: DealState
+    ):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Placement is confirmed here, not at stage 08b -- see
@@ -1367,6 +1377,7 @@ class TestStage09c_LeaseRecorded:
         """
         require_state(
             deal_state,
+            "negotiation_id",
             "real_escrow_uid",
             "settlement_status",
             "fulfillment_id",
@@ -1374,9 +1385,11 @@ class TestStage09c_LeaseRecorded:
 
         # DealLease resolves where this deal's lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease_view = DealLease(
+            provisioning_client, site_capacity, negotiation_id=deal_state.negotiation_id
+        )
         lease = lease_view.refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get("negotiation_id") == deal_state.negotiation_id
         host_id = lease.get("host_id")
         assert host_id == E2E_DEAL_CLI_HOST, (
             f"lease bound to executor {host_id!r}; this scenario's deal was "
@@ -1541,10 +1554,7 @@ class TestStage11b_TeardownCompletion:
         # Convergence-driven, not one-shot: `drain` returns when the provider
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
-        from tests.e2e.roles.scenarios.vms.conftest import (
-            advance_fulfillment_to as _advance_to,
-        )
-        fulfillment = _advance_to(
+        fulfillment = advance_fulfillment_to(
             provisioning_client, deal_state.fulfillment_id, "torn_down",
         )
 
@@ -1553,9 +1563,9 @@ class TestStage11b_TeardownCompletion:
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0)
+        wait_for_stage_event(
+            storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0
+        )
         assert not deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
         )

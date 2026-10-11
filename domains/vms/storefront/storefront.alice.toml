@@ -102,7 +102,6 @@ default = "http://alice-provisioning:8081"
 
 [provisioning]
 service_url   = "http://alice-provisioning:8081"
-mode          = "http"
 poll_interval = 1
 
 [provisioning.identity]

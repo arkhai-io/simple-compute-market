@@ -96,10 +96,10 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 
 ## Package and dependency discipline
 
-- Follow the dependency layers defined in `ARCHITECTURE.md` and the relevant subsystem specification.
-- `TYPE_CHECKING` imports count as architectural dependencies.
-- Internal Python dependencies are built into `.dist` and installed from wheels. Do not add editable sibling paths merely to make local development work.
-- Environments, images, and locks are built through `scripts/uv_project.py`, which derives the internal packages from each project's lock; never list internal packages by hand. `docs/development/BUILD_AND_PACKAGING.md` owns the conventions and names the check enforcing each.
+- Follow the package layers, scope, and kind rules in `ARCHITECTURE.md#package-and-dependency-layers` and the relevant subsystem specification. A change whose edges all point a permitted way has answered the direction and knowledge questions, not the ownership one; that one is review's.
+- Any import is an architectural dependency: module-level, function-local, under `TYPE_CHECKING`, or behind `try`/`except`. A "lazy" or "call-path" import does not soften the edge; if the edge is wrong, move the code rather than defer the import.
+- Place a new package where `ARCHITECTURE.md` says its scope puts it, and declare every distribution it imports in its `pyproject.toml`. A declared internal distribution the source never imports is removed or kept for a stated runtime reason.
+- These rules are enforced by the per-package boundary tests and by review; an edge no test forbids is still a violation. Record a known divergence in `ARCHITECTURE.md`'s "Where the current tree diverges" and the change that owns it, never as a comment at the import.
 
 ## Tests and diagnostics
 

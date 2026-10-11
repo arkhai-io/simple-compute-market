@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import pytest
 from market_site import auth as server_auth
+from market_site import capacity_definitions as server_models
 from market_site_client import client as client_contracts
+from market_site_client import models as client_models
 
 
 def _server_index() -> dict[tuple[str, str], server_auth.SiteRouteContract]:
@@ -158,9 +160,6 @@ def test_capacity_definition_import_contracts_agree():
 )
 def test_capacity_definition_models_agree(name: str):
     """The client keeps its own copies of the import models; their schemas match."""
-
-    from market_site import capacity_definitions as server_models
-    from market_site_client import models as client_models
 
     assert (
         getattr(server_models, name).model_json_schema()

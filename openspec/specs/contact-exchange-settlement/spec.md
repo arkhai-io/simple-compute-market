@@ -40,6 +40,21 @@ idempotent, and no other principal may read either payload.
 - **WHEN** a principal that is not a party to the deal requests the reveal
 - **THEN** the request is refused and no contact data is returned
 
+### Requirement: Accepted introductions survive publication disablement
+
+Introduction start and read MUST resolve the persisted accepted Agreement and plan
+through its declared seller stage. Current publication enablement MUST NOT gate
+accepted reveal or re-read; disabling contact for new work MUST continue to refuse
+fresh contact admission.
+
+#### Scenario: Contact is disabled after acceptance
+
+- **WHEN** contact is disabled for new publication after a contact Agreement is
+  accepted, with its seller stage and reveal inputs retained
+- **THEN** the buyer can start or retry that introduction and both parties can
+  re-read its persisted reveal under the same obligation reference, including
+  after restart, while new contact negotiation is refused
+
 ### Requirement: The agreed context is durable
 
 The accepted plan's `service_terms` and both contact payloads MUST be persisted at or

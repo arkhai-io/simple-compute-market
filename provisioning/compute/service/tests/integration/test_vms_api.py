@@ -27,6 +27,7 @@ import pytest
 from vm_provisioning_operator.models import CreateVmRequest
 from compute_provisioning_contracts import HostCreate
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.main import app
 from compute_provisioning.jobs.queue import AsyncJobQueue
 
 
@@ -53,7 +54,6 @@ class TestHttpValidation:
 
     async def test_create_vm_missing_vm_target_returns_422(self, client_and_queue):
         from httpx import ASGITransport, AsyncClient
-        from compute_provisioning_service.main import app
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
@@ -70,7 +70,6 @@ class TestHttpValidation:
         success — the failure the relay work exists to remove.
         """
         from httpx import ASGITransport, AsyncClient
-        from compute_provisioning_service.main import app
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
@@ -268,7 +267,6 @@ class TestDispatchRequiresARegisteredHost:
             "[kvm_hosts]\n"
             "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
         )
-        from compute_provisioning_service.main import app
 
         # Service-internal state setup: no API configures the inventory path.
         monkeypatch.setattr(

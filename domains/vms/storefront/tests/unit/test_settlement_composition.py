@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 
@@ -33,7 +35,9 @@ from market_storefront.settlement_composition import (
     reserve_vm_settlement_start,
     serialize_settlement_job,
 )
+from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fulfillment_fixtures import vm_delivery_evidence
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -129,10 +133,42 @@ async def _persist_accepted_negotiation(
         provision_terms=_ACCEPTED_PROVISION,
         binding=thread_binding,
     )
+    params = {
+        "accepted_escrow": {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [],
+        }
+    }
+    option_body = {
+        "mechanism": "alkahest.v1",
+        "asset": "0x" + "22" * 20,
+        "rates": [],
+        "params": params,
+    }
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(**option_body), **option_body
+    )
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=_BUYER.model_dump(mode="json"),
+        seller=_SELLER.model_dump(mode="json"),
+        settlement=option,
+        amount=42,
+        asset=option.asset,
+        duration_seconds=3600,
+        start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z",
+        provision_terms=_ACCEPTED_PROVISION,
+    )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
         agreed_price=42,
         agreed_duration_seconds=3600,
+        agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
     )
     await db.update_negotiation_thread_terminal(
         negotiation_id=negotiation_id,
@@ -153,6 +189,9 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
         mechanism_receipt={"verified": True},
         fulfillment_input=StorefrontSettlementFulfillmentInput(
             buyer_principal=_BUYER,
+            settlement_evidence=vm_delivery_evidence(
+                negotiation_id="neg-1", settlement_ref=escrow_uid,
+            ),
             thread_binding=StorefrontThreadBinding(
                 negotiation_id="neg-1",
                 listing_id="listing-1",
@@ -226,7 +265,9 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert domain.settlement is not None
     domain = replace(
         domain,
-        settlement=replace(domain.settlement, build_plan=build_plan),
+        settlement=replace(
+            domain.settlement, seller_stages=vm_seller_stages(build_plan)
+        ),
     )
     db = SQLiteClient(
         db_path=str(tmp_path / "injected-plan.db"),
@@ -318,6 +359,31 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(db):
 
 
 @pytest.mark.asyncio
+async def test_prepare_requires_agreement_mechanism_before_verification(db, monkeypatch):
+    await _persist_accepted_negotiation(
+        db, negotiation_id="neg-1", listing_id="listing-1",
+        proposal={"chain_name": "anvil", "escrow_address": "0x" + "11" * 20,
+                  "expiration_unix": 1_900_000_000},
+    )
+    thread = await db.load_negotiation_thread_row(negotiation_id="neg-1")
+    agreement = json.loads(thread["agreement_bytes"])
+    agreement["settlement"] = None
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute("UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id='neg-1'",
+                     (json.dumps(agreement).encode(),))
+    verify = AsyncMock()
+    monkeypatch.setattr("market_storefront.utils.escrow_verification.verify_escrow_for_settlement", verify)
+    with pytest.raises(ValueError, match="settlement_mechanism_required"):
+        await prepare_vm_settlement(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            escrow_uid="0xverified", negotiation_id="neg-1", local_principal=_SELLER,
+            mechanism_client=object(), chain_name="anvil", sqlite_client=db,
+        )
+    verify.assert_not_awaited()
+    assert await db.load_vm_settlement_evidence(negotiation_id="neg-1") is None
+
+
+@pytest.mark.asyncio
 async def test_prepare_rejects_contract_outside_the_accepted_thread_binding(
     db,
 ):
@@ -393,7 +459,7 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
     }
     result = {
         "negotiation_id": "neg-1",
-        "escrow_uid": "0xescrow",
+        "settlement_ref": "0xescrow",
         "site_id": "site-1",
         "state": "fulfilled",
         "fulfillment_id": "0xfulfillment",
@@ -409,7 +475,28 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         db_path=str(tmp_path / "injected-fulfillment.db"),
         registry=build_vm_storefront_registry(domain),
     )
+    await _persist_accepted_negotiation(
+        db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
+    )
     prepared = _prepared(db)
+    evidence = prepared.fulfillment_input.settlement_evidence
+    prepared = replace(
+        prepared,
+        fulfillment_input=replace(
+            prepared.fulfillment_input,
+            settlement_evidence=replace(
+                evidence,
+                evidence={
+                    **evidence.evidence,
+                    "source": {
+                        "obligation_ref": prepared.projection_context.obligation_ref
+                    },
+                },
+            ),
+        ),
+    )
+    await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
+    await db.update_vm_delivery(negotiation_id="neg-1", fulfillment_uid="0xfulfillment")
 
     outcome = await fulfill_vm_settlement(
         domain,
@@ -487,7 +574,7 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
     the outcome says so, and the escrow is neither ready nor failed."""
     deferred = {
         "negotiation_id": "neg-1",
-        "escrow_uid": "0xescrow",
+        "settlement_ref": "0xescrow",
         "site_id": "site-1",
         "state": "deferred",
         "domain_result": {
@@ -503,6 +590,9 @@ async def test_a_deferred_fulfillment_leaves_the_escrow_open_for_the_resume_pass
     db = SQLiteClient(
         db_path=str(tmp_path / "deferred-fulfillment.db"),
         registry=build_vm_storefront_registry(domain),
+    )
+    await _persist_accepted_negotiation(
+        db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
     )
     prepared = _prepared(db)
     await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")

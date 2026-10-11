@@ -59,3 +59,41 @@ only when `kit/site`'s boundary test forbids `market_resource_pools` and
 - **Test construction.** 26 files construct `CapacityLedgerService`. Whether tests
   that do not exercise pool facts receive a permissive test authority, and if so
   how it is kept out of production composition.
+- **Finish the split the contracts package started.** *Gates planning.* This design
+  predates `kit/resource-pools-contracts` and `kit/resource-pools-client`. The
+  contracts package took `hints`, `pools`, and `routes`, but three read-side
+  modules stayed with the authority: `asking_rates.py` (imports only
+  `market_capability_shape`), `site_declarations.py` (imports only
+  `market_resource_pools_contracts.hints`), and `host_requirement.py` (no imports).
+  Because they stayed, every reader of pool declarations still installs the
+  authority and its SQLAlchemy and PyYAML dependencies — the VM storefront's
+  `listing_sources.py`, the bare-metal storefront's `site_reading.py`,
+  `arkhai_vms_listings` in three modules, and `kit/site/ledger.py`, which imports
+  both distributions. Moving the three modules to the contracts package is
+  mechanical and leaves `kit/resource-pools` as `db`, `service`, and
+  `pool_config_handler`: the authority alone. After that, the port this design
+  defines is the *only* thing `kit/site` needs from pools, and the import is
+  deleted rather than injected around.
+- **What the authority is, once it is alone.** `db.py`, `service.py`, and
+  `pool_config_handler.py` speak provider, playbook, and host. Outside the compute
+  family only `apicredits_service` touches them, and only because the site ledger it
+  composes reads pool rows: `db/database.py` imports `market_resource_pools.db` to
+  create the table the ledger needs. Under
+  `ARCHITECTURE.md`'s scope rule a kit may know no family, and under the family-kit
+  placement tests the authority fails the third-domain test as a repository-wide
+  kit. Decide whether it becomes a compute family-kit distribution
+  (`provisioning-pools` beside `hosts/` and `jobs/`, once
+  `align-package-paths-with-layers` has placed the family kit) or stays
+  repository-wide with that finding recorded in "Where the current tree diverges".
+  If it moves, the ledger's pool-facts port is what keeps `kit/site`
+  repository-wide, and `apicredits_service` — which imports
+  `market_resource_pools.db` directly in `db/database.py` — takes the port's
+  implementation by injection or uses the static single-pool authority the
+  "API-credits pool storage" question above already contemplates. That question and
+  this one are one decision.
+- **Where the boundary test lives.** The tests this design plans (`kit/site`
+  forbids `market_resource_pools`; the pool kit forbids `market_site`) are two of
+  the eighteen per-package tests `enforce-package-layers` subsumes. Decide whether
+  this change adds them or records its edge in that check's rules file; its
+  exceptions table already carries `kit/site` → `kit/resource-pools` and
+  `apicredits_service` → `kit/resource-pools` under this change.

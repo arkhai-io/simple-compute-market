@@ -15,7 +15,7 @@ from typing import IO, Any, Sequence
 DEFAULT_WORKFLOW = "e2e.yml"
 DEFAULT_OUTPUT_DIR = Path(".snapshot/e2e-logs")
 RUN_LIST_LIMIT = 100
-LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs")
+LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs", "e2e-apicredits-logs")
 COMPOSE_LOG = "compose-logs.txt"
 
 

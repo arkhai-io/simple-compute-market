@@ -227,6 +227,9 @@ async def test_the_vm_buyer_accepts_an_introduction_the_seller_accepts_at_once(
                     on_round=lambda number, _ours, theirs: rounds.append(
                         (number, theirs.get("action"))
                     ),
+                    # As `request-introduction` does: an introduction is not a
+                    # purchase, so the purchase table's acceptance guard is off.
+                    validate_acceptance=None,
                 )
             )
 

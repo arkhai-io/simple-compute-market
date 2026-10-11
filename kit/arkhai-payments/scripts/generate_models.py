@@ -15,7 +15,7 @@ SCHEMA = ROOT / "schema" / "payments.schema.json"
 OUTPUT = ROOT / "src" / "market_arkhai_payments" / "models.py"
 HEADER = (
     "# Generated from schema/payments.schema.json; do not edit.\n"
-    "# Upstream: arkhai-io/arkhai-payments@f16b1ebdca4e0977dae45bebe7b57cce9c1a08c2\n\n"
+    "# Contract identity and update procedure: schema/SOURCE.md.\n\n"
 )
 
 

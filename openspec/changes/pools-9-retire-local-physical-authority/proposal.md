@@ -276,8 +276,12 @@ None.
   the hint mechanism, and the site-scoped override store this change makes
   the only tier.
 - Independent of `fix-resource-pool-provider-at-creation`; either order.
-- The repository work order is the multi-storefront repair (done), then
-  `remove-dead-storefront-physical-surfaces`, then this retirement. Design and
-  planning proceed before the zero-caller removal lands. Sellers
+- `remove-dead-storefront-physical-surfaces` (archived 2026-10-08) has already
+  frozen `compute_allocations` and removed the dead surfaces. Its local-row
+  cleanup in `release_reservations` uses the narrowed resource transition that
+  change left.
+- The repository work order was the multi-storefront repair, then
+  `remove-dead-storefront-physical-surfaces`, then this retirement; both
+  prerequisites are archived. Sellers
   self-host and choose deployment timing after preparing authoritative site
   inventory and commercial overrides; no fleet-wide rollout signal gates it.

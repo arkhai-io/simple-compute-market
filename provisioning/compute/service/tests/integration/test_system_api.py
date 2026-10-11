@@ -20,6 +20,8 @@ What is NOT covered here (unit test jurisdiction):
 
 from __future__ import annotations
 
+from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
+from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_ansible.readiness import (
     ANSIBLE_COMPONENT,
     ANSIBLE_READINESS_KIND,
@@ -33,6 +35,13 @@ from compute_provisioning_contracts import (
     SystemStatusResponse,
 )
 import pytest
+from vm_provisioning_adapter.services.mock_output import vm_mock_output
+
+from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.services.system_status import (
+    COMPONENT_FAILURE_KIND,
+    StatusComponentProvider,
+)
 
 
 class TestHealthEndpoint:
@@ -181,12 +190,6 @@ class TestComponentFailure:
     async def test_a_raising_component_degrades_status_through_the_route(
         self, client_and_queue, monkeypatch
     ):
-        from compute_provisioning_service import container as _container_module
-        from compute_provisioning_service.services.system_status import (
-            COMPONENT_FAILURE_KIND,
-            StatusComponentProvider,
-        )
-
         client, _ = client_and_queue
         composed = _container_module.resolved_system_status_service
 
@@ -249,18 +252,10 @@ class TestMockedExecution:
 
     @pytest.fixture
     def fake_ansible(self):
-        from compute_provisioning_ansible import MockAnsibleRunner
-        from vm_provisioning_adapter.services.mock_output import vm_mock_output
-
         return MockAnsibleRunner(default_output=vm_mock_output)
 
     @pytest.fixture
     def bare_metal_runner(self):
-        from bare_metal_provisioning_adapter.services.mock_output import (
-            bare_metal_mock_output,
-        )
-        from compute_provisioning_ansible import MockAnsibleRunner
-
         return MockAnsibleRunner(default_output=bare_metal_mock_output)
 
     async def test_every_executor_mocked(self, client_and_queue):

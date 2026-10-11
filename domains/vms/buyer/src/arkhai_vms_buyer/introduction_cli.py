@@ -200,6 +200,7 @@ def request_introduction(
             "_selected_settlement_option": selected.model_dump(mode="json")
         },
         max_rounds=max_rounds,
+        validate_acceptance=None,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
         run_log.end("exited", reason=outcome.reason)

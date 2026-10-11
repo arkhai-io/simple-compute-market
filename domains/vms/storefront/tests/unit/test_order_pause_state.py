@@ -25,6 +25,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.lifecycle import trading_pause
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_negotiation_runtime import (
     NegotiationUnavailableError,
@@ -327,8 +328,6 @@ class TestNegotiationRuntimePauseGuard:
     """Pause checks fire before negotiation policy or persistence."""
 
     async def test_global_pause_raises(self, db, monkeypatch):
-        from market_storefront.lifecycle import trading_pause
-
         monkeypatch.setattr(trading_pause(), "_paused", True)
 
         with pytest.raises(StorefrontPausedError) as exc_info:
@@ -339,8 +338,6 @@ class TestNegotiationRuntimePauseGuard:
         assert exc_info.value.reason == "global"
 
     async def test_order_pause_raises(self, db, monkeypatch):
-        from market_storefront.lifecycle import trading_pause
-
         monkeypatch.setattr(trading_pause(), "_paused", False)
 
         await db.set_listing_paused(listing_id="order-001", paused=True)
@@ -355,8 +352,6 @@ class TestNegotiationRuntimePauseGuard:
     async def test_no_pause_proceeds_normally(self, db, monkeypatch):
         """When not paused, the function proceeds to normal validation
         (raises ValueError for missing strategy, not StorefrontPausedError)."""
-        from market_storefront.lifecycle import trading_pause
-
         monkeypatch.setattr(trading_pause(), "_paused", False)
 
         # order-001 has no strategy set, so we expect ValueError not paused
@@ -377,8 +372,6 @@ class TestNegotiationRuntimePauseGuard:
         its source: the runtime refuses before any write with a retryable
         refusal (503), not a declared mismatch (409).
         """
-        from market_storefront.lifecycle import trading_pause
-
         monkeypatch.setattr(trading_pause(), "_paused", False)
 
         from market_core.schemas import EscrowProposal, ProvisionTerms

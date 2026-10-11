@@ -17,7 +17,8 @@ def test_storefront_authorities_are_isolated(tmp_path):
         )
     result = subprocess.run(
         ["docker", "compose", "--env-file", str(env_file),
-         "-f", "docker-compose.yml", "-f", "compose.local-identities.yml",
+         "-f", "docker-compose.yml", "-f", "compose.vms-local.yml",
+         "-f", "compose.apicredits-local.yml",
          "config", "--format", "json"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     )

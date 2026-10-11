@@ -8,12 +8,12 @@ provider URLs, credentials, or a fallback selector.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementEvidence
 from market_identity import Identity
 
 from .domain_registry import StorefrontDomainBinding, StorefrontThreadBinding
@@ -112,8 +112,14 @@ class StorefrontSettlementFulfillmentInput:
     domain_input: Mapping[str, Any] = field(repr=False)
     fulfillment_anchor: str | None = None
     evidence_client: Any = field(default=None, repr=False)
+    settlement_evidence: SettlementEvidence | None = None
 
     def __post_init__(self) -> None:
+        if (
+            self.settlement_evidence is not None
+            and self.settlement_evidence.negotiation_id != self.negotiation_id
+        ):
+            raise ValueError("settlement evidence changed its negotiation identity")
         object.__setattr__(
             self,
             "domain_input",
@@ -134,14 +140,21 @@ class StorefrontFulfillmentContext:
     """Exact accepted binding and public operation identities for fulfillment."""
 
     thread_binding: StorefrontThreadBinding
-    escrow_uid: str
+    settlement_evidence: SettlementEvidence
     buyer_principal: Identity
     ports: StorefrontFulfillmentPorts = field(repr=False)
     domain_input: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        if not self.escrow_uid:
-            raise ValueError("escrow_uid must be non-empty")
+        if self.settlement_evidence.negotiation_id != self.negotiation_id:
+            raise ValueError("settlement evidence changed its negotiation identity")
+        if self.settlement_evidence.settlement_ref is None:
+            raise ValueError("fulfillment requires an established settlement reference")
+
+    @property
+    def settlement_ref(self) -> str:
+        assert self.settlement_evidence.settlement_ref is not None
+        return self.settlement_evidence.settlement_ref
 
     @property
     def negotiation_id(self) -> str:
@@ -157,7 +170,7 @@ class StorefrontFulfillmentLifecycle:
     """Safe durable lifecycle projection returned by a domain fulfillment hook."""
 
     negotiation_id: str
-    escrow_uid: str
+    settlement_ref: str
     site_id: str
     state: str
     physical_resource_id: str | None = None
@@ -175,7 +188,7 @@ class StorefrontFulfillmentLifecycle:
             raise StorefrontDomainLifecycleError(
                 "selected domain fulfillment hook must return a mapping"
             )
-        required = ("negotiation_id", "escrow_uid", "site_id", "state")
+        required = ("negotiation_id", "settlement_ref", "site_id", "state")
         missing = tuple(key for key in required if not result.get(key))
         if missing:
             raise StorefrontDomainLifecycleError(
@@ -183,7 +196,7 @@ class StorefrontFulfillmentLifecycle:
             )
         return cls(
             negotiation_id=str(result["negotiation_id"]),
-            escrow_uid=str(result["escrow_uid"]),
+            settlement_ref=str(result["settlement_ref"]),
             site_id=str(result["site_id"]),
             state=str(result["state"]),
             physical_resource_id=_optional_text(result.get("physical_resource_id")),
@@ -200,6 +213,8 @@ class StorefrontFulfillmentLifecycle:
 def build_domain_settlement_artifacts(
     domain: MarketDomainContract,
     context: StorefrontSettlementBuildContext,
+    *,
+    build_plan: Callable[..., Any],
 ) -> StorefrontSettlementArtifacts:
     """Invoke only the already-resolved domain settlement builder."""
 
@@ -213,7 +228,7 @@ def build_domain_settlement_artifacts(
             f"domain {domain.identity!s} has no settlement capability"
         )
     return StorefrontSettlementArtifacts.from_hook_result(
-        settlement.build_plan(context=context)
+        build_plan(context=context)
     )
 
 
@@ -237,7 +252,7 @@ async def fulfill_domain(
     )
     if (
         result.negotiation_id != context.negotiation_id
-        or result.escrow_uid != context.escrow_uid
+        or result.settlement_ref != context.settlement_ref
         or result.site_id != context.site_id
     ):
         raise StorefrontDomainLifecycleError(

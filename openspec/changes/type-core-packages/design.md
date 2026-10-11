@@ -23,6 +23,29 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
 - **[Framework typing dominates work]** → Type stable boundaries first and leave shell internals at pragmatic levels.
 - **[Annotations alter runtime imports]** → Preserve dependency layers, including under `TYPE_CHECKING`, and run import-boundary tests.
 
+## Open question: declared-dependency completeness
+
+- **Typecheck ratchet versus undeclared imports.** *Gates the `core/storefront`
+  step.* `core_storefront` lazily imports three packages its `pyproject.toml` does
+  not declare: `market_alkahest.schemas` in `refund.py`, `web3` in
+  `token_transfer.py`, and `fastapi` in `app_composition.py` and `openapi.py`. A
+  per-package ratchet either fails on these, because the project's own environment
+  does not install them, or hides them behind ignores that erase the architectural
+  fact. `ARCHITECTURE.md` lists the undeclared imports under "Where the current tree
+  diverges" and `enforce-package-layers`'s exceptions table carries them under this
+  change. Suggested resolution: add "every distribution the source imports is declared,
+  and every declared internal distribution is imported or carries a stated runtime
+  reason" to the acceptance criterion for every ratcheted package, and sequence the `core/storefront` step after
+  `kit-owned-storefront-auth-and-persistence` and `move-escrow-into-alkahest` decide
+  whether `refund`, `token_transfer`, and `escrow_identity` leave for `kit/alkahest`
+  (the recommended outcome) or stay and are declared. The reverse direction catches
+  `domains/vms/storefront/pyproject.toml`'s two bare-metal declarations with no
+  import, owned by `kit-owned-storefront-shell`. Task 2.5 is the decision gate for
+  the "`kit/site` question" and stays one; the recommended answer for it is that
+  `kit/site` passes `ARCHITECTURE.md`'s third-domain placement test because API
+  credits composes it, stays repository-wide, and belongs in a kit typing ratchet
+  rather than this core campaign.
+
 ## Migration Plan
 
 Restore current advertised packages first, then add one package per coherent commit with passing wheel/type/runtime checks. Consumers require no wire migration. Roll back a package's marker only if its advertised support cannot be maintained, with release documentation corrected in the same change.

@@ -134,6 +134,23 @@ def test_the_seller_chain_is_read_from_the_environment(environment, monkeypatch)
     assert runtime.negotiation_policies == ["escrow_shape_guard", "bisection"]
 
 
+def test_the_publication_registry_is_composed_for_its_status_check(
+    environment, monkeypatch
+):
+    assert build_runtime_from_environment().registry_configuration is None
+
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_URL", "http://registry:8080")
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY", "registry")
+    monkeypatch.setenv(
+        "BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS",
+        json.dumps([{"scheme": "eip191", "identifier": "0x" + "aa" * 20}]),
+    )
+    configured = build_runtime_from_environment().registry_configuration
+
+    assert configured is not None and configured.url == "http://registry:8080"
+    assert configured.trust.authority == "registry"
+
+
 def test_a_malformed_seller_chain_is_refused(environment, monkeypatch):
     monkeypatch.setenv("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", "[escrow_shape_guard")
 
@@ -213,5 +230,6 @@ def test_a_disabled_section_is_still_configured():
 def test_a_contact_only_root_composes_its_obligation_worker(environment):
     runtime = build_runtime_from_environment()
 
-    assert runtime.alkahest_lifecycle is None
+    # Contact exchange declines its obligations; nothing services Alkahest.
+    assert set(runtime.obligation_servicing) == {"contact-exchange.v1"}
     assert runtime.settlement_worker is not None

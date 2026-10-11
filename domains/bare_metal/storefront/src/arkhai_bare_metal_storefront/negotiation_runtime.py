@@ -32,7 +32,7 @@ from typing import Any
 
 from arkhai_bare_metal import BareMetalMessage, BareMetalTerms
 from core_storefront.stage_log import stage_event
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import (
     AcceptedEscrow,
     EscrowProposal,
@@ -64,11 +64,8 @@ from market_storefront_kit import TradingPause
 from .listing_source_check import ListingSourceCheck
 from .negotiation import BareMetalSellerRoundHook, bare_metal_admission_refusal
 from .settlement import BareMetalSettlementPlanError
-from .settlement_composition import (
-    BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY,
-    UndeclaredMechanismFulfillmentError,
-    mechanism_fulfills_through_capacity,
-)
+from .settlement_composition import SELLER_STAGES
+from .settlement_stages import legacy_alkahest_option
 
 PlanBuilder = Callable[..., dict[str, Any]]
 # One curried registry dispatch per composed mechanism: the selection resolves
@@ -97,7 +94,7 @@ class BareMetalNegotiationRefusal(ValueError):
         self.status_code = status_code
 
 
-AcceptedAgreementBuilder = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+AcceptedAgreementBuilder = Callable[[Mapping[str, Any]], Mapping[str, Any] | None]
 
 
 def _with_agreement(
@@ -155,9 +152,9 @@ def _with_agreement(
     artifacts["agreement"] = agreement
     artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
     if settlement is not None and settlement.mechanism in data_dispatch:
-        artifacts["settlement_data"] = dict(
-            data_dispatch[settlement.mechanism](json.loads(agreement_bytes))
-        )
+        data = data_dispatch[settlement.mechanism](json.loads(agreement_bytes))
+        if data is not None:
+            artifacts["settlement_data"] = dict(data)
     return artifacts
 
 
@@ -252,17 +249,30 @@ def _decision_wire(decision: NegotiationDecision) -> dict[str, Any]:
     return payload
 
 
-def _matching_acceptance(
+def _priced_acceptance(
     listing_record: Mapping[str, Any], proposal: EscrowProposal
 ) -> AcceptedEscrow | None:
-    for raw in listing_record.get("accepted_escrows") or []:
-        accepted = AcceptedEscrow.model_validate(raw)
+    """The accepted escrow whose listed rate prices ``proposal``.
+
+    The one on the proposal's chain at its escrow address; otherwise the
+    listing's first accepted escrow. A buyer may leave the escrow contract
+    unpinned (no address, or the zero address), and is then priced from what
+    the listing offers rather than from nothing, so the seller's floor holds
+    for every opening. A pinned address the listing does not offer is refused
+    by ``escrow_shape_guard`` for its own reason, not priced from this.
+    """
+
+    accepted = [
+        AcceptedEscrow.model_validate(raw)
+        for raw in listing_record.get("accepted_escrows") or []
+    ]
+    for candidate in accepted:
         if (
-            accepted.chain_name == proposal.chain_name
-            and accepted.escrow_address.lower() == proposal.escrow_address.lower()
+            candidate.chain_name == proposal.chain_name
+            and candidate.escrow_address.lower() == proposal.escrow_address.lower()
         ):
-            return accepted
-    return None
+            return candidate
+    return accepted[0] if accepted else None
 
 
 def _escrow_proposal(proposal: Mapping[str, Any] | None) -> EscrowProposal:
@@ -280,7 +290,7 @@ def _seller_reference_amount(
     duration_seconds: int,
     buyer_amount: int | None,
 ) -> int:
-    """The listed rate of the escrow the buyer proposed, over the requested duration."""
+    """The listed rate of the escrow pricing the proposal, over the requested duration."""
 
     if accepted is None:
         return 0
@@ -323,7 +333,7 @@ def build_bare_metal_negotiation_runtime(
     seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
-    mechanism_fulfillment: Mapping[str, bool] = BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY,
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
@@ -458,7 +468,7 @@ def build_bare_metal_negotiation_runtime(
             )
         buyer_amount = _proposal_amount(proposal)
         reference = _seller_reference_amount(
-            _matching_acceptance(request.listing_record, opening),
+            _priced_acceptance(request.listing_record, opening),
             duration_seconds=message.duration_seconds,
             buyer_amount=buyer_amount,
         )
@@ -493,8 +503,12 @@ def build_bare_metal_negotiation_runtime(
         selection = exact_selection(proposal, None)
         assert selection is not None
         # A composed mechanism with no obligation builder settles from the
-        # Agreement alone, so it is admitted without a plan.
-        if selection.mechanism not in accepted_obligation_dispatch:
+        # Agreement alone, so it is admitted without a plan. A mechanism with no
+        # seller entry could never settle, so it is never admitted.
+        if (
+            selection.mechanism not in seller_stages
+            or selection.mechanism not in accepted_obligation_dispatch
+        ):
             raise BareMetalNegotiationRefusal(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
@@ -528,12 +542,7 @@ def build_bare_metal_negotiation_runtime(
             )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
-        try:
-            provisions = mechanism_fulfills_through_capacity(
-                selection.mechanism, mechanism_fulfillment
-            )
-        except UndeclaredMechanismFulfillmentError as exc:
-            raise BareMetalNegotiationRefusal(str(exc), status_code=400) from exc
+        provisions = seller_stages[selection.mechanism].physical
         terms: BareMetalTerms | None = None
         if provisions:
             trusted_listing = await request.repository.load_bare_metal_listing_payload(
@@ -639,7 +648,7 @@ def build_bare_metal_negotiation_runtime(
         if not scalar or pinned is None or "settlement_selection" in pinned:
             return 0
         return _seller_reference_amount(
-            _matching_acceptance(record, _escrow_proposal(pinned)),
+            _priced_acceptance(record, _escrow_proposal(pinned)),
             duration_seconds=int(terms.requested_duration_seconds or 0),
             buyer_amount=None,
         )
@@ -684,7 +693,15 @@ def build_bare_metal_negotiation_runtime(
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts
         }
         response.setdefault("accepted_escrow_proposal", acceptance.pinned_proposal)
-        return _with_agreement(acceptance, response, settlement=None, data_dispatch=data_dispatch)
+        # The negotiated escrow is recorded as the Agreement's selected option,
+        # so settlement dispatches it through its seller entry like any other.
+        settlement = legacy_alkahest_option(
+            _escrow_proposal(acceptance.pinned_proposal),
+            response.get("settlement_plan") or {},
+        )
+        return _with_agreement(
+            acceptance, response, settlement=settlement, data_dispatch=data_dispatch
+        )
 
     async def persist_opening(repository: Any, opening: OpeningRecord) -> None:
         copied = await repository.copy_listing_binding_to_thread(
@@ -714,15 +731,12 @@ def build_bare_metal_negotiation_runtime(
             await repository.save_bare_metal_terms(
                 negotiation_id=acceptance.negotiation_id, terms=terms
             )
-        data = artifacts.get("settlement_data")
-        if isinstance(data, Mapping):
-            selection = SettlementSelection.model_validate(artifacts["settlement_selection"])
-            agreement_bytes = base64.b64decode(artifacts["agreement_bytes"], validate=True)
-            await repository.record_bare_metal_payment_acceptance(
-                negotiation_id=acceptance.negotiation_id,
-                mechanism=selection.mechanism,
-                agreement_sha256=hashlib.sha256(agreement_bytes).hexdigest(),
-            )
+        # Every accepted Agreement records its settlement identity, whatever the
+        # mechanism: settlement, recovery and refund all start from it.
+        await repository.record_bare_metal_settlement_acceptance(
+            negotiation_id=acceptance.negotiation_id,
+            agreement_bytes=base64.b64decode(artifacts["agreement_bytes"], validate=True),
+        )
         plan = artifacts.get("settlement_plan")
         if isinstance(plan, Mapping):
             await repository.commit_settlement_plan(

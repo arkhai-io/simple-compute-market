@@ -424,6 +424,19 @@ def _vm_provision(duration_seconds: int = 3600) -> dict:
     }
 
 
+def _alkahest_selection(listing) -> dict:
+    """Fresh acceptance names its settlement option explicitly."""
+    (option,) = [
+        option for option in listing["settlement_options"]
+        if option["mechanism"] == "alkahest.v1"
+    ]
+    return {
+        "mechanism": "alkahest.v1",
+        "option_id": option["option_id"],
+        "expiration_unix": 1_800_000_000,
+    }
+
+
 async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_path):
     """Publication and negotiation in one app: the loop publishes an unbacked
     listing, and a buyer negotiates that listing to acceptance with no capacity
@@ -458,6 +471,7 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
                 rates=escrow["rates"],
                 demands=listing["demands"],
                 escrow_expiration_unix=1_800_000_000,
+                settlement_selection=_alkahest_selection(listing),
             )
 
         assert result["action"] == "accept"
@@ -524,6 +538,7 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
         "rates": escrow["rates"],
         "demands": listing["demands"],
         "expiration_unix": 2_000_000_000,
+        "settlement_selection": _alkahest_selection(listing),
     }
 
     async def evaluate():
@@ -813,6 +828,7 @@ async def test_a_stated_shape_negotiates_and_reserves_every_declared_dimension(t
                 rates=escrow["rates"],
                 demands=listing["demands"],
                 escrow_expiration_unix=1_800_000_000,
+                settlement_selection=_alkahest_selection(listing),
             )
 
         assert result["action"] == "accept"

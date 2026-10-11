@@ -16,8 +16,17 @@ from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
 from market_identity import Identity, Signer, TrustedIdentitySet
 
-from .buy_orchestrator import AgreedTerms
-from .run_log import read_run
+
+@dataclass
+class AgreedTerms:
+    """VM settlement summary presented before the buyer commits an effect."""
+
+    seller_url: str
+    seller_wallet_address: str
+    negotiation_id: str
+    listing_id: str
+    agreed_amount: int
+    duration_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,16 +58,14 @@ class VmSettlementTransport:
 
 
 def payer_selection(selected):
-    """Add the VM buyer's account only after selecting the payments mechanism."""
-    if selected.selection.mechanism != "arkhai.payments.v1":
-        return selected
+    """Add the VM buyer's account to a selected payments option."""
     section = load_user_config().get("vms", {})
     payer = AccountId.model_validate(section.get("payer_account")).root
     return replace(
         selected,
         selection=selected.selection.model_copy(
             update={
-                "params": {**selected.selection.params, "payer_account": payer},
+                "params": {**(selected.selection.params or {}), "payer_account": payer},
             }
         ),
     )
@@ -72,28 +79,6 @@ def payment_buyer(policy) -> PaymentApproval:
         ),
         AccountId.model_validate(section.get("payer_account")).root,
     )
-
-
-def accepted_payment_from_run(run_id, *, signer, negotiation_id):
-    """Read the exact accepted artifact from a validated profile-bound run."""
-    found = None
-    for event in read_run(run_id, signer=signer):
-        reply = event.get("their_reply") or event
-        encoded = reply.get("agreement_bytes")
-        data = reply.get("settlement_data")
-        if not isinstance(encoded, str) or not isinstance(data, dict):
-            continue
-        raw = base64.b64decode(encoded, validate=True)
-        agreement = Agreement.model_validate_json(raw)
-        if agreement.negotiation_id != negotiation_id:
-            continue
-        candidate = (raw, data)
-        if found is not None and found != candidate:
-            raise ValueError("run contains conflicting accepted payment artifacts")
-        found = candidate
-    if found is None:
-        raise ValueError("run has no accepted Agreement and payment mandate")
-    return found
 
 
 def settle_payment(

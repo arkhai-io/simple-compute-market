@@ -6,8 +6,16 @@ import pytest
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from market_settlement_runtime import settlement_migrations
 from market_identity import Ed25519Signer, Identity
+from market_negotiation_runtime import NegotiationStateError
+from market_policy.listing_source import ListingSourceVerdict
+from market_storefront_kit import TradingPause
 
+from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.migrations import RetiredListingKindError
+from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
+from arkhai_bare_metal_storefront.negotiation_runtime import (
+    build_bare_metal_negotiation_runtime,
+)
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
@@ -225,15 +233,6 @@ async def _legacy_thread(core: CoreSQLiteClient, negotiation_id: str) -> None:
 
 @pytest.mark.asyncio
 async def test_threads_left_open_by_the_retired_negotiation_are_abandoned(tmp_path) -> None:
-    from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-    from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
-    from arkhai_bare_metal_storefront.negotiation_runtime import (
-        build_bare_metal_negotiation_runtime,
-    )
-    from market_negotiation_runtime import NegotiationStateError
-    from market_policy.listing_source import ListingSourceVerdict
-    from market_storefront_kit import TradingPause
-
     path = tmp_path / "storefront.db"
     core = CoreSQLiteClient(str(path))
     await _legacy_thread(core, "neg-open")

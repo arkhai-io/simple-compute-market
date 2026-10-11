@@ -6,7 +6,7 @@ composes three closed-function stages in order:
 
     1. discover         — registry query for matching seller orders
     2. negotiate        — aggregation + per-match negotiation hook
-    3. settle           — create escrow, submit settlement, poll terminal state
+    3. settle           — invoke the declared Agreement mechanism stage
 
 Nothing here runs a server or handles inbound HTTP. The buyer is a
 client that drives the deal end to end. Seller HTTP calls use the buyer's
@@ -23,9 +23,11 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core import SettlementStageTable
+
+from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
 
 from core_buyer.orchestrator import (
@@ -39,6 +41,8 @@ from core_buyer.orchestrator import (
     fetch_listing_dict,
 )
 
+from .aggregation import AggregationPolicy, load_aggregation_policy
+from .deal_helpers import settlement_acceptance_fields
 from .negotiation_client import (
     NegotiationOutcome,
     _authenticated_json,
@@ -62,6 +66,13 @@ BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
 RevalidateSettlementFn = Callable[
     [dict[str, Any], SettlementOption],
     Awaitable[None],
+]
+# Per candidate listing: the selected mechanism's check of a seller plan that
+# it materializes from the selection rather than mirroring the option, or None
+# when the option's own parameters are the plan's.
+AdvertisedPlanValidatorFn = Callable[
+    [dict[str, Any]],
+    Callable[[SettlementPlan], None] | None,
 ]
 
 
@@ -379,6 +390,8 @@ def make_negotiate_hook(
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
     revalidate_settlement: RevalidateSettlementFn | None = None,
+    validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -408,6 +421,8 @@ def make_negotiate_hook(
             derive_prices=derive_prices,
             chain=chain,
             revalidate_settlement=revalidate_settlement,
+            validate_acceptance=validate_acceptance,
+            advertised_plan_validator=advertised_plan_validator,
             on_event=on_event,
         )
 
@@ -430,7 +445,9 @@ def _negotiate_matches(
     derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
     chain: list[Any] | None,
     revalidate_settlement: RevalidateSettlementFn | None,
+    validate_acceptance: Callable[[NegotiationOutcome], None] | None,
     on_event: Callable[[str, dict], None],
+    advertised_plan_validator: AdvertisedPlanValidatorFn | None = None,
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
 
@@ -605,6 +622,12 @@ def _negotiate_matches(
                 on_round=_on_round,
                 chain=chain,
                 policy_params=negotiation_policy_params,
+                validate_acceptance=validate_acceptance,
+                validate_advertised_plan=(
+                    advertised_plan_validator(match)
+                    if advertised_plan_validator is not None
+                    else None
+                ),
                 resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
@@ -658,8 +681,6 @@ def _negotiate_matches(
         # (default in the buyer's chain) handles seller-pin-mutation
         # vetoes per round — no separate post-agreement audit is needed.
 
-        from .deal_helpers import settlement_acceptance_fields
-
         accepted_settlement = settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id or "",
             selection=outcome.settlement_selection,
@@ -705,8 +726,6 @@ def _negotiate_matches(
         )
         return outcome
 
-    from .aggregation import AggregationPolicy, load_aggregation_policy
-
     policy: AggregationPolicy = load_aggregation_policy(config.aggregation_policy)
 
     async def _run_policy() -> tuple[dict[str, Any], NegotiationOutcome] | None:
@@ -727,7 +746,45 @@ def _negotiate_matches(
     return NegotiationResult(match=match, outcome=outcome, attempts=attempts)
 
 
+StageT = TypeVar("StageT")
+
+
 def make_settle_hook(
+    *,
+    stages: SettlementStageTable[StageT],
+    invoke: Callable[[StageT, NegotiationResult, Callable[[str, dict], None]], BuyResult],
+) -> SettleFn:
+    """Resolve accepted work before effects, then invoke its domain-owned stage.
+
+    ``invoke`` adapts the composing domain's stage shape to the buyer role hook;
+    core does not require methods or a callable stage from a mechanism kit.
+    """
+    def _hook(
+        negotiation: NegotiationResult,
+        on_event: Callable[[str, dict], None],
+    ) -> BuyResult:
+        if negotiation.match is None or negotiation.outcome is None:
+            raise ValueError("settle hook received no selected negotiation")
+        outcome = negotiation.outcome
+        agreement = outcome.agreement
+        if agreement is None or agreement.settlement is None:
+            raise ValueError("accepted work has no Agreement settlement option")
+        if agreement.negotiation_id != outcome.negotiation_id:
+            raise ValueError("accepted Agreement changed negotiation identity")
+        mechanism = agreement.settlement.mechanism
+        try:
+            stage = stages[mechanism]
+        except KeyError as exc:
+            raise ValueError(
+                f"unsupported accepted settlement mechanism: {mechanism}; "
+                "restore its buyer stage to resume this Agreement"
+            ) from exc
+        return invoke(stage, negotiation, on_event)
+
+    return _hook
+
+
+def make_escrow_settle_hook(
     *,
     config: BuyConfig,
     unit_count: float,
@@ -742,13 +799,11 @@ def make_settle_hook(
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
     duration_seconds: int = 0,
-    agreement_settlement: SettleFn | None = None,
 ) -> SettleFn:
-    """Build the schema-instantiated settlement hook.
+    """Bind the escrow helper explicitly into an applicable domain table entry.
 
-    Domain ports materialize escrow terms, recipient identity, and the
-    mechanism-specific settlement request payload. When a selected
-    settlement has no escrow proposal, an optional domain stage handles it.
+    This helper is never a dispatch default. The selected entry owns acceptance
+    guards and resolves its escrow prerequisites before invoking it.
     """
 
     def _hook(
@@ -757,12 +812,6 @@ def make_settle_hook(
     ) -> BuyResult:
         if negotiation.match is None or negotiation.outcome is None:
             raise ValueError("settle hook received no selected negotiation")
-        if (
-            negotiation.outcome.accepted_escrow_proposal is None
-            and negotiation.outcome.settlement_selection is not None
-            and agreement_settlement is not None
-        ):
-            return agreement_settlement(negotiation, on_event)
         return _settle_one(
             match=negotiation.match,
             outcome=negotiation.outcome,
@@ -808,9 +857,8 @@ def _settle_one(
 ) -> BuyResult:
     """Drive escrow → submit → poll for the policy's chosen winner.
 
-    Lifted out of the run_buy loop so the negotiate-vs-settle split is
-    structural, not just visual. Inputs are the policy's
-    ``(match, outcome)`` plus the orchestrator's settlement deps.
+    Only an explicitly composed escrow entry calls this helper. Inputs are
+    the policy's exact ``(match, outcome)`` and that entry's escrow ports.
     """
     seller_url = (
         match.get("storefront_url")

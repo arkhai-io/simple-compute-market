@@ -582,7 +582,8 @@ class TestBuyFrom:
 
         assert captured["config"].principal == BUYER_SIGNER.identity
         assert captured["config"].registry_urls == ["http://reg"]
-        assert captured["proposal"].chain_name == "anvil"
+        assert captured["proposal"].mechanism == "alkahest.v1"
+        assert captured["proposal"].option_id == listing["settlement_options"][0]["option_id"]
 
     def test_buy_from_rejects_current_max_price_override(
         self,

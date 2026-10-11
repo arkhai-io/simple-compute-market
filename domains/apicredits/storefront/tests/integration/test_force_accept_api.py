@@ -167,11 +167,10 @@ async def test_settle_wait_through_the_client_reports_a_terminal_settlement(
     storefront,
 ):
     app, db, _runtime, _capacity = storefront
-    await db.insert_escrow(
-        escrow_uid="0xsettled",
+    # Settlement status is the domain's issuance progress, keyed by its public reference.
+    await db.save_issuance_progress(
         negotiation_id="negotiation-settled",
-        chain_name="anvil",
-        escrow_address="0x" + "11" * 20,
+        public_ref="0xsettled",
         status="ready",
     )
 

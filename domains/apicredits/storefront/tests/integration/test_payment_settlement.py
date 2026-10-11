@@ -3,7 +3,9 @@
 Routes, authentication and response-signing middleware, SQLite persistence, the
 payment settlement service and the failure policy are real. The credits issuance
 authority is a controlled fake, and the payments service is the kit's fake
-injected at ``PaymentsClient`` through the seller stage.
+injected at ``PaymentsClient`` through the seller stage. Payment deals keep
+their state in the domain's settlement-evidence and issuance-progress tables and
+create no escrow rows.
 """
 
 from __future__ import annotations
@@ -16,7 +18,12 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi import FastAPI
-from market_arkhai_payments import ArkhaiPaymentsConfig, PaymentSellerStage, servicing_stage
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_MECHANISM,
+    ArkhaiPaymentsConfig,
+    PaymentSellerStage,
+    servicing_stage,
+)
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -30,6 +37,7 @@ from apicredits_storefront.services.payment_settlement_service import (
     ApiCreditPaymentSettlementService,
 )
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from tests._settings_overrides import settings_overrides
 
 PAYER = "11111111-1111-4111-8111-111111111111"
@@ -54,17 +62,17 @@ class Issuer:
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
 
-    async def fulfill(self, **request):
+    async def fulfill(self, *, evidence, retry_uncertain, db, credits_client):
         if self.started is not None and self.release is not None:
             self.started.set()
             await self.release.wait()
         if self.fail:
             await build_api_credit_failure_policy().apply(
                 self.db,
-                {"escrow_uid": request["escrow_uid"], "reason": "issuance_refused"},
+                {"negotiation_id": evidence.negotiation_id, "reason": "issuance_refused"},
             )
             return {"status": "failed", "message": "issuance refused"}
-        self.issued.append(request["negotiation_id"])
+        self.issued.append(evidence.negotiation_id)
         return {
             "status": "fulfilled",
             "fulfillment_uid": "grant-1",
@@ -94,7 +102,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
         duration_seconds=0,
         start_utc=now,
         accepted_at=now,
-        provision_terms={"kind": "api_credits.v1", "version": 1, "payload": {"quantity": 3}},
+        provision_terms=make_api_credits_provision_terms(quantity=3, key_mode="new").model_dump(mode="json"),
     )
     raw = agreement.model_dump_json(exclude_none=True).encode()
     data = stage.settlement_data(json.loads(raw))
@@ -103,7 +111,10 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
         status="open",
         created_at=now,
         updated_at=now,
-        listing_resource={"service": "sample", "unit": "credit"},
+        listing_resource={
+            "service_name": "sample", "resource_id": "svc-quota", "capacity_site_id": "quota",
+            "offering_mode": "api_credits", "base_url": "http://sample.local",
+        },
         accepted_escrows=[],
         fulfillment_resource=None,
         max_duration_seconds=None,
@@ -150,9 +161,11 @@ async def harness(tmp_path):
         stage = servicing_stage(config, client_for_owner=payments)
         data = await _seed(db, stage)
         issuer = Issuer(db)
-        composition = SimpleNamespace(domain=SimpleNamespace(fulfillment=issuer))
+        composition = SimpleNamespace(
+            domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+        )
         composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-            db=store, composition=composition, stage=stage
+            db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
         )
         _container.resolved_sqlite_client = db
         _container.resolved_marketplace_signer = SELLER
@@ -207,7 +220,8 @@ async def test_a_verified_receipt_issues_credits_once(harness):
     pending = await h.buyer.settle_agreement(NEGOTIATION)
     assert pending.pending and pending.retryable
     assert h.issuer.issued == []
-    assert await h.db.load_escrow(escrow_uid=NEGOTIATION) is None
+    assert await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION) is None
+    assert await h.db.load_issuance_progress(reference=NEGOTIATION) is None
 
     h.serve()
     ready = await h.buyer.settle_agreement(NEGOTIATION)
@@ -215,6 +229,9 @@ async def test_a_verified_receipt_issues_credits_once(harness):
     assert ready.settlement_ref == h.data.transaction_id
     await h.buyer.settle_agreement(NEGOTIATION)
     assert h.issuer.issued == [NEGOTIATION]
+    evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
+    assert evidence.status == "verified" and evidence.settlement_ref == h.data.transaction_id
+    assert await h.db.load_escrow(escrow_uid=NEGOTIATION) is None
 
 
 async def test_an_impostor_receipt_is_refused_without_a_grant(harness):
@@ -222,6 +239,7 @@ async def test_an_impostor_receipt_is_refused_without_a_grant(harness):
     h.serve(signer=IMPOSTOR)
     assert await _status_code(lambda: h.buyer.settle_agreement(NEGOTIATION)) == 409
     assert h.issuer.issued == []
+    assert await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION) is None
 
 
 async def test_a_refund_before_issuance_blocks_later_settlement(harness):
@@ -263,13 +281,13 @@ async def test_an_accepted_deal_issues_and_refunds_after_payments_is_disabled(ha
 async def test_a_refund_recorded_before_issuance_start_stops_issuance(harness):
     h = await harness()
     gate = asyncio.Event()
-    claim = h.db.claim_delivery_start
+    claim = h.db.claim_credit_delivery_start
 
     async def gated_claim(**kwargs):
         await gate.wait()
         return await claim(**kwargs)
 
-    h.db.claim_delivery_start = gated_claim
+    h.db.claim_credit_delivery_start = gated_claim
     h.serve()
     settling = asyncio.create_task(h.buyer.settle_agreement(NEGOTIATION))
     await asyncio.sleep(0.05)
@@ -288,9 +306,11 @@ async def test_a_refund_after_issuance_start_records_both(harness):
     assert (await h.seller.refund_settlement(NEGOTIATION)).status == "refunded"
     h.issuer.release.set()
     assert (await settling).status == "refunded"
-    escrow = await h.db.load_escrow(escrow_uid=NEGOTIATION)
+    evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
+    progress = await h.db.load_issuance_progress(reference=NEGOTIATION)
     assert h.issuer.issued == [NEGOTIATION]
-    assert escrow["status"] == "refunded" and escrow["fulfillment_uid"] == "grant-1"
+    assert evidence.status == "refunded"
+    assert progress["status"] == "ready" and progress["fulfillment_uid"] == "grant-1"
 
 
 def _restart(tmp_path, h, *, approved: bool):
@@ -309,9 +329,11 @@ def _restart(tmp_path, h, *, approved: bool):
     )
     stage = servicing_stage(config, client_for_owner=payments)
     issuer = Issuer(db)
-    composition = SimpleNamespace(domain=SimpleNamespace(fulfillment=issuer))
+    composition = SimpleNamespace(
+        domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+    )
     composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-        db=store, composition=composition, stage=stage
+        db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
     )
     _container.resolved_sqlite_client = db
     _container.resolved_settlement_composition = composition
@@ -330,8 +352,8 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == [NEGOTIATION]
-    escrow = await restarted.db.load_escrow(escrow_uid=NEGOTIATION)
-    assert escrow["status"] == "ready"
+    progress = await restarted.db.load_issuance_progress(reference=NEGOTIATION)
+    assert progress["status"] == "ready"
 
     again = await payment_reconciliation_step()
     assert again["attempted"] == 0
@@ -348,7 +370,28 @@ async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []
-    assert await restarted.db.load_escrow(escrow_uid=NEGOTIATION) is None
+    assert await restarted.db.load_settlement_evidence(negotiation_id=NEGOTIATION) is None
+
+
+def _complete(db_path: str, negotiation_id: str) -> None:
+    """Record a deal as verified and issued, as a completed payment settlement leaves it."""
+    import sqlite3
+
+    now = "2000-01-01T00:00:00+00:00"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO api_credit_settlement_evidence "
+            "(negotiation_id, mechanism, agreement_digest, settlement_ref, status, evidence) "
+            "VALUES (?, ?, ?, ?, 'verified', '{}')",
+            (negotiation_id, ARKHAI_PAYMENTS_MECHANISM, "0" * 64, f"tx-{negotiation_id}"),
+        )
+        conn.execute(
+            "INSERT INTO api_credit_issuance_progress "
+            "(negotiation_id, public_ref, status, created_at, updated_at) "
+            "VALUES (?, ?, 'ready', ?, ?)",
+            (negotiation_id, negotiation_id, now, now),
+        )
+
 
 def _clone_row(db_path: str, table: str, source: str, new_id: str, **columns) -> None:
     """Copy one negotiation-keyed row under a new negotiation ID, overriding columns."""
@@ -375,10 +418,7 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(harness):
             h.db.db_path, "negotiation_threads", NEGOTIATION, completed,
             created_at=f"2000-01-01T00:00:0{index}",
         )
-        await h.db.insert_escrow(
-            escrow_uid=completed, negotiation_id=completed, chain_name=None,
-            escrow_address=None, is_primary=True, status="ready",
-        )
+        _complete(h.db.db_path, completed)
     h.serve()
 
     service = _container.resolved_settlement_composition.payment_service(h.db)

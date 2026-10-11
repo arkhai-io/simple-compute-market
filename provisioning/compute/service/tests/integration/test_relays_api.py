@@ -21,6 +21,7 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
+from vm_provisioning_adapter.db import RelayPortLease
 from vm_provisioning_operator import VmOperatorClient
 from vm_provisioning_operator.relays import RelayCreate, RelayTokenRotate, RelayUpdate
 
@@ -134,7 +135,6 @@ class TestRebindingOverTheApi:
 
     def _lease_on(self, relay_id: str, *, port: int = 6100, host: str = "kvm1"):
         from compute_provisioning_service import container as _container_module
-        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():
@@ -154,7 +154,6 @@ class TestRebindingOverTheApi:
         from datetime import datetime, timezone
 
         from compute_provisioning_service import container as _container_module
-        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():

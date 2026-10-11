@@ -114,9 +114,9 @@ def round_zero_opening_guard(
             # inputs to the mechanism (a payer account, say) and is optional.
             if (
                 not isinstance(selection, dict)
-                or not {"mechanism", "option_id", "expiration_unix"} <= set(selection)
-                or not set(selection) <= {"mechanism", "option_id", "expiration_unix", "params"}
-                or not isinstance(selection.get("params") or {}, dict)
+                or not {"mechanism", "option_id", "expiration_unix"}.issubset(selection)
+                or set(selection) - {"mechanism", "option_id", "expiration_unix", "params"}
+                or (selection.get("params") is not None and not isinstance(selection["params"], dict))
             ):
                 raise ValueError("selection has invalid fields")
             mechanism = selection["mechanism"]
