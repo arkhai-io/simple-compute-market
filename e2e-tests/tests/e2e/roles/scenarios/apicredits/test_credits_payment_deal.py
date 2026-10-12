@@ -6,7 +6,7 @@
 The buyer is a wallet-free Ed25519 identity with only Arkhai payments enabled,
 so selection cannot fall back to Alkahest. The scenario needs a reachable
 payments service and the credits storefront configured for the same service;
-when either is absent the stages report blocked and never count as a live deal.
+An absent payments target reports blocked; invalid lane settings fail.
 The refund stage uses the seller's typed client and reads the transaction back
 from the payments service as the payer.
 """
@@ -14,6 +14,7 @@ from the payments service as the payer.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 import pytest
@@ -21,7 +22,6 @@ from market_arkhai_payments import ArkhaiPaymentsConfig, payments_client_for_own
 from market_identity import Ed25519Signer, IdentityScheme, TrustedIdentitySet
 from storefront_client import SyncStorefrontClient
 
-from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import (
     DealStage,
@@ -30,24 +30,29 @@ from tests.e2e.roles.helpers.domain_deal import (
     ordered_events,
     require_state,
 )
+from tests.e2e.roles.helpers.payments import (
+    configured_payments,
+    payment_config_toml,
+    payment_setting,
+)
 from tests.e2e.roles.scenarios.apicredits.conftest import lane_setting
 
 log = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.e2e_credits_payment_deal
 
-_PAYMENTS_KEYS = (
-    "SERVICE_URL",
-    "SERVICE_IDENTITY",
-    "DISPUTE_AUTHORITY",
-    "BUYER_ACCOUNT",
-    "BUYER_MARKETPLACE_CREDENTIAL",
-    "SELLER_MARKETPLACE_CREDENTIAL",
-)
 
-
-def _payments(name: str, default: object = "") -> object:
-    return settings.get(f"PAYMENTS.{name}", default) or default
+def _registry_pin(prefix: str) -> tuple[str, dict[str, Any]]:
+    url = lane_setting(f"API_CREDITS.{prefix}_URL").rstrip("/")
+    return url, {
+        "authority": lane_setting(f"API_CREDITS.{prefix}_AUTHORITY_ID"),
+        "identities": [
+            {
+                "scheme": lane_setting(f"API_CREDITS.{prefix}_SCHEME"),
+                "identifier": lane_setting(f"API_CREDITS.{prefix}_IDENTIFIER"),
+            }
+        ],
+    }
 
 
 @pytest.fixture(scope="module")
@@ -60,58 +65,32 @@ def payments_config() -> ArkhaiPaymentsConfig:
 
     lane_setting("API_CREDITS.REGISTRY_URL")
     lane_setting("API_CREDITS.STOREFRONT_URL")
-    missing = [key for key in _PAYMENTS_KEYS if not _payments(key)]
-    if missing:
-        pytest.skip(f"blocked: PAYMENTS.{', PAYMENTS.'.join(missing)} not configured")
-    url = str(_payments("SERVICE_URL")).rstrip("/")
-    try:
-        health = httpx.get(url + "/health", timeout=5.0, trust_env=False)
-        ready = health.status_code == 200 and health.json().get("status") == "ok"
-    except (httpx.HTTPError, ValueError):
-        ready = False
-    if not ready:
-        pytest.skip(f"blocked: payments service at {url} is not ready")
-    return ArkhaiPaymentsConfig(
-        enabled=True,
-        service_url=url,
-        service_identity={"scheme": "ed25519", "identifier": str(_payments("SERVICE_IDENTITY"))},
-        fee_bps=int(_payments("FEE_BPS", 250)),
-        dispute_authority=str(_payments("DISPUTE_AUTHORITY")),
-        development_auth=bool(_payments("DEVELOPMENT_AUTH", False)),
-        api_key_env=str(_payments("API_KEY_ENV")) or None,
-    )
+    return configured_payments()
 
 
 @pytest.fixture(scope="module")
 def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> BuyerCli:
-    identity = payments_config.service_identity
-    assert identity is not None
-    section = [
+    compute_registry, compute_pin = _registry_pin("COMPUTE_REGISTRY")
+    credits_registry, credits_pin = _registry_pin("REGISTRY")
+    section = (
         "[Settlement]",
         "schema_version = 1",
         'priority = ["arkhai.payments.v1"]',
         "",
-        "[Settlement.arkhai_payments]",
-        "enabled = true",
-        f"service_url = {_toml_quote(str(payments_config.service_url))}",
-        "service_identity = { scheme = \"ed25519\", identifier = "
-        + _toml_quote(identity.identifier)
-        + " }",
-        f"fee_bps = {payments_config.fee_bps}",
-        f"dispute_authority = {_toml_quote(str(payments_config.dispute_authority))}",
-    ]
-    if payments_config.development_auth:
-        section.append("development_auth = true")
-    else:
-        section.append(f"api_key_env = {_toml_quote(str(payments_config.api_key_env))}")
-    section += ["", "[apicredits]", f"payer_account = {_toml_quote(str(_payments('BUYER_ACCOUNT')))}", ""]
+        *payment_config_toml(payments_config),
+        "",
+        "[apicredits]",
+        f"payer_account = {_toml_quote(str(payment_setting('BUYER_ACCOUNT')))}",
+        "",
+    )
     return create_profiled_buyer_cli(
         binary=buyer_cli_binary,
         base=tmp_path_factory.mktemp("credits_payment_buyer_cli"),
         domain_identity="api_credits.v1",
         marketplace_scheme=IdentityScheme.ED25519,
-        marketplace_credential=str(_payments("BUYER_MARKETPLACE_CREDENTIAL")),
-        registries=(lane_setting("API_CREDITS.REGISTRY_URL"),),
+        marketplace_credential=str(payment_setting("BUYER_MARKETPLACE_CREDENTIAL")),
+        registries=(compute_registry, credits_registry),
+        registry_authorities={compute_registry: compute_pin, credits_registry: credits_pin},
         credential_variable="ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
         toml_sections=tuple(section),
     )
@@ -202,7 +181,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     payments_config: ArkhaiPaymentsConfig,
 ) -> None:
     require_state(payment_deal_state, "negotiation_id", "settlement_id")
-    seller = Ed25519Signer(bytes.fromhex(str(_payments("SELLER_MARKETPLACE_CREDENTIAL"))))
+    seller = Ed25519Signer(bytes.fromhex(str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL"))))
     with SyncStorefrontClient(
         lane_setting("API_CREDITS.STOREFRONT_URL"),
         signer=seller,
@@ -213,7 +192,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
 
-    with payments_client_for_owner(payments_config, str(_payments("BUYER_ACCOUNT"))) as client:
+    with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
         snapshot = client.get_transaction(payment_deal_state.settlement_id).snapshot
     assert {part.status.value for part in snapshot.parts} == {"reversed"}
     payment_deal_state.complete(
