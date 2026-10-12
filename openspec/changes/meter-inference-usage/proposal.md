@@ -60,8 +60,9 @@ reserve-then-settle, and the place to do it is the authority, not the gate.
 ## Non-Goals
 
 - No change to API-credits consumption; its fixed-amount gate is untouched.
-- No hosted fiat, no external rating platform integration — usage records are
-  the seam an adapter would consume; none is built here.
+- No fiat (`arkhai.payments.v1`) option, no external rating platform
+  integration — usage records are the seam an adapter would consume; none is
+  built here.
 - No embeddings, image, or audio metering; rate-card fields for those remain
   unenforced until their endpoints are in scope.
 - No TypeScript or Rust implementation of the metered gate.

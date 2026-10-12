@@ -391,8 +391,8 @@ Three shapes are anticipated and unowned, by a scope decision of 2026-09-16
 that confined this campaign to the marketplace repository: an Arkhai-hosted
 inference registry beside the compute one (the API-credits registry's Helm
 alias is the pattern, so the change is small when opened); webapp integration
-of inference alongside API credits; and a hosted fiat option for inference
-listings, which depends on hosted-route work owned outside this repository.
+of inference alongside API credits; and a fiat option (`arkhai.payments.v1`)
+for inference listings, which depends on the external payments service.
 External rating and billing platforms were evaluated during planning and are
 deliberately kept at the usage-record seam as optional seller-side adapters —
 the authority remains the only synchronous admission decision.

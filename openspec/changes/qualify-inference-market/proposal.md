@@ -54,7 +54,8 @@ inference and broadens the evidence to the cases that break real markets.
 
 - No new features. Every case here exercises behavior a prior change in the
   campaign defined.
-- No hosted fiat evidence; that route is owned outside this workstream.
+- No fiat (`arkhai.payments.v1`) evidence; Alkahest is the only mechanism this
+  campaign composes.
 - No performance or load qualification beyond correctness under concurrency.
 
 ## Dependencies and Related Changes
