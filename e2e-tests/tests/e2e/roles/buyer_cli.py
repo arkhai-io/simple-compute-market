@@ -523,7 +523,8 @@ def buyer_cli_binary() -> Path:
             [str(p), "--version"],
             capture_output=True,
             text=True,
-            timeout=10,
+            # Cold imports in the x86-emulated buyer image exceed ten seconds.
+            timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         pytest.skip(f"market binary at {p} is not executable: {exc}")

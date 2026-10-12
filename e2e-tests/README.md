@@ -55,6 +55,44 @@ ACTIVE_PROFILES=staging,staging-secrets
 # loads: config.yml → config-staging.yml → config-staging-secrets.yml
 ```
 
+### Shared payment-scenario configuration
+
+Payment scenarios use `tests/e2e/roles/helpers/payments.py` to read the same
+`PAYMENTS` section (environment prefix `ARKHAI_PAYMENTS__`). Supply all six:
+SERVICE_URL, SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL.
+Marketplace credentials are independent of payment account IDs.
+
+FEE_BPS defaults to 250 and LIVEMODE defaults to false; generated buyer tables
+explicitly pin that receipt mode. Choose either DEVELOPMENT_AUTH=true (literal
+loopback service URL only) or API_KEY_ENV naming the buyer's bearer-key environment
+variable, never both. Forward the named variable into the test runner yourself;
+host environment variables are not inherited by the buyer-machine container.
+
+Each scenario validates its lane prerequisites. Missing payments configuration
+or an unreachable/unready `/health` reports `blocked` and skips; invalid policy
+fails rather than selecting another settlement mechanism. The shared serializer
+writes only a named payment table (`Settlement.arkhai_payments` or
+`bare_metal.arkhai_payments`); the scenario supplies domain settings and payer.
+See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
+for the public testing boundary.
+
+The VM lane includes `e2e_vm_payment_deal` in
+`tests/e2e/roles/scenarios/vms/test_vm_payment_deal.py`. It uses a wallet-free
+Ed25519 buyer and owned capacity-backed mock supply. Its three calls buy a
+one-hour VM through `arkhai.payments.v1`, replay `market settle --from` the
+original run, then refund as the configured seller. Lease expiry and fulfillment
+convergence separately release the VM and capacity: refund is financial, not
+physical teardown. The existing Alkahest complete-deal stages are unchanged.
+
+For that route also supply PAYMENTS.SELLER_ACCOUNT and the actual lane seller's
+SELLER_MARKETPLACE_SCHEME (default `eip191`). COMPUTE_HOURLY_GROSS defaults to
+1000000 USD/6 base units (USD 1.00/hour); DISPUTE_WINDOW defaults to P7D. The
+hourly publication clause uses display units and the installed kit scales it.
+With a configured, ready target and the mock VM stack running, select
+`make test-buyer-machine BUYER_MODULE=e2e_vm_payment_deal` after mounting that
+runner's payments profile and forwarding its named auth variable.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:

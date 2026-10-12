@@ -51,7 +51,7 @@ dependencies = [
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
     "arkhai-apicredits-buyer>=0.5.0",
-    "arkhai-kit-arkhai-payments>=0.2.0",
+    "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-policy>=0.4.0",
 ]
 
@@ -93,6 +93,7 @@ markers = [
     "provisioning_write: Provisioning smoke tests that exercise write-path APIs",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test (synthetic-buyer + force-accept, follows the dry-run + advance stage pattern)",
     "e2e_deal_buyer_cli: Full deal driven by the buyer's `market` CLI subprocess against the live storefront (two-machine production interaction)",
+    "e2e_vm_payment_deal: Fixed-term VM payment approval, receipt-gated mock delivery, same-run settlement replay, seller refund and separate capacity release; blocked without a reachable payments target",
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
     "e2e_listing_shapes: A pool's stated listing shape publishes every declared quantity and is discoverable by a typed memory query",
