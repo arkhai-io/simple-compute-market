@@ -30,6 +30,11 @@ an attacker. Keep `fee_bps` and `dispute_authority` in the caller's trusted
 service policy: the HTTP service validates both against its own current
 configuration.
 
+Receipts carry a signed `livemode`, true only from a live payments service.
+`verify_receipt` takes the mode the caller expects, and `ArkhaiPaymentsConfig.livemode`
+(default `false`) supplies it for the buyer and seller stages. Set
+`livemode = true` against a live service; a receipt from the other mode is refused.
+
 `MandatePolicy` carries the accepted Agreement's payment facts without defining
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
 commits to the exact JSON object using RFC 8785, creates one `once` part, and
@@ -160,7 +165,7 @@ and reverse) against the service's local development authenticator, using a
 minimal deal object rather than a market Agreement. Start the payments repo's checkout-
 owned ledger with `FORMANCE_PORT=3168 bun run ledger:local`, then start its HTTP
 service from that repository in another shell with `bun run service` and
-`NODE_ENV=development`, `FORMANCE_PORT=3168`, `PAYMENTS_PORT=3180`,
+`PAYMENTS_MODE=development`, `FORMANCE_PORT=3168`, `PAYMENTS_PORT=3180`,
 `ARKHAI_DISPUTE_AUTHORITY`, `RECEIPT_SIGNING_KEY`, and `DEV_OPERATOR_TOKEN`
 set. Both service and client need the same `RECEIPT_SIGNING_KEY`; the operator
 funding request and client need the same `DEV_OPERATOR_TOKEN`.

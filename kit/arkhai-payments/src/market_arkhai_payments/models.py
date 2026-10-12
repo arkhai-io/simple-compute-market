@@ -48,8 +48,21 @@ class ApiErrorCode(Enum):
     hold_not_reversible = 'hold_not_reversible'
     insufficient_held_funds = 'insufficient_held_funds'
     insufficient_funds = 'insufficient_funds'
+    card_debt = 'card_debt'
+    transaction_stopped = 'transaction_stopped'
     account_directory_unavailable = 'account_directory_unavailable'
     ledger_unavailable = 'ledger_unavailable'
+    connect_account_not_found = 'connect_account_not_found'
+    withdrawal_not_found = 'withdrawal_not_found'
+    insufficient_withdrawable = 'insufficient_withdrawable'
+    withdrawal_too_small = 'withdrawal_too_small'
+    payouts_not_enabled = 'payouts_not_enabled'
+    stripe_unavailable = 'stripe_unavailable'
+    cash_database_unavailable = 'cash_database_unavailable'
+    top_up_limit = 'top_up_limit'
+    payment_method_not_found = 'payment_method_not_found'
+    top_up_not_found = 'top_up_not_found'
+    faucet_limit = 'faucet_limit'
     internal_error = 'internal_error'
 
 
@@ -66,8 +79,30 @@ class Authorities(BaseModel):
     reverse: Annotated[list[AccountId], Field(max_length=16)]
 
 
+class AutoRechargeDisabled(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    enabled: Literal[False]
+
+
 class BalanceAmount(RootModel[str]):
     root: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+
+
+class BalanceAvailable(RootModel[str]):
+    root: Annotated[str, Field(pattern='^(0|-?[1-9][0-9]{0,37})$')]
+
+
+class ConnectedAccountId(RootModel[str]):
+    root: Annotated[str, Field(pattern='^acct_[A-Za-z0-9]+$')]
+
+
+class ConnectTransferStatus(Enum):
+    active = 'active'
+    inactive = 'inactive'
+    pending = 'pending'
+    unrequested = 'unrequested'
 
 
 class DealContent(RootModel[Any]):
@@ -84,6 +119,26 @@ class Duration(RootModel[str]):
             pattern='^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$'
         ),
     ]
+
+
+class FaucetAmountCents(RootModel[str]):
+    root: Annotated[str, Field(max_length=16, pattern='^[1-9][0-9]*$')]
+
+
+class FaucetCredit(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    account: AccountId
+    amountCents: FaucetAmountCents
+    ledger: Annotated[str, Field(min_length=1)]
+
+
+class FaucetRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    amountCents: FaucetAmountCents
 
 
 class Fee(BaseModel):
@@ -114,6 +169,10 @@ class HoldUntilStop(BaseModel):
     until: Literal['stop']
 
 
+class HttpUrl(RootModel[str]):
+    root: Annotated[str, Field(pattern='^https?:\\/\\/[^\\s]+$')]
+
+
 class Identity(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -132,6 +191,14 @@ class MinorUnits(RootModel[str]):
     root: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
 
 
+class OnboardingRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    refreshUrl: HttpUrl
+    returnUrl: HttpUrl
+
+
 class PartState(Enum):
     held = 'held'
     released = 'released'
@@ -139,8 +206,73 @@ class PartState(Enum):
     settled = 'settled'
 
 
+class PaymentMethodId(RootModel[str]):
+    root: Annotated[str, Field(pattern='^pm_[A-Za-z0-9]+$')]
+
+
+class PayoutAmount(RootModel[str]):
+    root: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+
+
+class PayoutBalance(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    asset: Literal['USD/6']
+    available: BalanceAvailable
+    withdrawable: PayoutAmount
+
+
+class ProviderObjectId(RootModel[str]):
+    root: Annotated[str, Field(max_length=255, min_length=1)]
+
+
+class RateProgress(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    periodsEarned: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+    grossEarned: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+    reservedThrough: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+
+
+class RateReservation(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    period: Duration
+    reserveAhead: Duration
+    periodsReserved: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+
+
 class RequestId(RootModel[str]):
     root: Annotated[str, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')]
+
+
+class SavedCard(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: PaymentMethodId
+    brand: Annotated[str, Field(max_length=50, min_length=1)]
+    last4: Annotated[str, Field(pattern='^\\d{4}$')]
+    expMonth: Annotated[int, Field(ge=1, le=12)]
+    expYear: Annotated[int, Field(ge=2000, le=9999)]
+
+
+class SavedCards(RootModel[list[SavedCard]]):
+    root: list[SavedCard]
+
+
+class SettledPart(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    part: Annotated[int, Field(ge=0, le=9007199254740991)]
+    asset: Asset
+    gross: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+    fee: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
+    net: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
 
 
 class Sha256Hex(RootModel[str]):
@@ -176,6 +308,28 @@ class StoredDealAttachment(BaseModel):
     uploader: AccountId
 
 
+class StripeObjectId(RootModel[str]):
+    root: Annotated[str, Field(max_length=255, min_length=1)]
+
+
+class Event(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['stop']
+
+
+class TermsStopEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    issuer: Literal['terms']
+    requestId: RequestId
+    event: Event
+    receivedAt: Annotated[int, Field(ge=0, le=9007199254740991)]
+    sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
+
+
 class TimedBalanceHold(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -189,6 +343,45 @@ class TimedBalanceHold(BaseModel):
     balance: BalanceAmount
     fee: Fee
     releaseAt: str
+
+
+class TopUpAmountCents(RootModel[str]):
+    root: Annotated[str, Field(pattern='^[1-9]\\d*$')]
+
+
+class TopUpKind(Enum):
+    checkout = 'checkout'
+    saved_card = 'saved_card'
+    auto_recharge = 'auto_recharge'
+
+
+class TopUpState(Enum):
+    planned = 'planned'
+    pending = 'pending'
+    succeeded = 'succeeded'
+    failed = 'failed'
+    canceled = 'canceled'
+
+
+class Cause(Enum):
+    payer = 'payer'
+    payee = 'payee'
+    authority = 'authority'
+    terms = 'terms'
+
+
+class TransactionStop(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    effectiveAt: Annotated[int, Field(ge=0, le=9007199254740991)]
+    cause: Cause
+    sequence: Annotated[int, Field(ge=1, le=9007199254740991)]
+    settled: list[SettledPart]
+
+
+class UnixSeconds(RootModel[int]):
+    root: Annotated[int, Field(ge=0, le=9007199254740991)]
 
 
 class UntilStopBalanceHold(BaseModel):
@@ -206,6 +399,27 @@ class UntilStopBalanceHold(BaseModel):
     until: Literal['stop']
 
 
+class WithdrawalId(RootModel[str]):
+    root: Annotated[str, Field(pattern='^[0-9a-f]{64}$')]
+
+
+class WithdrawalRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    amount: Amount
+
+
+class WithdrawalState(Enum):
+    planned = 'planned'
+    reserved = 'reserved'
+    transferred = 'transferred'
+    payout_pending = 'payout_pending'
+    paid = 'paid'
+    compensating = 'compensating'
+    failed = 'failed'
+
+
 class ApiError(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -213,8 +427,55 @@ class ApiError(BaseModel):
     error: ApiErrorCode
 
 
+class AutoRechargeEnabled(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    enabled: Literal[True]
+    threshold: Annotated[str, Field(pattern='^(0|[1-9]\\d*)$')]
+    amountCents: TopUpAmountCents
+    paymentMethod: PaymentMethodId
+
+
+class AutoRechargeEnabledInput(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    enabled: Literal[True]
+    threshold: Annotated[str | None, Field(pattern='^(0|[1-9]\\d*)$')] = None
+    amountCents: TopUpAmountCents
+    paymentMethod: PaymentMethodId
+
+
+class AutoRechargeInput(RootModel[AutoRechargeDisabled | AutoRechargeEnabledInput]):
+    root: AutoRechargeDisabled | AutoRechargeEnabledInput
+
+
+class AutoRechargeSettings(RootModel[AutoRechargeDisabled | AutoRechargeEnabled]):
+    root: AutoRechargeDisabled | AutoRechargeEnabled
+
+
 class BalanceHold(RootModel[TimedBalanceHold | UntilStopBalanceHold]):
     root: TimedBalanceHold | UntilStopBalanceHold
+
+
+class CheckoutTopUpRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    amountCents: TopUpAmountCents
+    successUrl: HttpUrl
+    cancelUrl: HttpUrl
+
+
+class ConnectStatus(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    connectedAccount: ConnectedAccountId | None
+    payoutsEnabled: bool
+    transfers: ConnectTransferStatus
+    detailsSubmitted: bool
 
 
 class DealAttachment(BaseModel):
@@ -263,6 +524,15 @@ class LifecycleEvent(BaseModel):
     ] = None
 
 
+class OnboardingLink(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    connectedAccount: ConnectedAccountId
+    url: HttpUrl
+    expiresAt: UnixSeconds
+
+
 class OncePart(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -271,10 +541,6 @@ class OncePart(BaseModel):
     asset: Asset
     amount: Amount
     hold: Hold
-
-
-class Part(RootModel[OncePart]):
-    root: OncePart
 
 
 class PartSnapshot(BaseModel):
@@ -287,6 +553,9 @@ class PartSnapshot(BaseModel):
     held: MinorUnits
     released: MinorUnits
     reversed: MinorUnits
+    reserved: MinorUnits | None = None
+    refunded: MinorUnits | None = None
+    rate: RateProgress | None = None
     feePaid: MinorUnits
     hold: Hold
     releaseAt: Annotated[
@@ -294,6 +563,18 @@ class PartSnapshot(BaseModel):
         Field(description='UTC instant when a timed hold becomes releasable.'),
     ] = None
     status: PartState
+
+
+class RatePart(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['rate']
+    asset: Asset
+    amount: Amount
+    period: Duration
+    reserveAhead: Duration
+    hold: Hold
 
 
 class ReceiptPart(BaseModel):
@@ -305,6 +586,15 @@ class ReceiptPart(BaseModel):
     fee: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
     net: Annotated[str, Field(pattern='^(0|[1-9][0-9]{0,37})$')]
     hold: Hold
+    rate: RateReservation | None = None
+
+
+class SavedCardTopUpRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    amountCents: TopUpAmountCents
+    paymentMethod: PaymentMethodId | None = None
 
 
 class StoredEvent(BaseModel):
@@ -322,13 +612,70 @@ class StoredEvent(BaseModel):
             le=9007199254740991,
         ),
     ]
+    sequence: Annotated[
+        int | None,
+        Field(
+            description='Causal order within the transaction; absent on legacy events.',
+            ge=1,
+            le=9007199254740991,
+        ),
+    ] = None
+
+
+class TopUp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: Annotated[str, Field(max_length=255, min_length=1)]
+    account: AccountId
+    requestId: RequestId
+    kind: TopUpKind
+    amountCents: TopUpAmountCents
+    state: TopUpState
+    checkoutSession: ProviderObjectId | None = None
+    checkoutUrl: HttpUrl | None = None
+    paymentIntent: ProviderObjectId | None = None
+    paymentMethod: PaymentMethodId | None = None
+    succeededAt: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+    failure: Annotated[str | None, Field(max_length=300, min_length=1)] = None
+
+
+class TransactionEvent(RootModel[StoredEvent | TermsStopEvent]):
+    root: StoredEvent | TermsStopEvent
+
+
+class Withdrawal(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: WithdrawalId
+    account: AccountId
+    requestId: RequestId
+    connectedAccount: ConnectedAccountId
+    requestedAmount: Amount
+    amount: PayoutAmount
+    amountCents: PayoutAmount
+    createdAt: UnixSeconds
+    state: WithdrawalState
+    transfer: StripeObjectId | None = None
+    payout: StripeObjectId | None = None
+    reversal: StripeObjectId | None = None
+    paidAt: UnixSeconds | None = None
+
+
+class AutoRechargeResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    settings: AutoRechargeSettings
+    recommendedThreshold: Annotated[str, Field(pattern='^(0|[1-9]\\d*)$')]
 
 
 class Balance(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    available: dict[Asset, BalanceAmount]
+    available: dict[Asset, BalanceAvailable]
     held: list[BalanceHold]
 
 
@@ -341,31 +688,20 @@ class EventRequest(BaseModel):
     event: LifecycleEvent
 
 
-class Mandate(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    from_: Annotated[AccountId, Field(alias='from')]
-    to: AccountId
-    parts: Annotated[list[Part], Field(max_length=64, min_length=1)]
-    deal: DealCommitment
-    fee: Fee
-    authorities: Authorities
-    nonce: Annotated[str, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')]
-    expires: Annotated[
-        int,
-        Field(
-            description='Unix seconds after which approval is refused.',
-            ge=0,
-            le=9007199254740991,
-        ),
-    ]
+class Part(RootModel[OncePart | RatePart]):
+    root: OncePart | RatePart
 
 
 class Receipt(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
+    livemode: Annotated[
+        bool,
+        Field(
+            description='True only for real-money live payments; covered by the signature.'
+        ),
+    ]
     transaction: Sha256Hex
     deal: DealCommitment
     from_: Annotated[AccountId, Field(alias='from')]
@@ -392,6 +728,12 @@ class TransactionSnapshot(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
+    livemode: Annotated[
+        bool,
+        Field(
+            description='True only for real-money live payments; covered by the signature.'
+        ),
+    ]
     transaction: Sha256Hex
     receipt: SignedReceipt
     observedAt: Annotated[
@@ -403,17 +745,33 @@ class TransactionSnapshot(BaseModel):
         ),
     ]
     parts: Annotated[list[PartSnapshot], Field(min_length=1)]
-    events: list[StoredEvent]
+    events: list[TransactionEvent]
+    latestEventSequence: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+    fundedThrough: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+    stop: TransactionStop | None = None
     attachments: list[StoredDealAttachment]
     issuer: Identity
 
 
-class ApprovalRequest(BaseModel):
+class Mandate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    mandate: Mandate
-    attachments: list[DealAttachment] | None = None
+    from_: Annotated[AccountId, Field(alias='from')]
+    to: AccountId
+    parts: Annotated[list[Part], Field(max_length=64, min_length=1)]
+    deal: DealCommitment
+    fee: Fee
+    authorities: Authorities
+    nonce: Annotated[str, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')]
+    expires: Annotated[
+        int,
+        Field(
+            description='Unix seconds after which approval is refused.',
+            ge=0,
+            le=9007199254740991,
+        ),
+    ]
 
 
 class SignedTransactionSnapshot(BaseModel):
@@ -422,3 +780,11 @@ class SignedTransactionSnapshot(BaseModel):
     )
     snapshot: TransactionSnapshot
     proof: SignatureProof
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    mandate: Mandate
+    attachments: list[DealAttachment] | None = None

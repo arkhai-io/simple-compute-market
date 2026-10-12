@@ -15,7 +15,9 @@ def _setup():
 
 
 def _verify(receipt, terms, data):
-    return verify_receipt(receipt, SERVICE.identity, mandate=data.mandate, agreement_json=terms)
+    return verify_receipt(
+        receipt, SERVICE.identity, mandate=data.mandate, agreement_json=terms, livemode=False
+    )
 
 
 def test_a_service_receipt_for_the_mandate_verifies():
@@ -46,6 +48,15 @@ def test_a_receipt_for_another_agreement_is_refused():
     terms, data = _setup()
     receipt = build_signed_receipt(signer=SERVICE, mandate=data.mandate)
     assert not _verify(receipt, agreement(payer=OTHER), data)
+
+
+def test_a_receipt_from_the_other_mode_is_refused():
+    terms, data = _setup()
+    live = build_signed_receipt(signer=SERVICE, mandate=data.mandate, livemode=True)
+    assert not _verify(live, terms, data)
+    assert verify_receipt(
+        live, SERVICE.identity, mandate=data.mandate, agreement_json=terms, livemode=True
+    )
 
 
 def test_tampering_with_any_signed_field_breaks_the_signature():

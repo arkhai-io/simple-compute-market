@@ -77,8 +77,13 @@ def verify_receipt(
     *,
     mandate: Mandate | Mapping[str, Any],
     agreement_json: Mapping[str, Any],
+    livemode: bool,
 ) -> bool:
-    """Verify a receipt and bind it to the exact Agreement and mandate."""
+    """Verify a receipt and bind it to the exact Agreement, mandate and mode.
+
+    `livemode` is the mode the caller expects: a test-mode receipt never proves
+    a live payment, and a live receipt never satisfies a test deployment.
+    """
 
     try:
         signed = SignedReceipt.model_validate(signed_receipt)
@@ -94,6 +99,7 @@ def verify_receipt(
     )
     return (
         verify_receipt_signature(signed, trusted_service_identity)
+        and receipt.livemode is livemode
         and receipt.transaction.root == expected_transaction
         and receipt.deal.root.root == expected_deal
         and receipt.deal.root.root == mandate_values["deal"]
