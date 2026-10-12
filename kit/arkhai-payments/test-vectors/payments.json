@@ -5,14 +5,14 @@
   },
   "mandates": [
     {
-      "id": "cf0dba71ad962a95b80451663a079de64e0f59c5e531b893bb860f22905873a3",
+      "id": "e12d5a58b8e22495039a7aea77e7314e95fd02b173a67585235b2c4b68888bfb",
       "mandate": {
         "from": "11111111-1111-4111-8111-111111111111",
         "to": "22222222-2222-4222-8222-222222222222",
         "parts": [
           {
             "kind": "once",
-            "asset": "USD/2",
+            "asset": "USD/6",
             "amount": "1000",
             "hold": {
               "for": "P0D"
@@ -20,7 +20,7 @@
           },
           {
             "kind": "once",
-            "asset": "USD/2",
+            "asset": "USD/6",
             "amount": "9007199254740993",
             "hold": {
               "until": "stop"
@@ -57,20 +57,61 @@
         "nonce": "vector-1",
         "expires": 1900000000
       }
+    },
+    {
+      "id": "17b696d661d3776745d72a523605f5450b8a5f014da050481f5dddadfc3da9c5",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "parts": [
+          {
+            "kind": "rate",
+            "asset": "USD/6",
+            "amount": "2",
+            "period": "PT1H",
+            "reserveAhead": "PT5M",
+            "hold": {
+              "until": "stop"
+            }
+          }
+        ],
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "authorities": {
+          "start": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222"
+          ],
+          "stop": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+            "33333333-3333-4333-8333-333333333333"
+          ],
+          "reverse": [
+            "22222222-2222-4222-8222-222222222222",
+            "33333333-3333-4333-8333-333333333333"
+          ]
+        },
+        "nonce": "rate-vector-1",
+        "expires": 1900000000
+      }
     }
   ],
   "receipt": {
-    "message": "0000001a61726b6861692e7061796d656e74732e726563656970742e76310000004032643761643438393135336437393363643035313564663462663262386432336364363030333265336566333062626463373866653835663230623635376533",
+    "message": "0000001a61726b6861692e7061796d656e74732e726563656970742e76310000004038633531626334343066386430636232616136343836353166623031636161343333666363613933633735663934666563653035636263663663336236646138",
     "signed": {
       "receipt": {
-        "transaction": "cf0dba71ad962a95b80451663a079de64e0f59c5e531b893bb860f22905873a3",
+        "livemode": false,
+        "transaction": "e12d5a58b8e22495039a7aea77e7314e95fd02b173a67585235b2c4b68888bfb",
         "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         "from": "11111111-1111-4111-8111-111111111111",
         "to": "22222222-2222-4222-8222-222222222222",
         "ledger": "approval-1",
         "parts": [
           {
-            "asset": "USD/2",
+            "asset": "USD/6",
             "gross": "1000",
             "fee": "25",
             "net": "975",
@@ -79,7 +120,7 @@
             }
           },
           {
-            "asset": "USD/2",
+            "asset": "USD/6",
             "gross": "9007199254740993",
             "fee": "225179981368524",
             "net": "8782019273372469",
@@ -105,7 +146,7 @@
       },
       "proof": {
         "scheme": "ed25519",
-        "value": "M9ZDQ9K8lnFl_uyY1yRgc3P4D4yA2N5gvq1FD1cgGCEKN2CWNcY4Riw92RrlBj5tg-FHy6jEBOEoJhsf-KfICg"
+        "value": "pYBqH9f6S6dCMTxH_E3v4nem1MaPM2iNMLy4afHbuw97xyUDwsuYtDINW2XRYrN6rXGnce8Ss2QkKiU1DMv4BQ"
       }
     }
   },
@@ -117,7 +158,7 @@
           "terms": "Fixture agreement — opaque to the service",
           "price": {
             "amount": "1000",
-            "asset": "USD/2"
+            "asset": "USD/6"
           }
         },
         "label": "Agreement"
@@ -128,11 +169,11 @@
           "terms": "Fixture agreement — opaque to the service",
           "price": {
             "amount": "1000",
-            "asset": "USD/2"
+            "asset": "USD/6"
           }
         },
         "label": "Agreement",
-        "sha256": "a716abcad68e133e10582464eed641de7b19c9c83c72c0a05f4e47f3e8f3f642",
+        "sha256": "3aa80cbf7d90505b1ab0b48b35d0c90f9f1bc35baa59999b69a2a7c8e6f57227",
         "name": "deal.json",
         "mediaType": "application/json",
         "size": 97,
@@ -142,7 +183,7 @@
   ],
   "approvals": [
     {
-      "id": "2fd5b71c42740706db1053f2f78cc656c8970aa2fb3fdc49b037bf9138db40de",
+      "id": "e61402e4a48b12e95c6e558a3d8c7228877fb65466771cd066ed143ae4ca8d7c",
       "request": {
         "mandate": {
           "from": "11111111-1111-4111-8111-111111111111",
@@ -150,7 +191,7 @@
           "parts": [
             {
               "kind": "once",
-              "asset": "USD/2",
+              "asset": "USD/6",
               "amount": "1000",
               "hold": {
                 "for": "P0D"
@@ -158,7 +199,7 @@
             },
             {
               "kind": "once",
-              "asset": "USD/2",
+              "asset": "USD/6",
               "amount": "9007199254740993",
               "hold": {
                 "until": "stop"
@@ -173,7 +214,7 @@
               }
             }
           ],
-          "deal": "a716abcad68e133e10582464eed641de7b19c9c83c72c0a05f4e47f3e8f3f642",
+          "deal": "3aa80cbf7d90505b1ab0b48b35d0c90f9f1bc35baa59999b69a2a7c8e6f57227",
           "fee": {
             "bps": 250
           },
@@ -202,7 +243,7 @@
               "terms": "Fixture agreement — opaque to the service",
               "price": {
                 "amount": "1000",
-                "asset": "USD/2"
+                "asset": "USD/6"
               }
             },
             "label": "Agreement"

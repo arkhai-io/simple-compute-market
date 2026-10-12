@@ -99,7 +99,7 @@ E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
 E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction \
-                         or e2e_bare_metal_mock_deal
+                         or e2e_bare_metal_mock_deal or e2e_bare_metal_payment_deal
 
 test-buyer-machine:
 	docker run --rm \

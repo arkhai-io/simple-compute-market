@@ -201,6 +201,7 @@ class FakePaymentsClient:
                     "events": [],
                     "attachments": list(self.attachments),
                     "issuer": receipt["receipt"]["issuer"],
+                    "livemode": receipt["receipt"]["livemode"],
                 },
                 "proof": _PLACEHOLDER_PROOF,
             }

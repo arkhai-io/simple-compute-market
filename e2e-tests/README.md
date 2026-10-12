@@ -55,6 +55,28 @@ ACTIVE_PROFILES=staging,staging-secrets
 # loads: config.yml → config-staging.yml → config-staging-secrets.yml
 ```
 
+### Shared payment-scenario configuration
+
+Payment scenarios use `tests/e2e/roles/helpers/payments.py` to read the same
+`PAYMENTS` section (environment prefix `ARKHAI_PAYMENTS__`). Supply all six:
+SERVICE_URL, SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL.
+Marketplace credentials are independent of payment account IDs.
+
+FEE_BPS defaults to 250 and LIVEMODE defaults to false; generated buyer tables
+explicitly pin that receipt mode. Choose either DEVELOPMENT_AUTH=true (literal
+loopback service URL only) or API_KEY_ENV naming the buyer's bearer-key environment
+variable, never both. Forward the named variable into the test runner yourself;
+host environment variables are not inherited by the buyer-machine container.
+
+Each scenario validates its lane prerequisites. Missing payments configuration
+or an unreachable/unready `/health` reports `blocked` and skips; invalid policy
+fails rather than selecting another settlement mechanism. The shared serializer
+writes only a named payment table (`Settlement.arkhai_payments` or
+`bare_metal.arkhai_payments`); the scenario supplies domain settings and payer.
+See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
+for the public testing boundary.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:
@@ -167,6 +189,36 @@ ACTIVE_PROFILES=local,e2e-mock uv run pytest -m mock_provisioning_happy -v --tb=
 ```
 
 ---
+
+### Bare-metal payment deal
+
+The bare-metal lane includes marker `e2e_bare_metal_payment_deal`.
+With payments configured, run its three ordered calls against the ready lane:
+
+```sh
+make test-buyer-machine \
+  NETWORK=simple-market-bare-metal_default \
+  BUYER_MODULE=e2e_bare_metal_payment_deal
+```
+
+Supply the shared PAYMENTS settings in the runner's config directory, plus
+SELLER_ACCOUNT, COMPUTE_HOURLY_GROSS=1000000 and DISPUTE_WINDOW=P7D. The seller
+must enable the same payments policy and trust its service identity.
+SELLER_MARKETPLACE_CREDENTIAL must resolve to the lane's pinned seller scheme;
+the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
+public CI run reports a named blocked payments prerequisite, not success.
+
+The fixture declares a distinct backed whole host and publishes only a
+USD 1.00/hour option for a one-hour term. The installed
+`market bare-metal buy` emits `run_started → agreement_accepted → payment_approved → run_ended(status=agreed)`.
+Delivery reads use that purchase's signer and fulfillment transport.
+Re-drive recovers the original run's retained profile and calls the shared
+`settle_agreement` client, keeping both transaction and fulfillment unchanged;
+there is no bare-metal settle command. Seller refund reverses the held once
+payment, then a separate buyer teardown converges mock reclaim and site capacity
+release. Fixtures resume loops and remove their own mock rules even after failure.
+This is mock grant/reclaim evidence, not SSH qualification. The canonical
+Alkahest mock-deal scenario remains selected unchanged.
 
 ## CI/CD
 

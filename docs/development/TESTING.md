@@ -300,7 +300,12 @@ project of its own:
   discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
   deal runs the canonical compute deal for one whole host, stage for stage with
   VM's, then a second deal on the freed host whose buyer teardown, sent twice,
-  returns one operation and releases capacity once.
+  returns one operation and releases capacity once. Its separate
+  `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
+  one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
+  same-fulfillment re-drive through `settle_agreement`, then seller refund and
+  separate physical teardown with restored whole-host capacity. Unconfigured
+  payments remain a named blocked prerequisite; no real SSH claim is made.
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
@@ -764,6 +769,19 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 ## Private Service Dependencies
 
 This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
+
+Payment scenarios share `e2e-tests/tests/e2e/roles/helpers/payments.py`
+for explicit PAYMENTS configuration and a readiness-gated `/health` check
+(timeout 5 seconds, environment proxies disabled). The six required keys are
+SERVICE_URL, SERVICE_IDENTITY, DISPUTE_AUTHORITY, BUYER_ACCOUNT,
+BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL. FEE_BPS defaults
+to 250; LIVEMODE defaults to false and is emitted explicitly in buyer TOML.
+DEVELOPMENT_AUTH and API_KEY_ENV are mutually exclusive. Lane prerequisites
+remain scenario-owned and fail when invalid; missing or unready payments
+targets report a blocked skip, never an Alkahest fallback. The helper serializes
+only the named payments table, not domain configuration or payer selection.
+See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
+for environment and runner setup.
 
 **Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` checks conformance against the service's published vectors, vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`.
 
