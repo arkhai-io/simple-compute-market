@@ -204,9 +204,12 @@ def _delivery(negotiation_id: str) -> dict[str, Any]:
     connection = delivery.get("connection_details")
     if isinstance(connection, str):
         connection = json.loads(connection)
-    assert connection and connection.get("ssh_command"), "Ready VM has no usable mock SSH facts"
-    assert connection.get("tenant_user") == "vmuser"
-    assert str(connection.get("ssh_port")) == "2222"
+    assert connection and connection.get("host"), "Ready VM has no usable mock SSH endpoint"
+    assert connection["host"] == "127.0.0.1"
+    assert connection.get("user") == "vmuser"
+    assert connection.get("port") == 2222
+    assert connection.get("ready_at")
+    assert connection.get("provisioned_resource_ids")
     return delivery
 
 
