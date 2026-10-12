@@ -150,7 +150,8 @@ def make_publisher_trust_resolver(
             )
         if (
             str(refreshed.get("listing_id")) != listing_id
-            or refreshed.get("publisher_id") != publisher_id
+            # Recovery retains registry subject IDs as text in the run context.
+            or str(refreshed.get("publisher_id")) != str(publisher_id)
             or refreshed.get("storefront_url") != storefront_url
         ):
             raise RuntimeError(
