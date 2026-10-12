@@ -291,6 +291,7 @@ class _IntroductionContext:
         def deliver_copy(projection: Any) -> None:
             """The buyer's own copy, never fatal: the reveal is re-readable."""
 
+            assert sinks is not None
             outcomes = deliver_introduction(
                 projection,
                 sinks=sinks,
@@ -344,7 +345,8 @@ def buy_bare_metal(
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
         listing = client.get_listing(listing_id)
-    if not listing.storefront_url or listing.publisher_principals is None:
+    seller_principals = listing.publisher_principals
+    if not listing.storefront_url or seller_principals is None:
         raise typer.BadParameter("listing has no trusted storefront identity")
     options = [
         SettlementOption.model_validate(item) for item in listing.settlement_options
@@ -392,7 +394,7 @@ def buy_bare_metal(
         principal=identity.principal,
         signer=identity.signer,
         listing_id=listing_id,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: seller_principals,
         initial_price=amount,
         max_price=amount,
         unit_count=duration_seconds / 3600,
@@ -430,7 +432,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: seller_principals,
         timeout=buyer_config.timeout_seconds,
     )
     transaction, fulfillment = stage.settle(
