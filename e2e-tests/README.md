@@ -55,6 +55,28 @@ ACTIVE_PROFILES=staging,staging-secrets
 # loads: config.yml → config-staging.yml → config-staging-secrets.yml
 ```
 
+### Shared payment-scenario configuration
+
+Payment scenarios use `tests/e2e/roles/helpers/payments.py` to read the same
+`PAYMENTS` section (environment prefix `ARKHAI_PAYMENTS__`). Supply all six:
+SERVICE_URL, SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL.
+Marketplace credentials are independent of payment account IDs.
+
+FEE_BPS defaults to 250 and LIVEMODE defaults to false; generated buyer tables
+explicitly pin that receipt mode. Choose either DEVELOPMENT_AUTH=true (literal
+loopback service URL only) or API_KEY_ENV naming the buyer's bearer-key environment
+variable, never both. Forward the named variable into the test runner yourself;
+host environment variables are not inherited by the buyer-machine container.
+
+Each scenario validates its lane prerequisites. Missing payments configuration
+or an unreachable/unready `/health` reports `blocked` and skips; invalid policy
+fails rather than selecting another settlement mechanism. The shared serializer
+writes only a named payment table (`Settlement.arkhai_payments` or
+`bare_metal.arkhai_payments`); the scenario supplies domain settings and payer.
+See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
+for the public testing boundary.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:

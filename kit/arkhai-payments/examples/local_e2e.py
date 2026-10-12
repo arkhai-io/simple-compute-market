@@ -95,6 +95,7 @@ def main() -> int:
             local_service_identity(),
             mandate=mandate,
             agreement_json=agreement,
+            livemode=False,
         ):
             raise SystemExit("service receipt did not verify against this Agreement")
         deposited = seller.ensure_agreement_attached(identifier, agreement, option)
