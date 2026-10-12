@@ -29,6 +29,7 @@ from market_core import SettlementStageTable
 
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_policy.scalar_policies import selected_settlement_artifact
 
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
@@ -495,6 +496,11 @@ def _negotiate_matches(
         if settlement_selection is not None:
             selected = match.get("_selected_settlement")
             selected_option = getattr(selected, "option", None)
+            if selected_option is None:
+                selected_option = selected_settlement_artifact(
+                    match,
+                    {"settlement_selection": settlement_selection.model_dump(mode="json")},
+                )
             if selected_option is not None:
                 advertised_option = SettlementOption.model_validate(selected_option)
         if advertised_option is not None and revalidate_settlement is not None:
