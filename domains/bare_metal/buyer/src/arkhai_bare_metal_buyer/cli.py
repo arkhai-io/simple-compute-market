@@ -446,11 +446,7 @@ def buy_bare_metal(
         agreed_amount=outcome.agreed_amount,
         transaction_id=transaction,
         fulfillment=fulfillment,
-        accepted_provision_terms=(
-            outcome.accepted_provision_terms.model_dump(mode="json")
-            if outcome.accepted_provision_terms is not None
-            else None
-        ),
+        accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,
             selection=outcome.settlement_selection,
@@ -558,11 +554,7 @@ def request_introduction(
         "agreed",
         negotiation_id=outcome.negotiation_id,
         agreed_amount=outcome.agreed_amount,
-        accepted_provision_terms=(
-            outcome.accepted_provision_terms.model_dump(mode="json")
-            if outcome.accepted_provision_terms is not None
-            else None
-        ),
+        accepted_provision_terms=outcome.to_dict().get("accepted_provision_terms"),
         **settlement_acceptance_fields(
             negotiation_id=outcome.negotiation_id,
             selection=outcome.settlement_selection,
