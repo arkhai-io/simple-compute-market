@@ -141,7 +141,7 @@ def payment_run(
             host=context["host_id"], resource_id=context["resource_id"],
             pool_id=pool, sellable_units=1,
             attributes={"gpu_model": GPU_MODEL, "region": region},
-            region=region, pricing={"settlements": [clause]},
+            region=region, pricing={"gpu": {GPU_MODEL: {"settlements": [clause]}}},
             listing_shapes={"vm": [{"gpu": {"count": 1, "model": GPU_MODEL}}]},
         )
         refresh_storefront_projections(storefront_admin_client)
