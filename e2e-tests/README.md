@@ -77,6 +77,22 @@ writes only a named payment table (`Settlement.arkhai_payments` or
 See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
 for the public testing boundary.
 
+The VM lane includes `e2e_vm_payment_deal` in
+`tests/e2e/roles/scenarios/vms/test_vm_payment_deal.py`. It uses a wallet-free
+Ed25519 buyer and owned capacity-backed mock supply. Its three calls buy a
+one-hour VM through `arkhai.payments.v1`, replay `market settle --from` the
+original run, then refund as the configured seller. Lease expiry and fulfillment
+convergence separately release the VM and capacity: refund is financial, not
+physical teardown. The existing Alkahest complete-deal stages are unchanged.
+
+For that route also supply PAYMENTS.SELLER_ACCOUNT and the actual lane seller's
+SELLER_MARKETPLACE_SCHEME (default `eip191`). COMPUTE_HOURLY_GROSS defaults to
+1000000 USD/6 base units (USD 1.00/hour); DISPUTE_WINDOW defaults to P7D. The
+hourly publication clause uses display units and the installed kit scales it.
+With a configured, ready target and the mock VM stack running, select
+`make test-buyer-machine BUYER_MODULE=e2e_vm_payment_deal` after mounting that
+runner's payments profile and forwarding its named auth variable.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:

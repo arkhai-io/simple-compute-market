@@ -293,6 +293,12 @@ project of its own:
 
 - **VM lane** (`make -C e2e-tests test-e2e-vm`): Bob's and Alice's storefronts
   and provisioning authorities, the two VM registries, and the dev chain.
+  `e2e_vm_payment_deal` adds the fixed-term payments variant: production
+  `market buy`, same-run `market settle --from`, seller refund, and separate
+  lease-expiry/convergence mock release. It uses owned backed supply and a
+  wallet-free Ed25519 profiled buyer, and remains blocked without a configured
+  reachable payments target. Its three calls do not change the canonical
+  Alkahest stage inventory or qualify real VM access.
 - **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site
   trusting the bare-metal storefront, a bare-metal registry, and the dev chain.
   Its publication scenario declares pools and whole-host capacity through the
