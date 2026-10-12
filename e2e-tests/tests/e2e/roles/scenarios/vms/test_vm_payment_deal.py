@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from contextlib import contextmanager
@@ -195,7 +196,14 @@ def _delivery(negotiation_id: str) -> dict[str, Any]:
     assert status.status == "ready"
     assert status.fulfillment_id
     assert status.tenant_credentials, "Ready VM has no tenant delivery"
-    return status.model_dump(mode="json")
+    delivery = status.model_dump(mode="json")
+    connection = delivery.get("connection_details")
+    if isinstance(connection, str):
+        connection = json.loads(connection)
+    assert connection and connection.get("ssh_command"), "Ready VM has no usable mock SSH facts"
+    assert connection.get("tenant_user") == "vmuser"
+    assert str(connection.get("ssh_port")) == "2222"
+    return delivery
 
 
 def test_payment_deal_delivers_after_a_verified_receipt(
