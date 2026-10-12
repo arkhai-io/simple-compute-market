@@ -307,6 +307,8 @@ def test_the_seller_refund_reverses_the_held_payment(
     # Financial refund does not end physical delivery. Expiry drives release.
     lease = payment_run["lease"]
     assert lease.refresh()["status"] == "active"
+    events = storefront_admin_client.get_events(limit=500, stage="fulfillment")
+    since_id = max((event.id for event in events.events), default=0)
     try:
         assert provisioning_client.pause_lease_watchdog().get("paused") is True
         with contextmanager(convergence_paused)(provisioning_client):
@@ -326,10 +328,11 @@ def test_the_seller_refund_reverses_the_held_payment(
             advance_fulfillment_to(provisioning_client, payment_deal_state.fulfillment_ref, "torn_down")
             provisioning_client.check_leases()
             assert lease.refresh()["status"] == "released"
-            wait_for_stage_event(
+            released = wait_for_stage_event(
                 storefront_admin_client, "fulfillment", "capacity_released",
-                negotiation_id=payment_deal_state.negotiation_id, timeout=10.0,
+                since_id=since_id, timeout=10.0,
             )
+            assert released.data["capacity_reservation_id"] == lease.lease_id
             assert not lease.resource_consumed(storefront_admin_client, payment_run["resource_id"])
     finally:
         provisioning_client.resume_lease_watchdog()
