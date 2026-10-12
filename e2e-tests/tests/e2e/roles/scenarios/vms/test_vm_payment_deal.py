@@ -196,7 +196,11 @@ def _delivery(negotiation_id: str) -> dict[str, Any]:
     assert status.status == "ready"
     assert status.fulfillment_id
     assert status.tenant_credentials, "Ready VM has no tenant delivery"
-    delivery = status.model_dump(mode="json")
+    delivery = {
+        **status.extra,
+        "fulfillment_id": status.fulfillment_id,
+        "tenant_credentials": status.tenant_credentials,
+    }
     connection = delivery.get("connection_details")
     if isinstance(connection, str):
         connection = json.loads(connection)
