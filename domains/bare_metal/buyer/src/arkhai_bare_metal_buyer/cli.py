@@ -379,7 +379,7 @@ def buy_bare_metal(
         publisher_id=str(listing.publisher_id),
         publisher_principals=[
             principal.model_dump(mode="json")
-            for principal in listing.publisher_principals.identities
+            for principal in seller_principals.identities
         ],
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
