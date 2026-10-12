@@ -374,10 +374,11 @@ that separates proving the market plumbing from proving the billing, which are
 different risks.
 
 Excluded from this campaign by scope decision (2026-09-16): the Arkhai-hosted
-inference registry deployment, webapp integration, a hosted fiat option for
-inference, and any Stripe, Metronome, Formance, or WorkOS integration. Each is
-anticipated and unowned here; the Helm alias pattern the API-credits registry
-already uses makes the hosted registry a small change when it is opened.
+inference registry deployment, webapp integration, a fiat option
+(`arkhai.payments.v1`) for inference, and any Stripe, Metronome, Formance, or
+WorkOS integration. Each is anticipated and unowned here; the Helm alias
+pattern the API-credits registry already uses makes the hosted registry a small
+change when it is opened.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
