@@ -286,6 +286,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
     with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
+        assert payment_deal_state.settlement_id is not None
         snapshot = client.get_transaction(payment_deal_state.settlement_id).snapshot
     assert snapshot.parts and all(part.rate is None for part in snapshot.parts)
     assert all(part.reversed.root == part.gross.root for part in snapshot.parts)
