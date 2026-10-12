@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -123,7 +124,7 @@ def payment_run(
     try:
         pause_storefront(storefront_admin_client)
         gross = int(str(payment_setting("COMPUTE_HOURLY_GROSS", "1000000")))
-        clause = {
+        clause: dict[str, Any] = {
             "mechanism": "arkhai.payments.v1", "asset": "USD/6",
             # Hour clauses are display units; the option builder scales USD/6.
             "rate": str(Decimal(gross) / Decimal(10**6)), "per": "hour",
@@ -251,9 +252,11 @@ def test_settlement_re_driven_from_the_run_log_is_idempotent(
     approved = again.wait_for_event("payment_approved", timeout=10.0)
     assert approved["transaction_id"] == payment_deal_state.settlement_id
     assert approved["negotiation_id"] == payment_deal_state.negotiation_id
+    assert payment_deal_state.negotiation_id is not None
     delivery = _delivery(payment_deal_state.negotiation_id)
     for field in ("settlement_ref", "fulfillment_id", "tenant_credentials", "connection_details"):
         assert delivery.get(field) == payment_run["delivery"].get(field), field
+    assert payment_deal_state.delivery is not None
     assert payment_run["lease"].refresh()["id"] == payment_deal_state.delivery["lease_id"]
 
 
@@ -285,7 +288,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     assert lease.refresh()["status"] == "active"
     try:
         assert provisioning_client.pause_lease_watchdog().get("paused") is True
-        with convergence_paused(provisioning_client):
+        with contextmanager(convergence_paused)(provisioning_client):
             provisioning_test_client.add_mock_rule(
                 rule_id=payment_run["remove_rule"],
                 match={"vm_action": "vm_remove", "host_id": payment_run["host_id"]},
@@ -298,6 +301,7 @@ def test_the_seller_refund_reverses_the_held_payment(
             assert releasing["fulfillment_id"] == payment_deal_state.fulfillment_ref
             provisioning_client.advance_fulfillment_convergence_cycle()
             provisioning_test_client.drain(timeout=30)
+            assert payment_deal_state.fulfillment_ref is not None
             advance_fulfillment_to(provisioning_client, payment_deal_state.fulfillment_ref, "torn_down")
             provisioning_client.check_leases()
             assert lease.refresh()["status"] == "released"
