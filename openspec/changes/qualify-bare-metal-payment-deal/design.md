@@ -22,4 +22,4 @@ The ordinary lane buyer fixtures use a different signer and cannot read this pur
 | Bare-metal lane payment scenario map | `docs/development/TESTING.md#4-system-integration-tests-end-to-end` |
 | Configuration and first-use entry point | `e2e-tests/README.md#bare-metal-payment-deal` |
 
-No repository-wide architectural change or roadmap-goal state change: this qualifies existing fixed-term behavior, not the spot roadmap. The focused campaign index records this scenario separately.
+No repository-wide architectural change or roadmap-goal state change: this qualifies existing fixed-term behavior, not the spot roadmap. The focused campaign index records this scenario separately and now marks configured qualification complete, with review pending.

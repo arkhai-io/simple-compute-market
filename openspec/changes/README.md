@@ -13,7 +13,7 @@ Statuses here describe readiness, not merely whether a checklist exists:
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`qualify-bare-metal-payment-deal`](qualify-bare-metal-payment-deal/) | active; candidate validation | Fixed-term receipt-gated mock whole-host purchase, original-run settlement re-drive, seller refund and separate mock capacity release; canonical Alkahest scenario unchanged |
+| [`qualify-bare-metal-payment-deal`](qualify-bare-metal-payment-deal/) | implemented; configured scenario qualified, review pending | Fixed-term receipt-gated mock whole-host purchase, original-run settlement re-drive, seller refund and separate mock capacity release; canonical Alkahest scenario unchanged |
 
 ## How this index is organized
 
