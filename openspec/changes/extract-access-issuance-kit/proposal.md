@@ -103,7 +103,8 @@ market that sells a bearer credential.
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — kit layers gain the access-issuance
-      capability; the API-credit hosted settlement section cites the kit.
+      capability; the authority-boundaries row for API keys and credit
+      issuance cites the kit.
 - [x] Existing subsystem specification — `api-credits` and `inference`
       implementation-composition prose; `market-composition`.
 - [x] New subsystem specification — `access-issuance`.

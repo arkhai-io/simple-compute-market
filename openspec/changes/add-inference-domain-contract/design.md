@@ -62,7 +62,7 @@ rate card fixed at the moment credits were bought. A schema the registry can
 validate and filter with the operators it has today.
 
 **Non-Goals.** Composing a running stack, extracting anything, enforcing
-metering, hosted fiat, seller packaging, or any deployment. Each is owned by a
+metering, a fiat option, seller packaging, or any deployment. Each is owned by a
 named follow-on change.
 
 ## Decisions
@@ -77,13 +77,14 @@ give the listing the **shapes** a buyer compares on: a model card, a rate card,
 and a usage record.
 
 What the domain does *not* do is decide what a storefront sells or what it
-charges. Converting money into a balance is the payment kit's job (Stripe for
-fiat, Alkahest for crypto) and is opaque to the domain. How a storefront prices
-its balance against tokens is the storefront's declaration, made in the rate
-card. And whether two storefronts' listings are comparable is whatever the
-operator of the registry they publish to chooses to enforce — a registry here is
-the analogue of an OpenRouter or a Featherless, and there is no promise of
-compatibility between registries, nor within one unless its operator imposes it.
+charges. Converting money into a balance is the payment kit's job (Arkhai
+payments for fiat, Alkahest for crypto) and is opaque to the domain. How a
+storefront prices its balance against tokens is the storefront's declaration,
+made in the rate card. And whether two storefronts' listings are comparable is
+whatever the operator of the registry they publish to chooses to enforce — a
+registry here is the analogue of an OpenRouter or a Featherless, and there is no
+promise of compatibility between registries, nor within one unless its operator
+imposes it.
 
 Inference is a domain rather than a field on API credits because the vocabulary
 is different, not because the meaning of a credit is. Adding a model card to the

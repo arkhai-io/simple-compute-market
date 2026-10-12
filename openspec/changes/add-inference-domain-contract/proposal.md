@@ -121,9 +121,9 @@ shared.
   `extract-access-issuance-kit`, and it waits until two consumers exist.
 - No admission holds, no post-response settlement, no streaming usage capture,
   no cancellation handling. That is `meter-inference-usage`.
-- No hosted fiat (`fiat.stripe.v1`) option for inference listings, and no
-  Stripe, Metronome, Formance, or WorkOS integration of any kind. The hosted
-  route is owned outside this repository's workstream.
+- No fiat (`arkhai.payments.v1`) option for inference listings, and no
+  Stripe, Metronome, Formance, or WorkOS integration of any kind. Alkahest is
+  the only mechanism this campaign composes.
 - No Arkhai-hosted inference registry deployment, no Helm alias, no webapp
   integration.
 - No unbacked inference listing: version 1 admits only the backed value of the

@@ -47,7 +47,7 @@ negotiate, settle, issue, call the model, exhaust, top up — is correct.
   `docker-compose.yml`; development identities under `dev-env/identities/`
   (`inference-registry.ed25519`, `inference.identity.env`,
   `inference.wallet.env`, gated-app and service principals) with their
-  `compose.local-identities.yml` bindings and `e2e-dev-identities-env`
+  `compose.inference-local.yml` overlay and `e2e-inference-dev-env`
   variables. The model server is the CPU vLLM image with a small instruct
   model so the scenario runs without a GPU.
 - **Scenario.** `e2e_inference_deal`: discover by model, negotiate a new key,
@@ -77,7 +77,8 @@ negotiate, settle, issue, call the model, exhaust, top up — is correct.
 - No extraction from API credits; both copies coexist until
   `extract-access-issuance-kit`.
 - No admission holds, usage capture, or per-token charging.
-- No hosted fiat option, no Helm alias, no Arkhai-hosted registry, no webapp.
+- No fiat (`arkhai.payments.v1`) option, no Helm alias, no Arkhai-hosted
+  registry, no webapp.
 - No seller installer or packaging beyond the Compose stack.
 - No TypeScript or Rust gate.
 
@@ -98,10 +99,12 @@ negotiate, settle, issue, call the model, exhaust, top up — is correct.
 ## Impact
 
 - New: `domains/inference/{storefront,buyer,service,gateway}/`,
-  `domains/inference/compose.yml`, `compose.inference.yml`, development
-  identities, the e2e scenario and marker.
-- Touched: root `docker-compose.yml`, `compose.local-identities.yml`, the
-  `e2e-dev-identities-env` target, `domains/Makefile`, root `Makefile`,
+  `domains/inference/compose.yml`, `compose.inference.yml`,
+  `compose.inference-local.yml`, development identities, the
+  `e2e-inference-dev-env` target, the e2e lane targets, the e2e scenario and
+  marker.
+- Touched: root `docker-compose.yml`, `domains/Makefile`, root `Makefile`,
+  `e2e-tests/Makefile`, `.github/workflows/e2e.yml`,
   `e2e-tests/pyproject.toml` markers.
 - Wire: none beyond the new domain. Database: two new service databases,
   neither shared. Deployment: three new images and one more registry instance
