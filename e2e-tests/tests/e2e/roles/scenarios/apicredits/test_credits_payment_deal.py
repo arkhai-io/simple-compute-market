@@ -115,7 +115,7 @@ def test_payment_deal_issues_credits_after_a_verified_receipt(
         "credits", "buy",
         "--quantity", "3",
         "--new-key",
-        "--service-name", "weather-api",
+        "--resource", "service_name=weather-api",
         "--max-matches", "5",
         "--max-rounds", "10",
         "--poll-interval", "1.0",
