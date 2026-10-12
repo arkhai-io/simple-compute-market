@@ -4,9 +4,9 @@
 service's published wire contract: its JSON Schema and conformance test
 vectors. They are identified by content, not by where they were obtained.
 
-- Published schema SHA-256: `a978f81926aa268c41a3989339bf1ca90372c13e90b97e468f7da04a5a66c454`
-- Vendored schema SHA-256: `e0bf3dd2e41815082c8e939bd8cf02578d17cf1c5a64da11f05461555da20010`
-- Test-vector SHA-256: `8d39d794dde2500738b7ceb3ac1729e4c68a69cca7a35a12cbf21edc1a8b7e1e`
+- Published schema SHA-256: `da4ddc84e89b2144996e86f17dc260642d29943a2ed606c05eb63712b91da1db`
+- Vendored schema SHA-256: `444f2a635e02af6e428053cad2bf83891244fd4567d030d7e6d67c42a457fd2a`
+- Test-vector SHA-256: `e1a26e4c3fcde9724e5ec9bc606d20bebe49404554eca69a4cb78e4146215631`
 
 The vendored schema differs from the published one only in its `$id`, which is
 the neutral `urn:arkhai:payments:wire-contract`. The vectors are byte-identical
