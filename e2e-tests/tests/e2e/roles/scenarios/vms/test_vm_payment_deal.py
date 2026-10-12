@@ -198,6 +198,7 @@ def _delivery(negotiation_id: str) -> dict[str, Any]:
     assert status.tenant_credentials, "Ready VM has no tenant delivery"
     delivery = {
         **status.extra,
+        "escrow_uid": status.escrow_uid,
         "fulfillment_id": status.fulfillment_id,
         "tenant_credentials": status.tenant_credentials,
     }
@@ -236,7 +237,9 @@ def test_payment_deal_delivers_after_a_verified_receipt(
     negotiation = str(lifecycle[-1]["negotiation_id"])
     transaction = str(lifecycle[3]["transaction_id"])
     delivery = _delivery(negotiation)
-    assert delivery["settlement_ref"] == transaction
+    assert lifecycle[4]["body"]["settlement_ref"] == transaction
+    assert delivery["negotiation_id"] == negotiation
+    assert delivery["escrow_uid"] == negotiation
     lease = DealLease(provisioning_client, site_capacity, negotiation_id=negotiation)
     recorded = lease.refresh()
     assert recorded["host_id"] == payment_run["host_id"]
@@ -267,9 +270,11 @@ def test_settlement_re_driven_from_the_run_log_is_idempotent(
     approved = again.wait_for_event("payment_approved", timeout=10.0)
     assert approved["transaction_id"] == payment_deal_state.settlement_id
     assert approved["negotiation_id"] == payment_deal_state.negotiation_id
+    submitted = again.wait_for_event("settlement_submitted", timeout=10.0)
+    assert submitted["body"]["settlement_ref"] == payment_deal_state.settlement_id
     assert payment_deal_state.negotiation_id is not None
     delivery = _delivery(payment_deal_state.negotiation_id)
-    for field in ("settlement_ref", "fulfillment_id", "tenant_credentials", "connection_details"):
+    for field in ("negotiation_id", "escrow_uid", "fulfillment_id", "tenant_credentials", "connection_details"):
         assert delivery.get(field) == payment_run["delivery"].get(field), field
     assert payment_deal_state.delivery is not None
     assert payment_run["lease"].refresh()["id"] == payment_deal_state.delivery["lease_id"]
