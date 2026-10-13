@@ -26,7 +26,10 @@ It is an implementation round when any untriaged record is an implementation
 review, a validation record, or the owner's notes, or when `make triage` opened the
 session for a change `in implementation`. Before anything else, check as
 `change-implement` does: the checked-out branch carries the change, and the
-worktree is clean. Record `HEAD`: it is the base the fixes are made against.
+worktree is clean, and `make round-view-closed` passes — while the owner reads the
+round (`make round-view`), the branch points at its base, and a fix committed then
+would squash the round into it; ask the owner to run `make round-done` first.
+Record `HEAD`: it is the base the fixes are made against.
 
 ## 1. Find the review and load the context
 
@@ -79,9 +82,10 @@ For an implementation round, also take:
   is a round of its own: a `passed` record with no `V<n>` needs only its triage
   file saying it confirms that commit; any `V<n>` is triaged like any finding, with
   the owner's notes asked for as usual.
-- **The owner's notes.** Ask for them if the owner has not pasted them; the owner
-  reads the round with `make round-view CHANGE=<change>`, which shows it as
-  uncommitted changes in the checkout until `make round-done`. Save them
+- **The owner's notes.** Ask for them if the owner has not pasted them. The owner
+  reads the round before validation and review, with `make round-view
+  CHANGE=<change>`, which shows it as uncommitted changes in the checkout until
+  `make round-done`. Save them
   exactly as pasted as the next numbered record, `NN-implementation-owner.md`.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and triage each point like any

@@ -62,17 +62,24 @@ def _validation(repo: Path, number: int, commit: str, *, triaged: bool) -> None:
 class Remote:
     """The push and the dispatch, recorded; any other command runs for real."""
 
-    def __init__(self, *, refuse_push: bool = False) -> None:
+    def __init__(self, *, refuse_push: bool = False, fail: str | None = None) -> None:
         self.calls: list[list[str]] = []
         self.refuse_push = refuse_push
+        self.fail = fail
+        self.pushed: str | None = None
 
     def __call__(self, command: Sequence[str], cwd: Path) -> tuple[int, str]:
         command = list(command)
         if command[0] == "git":
             return rounds._run(command, cwd)
         self.calls.append(command)
+        if command[-1] == self.fail:
+            return 1, "failed"
         if command[-1] == "push-branch":
-            return (1, "REFUSED: protected branch") if self.refuse_push else (0, "")
+            if self.refuse_push:
+                return 1, "REFUSED: protected branch"
+            self.pushed = _git(cwd, "rev-parse", "HEAD")
+            return 0, ""
         if command[:3] == ["gh", "run", "list"]:
             return 0, "41\n"
         return 0, ""
@@ -166,13 +173,99 @@ def test_steps_that_describe_a_commit_refuse_while_the_view_is_open(repo: Path) 
         rounds.start(repo, CHANGE, base=base, e2e=False)
 
 
-def test_done_refuses_when_something_committed_during_the_view(repo: Path) -> None:
+def test_a_commit_during_the_view_leaves_only_its_own_changes_on_the_round(
+        repo: Path) -> None:
     base, head = _round(repo)
     rounds.start(repo, CHANGE, base=base, e2e=False)
+    (repo / "src/kept.py").write_text("fixed while reading\n", "utf-8")
     _git(repo, "commit", "-q", "-am", "committed while reading")
+    stray = _git(repo, "rev-parse", "HEAD")
 
-    with pytest.raises(rounds.RoundError, match=head):
+    closed = rounds.done(repo)
+
+    assert closed.stray == (stray,)
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _status(repo) == {"M src/kept.py"}
+    assert rounds.open_view(repo) is None
+
+
+def test_a_view_already_back_at_the_round_is_closed(repo: Path) -> None:
+    base, head = _round(repo)
+    rounds.start(repo, CHANGE, base=base, e2e=False)
+    _git(repo, "reset", "-q", "--mixed", head)
+
+    closed = rounds.done(repo)
+
+    assert closed.stray == ()
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert rounds.open_view(repo) is None
+    rounds.check(repo)
+
+
+def test_a_fix_committed_after_returning_by_hand_stays_on_the_branch(repo: Path) -> None:
+    base, head = _round(repo)
+    rounds.start(repo, CHANGE, base=base, e2e=False)
+    _git(repo, "reset", "-q", "--mixed", head)
+    fix = _write(repo, {"src/kept.py": "fixed\n"})
+
+    closed = rounds.done(repo)
+
+    assert closed.stray == ()
+    assert _git(repo, "rev-parse", "HEAD") == fix
+    assert _status(repo) == set()
+    assert rounds.open_view(repo) is None
+
+
+def test_a_branch_reset_to_a_round_commit_names_no_strays(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD")
+    middle = _write(repo, {"src/kept.py": "2\n"})
+    head = _write(repo, {"src/new.py": "new\n"})
+    rounds.start(repo, CHANGE, base=base, e2e=False)
+    _git(repo, "reset", "-q", "--mixed", middle)
+
+    closed = rounds.done(repo)
+
+    assert closed.stray == ()
+    assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_a_view_recorded_but_never_reset_is_closed(repo: Path) -> None:
+    base, head = _round(repo)
+    # An interrupted start: the state written, the branch not yet moved.
+    view = rounds.View(CHANGE, "feat/change", base, head)
+    rounds._git_path(repo, rounds.STATE).write_text(
+        rounds.json.dumps(rounds.asdict(view)), "utf-8")
+
+    rounds.done(repo)
+
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert _status(repo) == set()
+    assert rounds.open_view(repo) is None
+
+
+def test_done_refuses_on_another_branch_and_keeps_the_view(repo: Path) -> None:
+    base, _ = _round(repo)
+    rounds.start(repo, CHANGE, base=base, e2e=False)
+    _git(repo, "switch", "-q", "-c", "elsewhere")
+
+    with pytest.raises(rounds.RoundError, match="switch back to feat/change"):
         rounds.done(repo)
+    assert rounds.open_view(repo) is not None
+    assert _git(repo, "rev-parse", "HEAD") == base
+
+
+def test_done_refuses_a_branch_moved_off_the_base_and_names_the_way_back(
+        repo: Path) -> None:
+    root = _git(repo, "rev-parse", "HEAD")
+    base = _write(repo, {"src/kept.py": "base\n"})
+    _write(repo, {"src/kept.py": "2\n"})
+    head = _git(repo, "rev-parse", "HEAD")
+    rounds.start(repo, CHANGE, base=base, e2e=False)
+    _git(repo, "reset", "-q", "--mixed", root)
+
+    with pytest.raises(rounds.RoundError, match=f"git reset --mixed {head}"):
+        rounds.done(repo)
+    assert _git(repo, "rev-parse", "HEAD") == root
     assert rounds.open_view(repo) is not None
 
 
@@ -193,15 +286,34 @@ def test_a_base_that_is_not_an_ancestor_is_refused(repo: Path) -> None:
     _git(repo, "checkout", "-q", "feat/change")
     _git(repo, "reset", "-q", "--hard", root)
     _write(repo, {"src/kept.py": "2\n"})
+    head = _git(repo, "rev-parse", "HEAD")
     with pytest.raises(rounds.RoundError, match="not an ancestor"):
         rounds.start(repo, CHANGE, base=other, e2e=False)
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert rounds.open_view(repo) is None
+
+
+def test_a_detached_head_or_an_empty_round_is_refused(repo: Path) -> None:
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(rounds.RoundError, match="the base is HEAD"):
+        rounds.start(repo, CHANGE, base=head, e2e=False)
+    assert _git(repo, "rev-parse", "HEAD") == head
+    later = _write(repo, {"src/kept.py": "2\n"})
+    _git(repo, "checkout", "-q", "--detach")
+    with pytest.raises(rounds.RoundError, match="detached"):
+        rounds.start(repo, CHANGE, base=head, e2e=False)
+    assert _git(repo, "rev-parse", "HEAD") == later
+    assert rounds.open_view(repo) is None
 
 
 @pytest.mark.parametrize("change", ["", "archive", "missing"])
 def test_an_unknown_change_is_refused(repo: Path, change: str) -> None:
     (repo / "openspec/changes/archive").mkdir()
+    head = _git(repo, "rev-parse", "HEAD")
     with pytest.raises(rounds.RoundError, match="no active change"):
         rounds.start(repo, change, base="HEAD", e2e=False)
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert rounds.open_view(repo) is None
 
 
 def test_start_pushes_and_dispatches_first_and_records_the_baseline(repo: Path) -> None:
@@ -211,8 +323,23 @@ def test_start_pushes_and_dispatches_first_and_records_the_baseline(repo: Path) 
     rounds.start(repo, CHANGE, base=base, run=remote)
 
     assert [call[-1] for call in remote.calls] == ["push-branch", ".[0].databaseId", "run-e2e"]
-    assert rounds.e2e_baseline(repo, head) == "41"
+    assert remote.pushed == head
+    assert _git(repo, "rev-parse", "HEAD") == base
     assert rounds.e2e_baseline(repo, base) is None
+    assert rounds.e2e_baseline(repo, head, consume=True) == "41"
+    assert rounds.e2e_baseline(repo, head) is None
+
+
+@pytest.mark.parametrize("failing", [".[0].databaseId", "run-e2e"])
+def test_a_failed_dispatch_opens_no_view(repo: Path, failing: str) -> None:
+    base, head = _round(repo)
+
+    with pytest.raises(rounds.RoundError):
+        rounds.start(repo, CHANGE, base=base, run=Remote(fail=failing))
+
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert rounds.open_view(repo) is None
+    assert rounds.e2e_baseline(repo, head) is None
 
 
 def test_a_refused_push_opens_no_view(repo: Path) -> None:
@@ -225,3 +352,28 @@ def test_a_refused_push_opens_no_view(repo: Path) -> None:
     assert [call[-1] for call in remote.calls] == ["push-branch"]
     assert _git(repo, "rev-parse", "HEAD") == head
     assert rounds.open_view(repo) is None
+
+
+def test_the_command_line_guard_fails_while_a_view_is_open(repo: Path,
+                                                           capsys: pytest.CaptureFixture[str]
+                                                           ) -> None:
+    base, _ = _round(repo)
+    assert rounds.main(["check"], root=repo) == 0
+    assert rounds.main(["start", CHANGE, "--base", base, "--no-e2e"], root=repo) == 0
+    assert rounds.main(["check"], root=repo) == 1
+    assert "round-done" in capsys.readouterr().err
+    assert rounds.main(["done"], root=repo) == 0
+    assert rounds.main(["check"], root=repo) == 0
+
+
+def test_the_command_line_baseline_is_printed_once(repo: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    base, head = _round(repo)
+    rounds.start(repo, CHANGE, base=base, run=Remote())
+    rounds.done(repo)
+    capsys.readouterr()
+
+    assert rounds.main(["e2e-baseline"], root=repo) == 0
+    assert capsys.readouterr().out == "41\n"
+    assert rounds.main(["e2e-baseline"], root=repo) == 0
+    assert capsys.readouterr().out == ""

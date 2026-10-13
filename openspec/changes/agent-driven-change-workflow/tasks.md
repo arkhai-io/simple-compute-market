@@ -662,36 +662,64 @@ session").
       hand; a path that is not a worktree is never removed; an empty change name
       and `archive` are refused; the checkout's `HEAD` and status are untouched.
       `main()`'s output and the Make target are untested.
+      Run once by hand on `capacity-shape-envelope`: base `22bc1408` from
+      `13-validation`, 21 files.
       Corrected by 9.7: the owner tried the worktree and found a second editor
       project each round, without the owner's inline test setup, worse than reading
-      in the checkout; `round-diff`, its script, and its tests were removed. Run once by hand on
-      `capacity-shape-envelope`: base `22bc1408` from `13-validation`, 21 files.
+      in the checkout; `round-diff`, its script, and its tests were removed.
 
 - [x] 9.7 Show the round in the owner's own checkout instead:
       `make round-view CHANGE= [BASE=] [NO_E2E=1]` (`scripts/round_view.py`)
       pushes `HEAD`, dispatches the pipeline, and records the run before it, then
       mixed-resets the branch to the round's base, so the round shows as
       uncommitted changes with the files unchanged; `make round-done` resets the
-      branch to the recorded commit, leaving the owner's edits uncommitted. While
-      a view is open, `make review`, `implement`, `triage`, and `validate`
-      refuse, through their shared prerequisite `round-view-closed`. `change-validate` fetches the run `round-view` dispatched
-      (`make round-e2e-baseline`) rather than dispatching again;
-      `change-implement` and `change-triage` put the owner's reading before
-      validation and review. Spec scenario and design amended.
+      branch to the recorded commit, leaving the owner's edits uncommitted, and
+      also returns when something committed on the base during the view, leaving
+      that commit's own changes uncommitted and naming the commits taken off the
+      branch, and closes without moving the branch when it is already at or past
+      the round's commit.
+      While a view is open, every target that describes or publishes a commit —
+      `review`, `implement`, `triage`, `validate` and its parts, the push, the
+      dispatch, the snapshot and diff targets — fails through the shared
+      prerequisite `round-view-closed`, which `change-implement` and
+      `change-triage` also check at their start. `change-validate` reads the
+      recorded run once (`make round-e2e-baseline`) before any dispatch, since a
+      second dispatch cancels the run in progress; `change-implement` and
+      `change-triage` put the owner's reading before validation and review. Spec
+      requirement and scenario, and design, amended.
       Done at the owner's direction, choosing this over an editor comparison
       against a named base and over leaving sections uncommitted (the fallback).
+      A fresh-context check found that a commit during the view stranded the
+      branch, that an interrupted run or a view left by hand could not be closed,
+      that the recorded run was never forgotten, that the skill's order would
+      dispatch over the running pipeline, that the guard missed the push,
+      dispatch, snapshot, and diff targets, that the error's docstring claimed
+      nothing changed after a push, and that the note overstated its tests; all
+      fixed here. A second check found that a fix committed after returning by
+      hand was reset off the branch, and that the stray commits listed included
+      the round's own; fixed too.
       Integration against real temporary Git repositories, with the push and the
       dispatch through an injected runner (`scripts/tests/test_round_view.py`,
-      15 passed): the round shows as modified, deleted, and intent-to-add new
-      files with the branch at the base and the files unchanged; `done` restores
-      the commit and keeps an edit, or leaves a clean tree; the base is the latest
-      triaged validation, or must be given; `check` and a second `start` refuse
-      while a view is open; `done` refuses, keeping the view, when something
-      committed meanwhile; a dirty or untracked tree, a non-ancestor base, and an
-      unknown change or `archive` are refused with nothing moved; `start` pushes,
-      reads the baseline, then dispatches, and records the baseline for `HEAD`
-      only; a refused push dispatches nothing and opens no view. The Make
-      targets, the guard lines, and the real `gh` and push are not exercised.
+      26 passed): the round shows as modified, deleted, and intent-to-add new
+      files with the branch at the base (file contents checked for the new file);
+      `done` restores the commit and keeps an edit, or leaves a clean tree; a
+      commit made during the view leaves only its own change uncommitted on the
+      round's commit and is reported; a view reset back by hand, or recorded but
+      never reset, is closed; a fix committed after returning by hand stays on the
+      branch; a branch reset to an earlier round commit returns with no strays
+      named; `done` on another branch, or with the branch moved
+      off the base, refuses and keeps the view, naming the way back; the base is
+      the latest triaged validation, or must be given; `check` and a second
+      `start` refuse while a view is open; a dirty or untracked tree, a
+      non-ancestor base, a detached `HEAD`, a base equal to `HEAD`, and an unknown
+      change or `archive` are refused with the branch unmoved and no view open;
+      `start` pushes while `HEAD` is still the round's commit, reads the baseline,
+      then dispatches, and records the baseline for `HEAD` only; a refused push or
+      a failed baseline read or dispatch opens no view and records no baseline;
+      the baseline is read once; the command line's `check` fails while a view is
+      open and `e2e-baseline` prints once. Not exercised: the Make targets and
+      their prerequisite, the rollback when the reset itself fails, and the real
+      `gh` and push.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,

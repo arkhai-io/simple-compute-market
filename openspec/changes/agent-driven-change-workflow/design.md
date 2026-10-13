@@ -574,7 +574,10 @@ context the workflow has stopped trusting.
   review then run side by side. To keep the pipeline's hour overlapping the
   reading, `round-view` first pushes `HEAD` and dispatches the pipeline, and
   records the run before it, which validation then fetches instead of
-  dispatching again.
+  dispatching again. An editor's "commit all" during the view would land on the
+  base with the round squashed into it; `round-done` still returns the branch to
+  the round's commit, since the worktree holds what that commit captured, and
+  leaves the commit's own changes uncommitted on top.
   Two alternatives were tried or weighed. A worktree beside the checkout with
   `HEAD` overlaid on the base was built and tried first: it left the commits and
   validation untouched, but the editor needed a second project each round and the

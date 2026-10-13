@@ -24,7 +24,9 @@ before a section is committed.
   `ready for implementation` or `in implementation`, and no dependency in its
   `Depends on` gates implementation while unlanded.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
-  section's.
+  section's. `make round-view-closed` passes: while the owner reads a round
+  (`make round-view`), the branch points at the round's base and its changes are
+  uncommitted, so committing a section then would squash the round into it.
 - **Section.** The owner names it, or it is the first section with unchecked tasks.
   An earlier section with unchecked tasks is unfinished: that is the section, unless
   the owner says otherwise. When the owner names a range ("sections 1-3"), work them

@@ -7,7 +7,17 @@ diff is spread across commits and the editor's source-control view is empty.
 stay exactly HEAD's, and the round shows as uncommitted changes the owner reads,
 and runs tests against, in place. `done` resets the branch to the recorded HEAD;
 the files again stay as they are, so any edit the owner made while reading is
-left as an uncommitted change on top of the round's commit.
+left as an uncommitted change on top of the round's commit. Staging done during
+the view is not kept; the content is.
+
+A commit made during the view — an editor's "commit all" is easy to click —
+lands on the base and squashes the round into itself. `done` still returns: the
+worktree holds what such a commit captured, unless it was changed again since,
+so the branch is reset to the round's commit, that commit's own changes are left
+uncommitted on top, and the commits taken off the branch are named so nothing
+else depends on the reflog. A view whose branch is already at the round's commit,
+or past it — left by hand, a run interrupted before its reset, a fix committed
+after returning — is closed without moving the branch.
 
 The base is the commit named by the latest triaged validation record — where
 the previous round ended — unless one is given.
@@ -16,9 +26,11 @@ While a view is open the branch does not point at the round's commit, so every
 step that describes a commit — review, validation, triage, implementation —
 refuses (`check`). `start` can first push HEAD and dispatch the end-to-end
 pipeline, so the slowest part of validation overlaps the owner's reading; it
-records the newest earlier run, which validation later uses to fetch that run.
+records the newest earlier run, which validation reads once, and forgets, to
+fetch that run.
 
-The state lives in the Git directory, beside the checkout's own refs.
+The state lives in the Git directory of this worktree, so a view and its baseline
+belong to the checkout that opened them.
 
 Contract: openspec/specs/change-workflow/spec.md, "Triage of an implementation
 round".
@@ -47,7 +59,11 @@ Runner = Callable[[Sequence[str], Path], tuple[int, str]]
 
 
 class RoundError(RuntimeError):
-    """The view could not be opened or closed; nothing was changed."""
+    """The view could not be opened or closed.
+
+    The branch is never moved by a failed call. A failure after the push leaves
+    the push, and after the dispatch the pipeline run, in place.
+    """
 
 
 @dataclass(frozen=True)
@@ -93,10 +109,19 @@ def open_view(root: Path) -> View | None:
     return View(**json.loads(state.read_text("utf-8"))) if state.exists() else None
 
 
-def e2e_baseline(root: Path, head: str) -> str | None:
-    """The newest run before the one `start` dispatched for `head`, if it dispatched one."""
+def e2e_baseline(root: Path, head: str, consume: bool = False) -> str | None:
+    """The newest run before the one `start` dispatched for `head`, if it dispatched one.
+
+    Consumed, it is forgotten, so a later validation of the same commit dispatches
+    a run of its own rather than fetching this one again.
+    """
     recorded = _git_path(root, E2E_BASELINES) / head
-    return recorded.read_text("utf-8").strip() if recorded.exists() else None
+    if not recorded.exists():
+        return None
+    baseline = recorded.read_text("utf-8").strip()
+    if consume:
+        recorded.unlink()
+    return baseline
 
 
 def start(root: Path, change: str, base: str | None = None, e2e: bool = True,
@@ -121,7 +146,7 @@ def start(root: Path, change: str, base: str | None = None, e2e: bool = True,
     head = _git(root, "rev-parse", "HEAD")
     if base == head:
         raise RoundError("the base is HEAD; the round has no commits to show")
-    if run(["git", "merge-base", "--is-ancestor", base, head], root)[0] != 0:
+    if not _ancestor(root, base, head):
         raise RoundError(f"{base[:12]} is not an ancestor of HEAD")
 
     if e2e:
@@ -157,30 +182,53 @@ def _dispatch(root: Path, head: str, run: Runner) -> None:
     (baselines / head).write_text(baseline + "\n", "utf-8")
 
 
-def done(root: Path) -> View:
+@dataclass(frozen=True)
+class Closed:
+    view: View
+    # Commits made on the base during the view, no longer on the branch; their
+    # changes are in the worktree.
+    stray: tuple[str, ...]
+
+
+def done(root: Path) -> Closed:
     """Reset the branch to the round's commit, leaving the files as they are."""
     view = open_view(root)
     if view is None:
         raise RoundError("no round view is open")
     branch = _git(root, "branch", "--show-current")
     current = _git(root, "rev-parse", "HEAD")
-    if branch != view.branch or current != view.base:
+    if branch != view.branch:
+        raise RoundError(f"the view was opened on {view.branch}, but HEAD is now "
+                         f"{branch or 'detached'}; switch back to {view.branch} and run "
+                         "`make round-done` again. Nothing was reset")
+    if current == view.head or _ancestor(root, view.head, current):
+        # Already back, by hand or by an interrupted run, perhaps with commits
+        # of the owner's own on top: the branch holds the round.
+        _git_path(root, STATE).unlink()
+        return Closed(view, ())
+    if current != view.base and not _ancestor(root, view.base, current):
         raise RoundError(
-            f"the view opened {view.branch} at {view.base[:12]}, but HEAD is now "
-            f"{branch or 'detached'} at {current[:12]}; something committed or switched "
-            f"branch while the view was open. The round's commit is {view.head}; "
-            "nothing was reset")
+            f"{branch} is at {current[:12]}, neither at or past the round's commit "
+            f"{view.head} nor a descendant of its base {view.base[:12]}. Nothing was "
+            f"reset; to return, `git reset --mixed {view.head}`, then run "
+            "`make round-done` again")
+    stray = tuple(_git(root, "rev-list", "--reverse", f"{view.head}..{current}").split())
     _git(root, "reset", "--quiet", "--mixed", view.head)
     _git_path(root, STATE).unlink()
-    return view
+    return Closed(view, stray)
+
+
+def _ancestor(root: Path, ancestor: str, commit: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, commit],
+                          cwd=root).returncode == 0
 
 
 def check(root: Path) -> None:
     view = open_view(root)
     if view:
-        raise RoundError(f"a round view of {view.change} is open: the branch points at "
-                         f"its base {view.base[:12]}, not the round's commit "
-                         f"{view.head[:12]}; run `make round-done` first")
+        raise RoundError(f"a round view of {view.change} is open, so the branch need not "
+                         f"point at the round's commit {view.head[:12]}; run "
+                         "`make round-done` first")
 
 
 def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
@@ -205,14 +253,22 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
                       "validation fetches that run.")
             print("Read it in your editor, then `make round-done`.")
         elif args.action == "done":
-            view = done(root)
-            print(f"{view.branch} is back at {view.head[:12]}.")
+            closed = done(root)
+            print(f"{closed.view.branch} is back at {closed.view.head[:12]}.")
+            if closed.stray:
+                print("Commits made during the view are off the branch; their changes "
+                      "are uncommitted below: " + ", ".join(c[:12] for c in closed.stray))
             edits = _git(root, "status", "--short")
-            print(f"Your edits, uncommitted:\n{edits}" if edits else "The worktree is clean.")
+            if edits:
+                print(f"Your edits, uncommitted:\n{edits}\nValidation needs a clean "
+                      "worktree: commit them as their own commit, which validation then "
+                      "validates with a pipeline run of its own, or discard them.")
+            else:
+                print("The worktree is clean.")
         elif args.action == "check":
             check(root)
         else:
-            baseline = e2e_baseline(root, _git(root, "rev-parse", "HEAD"))
+            baseline = e2e_baseline(root, _git(root, "rev-parse", "HEAD"), consume=True)
             if baseline:
                 print(baseline)
     except RoundError as error:

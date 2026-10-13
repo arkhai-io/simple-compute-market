@@ -751,7 +751,7 @@ check-project-layout: ## Fail if a distribution is not one package under src/ or
 # `zip -y` stores a symlink as a link. Without it the agent-skill links under
 # .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
 # longer shows which skills each harness loads.
-code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -766,7 +766,7 @@ code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored art
 # staging their content; the trailing `git reset` unwinds the index back
 # to exactly its pre-run state, so the target's own "without changing git
 # state" guarantee still holds once it completes.
-review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
+review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for review without changing git state.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -775,7 +775,7 @@ review-diff: ## Write a binary-safe HEAD-relative diff for review without changi
 	git reset -q; \
 	echo "Done: $$OUTFILE"
 
-last-diff: ## Write a binary-safe diff for the most recent commit.
+last-diff: round-view-closed ## Write a binary-safe diff for the most recent commit.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -843,7 +843,7 @@ round-view: ## Show an implementation round as uncommitted changes in this check
 round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
 	@python3 scripts/round_view.py done
 
-round-e2e-baseline: ## Print the run before the E2E run round-view dispatched for HEAD, if it dispatched one
+round-e2e-baseline: ## Print, and forget, the run before the E2E run round-view dispatched for HEAD, if it dispatched one
 	@python3 scripts/round_view.py e2e-baseline
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
@@ -851,16 +851,16 @@ design-review: ## Design review of an OpenSpec change in Codex, continuing the l
 
 HELM_CONTEXT ?= docker-desktop
 
-validate-local: ## Validate HEAD without changing the checkout: check-packaging, then make test
+validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
 	@python3 scripts/validate_slice.py local
 
-validate-helm: ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
 	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
 
-check-push-ready: ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
+check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@python3 scripts/check_push_ready.py check
 
-push-branch: ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
+push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
 	@python3 scripts/check_push_ready.py push
 
 validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
@@ -868,7 +868,7 @@ validate: round-view-closed ## Open a Claude Code session validating the commit 
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)"
 
-run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \
 	if [ -z "$$branch" ]; then \
 		echo "ERROR: run-e2e requires a checked-out branch." >&2; \

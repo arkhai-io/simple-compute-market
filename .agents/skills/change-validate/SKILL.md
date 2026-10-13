@@ -27,8 +27,8 @@ a time; nothing else should be building in the checkout while you run.
 
 `make validate` refuses while the owner's round view is open (`make round-view`):
 the branch then points at the round's base, not its commit. If you were started
-some other way, `python3 scripts/round_view.py check` says the same; stop and ask
-the owner to run `make round-done`.
+some other way, `make round-view-closed` says the same; stop and ask the owner to
+run `make round-done`.
 
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
@@ -49,12 +49,14 @@ The pipeline is by far the slowest part, so it runs while everything else does:
 1. `gh auth status` — without it the dispatch fails after the push.
 2. `make push-branch` — the guarded push of exactly `HEAD`, never forced. If it
    refuses, stop and report its reasons.
-3. Record the newest end-to-end run ID before dispatching —
+3. First run `make round-e2e-baseline`, once. If it prints a run ID,
+   `make round-view` already pushed `HEAD` and dispatched the pipeline while the
+   owner read the round, and the ID is the run recorded before that dispatch:
+   use it, and dispatch nothing — a second dispatch on the branch cancels the run
+   in progress. It prints the ID only once, so note it. Otherwise record the
+   newest end-to-end run ID —
    `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
-   — then `make run-e2e`, which dispatches the workflow on the branch. Unless
-   `make round-e2e-baseline` prints a run ID: `make round-view` already pushed
-   `HEAD` and dispatched the pipeline while the owner read the round, and that ID
-   is the one recorded before its dispatch. Use it, and dispatch nothing.
+   — then `make run-e2e`, which dispatches the workflow on the branch.
 4. `make fetch-e2e-logs E2E_AFTER_RUN=<that ID>`, in the background. It waits for
    a run of `HEAD` newer than that ID to be listed — so a commit validated before
    never fetches its earlier run — then for it to finish, and downloads its logs

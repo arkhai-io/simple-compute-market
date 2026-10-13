@@ -266,7 +266,9 @@ each disposition MUST be logged to the intervention ledger. Accepted fixes MUST 
 the checks a section passes before they are committed, and the commit MUST be
 validated again. The owner MUST be able to read a round as one set of changes from the
 commit the previous round ended on to the round's commit, without any commit being
-changed to show it. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
+changed to show it; while the branch is moved to show it, review, validation,
+triage, and implementation MUST NOT start, and ending the reading MUST return the branch
+to the round's commit. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
 unless the latest validation names `HEAD` and its result is `passed`, except where
 the owner overrides it.
 
