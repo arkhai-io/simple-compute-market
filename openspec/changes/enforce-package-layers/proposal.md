@@ -49,7 +49,7 @@ In two phases. The first is a report; nothing gates until the second.
   budgets, plugin in-degree, scope-vocabulary literals, and the two table-expiry
   rules.
 - A report script that runs every rule over the whole tree and writes a classified
-  baseline: each finding marked defect (owned by a named change), accepted (with
+  baseline, to a path it is given: each finding marked defect (owned by a named change), accepted (with
   its reason), or rule error (the rule is wrong and is revised). The baseline is
   reviewed as a design artifact of this change before anything gates.
 
@@ -64,16 +64,20 @@ In two phases. The first is a report; nothing gates until the second.
 - Four check scripts in `check_project_layout.py`'s shape under
   `make check-architecture`, which `make check-packaging` runs and the
   deployment-contracts CI job runs on every push;
-  `make check-architecture-change CHANGE=<name>` scopes the checks to one change's
-  review scope. The declared-but-unimported rule and the vocabulary-literal rule
-  warn rather than fail; the kind budgets fail only for rules the audit showed
+  `make check-architecture-change CHANGE=<name>` lists the exception rows one
+  change owns and fails while any remains, which gates its archive. The
+  declared-but-unimported rule warns; the vocabulary-literal rule fails in core and
+  kit and warns elsewhere; the kind budgets fail only for kinds the audit showed
   clean or seeded.
 - Tests in `scripts/tests/` with a passing and a failing synthetic tree per rule.
-- The per-package boundary tests are retired one package per commit, each only
+- The per-package boundary tests — twenty modules and one function today — are
+  retired one package per commit, each only
   after the repository check runs in CI and fails on the same synthetic violation
   the local test fails on. A test asserting what the repository check cannot
-  express stays: the provisioning service's adapter-entrypoint allowlist, and
-  `kit/site`'s test if it comes to forbid `market_resource_pools`.
+  express stays: the provisioning service's adapter-entrypoint allowlist, the VM
+  buyer's runtime import test, and `kit/site`'s test if it comes to forbid
+  `market_resource_pools`. A test still blocked by another change's exception row
+  at this change's closeout is handed to that change to retire.
 
 ## Capabilities
 
@@ -82,8 +86,9 @@ In two phases. The first is a report; nothing gates until the second.
 - `market-composition`: "From-below kit dependencies" names the layer and scope
   rules and the repository-wide check as their evidence; the "Architecture
   boundary tests run" scenario becomes one scenario per rule.
-- `planning-governance`: "Packaging check at change closeout" gains a scenario for
-  an architecture exception the change owns.
+- `planning-governance`: "Packaging check at change closeout" requires a change to
+  own no architecture exception row when it archives, with a scenario for one it
+  still owns.
 - `deployment-state`: the packaging-check inventory names the architecture check.
 
 ### New Capabilities
@@ -110,8 +115,8 @@ None.
 
 ## Impact
 
-- Affected code: `scripts/` (one library, five scripts, one test module),
-  `Makefile` (six targets, one addition to `check-packaging`), one CI workflow
+- Affected code: `scripts/` (one library, five scripts, two test modules),
+  `Makefile` (seven targets, one addition to `check-packaging`), one CI workflow
   step, the per-package boundary tests (retired where the check expresses what
   they assert), and the new `ARCHITECTURE.toml`
   beside `docs/development/ARCHITECTURE.md`.

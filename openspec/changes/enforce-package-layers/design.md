@@ -158,7 +158,7 @@ seven projects with no import; the audit classifies each as a row or a removal.
 | unused declaration | a declared internal distribution has neither an import nor a declarations-table row | warn |
 | kind budget | a `contracts` or `client` package exceeds its budget (below) | fail once the audit shows the kind clean |
 | plugin in-degree | any package imports a plugin; declaring one is permitted | fail |
-| vocabulary | a package's string literals contain a scope element's token outside its scope | warn; fail at core and kit after one cycle |
+| vocabulary | a package's string literals contain a scope element's token outside its scope | warn; fail at core and kit once the gate lands (see "Planning decisions") |
 | exception expiry | an `[[exceptions]]` row excuses no current finding: its edge or token is gone, or the edge no longer breaks the rule the row names | fail |
 | override expiry | an `[overrides]` row names a path that now classifies without it, or grants a scope element that none of the project's edges uses | fail |
 
@@ -318,6 +318,47 @@ the review's, by design.
   `importlib` or `__import__`; the few dynamic loads are third-party (`uvicorn`,
   `torch`, `keyring`). Scanning import statements is sufficient.
 
+## Planning decisions
+
+Taken while writing `tasks.md`; each is a default the maintainer may revise.
+
+- **What `check-architecture-change CHANGE=<name>` scopes to.** The rows the named
+  change owns, and it fails while any remains. `scripts/resolve-review-scope.py`
+  maps projects, manifests, and diffs, not change names, so "a change's review
+  scope" had no existing meaning to reuse. The row-ownership meaning is the one
+  closeout needs: a change owes the rows it owns, as it owes the citations it
+  wrote, and gating it on every other change's rows would let one change block
+  another's archive. `planning-governance`'s new scenario and
+  `openspec/README.md`'s closeout part 8 use it.
+- **How the four check scripts divide the rules.** By the question each answers:
+  - `layers`: layer, cycle, layer/scope bounds, and override expiry, since an
+    override changes classification;
+  - `scope`: scope subset and vocabulary;
+  - `dependencies`: undeclared import and unused declaration;
+  - `kinds`: kind budgets, external budgets, and plugin in-degree.
+
+  Exception expiry runs in whichever script owns the rule a row names. Each is
+  also its own Make target, as each packaging check is.
+- **Vocabulary at core and kit fails from the gate.** The rule table said "fail
+  at core and kit after one cycle" without defining a cycle. The audit phase is
+  that cycle: the baseline classifies every literal finding, defects become
+  exception rows like any other, and the gate then fails on new ones. It still
+  warns in the specialization and composition layers, where a domain's own tokens
+  are expected.
+- **The report writes where it is told.** `scripts/architecture_report.py` writes
+  to an `OUT` path or standard output, and the baseline is produced by passing the
+  change directory on the command line. A script naming a change directory would
+  fail `make check-comment-hygiene` and go stale at archive.
+- **The test inventory is twenty modules and one function.** That count is from
+  the current tree; the proposal's eighteen was an earlier count.
+  `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` asserts what an
+  import loads at runtime, which no graph rule expresses, so it is kept. The
+  disposition of every test is in `tasks.md` 3.1.
+- **Retirements this change cannot finish are handed off.** A test whose guarded
+  edge is still excused by another change's row at this change's closeout cannot
+  retire here without breaking the design's rule. The owning change gains the
+  retirement task instead, so archiving this change does not wait on every owner.
+
 ## Open questions
 
-None. The design is ready for planning.
+None.
