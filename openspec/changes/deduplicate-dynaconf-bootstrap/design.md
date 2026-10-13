@@ -117,10 +117,13 @@ The accepted disposition is behavior preservation rather than feature expansion:
   known mechanism and `fiat.stripe.v1` in a `RETIRED_MECHANISMS` map that migrates
   it to `arkhai.payments.v1`. A shared-configuration helper now holds the history of
   every mechanism the marketplace has had, and the import is the only reason
-  `kit/config` declares `arkhai-kit-settlement-runtime`. `ARCHITECTURE.md` lists both
-  facts under "Where the current tree diverges" with this change as owner, and
-  `enforce-package-layers`'s vocabulary rule will fail on the literals at the kit
-  layer once promoted from warn to fail. Suggested resolution: move the module to
+  `kit/config` declares `arkhai-kit-settlement-runtime`. The architecture check's
+  vocabulary rule already fails on a mechanism literal at the kit layer, and the
+  `alkahest.v1` literal is excused only by a `vocabulary` exception row in
+  `docs/development/ARCHITECTURE.toml` that this change owns and must delete: the
+  row fails once the literal leaves `kit/config`, and this change cannot archive
+  while it owns the row (`make check-architecture-change
+  CHANGE=deduplicate-dynaconf-bootstrap`). Suggested resolution: move the module to
   `market_settlement_runtime.migration` beside `configuration.py`, which already
   owns typed settlement configuration and registration; the `config migrate
   --scope settlement` commands call it from there, the known set is derived from

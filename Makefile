@@ -838,7 +838,7 @@ check-architecture: ## Fail if a package breaks a layer, scope, dependency, or k
 	done; \
 	exit $$status
 
-check-architecture-layers: ## Fail on an upward dependency, a same-layer cycle, a scope outside its layer's bounds, or an unclassified project
+check-architecture-layers: ## Fail on an upward dependency, a same-layer cycle, a scope outside its layer's bounds, an unclassified project, a stale override, or an invalid rules file
 	@python3 scripts/check_architecture_layers.py
 
 check-architecture-scope: ## Fail on a dependency or identity literal outside a package's scope
@@ -847,7 +847,7 @@ check-architecture-scope: ## Fail on a dependency or identity literal outside a 
 check-architecture-dependencies: ## Fail on an undeclared internal import; warn on an unexplained declaration
 	@python3 scripts/check_architecture_dependencies.py
 
-check-architecture-kinds: ## Fail on a light kind over budget, an import over an external budget, or an imported plugin
+check-architecture-kinds: ## Fail on a dependency outside a kind or package allowlist, an undeclared third-party import in an allowlisted package, or an imported plugin
 	@python3 scripts/check_architecture_kinds.py
 
 # A change owes the rows it owns, as it owes the citations it wrote: it may not
