@@ -115,6 +115,12 @@ Handoff from section 1:
   `ShapeSplit`'s `declaration` or `constraint_problems`; format positions from
   `problem.entries`.
 
+Implementation round 2 fix (12 F1): `at_most`/`at_least` raised `OverflowError` for a
+rational threshold too large for a float (`10**1000`), because the finiteness check
+converted it. A rational is now returned unconverted, since it is always finite; only
+other reals are checked. A unit case covers a huge int and Fraction, both signs, on both
+accessors.
+
 ## 2. Pool-write validation of constrained listing shapes
 
 Delivers the structural split at every pool-write surface. Implements D10's pool-write
@@ -170,6 +176,13 @@ Handoff from section 2:
   this section's wheels, and if not, rebuild `.dist` from empty and relock.
 - The fresh-context check found one stale `pyproject.toml` comment (fixed); nothing else.
 - `domains/vms/listings` has no lock of its own; the VM storefront's lock covers it.
+
+Relocation note (12 F2): the merge of `dev` moved listing-shape hint validation out of
+`kit/resource-pools`. The direct dependency on `arkhai-kit-capability-admissibility` (2.1)
+and the `hints.py` change (2.2) now live in `kit/resource-pools-contracts`, and 2.3's unit
+cases are `kit/resource-pools-contracts/tests/unit/test_hints.py` (`TestListingShapesHint`),
+verified by `make -C kit test-resource-pools-contracts`. The library integration cases
+remain in `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 
 ## 3. VM domain: stated-shape resolution and the bounded generator
 

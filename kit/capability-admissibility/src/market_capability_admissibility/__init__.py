@@ -36,7 +36,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from numbers import Real
+from numbers import Rational, Real
 from typing import Any
 
 from market_capability_shape import (
@@ -181,7 +181,7 @@ class AdmissibleValues:
 
         ``value`` may be any finite real number; the answer is always a member.
         """
-        bound = math.floor(_threshold(value))
+        bound = int(math.floor(_threshold(value)))
         if self._low is None or bound < self._low:
             return None
         return bound if self._high is None else min(bound, self._high)
@@ -191,7 +191,7 @@ class AdmissibleValues:
 
         ``value`` may be any finite real number; the answer is always a member.
         """
-        bound = math.ceil(_threshold(value))
+        bound = int(math.ceil(_threshold(value)))
         if self._low is None:
             return None
         candidate = max(bound, self._low)
@@ -751,11 +751,16 @@ def _without_field(partial_shape: Any, path: _Path) -> Any:
     return rest
 
 
-def _threshold(value: Any) -> float:
+def _threshold(value: Any) -> Real:
     # A boolean is an int to Python but never a quantity, and an infinite or
-    # NaN threshold has no integer floor or ceiling to answer with.
+    # NaN threshold has no integer floor or ceiling to answer with. A rational
+    # is always finite and is returned unconverted: ``math.isfinite`` converts
+    # to float, which overflows on a large int or Fraction that has an exact
+    # floor and ceiling.
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"an admissible-value threshold must be a real number, not {value!r}")
+    if isinstance(value, Rational):
+        return value
     if not math.isfinite(value):
         raise ValueError(f"an admissible-value threshold must be finite, not {value!r}")
     return value

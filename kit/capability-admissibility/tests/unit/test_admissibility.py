@@ -163,6 +163,16 @@ def test_a_non_integral_threshold_answers_the_nearest_member_on_its_side():
     assert values.at_least(3.5) == 4
 
 
+@pytest.mark.parametrize("threshold", [10**1000, Fraction(10**1000, 3)])
+def test_a_rational_threshold_too_large_for_a_float_still_answers(threshold):
+    values = _policy({"widget": {"count": {"max": 4}}}).admissible_values("widget.count", {})
+
+    assert values.at_most(threshold) == 4
+    assert values.at_least(threshold) is None
+    assert values.at_most(-threshold) is None
+    assert values.at_least(-threshold) == 1
+
+
 @pytest.mark.parametrize(
     ("threshold", "error"),
     [(True, TypeError), ("3", TypeError), (None, TypeError), (math.inf, ValueError), (math.nan, ValueError)],
