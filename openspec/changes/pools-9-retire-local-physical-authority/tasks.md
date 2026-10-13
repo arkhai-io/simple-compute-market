@@ -95,10 +95,10 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
 - [x] 4.6 The upgrade is fail-forward for this change only, and retained
       tables stay for extraction: `DEPLOYMENT_AND_CONFIG.md`, "Migrations at
       startup"; `docs/seller-quickstart.md`, "Upgrading from CSV inventory".
-- [x] 4.7 Storefront unit (993 passed, 1 skipped) and integration (377 passed;
-      the two `test_alkahest.py` failures need a live chain environment and
-      predate this change) pass on the final tree; the VM e2e scenarios pass
-      (see 7.9).
+- [x] 4.7 The VM storefront suite passes on the final tree: 1374 passed and 1
+      skipped, with the two `test_alkahest.py` cases excluded because they need
+      a live chain environment and predate this change. The VM e2e scenarios
+      pass (see 7.9).
 - [x] 4.8 Publication holds a VM pool that states no region and reports it,
       rather than refusing it on every cycle with a validation message; the
       pool's rows are still derived, so availability reconciliation closes a
@@ -209,29 +209,44 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 7.8 **Documentation citations.** Every citation in this change's
       documents and in the promoted Evidence resolves. The repository-wide
       check's remaining failures are in files this change does not touch.
-- [x] 7.9 **End-to-end pipeline.** Pipeline run 38368952135, 2026-10-13, at
-      `c30cb4de`: the VM lane passed 129 (`test_full_deal.py`,
-      `test_full_deal_buyer_cli.py`, `test_buy_oneshot_buyer_cli.py`,
-      `test_compute_dynamic_listings.py`, `test_listing_shapes.py`,
-      `test_multi_registry.py`, `test_vm_introduction.py`, and the Alkahest
-      escrow codecs), bare metal 51, and API credits 1 with 3 skipped. A
-      deployed chart at the same revision passed `helm test`: registry 3,
-      storefront 3 (including `test_site_projections_loaded`, reporting site
-      `default` loaded), provisioning 3 with 1 skipped (no host registered),
-      and chain validation 1. The smoke run needed the shared e2e fixtures to
-      expose the seller and provisioning administrator settings the mounted
-      profile already held (`e2e-tests/tests/conftest.py`); before that the
-      storefront smoke checks skipped. Commits after `c30cb4de` change only
-      migrations that run on a legacy database, which a fresh e2e stack never
-      has and `test_inventory_freeze.py` covers, plus docstrings and
-      documents. The VM lane now selects `test_non_erc20_settlement.py`
-      (`e2e_non_erc20_settlement`); pipeline run 38376907354 at `40f5805f`
-      passed all three lanes, the VM lane 131 with both settlement cases.
-      Running it surfaced a defect outside this change's scope, fixed here:
-      a proposal built from a native-token escrow entry named its token as
-      `None`, so its escrow never verified, and the verifier's mismatch report
-      omitted a key present on one side only
-      (`kit/alkahest/tests/unit/test_native_escrow_verification.py`).
+- [x] 7.9 **End-to-end pipeline.** Evidence by revision, 2026-10-13:
+      - **`c30cb4de`.** Pipeline run 38368952135: the VM lane passed 129
+        (`test_full_deal.py`, `test_full_deal_buyer_cli.py`,
+        `test_buy_oneshot_buyer_cli.py`, `test_compute_dynamic_listings.py`,
+        `test_listing_shapes.py`, `test_multi_registry.py`,
+        `test_vm_introduction.py`, and the Alkahest escrow codecs), bare metal
+        51, and API credits 1 with 3 skipped. A deployed chart passed
+        `helm test`: registry 3, storefront 3 (including
+        `test_site_projections_loaded`, reporting site `default` loaded),
+        provisioning 3 with 1 skipped (no host registered), and chain
+        validation 1. The smoke run needed the shared e2e fixtures to expose
+        the seller and provisioning administrator settings the mounted profile
+        already held (`e2e-tests/tests/conftest.py`); before that the
+        storefront smoke checks skipped.
+      - **`40f5805f`.** Since `c30cb4de`: startup migrations that run only on
+        a legacy database (`test_inventory_freeze.py`), docstrings, permanent
+        documents, the VM lane selecting `test_non_erc20_settlement.py`, that
+        scenario's repair, and a defect the scenario surfaced, fixed here: a
+        proposal built from a native-token escrow entry named its token as
+        `None`, so its escrow never verified, and the verifier's mismatch
+        report omitted a key present on one side only
+        (`kit/alkahest/tests/unit/test_native_escrow_verification.py`).
+        Pipeline run 38376907354 passed all three lanes, the VM lane 131 with
+        both settlement cases.
+      - **`f48e2f71`.** Since `40f5805f`: publication's hold on a VM pool that
+        states no region (4.8). Pipeline run 38379978667 passed all three
+        lanes, the VM lane 131; its storefront logs carry `pool_region_missing`
+        holds where the earlier runs carried validation refusals. The first
+        version of the hold, at `597fac49`, failed seven VM scenarios in run
+        38379186498 because it also removed the pool from the round-zero
+        inventory guard; see `design.md`.
+      - **After `f48e2f71`.** Comments, docstrings, the task ledger, and
+        `design.md` only.
+
+      The deployed smoke suite was not re-run after `c30cb4de`: nothing since
+      changes chart rendering, configuration, service readiness, or projection
+      loading, which are what it checks; the region hold changes publication,
+      which it does not exercise.
 - [x] 7.10 **Packaging.** `make check-packaging` passes after the relock that
       dropped `python-multipart`.
 
