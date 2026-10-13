@@ -720,6 +720,16 @@ session").
       open and `e2e-baseline` prints once. Not exercised: the Make targets and
       their prerequisite, the rollback when the reset itself fails, and the real
       `gh` and push.
+- [x] 9.8 Present a triage one finding per message (`change-triage` step 3): the
+      first message opens with an agenda of labels only; a finding is disposed of
+      only when the owner names a disposition for it, and any left undisposed is
+      raised before the gate; findings follow any decision that could change them,
+      then severity. `AGENTS.md` asks every session to put questions to the owner
+      in prose and never through a multiple-choice selector, overriding the stock
+      OpenSpec skills that name one, which are regenerated and so not edited. Spec
+      requirement "Triage of every finding" and design amended. At the owner's
+      direction, after the triage of `capacity-shape-envelope`'s third round.
+      Text only, proven when a session follows it.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,

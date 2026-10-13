@@ -35,6 +35,13 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
 - `make check-packaging` passes.
 
+### Asking the owner
+
+Ask the owner questions in prose, in the chat, with each option and your
+recommendation written out. Do not use a multiple-choice selector, even where a
+skill names one: a list of buttons invites picking an option over thinking the
+problem through and writing the answer that fits it.
+
 ## Documentation ownership
 
 - `docs/development/ARCHITECTURE.md` is the repository-wide architecture reference: system shape, dependency layers, authority boundaries, shared vocabulary, major flows, deployment topology, packaging rules, and testing philosophy.

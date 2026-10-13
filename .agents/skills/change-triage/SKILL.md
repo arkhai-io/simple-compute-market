@@ -171,28 +171,28 @@ evidence line; they support the argument and never replace it. A finding that is
 an obvious agreed edit gets one paragraph. End every finding with a single `→`
 outcome line.
 
-Present in two passes.
+Present one finding per message, each discussed in full, and wait for the
+owner's answer before the next. A summary of every finding up front invites a
+disposition before the owner has read the argument, so open the first message
+with only an agenda: each finding's label and heading emoji, one line, no
+positions.
 
-Before the first pass, check each finding against the decisions still open in the
-second pass. A finding whose outcome could change with an open decision does not
-belong in the first pass: hold it, and say which decision it waits on. Disposing of
-it early only for the decision to overturn it wastes the owner's attention and
-leaves revised dispositions behind.
+A finding is disposed of only when the owner states a disposition for its label.
+A question about it, a discussion of another finding, or moving on disposes of
+nothing; never infer acceptance from silence. Before asking about the gate, name
+any finding still without a disposition and ask about it. The owner may answer
+several at once or say to batch the rest; never propose it.
 
-**First pass, in one message:** every finding that needs no choice between
-alternatives — outcomes `edit`, `task`, `fix`, or `none`, and findings you disagree
-with —
-ordered by lens (`direction`, `consistency`, `architecture`, `testing`,
-`documentation`, `scope`, `readiness`) and within a lens by severity. Close by
-listing, by label only, the findings left for the second pass. The owner disposes
-of the first pass together, often tersely by label; follow up only where an answer
-is ambiguous.
+Order the findings so that each comes after any decision that could change its
+outcome, and otherwise most severe first: disposing of a finding only for a later
+decision to overturn it wastes the owner's attention and leaves revised
+dispositions behind.
 
-**Second pass, one finding per message:** every finding whose outcome is a
-`decision`. Present it as `change-design` presents a decision — its context,
-each alternative with its trade-offs and examples where it concerns a
-representation, and your recommendation with what would change your mind. Here the
-owner's choice of an option is the disposition; never ask the owner to accept a
+A finding whose outcome is a `decision` is presented as `change-design` presents
+one: its context, each alternative with its trade-offs, with an example where it
+concerns a representation, and your recommendation with what would change your
+mind — in the same prose layout, without a heading or label per part. The owner's
+choice of an alternative is the disposition; never ask the owner to accept a
 problem whose fixes they have not been shown. Record the choice as the settled
 decision in the design discussion, under the finding's label.
 
@@ -231,7 +231,7 @@ the shape `design.md` and the `change-workflow` delta define:
 `review` names the record (`NN-<kind>`, `NN-<kind>-external`, `NN-validation`, or
 `NN-implementation-owner`); `section` is the
 `tasks.md` section or `null`. A review finding is always logged under its own
-review record, even when it was settled in the second pass as a design decision;
+review record, even when it was settled as a design decision;
 `"review": "design"` is only for a redirection of a decision no review raised. When
 a disposition revises an earlier one, the new entry's `owner_disposition` starts
 with `revises <review> <finding>:` so the ledger reads as history rather than as a
@@ -244,7 +244,7 @@ the owner cannot otherwise see that it was written.
 ## 5. Carry out the accepted outcomes
 
 - **edit:** make it, and record it in the finding's `Result`.
-- **decision:** settled with the owner in the second pass, in the same session, as
+- **decision:** settled with the owner when it was presented, in the same session, as
   part of the design discussion. Do not settle one yourself, even an obvious one.
   Record each settled decision in the change's `design.md` when the design is
   settled, as `change-design` records decisions.

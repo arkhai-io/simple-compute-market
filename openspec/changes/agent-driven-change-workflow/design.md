@@ -288,8 +288,17 @@ The implementing agent reads each finding, checks it against the files, and reco
 its own position — agree, disagree, or partly — with evidence and a proposed
 action. Agreement needs a stated reason, the same as disagreement, so that
 deference to the reviewer is visible rather than the default. Every finding is
-presented to the owner, ordered by lens with `direction` first, then by severity.
-Nothing is applied until the owner has recorded a disposition.
+presented to the owner, one finding per message, each after any decision that
+could change its outcome and otherwise most severe first. Nothing is applied until
+the owner has recorded a disposition for that finding.
+
+The first triages presented the findings that needed no choice in one message, to
+be disposed of together, and each decision after. In use, the batch invited
+dispositions before the owner had read the arguments, and the owner's question
+about one finding was taken as acceptance of the rest. Each finding now gets its
+own discussion, the first message opens with an agenda of labels only, and a
+finding has a disposition only when the owner gives it one. The emoji heading
+already tells the owner which findings to skim.
 
 On each disposition, one line is appended to the change's
 `interventions.jsonl`: the review kind, the `tasks.md` section the finding concerns

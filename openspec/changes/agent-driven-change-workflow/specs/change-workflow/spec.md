@@ -117,12 +117,20 @@ agent may decline with a reason.
 The implementing agent MUST record, for every finding in a review, its own position
 — agree, disagree, or partly — with the evidence for it and a proposed action, and a
 position of agreement MUST state its reason as a disagreement does. Every finding
-MUST be presented to the owner, none withheld for being minor or uncontested.
+MUST be presented to the owner, none withheld for being minor or uncontested. A
+finding MUST be treated as disposed of only when the owner states a disposition for
+it.
 
 #### Scenario: A minor finding the agent agrees with
 
 - **WHEN** a review contains a `minor` finding the implementing agent agrees with
 - **THEN** it is still presented to the owner with the agent's reason
+
+#### Scenario: The owner discusses one finding and not another
+
+- **WHEN** the owner asks about one finding and says nothing of another
+- **THEN** the other has no disposition, and is presented again before the gate is
+  asked about
 
 ### Requirement: Intervention ledger
 
