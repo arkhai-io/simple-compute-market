@@ -70,6 +70,8 @@ def seller_settings() -> dict:
         "base_url_override": settings.SELLER.BASE_URL_OVERRIDE,
         "private_key": settings.SELLER.PRIVATE_KEY,
         "wallet_address": settings.SELLER.WALLET_ADDRESS,
+        "admin_scheme": settings.SELLER.get("admin_scheme", "eip191"),
+        "admin_credential": settings.SELLER.get("admin_credential", ""),
         "admin_api_key": str(getattr(settings.SELLER, "ADMIN_API_KEY", None) or "").strip(),
         "agent_id": str(getattr(settings.SELLER, "AGENT_ID", None) or ""),
     }
@@ -84,6 +86,10 @@ def min_eth_balance() -> Decimal:
 def provisioning_settings() -> dict:
     return {
         "api_url": settings.PROVISIONING.API_URL,
+        "admin_scheme": settings.PROVISIONING.get("admin_scheme", "eip191"),
+        "admin_credential": settings.PROVISIONING.get("admin_credential", ""),
+        "authority_scheme": settings.PROVISIONING.get("authority_scheme", "eip191"),
+        "authority_identifier": settings.PROVISIONING.get("authority_identifier", ""),
     }
 
 
