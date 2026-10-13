@@ -23,11 +23,43 @@ A domain package MUST own the listing, message, terms, materialization, receipt,
 - **THEN** its deterministic codecs and reference semantics can be installed without modifying core orchestration
 
 ### Requirement: From-below kit dependencies
-Kit and domain concept modules MUST NOT depend on core composition packages; role implementations MAY depend on both the relevant core role and domain/kit contracts.
+Every package MUST depend only on packages in its own layer or a lower one, without a cycle inside a layer, and only on packages whose scope is a subset of its own. Layer, kind, and scope MUST be read from the package's path and name, never inferred from its imports. Any import and any declared internal distribution is a dependency. One repository-wide check MUST hold these rules over every project, and every divergence it reports MUST be an owned exception that expires with its cause.
 
 #### Scenario: Architecture boundary tests run
-- **WHEN** imports are checked for core, kit, and domain concept packages
-- **THEN** core has no domain imports and from-below modules have no upward composition imports
+- **WHEN** the repository architecture check runs over every project outside the tooling paths
+- **THEN** every project is classified by layer, kind, and scope, and every dependency a rule forbids is reported unless an owned exception row excuses it
+
+#### Scenario: A lower layer depends on a higher one
+- **WHEN** a kit or specialization imports a composition, at module level, inside a function, under `TYPE_CHECKING`, or behind `try`
+- **THEN** the architecture check fails and names the importing file and line and the imported distribution
+
+#### Scenario: Packages in one layer import each other
+- **WHEN** two packages in the same layer depend on each other directly or through others in that layer
+- **THEN** the architecture check fails and names the cycle
+
+#### Scenario: A package knows a scope it is not placed in
+- **WHEN** a package depends on one whose scope is not a subset of its own, such as a domain composition declaring a sibling domain's contribution without importing it
+- **THEN** the architecture check fails and names the dependency and the scope elements it adds
+
+#### Scenario: A package imports an internal distribution it does not declare
+- **WHEN** a project's source imports a repository distribution its `pyproject.toml` does not declare
+- **THEN** the architecture check fails and names the importing file and line
+
+#### Scenario: A package imports a plugin
+- **WHEN** any package imports a package that registers into a plugin entry-point group
+- **THEN** the architecture check fails, while a declaration that installs the plugin passes
+
+#### Scenario: A light kind depends outside its kind allowlist
+- **WHEN** a contracts or client package depends on a distribution its kind allowlist does not name
+- **THEN** the architecture check fails and names the dependency
+
+#### Scenario: An exception outlives its cause
+- **WHEN** an exception row's edge is gone, or the edge no longer breaks the rule the row names
+- **THEN** the architecture check fails and names the row and its owning change
+
+#### Scenario: An override outlives its cause
+- **WHEN** an override row's project now classifies the same from its path alone, or the row grants a scope element none of the project's dependencies uses
+- **THEN** the architecture check fails and names the row
 
 ### Requirement: Role-owned executable composition
 The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. VM, bare-metal, and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots. Each storefront contribution MUST provide one validated `MarketDomainContract` plus its domain-owned runtime builder without importing another domain implementation.
@@ -815,11 +847,11 @@ mount its rule routes under its own prefix; job draining and waiting MUST stay s
 
 ## Evidence
 
-- Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
+- Layer, scope, and kind rules over every project: `make check-architecture`, `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`, and `scripts/tests/test_architecture.py`; VM concept-module and contract-construction guardrails: `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
 
-- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py` and `test_import_boundary.py`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
+- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py`, with its empty `allowed-dependencies` in `kit/capability-shape/pyproject.toml`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
 - The schema-driven inverse of flattening: `kit/capability-shape/tests/unit/test_capability_shape.py`.
-- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py` and `test_import_boundary.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and `domains/bare_metal/tests/test_import_boundary.py`.
+- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and the compute vocabulary's `allowed-dependencies` and the sibling-domain scope rule, both held by `make check-architecture`.

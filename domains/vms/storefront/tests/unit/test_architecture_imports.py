@@ -1,15 +1,12 @@
-"""Dependency-direction guardrail for the core/kit/domain split.
+"""VM-specific guardrails the repository architecture check does not express.
 
-The target graph (docs/development/ARCHITECTURE.md, "Package and dependency
-layers") permits shared kits to consume lower-layer core contracts, including
-``core_storefront``. Kits must not reverse the dependency direction by
-importing domain packages, composition roots, or role executables. VM domain
-concept modules implement core hook shapes from below without importing core
-packages. Only composition roots (the VM buyer/storefront executables and the
-provisioning service) may import every layer.
-
-This test walks the actual import statements so the rule is enforced,
-not just documented.
+`make check-architecture` holds the layer and scope rules for every package
+(docs/development/ARCHITECTURE.md, "Package and dependency layers"). These
+tests hold what is narrower than those rules: VM domain concept modules
+implement core hook shapes from below without importing any core package, the
+storefront builds its domain contract in one place, the VM storefront never
+imports the bare-metal contribution it installs, and its wheel declares the
+lower-layer contract package.
 """
 
 from __future__ import annotations
@@ -43,34 +40,12 @@ CORE_PREFIXES = (
     "storefront_client",
 )
 
-# Executable role/composition imports point upward from a kit and are forbidden.
-# ``core_buyer`` is included because that distribution owns the ``market``
-# executable; ``core_storefront`` is a contract package with no executable.
+# Role executables, which concept modules must not import either.
 ROLE_EXECUTABLE_PREFIXES = (
     "core_buyer",
     "market_buyer",
     "market_storefront",
 )
-
-# Both repository namespaces and installed domain package names are guarded.
-# A kit must receive domain behavior through injected hooks instead.
-DOMAIN_PREFIXES = (
-    "arkhai_apicredits",
-    "arkhai_apicredits_buyer",
-    "arkhai_vms_buyer",
-    "arkhai_vms_listings",
-    "arkhai_vms_negotiation",
-    "arkhai_vms_settlement",
-    "apicredits_storefront",
-    "arkhai_bare_metal",
-    "arkhai_bare_metal_storefront",
-    "arkhai_vms",
-    "bare_metal_provisioning_adapter",
-    "vm_provisioning_adapter",
-    "vm_provisioning_operator",
-)
-
-KIT_ROOTS = sorted(REPO.glob("kit/*/src"))
 
 # Concept modules: from-below hook/implementation homes. Storefront-owned VM
 # provisioning orchestration is now under the storefront composition root, and
@@ -124,24 +99,6 @@ def _violations(roots, forbidden_prefixes):
     return out
 
 
-def test_kit_imports_no_domain_or_upward_role_packages():
-    assert KIT_ROOTS, "no kit packages found"
-    violations = _violations(
-        KIT_ROOTS,
-        ROLE_EXECUTABLE_PREFIXES + DOMAIN_PREFIXES,
-    )
-    assert not violations, "kit must stay domain- and upward-role-free:\n" + "\n".join(
-        violations
-    )
-
-
-def test_kit_boundary_classifier_rejects_domain_and_upward_imports() -> None:
-    forbidden = ROLE_EXECUTABLE_PREFIXES + DOMAIN_PREFIXES
-    assert _matches_prefix("arkhai_vms_settlement", forbidden)
-    assert _matches_prefix("market_storefront.server", forbidden)
-    assert not _matches_prefix("core_storefront.domain_registry", forbidden)
-
-
 def test_domain_concept_modules_import_no_core_packages():
     violations = _violations(
         CONCEPT_ROOTS,
@@ -188,24 +145,6 @@ def test_vm_storefront_imports_no_bare_metal_composition() -> None:
         ("arkhai_bare_metal_storefront",),
     )
     assert not violations, "VM storefront must not import bare-metal roots:\n" + "\n".join(
-        violations
-    )
-
-
-def test_core_storefront_imports_no_domain_composition() -> None:
-    core_root = REPO / "core" / "storefront" / "src" / "core_storefront"
-    violations = _violations(
-        [core_root],
-        (
-            "arkhai_vms_buyer",
-            "arkhai_vms_listings",
-            "arkhai_vms_negotiation",
-            "arkhai_vms_settlement",
-            "market_storefront",
-            "arkhai_bare_metal_storefront",
-        ),
-    )
-    assert not violations, "core storefront must stay domain-free:\n" + "\n".join(
         violations
     )
 

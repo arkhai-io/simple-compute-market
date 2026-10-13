@@ -13,6 +13,7 @@ DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
@@ -811,7 +812,7 @@ lock: dist ## Relock projects against current wheels without installing anything
 	python3 scripts/uv_project.py lock $(PROJECTS)
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py
@@ -824,6 +825,44 @@ check-python-version: ## Fail if anything selects a Python version other than .p
 
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py
+
+# check-architecture -- the package layer, scope, and kind rules of
+# docs/development/ARCHITECTURE.md, over every import and every declared
+# internal dependency, against docs/development/ARCHITECTURE.toml. Each part
+# runs alone; any part failing fails the whole. It reads only the tree, so it
+# needs no wheelhouse and no project environment.
+check-architecture: ## Fail if a package breaks a layer, scope, dependency, or kind rule no exception row excuses
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py || status=1; \
+	done; \
+	exit $$status
+
+check-architecture-layers: ## Fail on an upward dependency, a same-layer cycle, a scope outside its layer's bounds, an unclassified project, a stale override, or an invalid rules file
+	@python3 scripts/check_architecture_layers.py
+
+check-architecture-scope: ## Fail on a dependency or identity literal outside a package's scope
+	@python3 scripts/check_architecture_scope.py
+
+check-architecture-dependencies: ## Fail on an undeclared internal import; warn on an unexplained declaration
+	@python3 scripts/check_architecture_dependencies.py
+
+check-architecture-kinds: ## Fail on a dependency outside a kind or package allowlist, an undeclared third-party import in an allowlisted package, or an imported plugin
+	@python3 scripts/check_architecture_kinds.py
+
+# A change owes the rows it owns, as it owes the citations it wrote: it may not
+# be archived while it owns an exception or override row.
+check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exception or override row
+	@if [ -z "$(CHANGE)" ]; then echo "CHANGE=<name> is required" >&2; exit 2; fi
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py --change "$(CHANGE)" || status=1; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "OK: $(CHANGE) owns no architecture row."; fi; \
+	exit $$status
+
+architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
+	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot

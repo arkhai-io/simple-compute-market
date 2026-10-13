@@ -49,6 +49,23 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `kit-owned-storefront-shell`'s design for which change lands the lifespan step.
   - `market_core.schemas`'s Alkahest-named escrow fields leave with
     `SettlementObligation`'s, which the first bullet above already moves.
+- The VM listing and negotiation specializations stop importing `kit/alkahest`,
+  since neither carries a mechanism in its name and so neither may know one
+  (`ARCHITECTURE.md`, "Scope"):
+  - `arkhai_vms_listings` types `accepted_escrows` with `AcceptedEscrow` and
+    `EscrowDemand` and resolves `ERC20TokenMetadata` through
+    `resolve_token_cached` in `models.py` and `resources.py`, and reads
+    `accepted_token_address` and `primary_rate_value` in `pricing.py` and
+    `buyer_cli.py`.
+  - `arkhai_vms_negotiation`'s `policies.py` validates an `EscrowProposal` and
+    normalizes it against the listing's accepted escrows through a
+    function-local import.
+  - Each reaches the escrow-shaped data through the Alkahest registration or the
+    VM settlement codec, which legitimately knows its mechanism. The listing's
+    wire shape is unchanged; removing escrow from it is
+    `drop-escrow-from-shared-wire`'s. `enforce-package-layers`'s exceptions table
+    carries both edges under this change, and the rows are deleted when the
+    imports are.
 
 ## Capabilities
 

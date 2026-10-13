@@ -202,6 +202,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -318,7 +319,6 @@ dependencies = [
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-policy" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -392,7 +392,6 @@ name = "arkhai-kit-capacity-publication"
 version = "0.6.1"
 source = { registry = "../../../.dist" }
 dependencies = [
-    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-site-client" },
 ]
@@ -602,8 +601,10 @@ version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
@@ -643,7 +644,6 @@ dependencies = [
     { name = "arkhai-vms" },
     { name = "arkhai-vms-listings" },
     { name = "arkhai-vms-negotiation" },
-    { name = "arkhai-vms-settlement" },
     { name = "eth-account" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
@@ -661,7 +661,6 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-vms" },
     { name = "pydantic" },
 ]

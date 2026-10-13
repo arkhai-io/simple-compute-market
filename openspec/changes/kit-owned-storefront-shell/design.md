@@ -116,6 +116,13 @@ Design phase; not planned.
   that remains under `domains/vms/` is named `arkhai_vms_storefront` like its
   siblings and declares no sibling domain. Decide which home before planning
   executable assembly; `align-package-paths-with-layers` moves it there.
+  The two rows are a scope finding on `arkhai-vms-storefront` → `arkhai-bare-metal`
+  and → `arkhai-bare-metal-storefront`; the first also has a declarations row
+  giving its runtime reason, which goes with it. While they stand,
+  `domains/vms/storefront/tests/unit/test_architecture_imports.py`'s
+  `test_vm_storefront_imports_no_bare_metal_composition` stays, because the row
+  that excuses the declaration would also excuse an import. Retire that test in the
+  same commit that deletes the rows.
 
 ## Decisions
 

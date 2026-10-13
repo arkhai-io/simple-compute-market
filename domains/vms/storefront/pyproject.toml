@@ -181,3 +181,8 @@ allow-direct-references=true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_storefront"]
+
+# Internal distributions declared without an import, each with the runtime
+# reason it is installed. make check-architecture warns on one without a reason.
+[tool.arkhai.architecture.runtime-dependencies]
+arkhai-bare-metal = "Registers the bare-metal storefront domain, which the compute-family shell discovers through market.storefront_domains."

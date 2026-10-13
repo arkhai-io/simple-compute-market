@@ -18,6 +18,7 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-arkhai-payments>=0.2.0",
   "arkhai-kit-config",
+  "arkhai-kit-identity==0.4.0",
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime",
 ]
