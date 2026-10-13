@@ -151,6 +151,7 @@ class ShapeState:
     site_id: str | None = None
     overridden: bool = False
     shape_priced: bool = False
+    override_cleared: bool = False
     constrained: bool = False
 
 
@@ -469,6 +470,18 @@ class TestStage07_ShapePricing:
         assert _listing_rate(listing) == FLAT_RATE
         assert listing.extra.get("rate_structure") is None
 
+    def test_07c_no_override_is_left_for_the_pool(self, storefront_admin_client, shape_state):
+        """Stages 06 and 07 each delete the override they wrote; stage 08 needs the
+        hint to be authoritative whatever became of them, so this stage removes any
+        override left behind and confirms none is stored."""
+        require_state(shape_state, "site_id")
+        overrides = SyncPoolOverrideClient(storefront_admin_client)
+        overrides.delete_pool_override(shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm")
+        assert overrides.list_pool_overrides(
+            site_id=shape_state.site_id, pool_id=E2E_LISTING_SHAPES_POOL_ID
+        ).overrides == []
+        shape_state.override_cleared = True
+
 
 def _carries_no_constraint(value) -> bool:
     """No mapping anywhere in a published listing holds a constraint's keys."""
@@ -485,7 +498,7 @@ class TestStage08_ShapeConstraints:
     def test_08a_the_pool_states_its_shape_with_constraints(
         self, resource_pool_client, storefront_admin_client, shape_state
     ):
-        require_state(shape_state, "declared")
+        require_state(shape_state, "declared", "override_cleared")
         tags = dict(resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID).policy_tags)
         resource_pool_client.patch_pool(
             E2E_LISTING_SHAPES_POOL_ID,

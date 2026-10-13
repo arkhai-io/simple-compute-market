@@ -500,6 +500,20 @@ Handoff from section 5:
   was not run again: the fixes were local and each is covered by a test or this note.
 - `DEPLOYMENT_AND_CONFIG.md` still describes no `[admissibility]` table; 7.10 owes it.
 
+Implementation round 3 fix (14 F1): no application-level case accepted a valid
+constrained override; the typed-client cases covered only refusals. Added
+`test_a_constrained_override_is_stored_verbatim_and_publishes_its_base_shape` to
+`test_pool_overrides_api.py`: under a configured default of `gpu.count {max: 1}`, an
+override stating `gpu.count {offer: 2, max: 2}` is accepted as feasible, read back with
+its constraints as written, and one cycle closes the hint's listing and publishes the
+override's base shape (GPU count 2, 16 GiB) with no constraint keys; changing only the
+override's constraints is stored as written and then closes and publishes nothing.
+Evidence: VM storefront integration suite (application integration) 407 passed;
+repository `make test` exit 0. The fresh-context check's three low points on this test
+were fixed: the comment no longer claims the default is shown biting, the
+constraint-only write is read back and asserts neither close nor publish, and `_H100`
+moved beside the other shape constants.
+
 ## 6. End-to-end scenario
 
 Delivers system-level evidence that a constrained stated shape crosses the site,
@@ -523,11 +537,16 @@ checks owed unless the lane's configuration changes.
       and derivation evidence cover them). Evidence so far: collected locally (16 cases)
       and `make -C e2e-tests test-unit` 22 passed; the stage has not run against a
       stack.
-- [ ] 6.2 Verify: run the VM lane with `make run-e2e` and
+- [x] 6.2 Verify: run the VM lane with `make run-e2e` and
       `make fetch-e2e-logs E2E_RUN_ID=<run>`; the evidence is recorded in 7.9.
       Not run in the implementation session: running the pipeline needs a push, and
       pushing belongs to validation. `make validate CHANGE=capacity-shape-envelope`
       owes it; this task closes on that run's record.
+      Done by validation 15 of `8913fbe0`: pipeline run 38383391257 passed, the e2e-vm
+      lane 137 passed and 3 skipped (the credits-payment scenario's own readiness
+      guard), all 16 cases of `test_listing_shapes.py` passed including stage 08. The
+      round 3 fix below adds stage 07c, which that run predates; the fix commit's
+      validation runs it.
 
 Handoff from section 6:
 
@@ -535,12 +554,30 @@ Handoff from section 6:
   regression evidence, and stage 08 is this change's first system evidence for a
   constrained stated shape. No scenario covers the configured default or the override
   write check.
-- Stage 08 depends on 06c and 07b having deleted the override; a left-over override
-  stating shapes would make 08b fail rather than skip.
+- Stage 08 needs no override stored for the pool, since an override's shapes replace
+  the hint's. Stage 07c establishes that and records `override_cleared`, which 08a
+  requires; see the round 3 fix below.
 - The fresh-context check found nothing blocking; its three low points (a comment
   claiming the projection, the `require_state` field, a shallow constraint check) were
   fixed. It noted for 7.10 that the spec's Evidence entry for this scenario should name
   the constrained stage.
+
+Implementation round 3 fix (16 F1): stage 08 depended on 06c and 07b having deleted the
+override without recording it, so an earlier cleanup failure would have surfaced as a
+08b failure rather than a skip. A new stage 07c, independent of the pricing stages
+(it requires only `site_id`), deletes any override left for the pool, confirms through
+`list_pool_overrides` that none is stored, and sets `override_cleared`; 08a requires it
+with `declared`. A pricing failure in 07a or 07b therefore no longer blocks stage 08.
+Not fixed, recorded at the owner's request: 07a has the same unrecorded dependency on
+06c: with a left-over shapes override, 07a's whole-record `PUT` drops those shapes, so
+the cycle closes the override's listing and 07a's same-listing assertion fails. It
+predates this change.
+Evidence: `make -C e2e-tests test-unit` 22 passed (unit); the scenario collects 17
+cases. Stage 07c has not run against a stack: the fix commit's validation runs it.
+Repository `make test` exit 0; `make check-comment-hygiene`, `make check-doc-citations
+CHANGE=capacity-shape-envelope`, and `openspec validate --strict` OK. The fresh-context
+check found nothing blocking; its low point on this note's wording (which 07a assertion
+a left-over override breaks) was fixed.
 
 ## 6A. Pilot merge reconciliation
 
