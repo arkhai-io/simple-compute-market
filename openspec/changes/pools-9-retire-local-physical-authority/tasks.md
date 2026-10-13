@@ -1,6 +1,6 @@
 # Tasks
 
-## Status: implemented and reviewed 2026-10-13; awaiting the VM e2e lane and the deployed chart smoke test
+## Status: implemented, reviewed, and validated end to end 2026-10-13
 
 Section numbers keep the original plan's. Section 0 is
 `fix-resource-pool-provider-at-creation`'s, and Section 2 and most of Section 3
@@ -95,9 +95,9 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
 - [x] 4.6 The upgrade is fail-forward for this change only, and retained
       tables stay for extraction: `DEPLOYMENT_AND_CONFIG.md`, "Migrations at
       startup"; `docs/seller-quickstart.md`, "Upgrading from CSV inventory".
-- [ ] 4.7 Storefront unit (993 passed, 1 skipped) and integration (377 passed;
+- [x] 4.7 Storefront unit (993 passed, 1 skipped) and integration (377 passed;
       the two `test_alkahest.py` failures need a live chain environment and
-      predate this change) pass on the final tree. Open: the VM e2e scenarios
+      predate this change) pass on the final tree; the VM e2e scenarios pass
       (see 7.9).
 
 ## 5. Retire CSV import and its deployment contract
@@ -157,11 +157,11 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
       two failed against the previous core migration alone.
       `tests/unit/test_migrations.py` covers a fresh bootstrap and the
       `20260604_003` backfill with and without a retained members table.
-- [ ] 6.3 Pass on the final tree: storefront unit and integration,
+- [x] 6.3 Pass on the final tree: storefront unit and integration,
       `core/storefront`, `core/storefront-client`, `kit/pool-overrides`,
       `kit/config`, the VM buyer and domain packages, the bare-metal and
       API-credits storefronts, `scripts/tests/`, and the chart render tests.
-      Open: the VM e2e scenarios and the smoke suite (see 7.9).
+      The e2e lanes and the deployed smoke suite pass (see 7.9).
 - [x] 6.4 This change and both touched specifications validate strictly; the
       other failures in `validate --all --strict` are in other active changes.
 
@@ -194,13 +194,24 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 7.8 **Documentation citations.** Every citation in this change's
       documents and in the promoted Evidence resolves. The repository-wide
       check's remaining failures are in files this change does not touch.
-- [ ] 7.9 **End-to-end pipeline.** Open. The implementation environment could
-      not build the e2e images: its network policy denies
-      `install.zerotier.com` and the image builds cannot reach the Debian
-      mirrors. The VM lane (`make -C e2e-tests test-e2e-vm`), the smoke
-      suite, and the deployed chart smoke test (`helm test`, whose storefront
-      pod runs `pytest -m storefront`) are to be run by the operator. Until
-      they are, every validation they gate is unrun, not passed.
+- [x] 7.9 **End-to-end pipeline.** Pipeline run 38368952135, 2026-10-13, at
+      `c30cb4de`: the VM lane passed 129 (`test_full_deal.py`,
+      `test_full_deal_buyer_cli.py`, `test_buy_oneshot_buyer_cli.py`,
+      `test_compute_dynamic_listings.py`, `test_listing_shapes.py`,
+      `test_multi_registry.py`, `test_vm_introduction.py`, and the Alkahest
+      escrow codecs), bare metal 51, and API credits 1 with 3 skipped. A
+      deployed chart at the same revision passed `helm test`: registry 3,
+      storefront 3 (including `test_site_projections_loaded`, reporting site
+      `default` loaded), provisioning 3 with 1 skipped (no host registered),
+      and chain validation 1. The smoke run needed the shared e2e fixtures to
+      expose the seller and provisioning administrator settings the mounted
+      profile already held (`e2e-tests/tests/conftest.py`); before that the
+      storefront smoke checks skipped. Commits after `c30cb4de` change only
+      migrations that run on a legacy database, which a fresh e2e stack never
+      has and `test_inventory_freeze.py` covers, plus docstrings and
+      documents. Not run: `test_non_erc20_settlement.py`, whose
+      `e2e_non_erc20_settlement` marker no pipeline lane selects; its
+      provisioning-declared supply is unvalidated end to end.
 - [x] 7.10 **Packaging.** `make check-packaging` passes after the relock that
       dropped `python-multipart`.
 
