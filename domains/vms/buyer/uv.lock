@@ -343,6 +343,7 @@ rl = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-vms-settlement" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -373,6 +374,7 @@ provides-extras = ["rl"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-vms-settlement", specifier = ">=0.2.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
@@ -403,6 +405,18 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_vms_negotiation-0.4.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-settlement"
+version = "0.2.1"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-vms-listings" },
+]
+wheels = [
+    { path = "arkhai_vms_settlement-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
