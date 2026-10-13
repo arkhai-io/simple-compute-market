@@ -24,12 +24,17 @@ from market_alkahest.alkahest import (
 )
 from e2e_harness.settings import settings
 from tests.e2e.roles.helpers.compute_deal import (
+    advance_storefront,
     delete_mock_rules_if_present,
     pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
-from tests.e2e.roles.scenarios.vms.conftest import _signer, capacity_source_for
+from tests.e2e.roles.scenarios.vms.conftest import (
+    _signer,
+    capacity_source_for,
+    one_site,
+)
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_NON_ERC20_HOST,
     E2E_NON_ERC20_POOL_ID,
@@ -517,6 +522,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     assert final_status.status == "ready"
     assert final_status.tenant_credentials
 
+    # The storefront's loops are held, so the listing closes only when its
+    # capacity events are applied, and the close decides from the projection
+    # cache, which must already reflect the deal's reservation.
+    advance_storefront(storefront_admin_client, "site-projections")
+    for _ in range(5):
+        cycle = one_site(advance_storefront(storefront_admin_client, "capacity-events"))
+        assert cycle["error"] is None, cycle
+        if not cycle["truncated"]:
+            break
+    else:
+        raise AssertionError("capacity-event feed still truncated after five cycles")
     final_listing = storefront_admin_client.get_listing(listing_id)
     assert final_listing.status == "closed"
 
