@@ -674,9 +674,11 @@ because availability reconciliation keys on them and region does not bear on
 capacity: a sold-out listing of such a pool still closes. Holding the pool in
 derivation, as an unreadable declaration is held, was tried first and
 rejected: it kept a sold-out listing open, offering capacity the site no
-longer had. A listing closed that way reopens only once the pool states its
-region again, because the reopen check compares the published region with the
-source's.
+longer had, and the round-zero inventory guard, which reads the same
+derivation, refused every negotiation against the pool's published listings
+(e2e run 38379186498). A listing availability reconciliation closes reopens
+only once the pool states its region again, because the reopen check compares
+the published region with the source's.
 
 Alternatives:
 
