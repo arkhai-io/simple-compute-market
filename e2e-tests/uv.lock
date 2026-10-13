@@ -772,7 +772,6 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-vms" },
     { name = "pydantic" },
 ]

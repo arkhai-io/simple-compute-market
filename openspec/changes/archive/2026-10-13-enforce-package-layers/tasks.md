@@ -444,8 +444,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
       *Done.* After merging `dev` at `c22453bc6`, `make check-packaging`
       passes and this change owns no row. One warning came from `dev`:
       `arkhai-vms-listings` still declares `arkhai-kit-settlement-runtime`,
-      whose only importer `dev` deleted with the CSV importer. Removing it needs
-      the VM locks relocked, so it is left to the maintainer.
+      whose only importer `dev` deleted with the CSV importer. The declaration
+      was removed under the declarative-remedy rule, with the release guide's
+      row and the end-to-end lock; the maintainer relocked the VM buyer and
+      storefront, where `download.pytorch.org` is reachable.
 - [x] 6.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the run and its result. This change alters no runtime path, so
       the evidence is that the pipeline is unaffected; the retired tests'
