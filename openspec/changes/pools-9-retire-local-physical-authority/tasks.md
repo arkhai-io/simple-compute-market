@@ -209,9 +209,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       storefront smoke checks skipped. Commits after `c30cb4de` change only
       migrations that run on a legacy database, which a fresh e2e stack never
       has and `test_inventory_freeze.py` covers, plus docstrings and
-      documents. Not run: `test_non_erc20_settlement.py`, whose
-      `e2e_non_erc20_settlement` marker no pipeline lane selects; its
-      provisioning-declared supply is unvalidated end to end.
+      documents. The VM lane now selects `test_non_erc20_settlement.py`
+      (`e2e_non_erc20_settlement`); pipeline run 38376907354 at `40f5805f`
+      passed all three lanes, the VM lane 131 with both settlement cases.
+      Running it surfaced a defect outside this change's scope, fixed here:
+      a proposal built from a native-token escrow entry named its token as
+      `None`, so its escrow never verified, and the verifier's mismatch report
+      omitted a key present on one side only
+      (`kit/alkahest/tests/unit/test_native_escrow_verification.py`).
 - [x] 7.10 **Packaging.** `make check-packaging` passes after the relock that
       dropped `python-multipart`.
 
