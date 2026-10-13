@@ -164,6 +164,7 @@ When the session stops, tell the owner, for each section implemented:
 - what comes next — validation (`make validate CHANGE=<change>`) and one
   implementation review (`make review CHANGE=<change> KIND=implementation`) of the
   commits since the last review, run side by side; the owner's own notes on the
-  diff meanwhile; then the round triaged in a fresh session
+  diff meanwhile, read as one set of changes with `make round-diff CHANGE=<change>`;
+  then the round triaged in a fresh session
   (`make triage CHANGE=<change>`), which fixes what the owner accepts; then the
   next section.

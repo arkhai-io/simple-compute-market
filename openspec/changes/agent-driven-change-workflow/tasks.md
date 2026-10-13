@@ -639,6 +639,31 @@ session").
       the step summaries and the pipeline log and wrote only the confirming
       triage file, as the skill's lone re-validation rule says.
 
+- [x] 9.6 Give the owner the round to read as uncommitted changes:
+      `make round-diff CHANGE= [BASE=]` (`scripts/round_worktree.py`) checks out
+      the round's base in a worktree beside the checkout and overlays `HEAD`'s
+      files, other changes' directories excepted; `change-implement`,
+      `change-validate`, and `change-triage` point the owner's notes at it. A
+      pasted review's commit is read from the snapshot name and appended as the
+      runner's `reviewed-commit` comment (`change-triage`). Spec delta and design
+      amended (`design.md`, "An implementation round is triaged in a fresh
+      session").
+      Done at the owner's direction after round 3 of the pilot, whose sections
+      were committed before the owner could read them; leaving sections
+      uncommitted is the recorded fallback if the worktree does not serve.
+      Integration against real temporary Git repositories
+      (`scripts/tests/test_round_worktree.py`, 11 passed): the worktree's status is
+      the round — modified, deleted, and new files, the change's own documents and
+      `openspec/changes/README.md` included, another change's directory at its
+      base; new files Git would quote and new tracked files `.gitignore` matches
+      appear; the change's directory removed in the round shows as deleted; the
+      base is the latest triaged validation; with none, the base must be given; a
+      second run replaces the worktree, also after its directory was deleted by
+      hand; a path that is not a worktree is never removed; an empty change name
+      and `archive` are refused; the checkout's `HEAD` and status are untouched.
+      `main()`'s output and the Make target are untested. Run once by hand on
+      `capacity-shape-envelope`: base `22bc1408` from `13-validation`, 21 files.
+
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
 proven only when a session follows them:

@@ -222,6 +222,7 @@ conclusion, the coverage of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and
 anything under "About the validation". Then say what comes next: the
 implementation round — this record, the implementation review of the same commit,
-and the owner's own notes — is triaged together in a fresh session,
+and the owner's own notes, read with `make round-diff CHANGE=<change>` — is triaged
+together in a fresh session,
 `make triage CHANGE=<change>`, which fixes what the owner accepts; the fix commit
 is then validated again.

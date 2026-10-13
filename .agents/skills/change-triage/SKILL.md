@@ -64,7 +64,9 @@ For an implementation round, also take:
   triage file saying so, so no later round picks it up again.
 - **The commits.** A review published by `make review` ends with
   `<!-- reviewed-commit: <commit> -->`; a validation record names its `Commit:`.
-  For a pasted external review, ask the owner which commit the reviewer saw. Name
+  For a pasted external review, ask the owner which commit the reviewer saw — a
+  snapshot from `make code-snapshot` names it, `<repository>-<short commit>.zip` —
+  and append the same `reviewed-commit` comment to the saved record. Name
   every record's commit at the top of its triage file, then compare them before
   anything else. When they differ, the records are a round
   only if the owner waives the rule, judging the changes between the commits: name
@@ -77,7 +79,9 @@ For an implementation round, also take:
   is a round of its own: a `passed` record with no `V<n>` needs only its triage
   file saying it confirms that commit; any `V<n>` is triaged like any finding, with
   the owner's notes asked for as usual.
-- **The owner's notes.** Ask for them if the owner has not pasted them. Save them
+- **The owner's notes.** Ask for them if the owner has not pasted them; the owner
+  reads the round with `make round-diff CHANGE=<change>`, which shows it as
+  uncommitted changes in a worktree beside the checkout. Save them
   exactly as pasted as the next numbered record, `NN-implementation-owner.md`.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and triage each point like any

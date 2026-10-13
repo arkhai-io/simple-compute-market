@@ -264,7 +264,9 @@ verbatim as a review record and triaged like any review: the triaging agent MUST
 state its own position on each point rather than carry it out as an instruction, and
 each disposition MUST be logged to the intervention ledger. Accepted fixes MUST pass
 the checks a section passes before they are committed, and the commit MUST be
-validated again. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
+validated again. The owner MUST be able to read a round as one set of changes from the
+commit the previous round ended on to the round's commit, without any commit being
+changed to show it. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
 unless the latest validation names `HEAD` and its result is `passed`, except where
 the owner overrides it.
 
@@ -280,6 +282,12 @@ the owner overrides it.
 - **THEN** triage names both commits and what changed between them, and treats
   them as one round only on the owner's recorded waiver; otherwise the reviewed
   commit is validated or the validated commit reviewed first
+
+#### Scenario: The owner reads a round committed section by section
+
+- **WHEN** the owner reads a round whose sections were each committed
+- **THEN** the round is shown as uncommitted changes over the commit the previous
+  round ended on, and the branch's commits are left as they are
 
 #### Scenario: Validation fails beside an implementation review
 

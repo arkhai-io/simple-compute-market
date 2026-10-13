@@ -558,6 +558,19 @@ context the workflow has stopped trusting.
   takes a position on each point as on any finding, disagreeing where the files say
   otherwise. Each point is logged to the ledger: one the owner raised and no
   reviewer did is the clearest sign of a check missing from the guidance.
+- **The owner reads the round as uncommitted changes.** Implementation commits
+  each section, so by the time the owner reads a round its diff is spread across
+  commits and the editor's source-control view, where the owner used to read
+  uncommitted work, is empty. `make round-diff CHANGE=` checks out the round's
+  base — the commit named by the latest triaged validation record, where the
+  previous round ended, or `BASE=` — in a disposable worktree beside the checkout,
+  and overlays `HEAD`'s files on it, leaving other changes' directories at the
+  base. The worktree's status and diff are then exactly the round, and nothing
+  about how commits are made changes, so review, validation, and triage still
+  describe one commit. A diff file was simpler but reads as a patch. Leaving
+  sections uncommitted until the owner has read them would restore the old view
+  directly, but validation and review would wait on the owner and describe no
+  commit; it stays the fallback if the worktree's experience does not serve.
 - **Triage fixes what the owner accepts, in the same session.** The fixes are
   checked as a section is — `change-implement`'s checks, the fresh-context
   compliance check among them — and committed as one commit, which is then
@@ -592,7 +605,8 @@ compares them. A round whose review and validation describe different commits is
 triaged together only when the owner waives the rule, judging the changes between
 them, and the waiver is logged to the ledger as a line under the review's record
 with `"finding": "commit"`. A pasted external review has no runner to record its
-commit; triage asks the owner which commit its reviewer saw and records it. A hard boundary would force a
+commit; triage asks the owner which commit its reviewer saw — a snapshot zip names
+it — and appends the same comment to the saved record. A hard boundary would force a
 re-review or re-validation whenever the commits drift, even when the owner can see
 the drift does not touch what was reviewed; the waiver keeps that judgement with
 the owner and on the record, as the waiver of a design re-review does.
