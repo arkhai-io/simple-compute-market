@@ -350,7 +350,7 @@ provisioning can trust two principals leaves it with no listing source.
       `seed_resources` startup step, `SystemService.seed_resources_if_empty`,
       `_DEFAULT_CSV_PATH`, and the `resources_csv_path`/`resources_csv_inline`
       settings including their `groups/config.py` documentation.
-- [ ] 5.2 Remove `host_csv_importer.py`, `resource_csv_importer.py`,
+- [x] 5.2 Remove `host_csv_importer.py`, `resource_csv_importer.py`,
       `SQLiteClient.upsert_hosts_from_csv` and `upsert_resources_from_csv*`,
       the `POST /api/v1/admin/portfolio/resources/import` route, its
       administrator route contract and `_resource_import_descriptor` in
@@ -371,6 +371,9 @@ provisioning can trust two principals leaves it with no listing source.
       `download.pytorch.org` is unreachable from the implementation
       environment, and a hand-edited lock is not acceptable, so the dependency
       stays declared until the locks can be regenerated, before closeout.
+      Done 2026-10-13: `python-multipart` removed and the storefront and
+      `e2e-tests` locks regenerated; `make check-packaging` passes and the
+      storefront app composes without it.
 - [x] 5.3 Remove the CLI surface: `cli_portfolio.py` and its `add_typer`
       registration in `cli.py`, and
       `domains/vms/storefront/scripts/import_resources_csv.py`, with
@@ -575,7 +578,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       gap mapping in `docs/development/ROADMAP.md`.
       Done 2026-10-11: Goal 1's current state and gap table updated; the
       retired-table drop stays a later follow-up.
-- [ ] 7.6 **Promotion.** Complete the design-promotion record below. Widen
+- [x] 7.6 **Promotion.** Complete the design-promotion record below. Widen
       `openspec/specs/storefront-publication/spec.md`'s rule that an unbacked
       listing is derived only from the site projection to every listing, and correct
       `docs/development/ARCHITECTURE.md`'s "Storefront capacity boundary", which
@@ -614,6 +617,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       fail-forward policy and extraction procedure in the operator documents
       named in task 4.6, and list the retired settings to remove, noting that
       the chart and `config set` refuse them while the runtime ignores them.
+      Done 2026-10-13, after implementation review: the delta is applied to
+      `openspec/specs/storefront-publication/spec.md` (four requirements
+      replaced in place, two modified, one added) with its Evidence
+      reconciled; the companion, `settlement-configuration/architecture.md`,
+      and `ARCHITECTURE.md` are corrected as listed. The operator documents
+      were updated under 4.6 and 5.5. Stale production docstrings the
+      review found (`utils/sqlite_client.py`, `ComputeResource`) are
+      corrected in code. Both specifications and this change validate.
 - [x] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
@@ -653,19 +664,19 @@ Per `openspec/README.md#plan-closeout-requirements`.
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
       the root declaration.
-      Done 2026-10-11: `make check-packaging` passes. `python-multipart` is
-      still declared (see 5.2), so no lock changed.
+      Done 2026-10-11: `make check-packaging` passes; it passes again after
+      the 2026-10-13 relock that dropped `python-multipart` (see 5.2).
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
 | The storefront holds no physical-resource, host, or physical-allocation authority | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority" |
-| Projection-backed derivation is the only listing-candidate path, not the default one | `openspec/specs/storefront-publication/spec.md` — "Storefronts cache independent site projections" (modified) |
+| Projection-backed derivation is the only listing-candidate path, not the default one | `openspec/specs/storefront-publication/spec.md` — "Projection-backed listing candidate derivation", replacing "Storefronts cache independent site projections"; the unbacked-listing and inline-reconciliation rules widened to every listing; companion `architecture.md` — "Unknown sites and inline reconciliation" |
 | A site whose projection is not held yields no listing from any other source | `openspec/specs/storefront-publication/spec.md` — "A site whose projection is not held holds its listings" (modified) |
-| Projection is the only listing-candidate origination path; no local-table path or configuration option selects another source | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" |
+| Projection is the only listing-candidate origination path; no local-table path or configuration option selects another source | `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary"; its host-naming paragraph no longer names storefront inventory tables as a live exception |
 | The site-scoped store is the only storefront-override tier; the legacy home-site record retires with the import that wrote it, and its values are not carried over | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier", replacing "Storefront pool overrides are site-scoped and durable" |
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "The legacy override tier retires with the import, without carry-over" |
-| Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" frozen-table paragraph names the inventory tables beside `compute_allocations` |
+| Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes, startup migrations included | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" frozen-table paragraph names the inventory tables beside `compute_allocations` |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the retired migrations leave the chain rather than being gated or emptied, why `20260604_003` stays without reading a retired table, and why the core timestamp migration covers `listings` only | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
 | Retired settings are refused at chart render and by `config set`, as retired settlement settings are, and ignored at runtime | `openspec/specs/deployment-state/spec.md` (existing retired-values rule, no text change); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
