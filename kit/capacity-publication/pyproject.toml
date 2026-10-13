@@ -6,7 +6,6 @@ description = "Schema-opaque capacity projection and storefront publication life
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-core-storefront==0.11.0",
-    "arkhai-core-registry-client>=0.12.1",
     "arkhai-kit-site-client>=0.9.0",
 ]
 
