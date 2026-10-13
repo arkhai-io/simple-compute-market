@@ -47,20 +47,25 @@ so.
 | `roles/<name>` | composition | executable |
 | `domains/<scope>/…/<last>` | by kind | the last segment if it names a kind, else a `-<kind>` suffix, else library |
 
-Kinds are five: `library`, `executable`, `contracts`, `client`, `plugin`. A
-`-<kind>` suffix is read only when the word after the hyphen is one of the kind
-words; `kit/capability-shape` is a library, not a kind "shape". A last segment or
-suffix naming an executable role (`storefront`, `buyer`, `service`, `app`) yields
-`executable`; `adapter`, `vocabulary`, `listings`, `negotiation`, and
-`settlement` are descriptive segments that yield `library` — what a VM
-specialization is about is not a kind. The reading needs no special case for a
-vocabulary project at a scope directory's root or for the nested
-`domains/apicredits/middleware/python`: both classify as libraries in the right
-scope. Where the current tree does not match these readings, an **override row**
-states the attributes and names the change that will move the project; the row
-fails once the path conforms.
+Kinds are four: `library`, `executable`, `contracts`, `client`. Being a plugin is
+a property, not a kind (below). The words a reading may take are the kind words
+`contracts` and `client` and the executable role words `storefront`, `buyer`,
+`service`, and `app`; a last segment or `-<word>` suffix is read only when it is
+one of them, so `kit/capability-shape` is a library, not a kind "shape", and
+`domains/apicredits/sample-app` is an executable through `app`. A role word
+yields `executable`. Role words are not read under `kit/`, because a kit composes
+nothing: `kit/storefront` is a library. `adapter`, `vocabulary`, `listings`,
+`negotiation`, and `settlement` are descriptive segments that yield `library` —
+what a VM specialization is about is not a kind. Under `domains/`, an executable
+is in the composition layer and every other kind in the specialization layer. The
+reading needs no special case for a vocabulary project at a scope directory's
+root or for the nested `domains/apicredits/middleware/python`: both classify as
+libraries in the right scope. Where the current tree does not match these
+readings, an **override row** states the attributes and names the change that
+will move or rename the project; the row fails once the path conforms or once a
+scope element it grants goes unused.
 
-### A plugin is a registrant in a listed group, not any entry point
+### A plugin is a registrant in a listed group, and a property rather than a kind
 
 The first draft made any non-console entry point a plugin that nothing may
 import. That fails correct code: `arkhai-vms` and `arkhai-bare-metal` register
@@ -71,11 +76,21 @@ therefore lists the **plugin groups** — `market.buyer_domains`,
 `market.storefront_contributions`, `market.delivery_sinks` — and a package that
 registers into one is a plugin. A group may name an **owner**, the package that
 discovers the group and may also register into it; `kit/delivery` owns
-`market.delivery_sinks`, so its built-in sinks are a library and
-`kit/delivery-apprise` is a plugin. Every other group is an extension point
-libraries contribute to and confers no kind. The in-degree rule is about imports:
-a host declares a plugin to have it installed, and that declaration is judged by
-the scope rule like any other.
+`market.delivery_sinks`, so its built-in sinks do not make it a plugin and
+`kit/delivery-apprise` is one. Every other group is an extension point libraries
+contribute to and confers nothing.
+
+The first draft also made plugin a kind, which left a project with a role name
+that registers into a plugin group — every buyer, and the VM storefront, which
+has console scripts and registers a storefront contribution — with two kinds and
+no layer: the `domains/` reading takes its layer from its kind. Plugin is
+therefore a property a package of any kind may have. Layer and kind come from the
+path and name as for every other package, so a buyer is an executable in the
+composition layer that is a plugin, and `kit/delivery-apprise` is a kit library
+that is one. The property adds exactly one rule, in-degree, and the rule is about
+imports: a host declares a plugin to have it installed, and that declaration is
+judged by the scope rule like any other. Nothing imports a plugin on the current
+tree; the VM and bare-metal storefronts only declare them.
 
 ### Declarations are dependencies
 
@@ -120,7 +135,10 @@ form handling, a plugin to install, or an optional extra with no static import.
 gives it no home, so the rules file has a **declarations table** — distribution,
 dependency, reason — and the warning applies only to a declared internal
 distribution with neither an import nor a row, which lets it become a failure
-later. Declared external distributions are not examined. The scan on 2026-10-11
+later. External distributions are not examined in either direction: mapping a
+third-party import root to its distribution needs installed metadata the
+stdlib check does not have, and a project's own environment already fails on an
+undeclared third-party import when its tests or type check run. The scan on 2026-10-11
 found six projects with undeclared direct internal imports —
 `arkhai-core-storefront`, `arkhai-apicredits-buyer`, `arkhai-bare-metal-storefront`,
 `arkhai-kit-alkahest`, `arkhai-kit-policy`, and `arkhai-kit-storefront`
@@ -136,20 +154,20 @@ seven projects with no import; the audit classifies each as a row or a removal.
 | cycle | a same-layer strongly connected component has more than one package | fail |
 | scope subset | `scope(dst) ⊄ scope(src)` | fail |
 | layer/scope | a scope violates its layer's bounds, or a kit holds `{m}` without being `m`'s kit | fail |
-| undeclared import | an imported distribution is not declared | fail |
+| undeclared import | an imported internal distribution is not declared | fail |
 | unused declaration | a declared internal distribution has neither an import nor a declarations-table row | warn |
-| kind budget | a `contracts`, `client`, or `plugin` package exceeds its budget (below) | fail once the audit shows the kind clean |
-| plugin in-degree | any package imports a `plugin`; declaring one is permitted | fail |
+| kind budget | a `contracts` or `client` package exceeds its budget (below) | fail once the audit shows the kind clean |
+| plugin in-degree | any package imports a plugin; declaring one is permitted | fail |
 | vocabulary | a package's string literals contain a scope element's token outside its scope | warn; fail at core and kit after one cycle |
-| exception expiry | an `[[exceptions]]` row names an edge or token that no longer exists | fail |
-| override expiry | an `[overrides]` row names a path that now classifies without it | fail |
+| exception expiry | an `[[exceptions]]` row excuses no current finding: its edge or token is gone, or the edge no longer breaks the rule the row names | fail |
+| override expiry | an `[overrides]` row names a path that now classifies without it, or grants a scope element that none of the project's edges uses | fail |
 
 Kind budgets: `contracts` may depend on core, foundation kits, and its own
 family's vocabulary; `client` on its contracts, core, the identity kit, and an
-HTTP library; `plugin` on anything, but nothing depends on it. These are the
-reviewed refinement of the first draft, which allowed a client no core carriers
-and a family contract no family vocabulary; both were wrong for packages that
-exist today.
+HTTP library. These are the reviewed refinement of the first draft, which
+allowed a client no core carriers and a family contract no family vocabulary;
+both were wrong for packages that exist today. A plugin has no budget beyond its
+layer and scope; its constraint is the in-degree rule.
 
 ### Audit before gate
 
@@ -164,12 +182,31 @@ exercise in loosening rules or adding exceptions after the fact.
 
 ### Exceptions are owned and expire
 
-Every row carries the owning change and the date. A row is deleted by the change
-that owns it at closeout; a row whose edge is already gone fails the check, so a
-change cannot fix the code and forget the row, and a change cannot re-add the edge
-without the check naming it. `--strict` ignores the table and shows the full set.
-Once the gate exists, the table is the authoritative list of divergences and
+Every row carries the owning change, the rule it excuses, and the date. A row is
+deleted by the change that owns it at closeout. A row that excuses no current
+finding fails the check — whether its edge is gone or the edge no longer breaks
+the named rule — so a change cannot fix the code and forget the row, a rule
+revision cannot leave a row excusing nothing, and a row cannot be seeded for an
+edge the rules do not report. A change cannot re-add the edge without the check
+naming it. `--strict` ignores the table and shows the full set. Once the gate
+exists, the table is the authoritative list of divergences the check can see and
 `ARCHITECTURE.md`'s paragraph points at it.
+
+### Overrides state attributes, exceptions excuse defects
+
+The two tables are not interchangeable. An override asserts what a project truly
+is when its path says otherwise: its layer, kind, or scope is right and only its
+place in the tree is wrong, so the row is owned by the change that moves or
+renames it. An exception excuses an edge that is wrong, so the row is owned by the
+change that removes the edge. Using an override for a defect would record a
+violation as the package's real scope, and the scope rule would then pass every
+later edge of the same shape.
+
+An override expires when its path classifies without it, and also when it grants
+a scope element none of the project's edges uses. The second condition is what
+makes "the row expires either way" true: a package whose mechanism import is
+removed before it is renamed would otherwise keep a grant for knowledge it no
+longer has.
 
 ### The check joins `make check-packaging`
 
@@ -184,7 +221,7 @@ existing deployment-contracts CI job, which it can, since it needs plain
 
 ### Per-package tests are subsumed, not deleted in bulk
 
-Each of the eighteen tests is retired in its own commit, after the repository check
+Each retired test is retired in its own commit, after the repository check
 has been shown to fail on the synthetic violation that test fails on, and after the
 owning change for any edge the local test guarded has closed, so no local guard is
 removed while the global check still excuses its edge. Several assert things the
@@ -193,9 +230,37 @@ repository rules express directly (`kit/fulfillment` forbids
 VM package: a scope rule). `core/tests/unit/test_domain_boundaries.py` already
 scans for `CONCRETE_IDENTITIES` literals and becomes the three domains' `tokens`.
 `kit/settlement-runtime`'s test forbids external packages (`fastapi`, `httpx`,
-`eth_account`), which becomes an `external_budget` on its row. The provisioning
-service's test allowlists two adapter entrypoints the repository check cannot
-model and is kept.
+`eth_account`), which becomes an `external_budget` on its row.
+
+A test is kept, not retired, when it asserts something the repository check
+cannot express. Two are known: the provisioning service's test, which allowlists
+two adapter entrypoints, and `kit/site`'s, if `inject-site-pool-authority` keeps
+the pool authority repository-wide and adds `market_resource_pools` to the
+modules that test forbids — a kit-to-kit edge the layer and scope rules allow and
+the kit-area order forbids. Retiring a test is therefore a per-test judgement
+against the check's rules, not a count to reach.
+
+### The kit-area order is not encoded
+
+`ARCHITECTURE.md`'s kit areas — foundation, authority, fulfillment, storefront
+role composition, with the mechanism kits beside the foundation — are a map of
+where a capability lives and what it may build on, not a second ordering inside
+the kit layer. Encoding them would reintroduce the per-layer sub-ordering the
+layer model deliberately rejected, and would put every kit's area in the rules
+file as a classification the path does not carry. The check holds the layer and
+scope rules only; an edge between two kits that both allow is a review finding,
+guarded where it matters by that kit's own boundary test.
+
+The cost is that the check cannot see `kit/site` → `kit/resource-pools`: both are
+kits of empty scope and the edge forms no cycle. That edge is owned by
+`inject-site-pool-authority`, and both of its outcomes become visible without new
+machinery. If the pool authority becomes a compute family-kit distribution, the
+edge is `{}` → `{compute}` and the scope rule fails it. If the authority stays
+repository-wide, the port removes the import and `kit/site`'s boundary test
+guards against its return. No exception row is seeded for it, nor for
+`apicredits_service` → `kit/resource-pools`, which is a composition depending on
+a kit and legal until the authority is scoped, at which point the scope rule
+reports it; a row for either would excuse nothing and fail exception expiry.
 
 ## What the rules deliberately do not catch
 
@@ -203,7 +268,9 @@ So that no one expects them to: the VM storefront importing `kit/site`'s matchin
 predicate passes layer and scope and is an ownership judgement; `kit/alkahest`
 reading a user configuration file is a content rule; the provisioning service is a
 family composition and which of its modules may name an adapter is a wiring
-judgement. Each is owned elsewhere. The ownership question in `ARCHITECTURE.md` is
+judgement; and a kit-to-kit edge the kit-area order forbids but layer and scope
+allow, such as `kit/site` → `kit/resource-pools` today, is a placement judgement.
+Each is owned elsewhere. The ownership question in `ARCHITECTURE.md` is
 the review's, by design.
 
 ## Resolved questions
@@ -211,13 +278,26 @@ the review's, by design.
 - **Rules file home.** `ARCHITECTURE.toml` under `docs/development`. Forced:
   `make check-comment-hygiene` rejects any `.toml` outside `docs/` and `openspec/`
   that names a change directory, and every exception row names its owning change.
-- **Mechanism in the name for existing specializations.** Override rows, no
-  renames here. `arkhai_vms_settlement`, `arkhai_vms_listings`,
-  `arkhai_vms_negotiation`, and `arkhai_apicredits` (which imports both
-  `kit/alkahest` and `kit/arkhai-payments`) each get a row naming
-  `align-package-paths-with-layers` as the change that renames them and noting
-  that `move-escrow-into-alkahest` may remove the import first; a row expires
-  either way.
+- **Mechanism in the name for existing specializations.** No renames here, and
+  the four packages importing a mechanism kit without naming it split by what the
+  import is. `arkhai_vms_settlement` and `arkhai_apicredits` (which imports both
+  `kit/alkahest` and `kit/arkhai-payments`) legitimately know their mechanisms and
+  get override rows owned by `align-package-paths-with-layers`, which renames
+  them. `arkhai_vms_listings` and `arkhai_vms_negotiation` import `kit/alkahest`
+  as a defect `move-escrow-into-alkahest` removes, and get exception rows owned by
+  that change. Every row expires either way: an override once its path conforms or
+  its grant goes unused, an exception once its edge is gone.
+- **The kit-area order.** Not encoded; see "The kit-area order is not encoded".
+  `kit/site` → `kit/resource-pools` is left to `inject-site-pool-authority`, whose
+  outcomes the check sees through the scope rule or that kit's own boundary test.
+- **Plugin as kind.** Plugin is a property, not a kind; see "A plugin is a
+  registrant in a listed group, and a property rather than a kind".
+- **Which per-package test retires first.** Not a design decision. The criteria are
+  in "Per-package tests are subsumed, not deleted in bulk": a test retires only
+  after `check-architecture` runs in CI, after the check fails on that test's
+  synthetic violation, and after every owning change for an edge it guarded has
+  closed; a test asserting what the check cannot express is kept. The plan orders
+  retirements by when those conditions hold.
 - **Vocabulary projects at a scope root, and nested paths.** No rule and no
   override: the path reading classifies `domains/vms/domain`, the three root
   vocabulary projects, and `domains/apicredits/middleware/python` as libraries in
@@ -240,7 +320,4 @@ the review's, by design.
 
 ## Open questions
 
-- **Which per-package test retires first.** The order should follow which owning
-  changes close first, so that no local test is deleted while the global check still
-  excuses the edge it guarded, and so that a test running in the CI matrix is not
-  removed before `check-architecture` runs there.
+None. The design is ready for planning.

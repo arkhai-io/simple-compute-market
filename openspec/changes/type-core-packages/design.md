@@ -32,8 +32,9 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
   per-package ratchet either fails on these, because the project's own environment
   does not install them, or hides them behind ignores that erase the architectural
   fact. `ARCHITECTURE.md` lists the undeclared imports under "Where the current tree
-  diverges" and `enforce-package-layers`'s exceptions table carries them under this
-  change. Suggested resolution: add "every distribution the source imports is declared,
+  diverges". `enforce-package-layers`'s exceptions table carries the internal one,
+  `market_alkahest`, under this change; that check maps only internal import roots
+  to distributions, so `web3` and `fastapi` are this ratchet's to catch. Suggested resolution: add "every distribution the source imports is declared,
   and every declared internal distribution is imported or carries a stated runtime
   reason" to the acceptance criterion for every ratcheted package, and sequence the `core/storefront` step after
   `kit-owned-storefront-auth-and-persistence` and `move-escrow-into-alkahest` decide

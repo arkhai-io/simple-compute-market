@@ -56,9 +56,11 @@ In two phases. The first is a report; nothing gates until the second.
 **Gate.**
 
 - An **exceptions** table in the rules file, seeded from the baseline's defects,
-  each row naming its owning change and date. A row whose edge no longer exists
-  fails, and an override row whose path now conforms fails, so neither table
-  outlives its cause.
+  each row naming its owning change, the rule it excuses, and the date. An
+  exception row that excuses no current finding fails, and an override row fails
+  once its path conforms or its grant goes unused, so neither table outlives its
+  cause. An override states what a project truly is; an exception excuses a
+  defect.
 - Four check scripts in `check_project_layout.py`'s shape under
   `make check-architecture`, which `make check-packaging` runs and the
   deployment-contracts CI job runs on every push;
@@ -67,10 +69,11 @@ In two phases. The first is a report; nothing gates until the second.
   warn rather than fail; the kind budgets fail only for rules the audit showed
   clean or seeded.
 - Tests in `scripts/tests/` with a passing and a failing synthetic tree per rule.
-- The eighteen per-package boundary tests are retired one package per commit, each
-  only after the repository check fails on the same synthetic violation the local
-  test fails on. The provisioning service's adapter-entrypoint allowlist, which the
-  repository check does not model, stays.
+- The per-package boundary tests are retired one package per commit, each only
+  after the repository check runs in CI and fails on the same synthetic violation
+  the local test fails on. A test asserting what the repository check cannot
+  express stays: the provisioning service's adapter-entrypoint allowlist, and
+  `kit/site`'s test if it comes to forbid `market_resource_pools`.
 
 ## Capabilities
 
@@ -98,19 +101,26 @@ None.
   composition root may name a contribution all pass the graph rules and remain
   review judgements (`negotiation-capacity-feasibility-probe`,
   `move-escrow-into-alkahest`, `resolve-compute-family-findings`).
+- No ordering inside the kit layer. `ARCHITECTURE.md`'s kit areas are a map, not a
+  checked rule; a kit-to-kit edge layer and scope allow, such as `kit/site` →
+  `kit/resource-pools`, is a review finding guarded by that kit's own test, and
+  becomes a scope finding if `inject-site-pool-authority` scopes the pool
+  authority to the compute family.
 - No scanning of `tests/` directories.
 
 ## Impact
 
 - Affected code: `scripts/` (one library, five scripts, one test module),
   `Makefile` (six targets, one addition to `check-packaging`), one CI workflow
-  step, the eighteen boundary tests (retired), and the new `ARCHITECTURE.toml`
+  step, the per-package boundary tests (retired where the check expresses what
+  they assert), and the new `ARCHITECTURE.toml`
   beside `docs/development/ARCHITECTURE.md`.
 - Affected documentation: `docs/development/ARCHITECTURE.md` (the "Where the current
   tree diverges" paragraph becomes a pointer to the exceptions table, and the kind
   conventions and budgets this change owns are promoted once they hold),
   `docs/development/BUILD_AND_PACKAGING.md` (names the check), `AGENTS.md` (the
-  interim "enforced by review" sentence is removed).
+  interim "enforced by the per-package boundary tests and by review" sentence
+  names the check, the tests it keeps, and review for what neither expresses).
 - Every open change that owns an exception row gains a closeout obligation it
   already had in prose: the row must be gone when the change archives.
 
@@ -120,9 +130,11 @@ None.
   findings can cite the baseline; the gate follows the baseline's review.
 - `align-package-paths-with-layers` deletes the overrides this change seeds.
 - `kit-owned-storefront-auth-and-persistence`, `kit-owned-storefront-shell`,
-  `move-escrow-into-alkahest`, `inject-site-pool-authority`,
-  `deduplicate-dynaconf-bootstrap`, and `type-core-packages` each own findings;
-  their designs carry the gating question.
+  `move-escrow-into-alkahest`, `deduplicate-dynaconf-bootstrap`, and
+  `type-core-packages` each own findings; their designs carry the gating question.
+- `inject-site-pool-authority` owns no exception row: its edge is invisible to the
+  layer and scope rules until it scopes the pool authority, and is otherwise
+  guarded by `kit/site`'s own boundary test.
 - `shorten-long-requirements` restructures `market-composition`'s requirements;
   the scenario split here should follow its form.
 
