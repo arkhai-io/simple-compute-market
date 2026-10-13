@@ -31,14 +31,14 @@ from core_storefront.models.system_models import (
     IdentityStatusResponse,
 )
 from core_storefront.stage_log import stage_event
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
@@ -53,8 +53,6 @@ from market_storefront.models.capacity_admin_models import (
     FulfillmentEventResponse,
     FulfillmentFailedEventRequest,
     FulfillmentStartedEventRequest,
-    ImportResourcesResponse,
-    ImportRowError,
     InterruptDealRequest,
     InterruptDealResponse,
     ReleaseReservationsResponse,
@@ -86,18 +84,10 @@ from market_capacity_publication import (
     CapacityBindingError,
     remote_site_clients,
 )
-from market_storefront.settlement_composition import (
-    build_storefront_publication_clause_compiler,
-)
-from market_storefront.utils.config import ESCROW_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
-# States that the release-reservations endpoints transition back to
-# ``available``. ``reserved`` is the in-flight provisioning hold;
-# ``leased`` is the post-fulfillment hold for the duration of the lease.
-# Anything else (``available``, ``deleted``, etc.) is a no-op.
-_HELD_STATES = frozenset({"reserved", "leased"})
+# Site-ledger reservation states that still hold capacity.
 _INTERRUPTIBLE_HELD_STATES = frozenset(
     {"reserved", "provisioning", "leased", "releasing"}
 )
@@ -551,89 +541,6 @@ class AdminController:
         except PoolOverrideRouteError as exc:
             raise self._http(exc) from exc
 
-    @router.post(
-        "/portfolio/resources/import",
-        response_model=ImportResourcesResponse,
-        summary="Bulk-import compute resources from a CSV file (admin)",
-    )
-    async def import_resources(
-        self,
-        file: UploadFile = File(  # noqa: B008
-            ..., description="Compute resource CSV file."
-        ),
-    ) -> ImportResourcesResponse:
-        """Upload a CSV file and upsert resource rows into the portfolio.
-
-        Upsert semantics: rows present in the file are inserted or updated;
-        rows absent from the file are not touched. Always upserts regardless
-        of whether the table is already populated — use this to force a
-        clobber of the current inventory.
-
-        The CSV must contain at minimum a ``resource_type`` column. Rows that
-        fail schema validation are counted in ``failed_count`` and skipped
-        without rolling back successfully imported rows. The first failing
-        rows surface via ``errors[]`` (capped at 50) so the caller doesn't
-        have to attach a debugger to see what went wrong.
-
-        Example::
-
-            curl -X POST http://localhost:8001/api/v1/admin/portfolio/resources/import \\
-                 -H "X-Admin-Key: <key>" \\
-                 -F "file=@/path/to/resources.csv"
-        """
-        try:
-            csv_content = (await file.read()).decode("utf-8")
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400, detail=f"Could not read uploaded file: {exc}"
-            ) from exc
-        try:
-            report = await self._db.upsert_resources_from_csv_content(
-                csv_content=csv_content,
-                source_label=f"admin-import:{file.filename or 'upload'}",
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        logger.info(
-            "[ADMIN] Resource import: %d imported, %d failed, %d total rows (file=%s)",
-            report.get("imported_count", 0),
-            report.get("failed_count", 0),
-            report.get("total_rows", 0),
-            file.filename,
-        )
-        # Surface up to 50 per-row failures so operators can see what's
-        # wrong without shell access. The full report.rows[] is also
-        # logged below, capped lower per line.
-        failed_rows = [
-            row for row in report.get("rows") or [] if not row.get("imported")
-        ]
-        errors_payload = [
-            ImportRowError(
-                row_number=int(row.get("row_number") or 0),
-                resource_id=row.get("resource_id"),
-                resource_type=row.get("resource_type"),
-                errors=list(row.get("errors") or []),
-            )
-            for row in failed_rows[:50]
-        ]
-        for row in failed_rows[:20]:
-            logger.warning(
-                "[ADMIN] CSV row %s (%s) failed: %s",
-                row.get("row_number"),
-                row.get("resource_id") or "<no id>",
-                "; ".join(row.get("errors") or []),
-            )
-        if report.get("imported_count"):
-            await self._mirror_resources_to_site_authority("import")
-        return ImportResourcesResponse(
-            imported_count=report.get("imported_count", 0),
-            failed_count=report.get("failed_count", 0),
-            total_rows=report.get("total_rows", 0),
-            errors=errors_payload,
-        )
-
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
         if isinstance(value, dict):
@@ -768,18 +675,6 @@ class AdminController:
         source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
         return reservation, CapacityBinding(site_id, "vm", source_id), None
 
-    async def _mirror_resources_to_site_authority(self, source: str) -> None:
-        """Compatibility no-op for callers completing local admin mutations.
-
-        Provisioning inventory is authoritative and storefront projections are
-        pull-synchronized. Storefront admin mutations must not push inventory
-        into the provisioning ledger.
-        """
-        logger.debug(
-            "[ADMIN] Skipping deprecated storefront inventory push after %s",
-            source,
-        )
-
     async def _apply_fulfillment_event(
         self,
         *,
@@ -854,11 +749,6 @@ class AdminController:
     def _capacity(self) -> Any:
         return self._runtime().client()
 
-    def _site_topology(self) -> tuple[str | None, int]:
-        """Return the configured home site and exact site count."""
-        sites = self._runtime().site_ids
-        return next(iter(sites), None), len(sites)
-
     async def _member_availability(self) -> dict | None:
         """Aggregated site availability, or None when unobtainable.
 
@@ -885,23 +775,21 @@ class AdminController:
         from arkhai_vms_listings.reconciler import stale_open_listing_ids
 
 
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
         await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        projection = site_pool_projection()
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             configured_sites=self._runtime().site_ids,
             member_availability=availability,
             # The same source publication derives from, so reconciliation here
             # cannot close a listing publication would keep.
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            site_capacity_buckets=site_capacity_buckets(),
             backed_only=True,
             shape_feasible=vm_shape_feasibility(),
         )
@@ -919,20 +807,18 @@ class AdminController:
         from arkhai_vms_listings.reconciler import closed_available_listing_ids
 
 
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
         await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        projection = site_pool_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             member_availability=availability,
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            site_capacity_buckets=site_capacity_buckets(),
             shape_feasible=vm_shape_feasibility(),
             configured_sites=self._runtime().site_ids,
         )
@@ -1222,16 +1108,13 @@ class AdminController:
     @router.post(
         "/portfolio/release-reservations",
         response_model=ReleaseReservationsResponse,
-        summary="Release every held compute resource back to available (admin)",
+        summary="Release every held site reservation (admin)",
     )
     async def release_reservations(self) -> ReleaseReservationsResponse:
-        """Release every held reservation and reset held local rows.
+        """Release every held reservation at every configured site.
 
         Releases each ``reserved``, ``provisioning``, ``leased``, or
-        ``releasing`` reservation at every configured site, then returns
-        local resource rows still ``reserved`` or ``leased`` to
-        ``available`` so the local listing view stops advertising them as
-        held. Rows in any other state are left alone, and repeating the call
+        ``releasing`` reservation in each site's ledger. Repeating the call
         releases nothing new.
 
         This is fleet-wide cleanup: end-to-end teardown between runs against
@@ -1239,23 +1122,11 @@ class AdminController:
         holds is known to be gone. A single reservation is released by the
         provisioning service's ``capacity_released`` event instead.
         """
-        released = list(await self._release_site_ledger_holds())
-
-        for r in await self._db.list_resources():
-            if r.get("state") not in _HELD_STATES:
-                continue
-            resource_id = str(r["resource_id"])
-            await self._db.apply_resource_transition(
-                resource_id=resource_id,
-                event_type="reservation_released_by_admin",
-                idempotency_key=f"admin-release:{resource_id}:{r.get('updated_at', '')}",
-                set_state="available",
-            )
-            released.append(resource_id)
+        released = await self._release_site_ledger_holds()
 
         if released:
             logger.info(
-                "[ADMIN] Released %d held resource(s): %s",
+                "[ADMIN] Released %d site reservation(s): %s",
                 len(released),
                 released,
             )

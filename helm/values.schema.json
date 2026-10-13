@@ -507,7 +507,8 @@
             },
             "privKey": false,
             "privateKey": false,
-            "walletPrivateKey": false
+            "walletPrivateKey": false,
+            "resourcesCsvInline": false
           }
         },
         "agentId": false,
@@ -527,7 +528,16 @@
                 "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
                 "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
                 "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
-                "^[cC][hH][aA][iI][nN]$": false
+                "^[cC][hH][aA][iI][nN]$": false,
+                "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[pP][aA][tT][hH]$": false,
+                "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[iI][nN][lL][iI][nN][eE]$": false,
+                "^[eE][sS][cC][rR][oO][wW]_[tT][eE][mM][pP][lL][aA][tT][eE][sS]$": false,
+                "^[cC][aA][pP][aA][cC][iI][tT][yY]$": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[uU][sS][eE]_[sS][iI][tT][eE]_[pP][rR][oO][jJ][eE][cC][tT][iI][oO][nN]_[fF][oO][rR]_[lL][iI][sS][tT][iI][nN][gG][sS]$": false
+                  }
+                }
               }
             }
           ]

@@ -2,7 +2,7 @@
 
 VM's run of the compute family's canonical deal. The stages VM shares with
 bare metal are defined once in ``helpers/compute_deal_stages.py`` and declared
-here, in order, by subclassing; VM's own stages (00f, 02b, 03a, 03b, 09a2, 09bb)
+here, in order, by subclassing; VM's own stages (02b, 03a, 03b, 09a2, 09bb)
 are inserted in place, and ``VmComputeDealDriver`` supplies VM's part of the
 shared ones.
 
@@ -16,8 +16,6 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00c2 Contract pins agree:     storefront and provisioning report one major
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
   00e  Provisioning mock mode:  GET /api/v1/system/status → execution.mocked
-  00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
-                                upserts the compute row this test needs
   00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
                                 gates Phase 7b (on-chain escrow verification)
   00h  Provisioning→storefront: GET provisioning /api/v1/system/status →
@@ -151,7 +149,7 @@ pytestmark = [
 ]
 
 # ---------------------------------------------------------------------------
-# VM's listing: the offer, its escrow advertisement, and its resource row
+# VM's listing: the offer and its escrow advertisement
 # ---------------------------------------------------------------------------
 
 OFFER_RESOURCE = {
@@ -159,9 +157,8 @@ OFFER_RESOURCE = {
     # offering mode its domain binding selected.
     "offering_mode": "vm",
     "interruptible": True,
-    # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
-    # storefront admin API so it does not depend on a mounted resource file.
-    "resource_id": "compute-e2e-deal-001",
+    # The resource stage 00f1 declares at the site for this scenario.
+    "resource_id": E2E_RESOURCE_ID,
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,
@@ -197,10 +194,6 @@ def _recipient_demands(seller_wallet: str) -> list[dict]:
     }]
 
 
-E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
-"""
-
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
@@ -231,45 +224,6 @@ class TestStage00d_NegotiationStrategy(Stage00d_NegotiationStrategy):
 
 class TestStage00e_ProvisioningMockMode(Stage00e_ProvisioningMockMode):
     pass
-
-
-class TestStage00f_ResourceSeed:
-    def test_00f_imports_e2e_resource_inventory(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Import the compute resource row required by this scenario.
-
-        The e2e deal should not depend on a container-mounted CSV. Importing
-        an inline fixture through the admin API keeps this scenario
-        self-contained while exercising the same upsert path operators use.
-        """
-        require_state(
-            deal_state, "_lifecycle_paused", "_storefront_healthy",
-            "_provisioning_mock_mode", "_contract_pins_agree",
-        )
-
-        result = storefront_admin_client.admin_import_resources(
-            E2E_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-deal-resources.csv",
-        )
-        assert result.failed_count == 0, (
-            f"E2E resource import failed for {result.failed_count} row(s): {result}"
-        )
-        assert result.imported_count >= 1, (
-            f"Expected at least one imported resource row, got: {result}"
-        )
-
-        status = storefront_admin_client.get_system_status()
-        assert (status.resource_count or 0) >= 1, (
-            f"Storefront still reports no resources after import: {status}"
-        )
-
-        deal_state._resources_seeded = True
-        log.info(
-            "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
-            E2E_RESOURCE_ID,
-            status.resource_count,
-        )
 
 
 class TestStage00f1_ExecutorHostRegistry(Stage00f1_ExecutorHostRegistry):
@@ -303,7 +257,7 @@ class TestStage02b_CreateListingPaused:
           3. registry GET does NOT contain the listing
         """
         require_state(
-            deal_state, "_resources_seeded", "_registry_reachable", "_supply_seeded",
+            deal_state, "_registry_reachable", "_supply_seeded",
         )
 
         resp = storefront_seller_client.create_listing(
@@ -502,8 +456,7 @@ class TestStage09a2_CapacityEventCycle:
             f"head={pending['feed_head']!r})"
         )
 
-        # Projections before deltas. With `use_site_projection_for_listings`
-        # on (the shipped default) the close path decides from the
+        # Projections before deltas. The close path decides from the
         # storefront's own projection cache, and only the site-projections
         # loop refills it -- held here like every other loop. Applying the
         # deltas against a pre-deal projection closes nothing however many of

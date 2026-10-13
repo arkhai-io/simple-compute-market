@@ -17,7 +17,6 @@ port                = 8002
 base_url            = "http://alice-storefront:8002/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/alice.log"
-resources_csv_path  = "/app/resources.csv"
 
 # Timer-loop intervals, shortened for this stack only. A scenario pauses the
 # storefront and then advances each loop deliberately, and a pause is observed

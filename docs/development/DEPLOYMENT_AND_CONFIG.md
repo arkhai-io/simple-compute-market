@@ -509,7 +509,9 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
   its declarations, which reservations match.** A VM listing's claim requests the
   region and model it publishes, so a pool whose listings claim a region or model
   no member declares publishes nothing and is reported per pool; a region stated
-  only on the pool publishes nothing.
+  only on the pool publishes nothing, and a pool stating no region is held by
+  publication: nothing new publishes, its listings are neither refreshed nor
+  closed except for availability, and system status names it.
 - **A bare-metal declaration describes one whole machine.** Set
   `capacity.units` to `1`, and state its hardware under the compute family's
   capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and
@@ -566,7 +568,19 @@ stays recorded wherever it was applied, because the migration engine skips
 recorded IDs it no longer lists. The ID is never reused. A database that had
 not yet applied it never does, so the frozen table keeps whichever shape it
 already had. The VM storefront's `compute_allocations` table is frozen this
-way.
+way, as are its retired inventory tables: `resources`, `hosts`,
+`resource_transition_events`, `compute_pool_members`, and
+`compute_capacity_pools` (or `compute_inventory_pools`, on a database that
+never applied the rename). Their rows stay as an operator's input for
+declaring the same inventory at provisioning; the storefront neither reads nor
+writes them.
+
+Upgrading a VM storefront past storefront-held inventory is fail-forward:
+there is no supported downgrade, because the release that drops local
+inventory also stops creating and migrating its tables. The retained tables
+stay, unread, as an operator's extraction input until a later change drops
+them; `docs/seller-quickstart.md`'s "Upgrading from CSV inventory" describes
+declaring their contents at provisioning.
 
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
@@ -628,19 +642,17 @@ system status names the retired keys.
   unverifiable site is refused as retryable, and a shape no member is feasible for
   is accepted and reported, because it then publishes nothing.
 - **System status reports each override's state:** `applied`, `orphaned` while
-  its pool is absent, `unknown` while its site's projection is not loaded,
-  `site_unconfigured`, or `inactive`. Overrides are stored but have no effect
-  while listings derive from local tables
-  (`capacity.use_site_projection_for_listings = false`).
-- **The legacy per-pool terms** written by the local resource import remain the
-  tier below overrides, for the home site only. System status names each field a
-  legacy row still supplies; an override of that field supersedes it.
+  its pool is absent, `unknown` while its site's projection is not loaded, or
+  `site_unconfigured`.
+- **An override is the only storefront tier.** Each term it states replaces the
+  pool's own hint for that term; a term it omits resolves from the hint, then
+  from the storefront's configured defaults. The storefront holds no other
+  per-pool record.
 - **A site whose projection is not loaded holds its listings.** They are neither
   closed nor refreshed until it loads, so a storefront restarting while a site is
-  unreachable does not delist that site. A storefront configured to derive from
-  projections never derives from its local tables instead. A site decommissioned
-  without closing its listings leaves them advertised until an operator closes
-  them.
+  unreachable does not delist that site. Listings derive only from site
+  projections; nothing local stands in for one. A site decommissioned without
+  closing its listings leaves them advertised until an operator closes them.
 
 Upgrading to listing shapes is fail-forward. Every VM listing's identity now
 includes its shape, so the first publication cycle after upgrade closes each
@@ -695,7 +707,9 @@ either only where that disclosure to the payments service is intended.
 
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
-Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
+Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
+
+The VM storefront's retired inventory settings — `resources_csv_path`, `resources_csv_inline`, `[escrow_templates]`, and `capacity.use_site_projection_for_listings`, with the chart's `secret.resourcesCsvInline` value — are refused the same way as retired settlement settings: the chart's values schemas refuse them in any spelling, and `market-storefront config set` refuses to write them, naming the seller quickstart's "Upgrading from CSV inventory". No command migrates them, because inventory moves to provisioning by operator action, and startup does not refuse them.
 
 The API-credit storefront and the credits service each own their own state: the
 credits service owns keys, request-digested grants, balances, quota, credentials,
@@ -728,17 +742,13 @@ sequence:
      --scope settlement --write --backup
    ```
 
-   Preview and migrate storefront publication defaults and every inventory:
+   Preview and migrate storefront publication defaults:
 
    ```console
    market-storefront --config /path/storefront.toml config migrate \
      --scope publication --check
    market-storefront --config /path/storefront.toml config migrate \
      --scope publication --write --backup
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --inventory /path/resources.csv --check
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --inventory /path/resources.csv --write --backup
    ```
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.

@@ -1,6 +1,9 @@
-"""Verify the compute_inventory_pools -> compute_capacity_pools rename
-migration, rather than assume SQLite's ALTER TABLE ... RENAME TO
-correctly rewrites compute_pool_members' foreign key."""
+"""Storefront schema across bootstrap, restart, and legacy migrations.
+
+A fresh database carries no retired inventory schema; a restart preserves the
+schema and every persisted identifier; and the legacy derived-listing backfill
+never reads a retired table, whether or not one exists.
+"""
 
 from __future__ import annotations
 
@@ -26,135 +29,77 @@ from market_storefront.utils import sqlite_client as sqlite_module
 from tests.fulfillment_fixtures import vm_delivery_evidence
 
 from market_storefront.utils.migrations import (
-    _migrate_rename_compute_capacity_pools,
+    _migrate_derived_compute_listing_pool_ids,
 )
 
 
-def test_rename_migration_preserves_data_and_pool_members_fk(tmp_path):
-    """A database still on the old table name: the rename must not lose
-    rows, and compute_pool_members' FK must resolve through the new name."""
-    conn = sqlite3.connect(str(tmp_path / "rename.db"))
-    try:
-        conn.execute(
-            """
-            CREATE TABLE compute_inventory_pools (
-              pool_id TEXT PRIMARY KEY,
-              gpu_model TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE compute_pool_members (
-              member_id TEXT PRIMARY KEY,
-              pool_id TEXT NOT NULL,
-              resource_id TEXT NOT NULL UNIQUE,
-              FOREIGN KEY(pool_id) REFERENCES compute_inventory_pools(pool_id)
-            )
-            """
-        )
-        conn.execute(
-            "INSERT INTO compute_inventory_pools(pool_id, gpu_model) "
-            "VALUES ('pool-A', 'H200')"
-        )
-        conn.execute(
-            "INSERT INTO compute_pool_members(member_id, pool_id, resource_id) "
-            "VALUES ('m1', 'pool-A', 'res-1')"
-        )
-        conn.commit()
+_RETIRED_INVENTORY_MIGRATIONS = (
+    "20260604_002_compute_inventory_pools",
+    "20260611_006_pool_member_sites",
+    "20260716_008_rename_compute_capacity_pools",
+    "20260813_010_resource_settlement_clauses",
+)
 
-        _migrate_rename_compute_capacity_pools(conn)
-        conn.commit()
 
-        tables = {
+def test_fresh_bootstrap_creates_no_inventory_schema_and_records_no_retired_migration(
+    tmp_path,
+):
+    db_path = str(tmp_path / "fresh.db")
+    registry = build_vm_storefront_registry(build_vm_storefront_domain())
+
+    SQLiteClient(db_path, registry=registry)
+    SQLiteClient(db_path, registry=registry)
+
+    with sqlite3.connect(db_path) as conn:
+        names = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
         }
-        assert "compute_capacity_pools" in tables
-        assert "compute_inventory_pools" not in tables
-
-        assert conn.execute(
-            "SELECT gpu_model FROM compute_capacity_pools WHERE pool_id = 'pool-A'"
-        ).fetchone() == ("H200",)
-
-        # The FK's target survived the rename: SQLite rewrites the
-        # foreign-key clause in compute_pool_members' schema text as part
-        # of ALTER TABLE ... RENAME TO — verified here rather than assumed.
-        fk_sql = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' "
-            "AND name='compute_pool_members'"
-        ).fetchone()[0]
-        assert "compute_capacity_pools" in fk_sql
-        assert "compute_inventory_pools" not in fk_sql
-
-        joined = conn.execute(
-            """
-            SELECT m.resource_id FROM compute_pool_members m
-            JOIN compute_capacity_pools p ON p.pool_id = m.pool_id
-            """
-        ).fetchall()
-        assert joined == [("res-1",)]
-
-        conn.execute("PRAGMA foreign_keys = ON")
-        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    finally:
-        conn.close()
+        recorded = {row[0] for row in conn.execute("SELECT id FROM schema_migrations")}
+    assert not names & {
+        "resources",
+        "hosts",
+        "resource_transition_events",
+        "compute_capacity_pools",
+        "compute_pool_members",
+        "trg_resources_updated_at",
+        "trg_hosts_updated_at",
+        "idx_compute_pool_members_pool",
+    }
+    assert not {name for name in names if name.startswith(("idx_resources_", "idx_resource_transition"))}
+    assert not recorded & set(_RETIRED_INVENTORY_MIGRATIONS)
+    assert "20260604_003_derived_compute_listing_pool_ids" in recorded
 
 
-def test_rename_migration_is_noop_on_fresh_database(tmp_path):
-    """A fresh database, where the inventory-pools migration already
-    created compute_capacity_pools directly, must not error when the
-    rename migration also runs against it."""
-    conn = sqlite3.connect(str(tmp_path / "fresh.db"))
-    try:
-        conn.execute("CREATE TABLE compute_capacity_pools (pool_id TEXT PRIMARY KEY)")
-        conn.commit()
+def _derived_listings(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE TABLE derived_compute_listings (listing_id TEXT PRIMARY KEY, resource_id TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO derived_compute_listings VALUES (?, ?)",
+        [("listing-member", "res-member"), ("listing-alone", "res-alone")],
+    )
 
-        _migrate_rename_compute_capacity_pools(conn)  # must not raise
 
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+@pytest.mark.parametrize("retained_members", [True, False])
+def test_derived_listing_pool_ids_take_the_listings_own_resource(tmp_path, retained_members):
+    """A retained membership table is frozen data the backfill never reads."""
+    with sqlite3.connect(tmp_path / "legacy.db") as conn:
+        _derived_listings(conn)
+        if retained_members:
+            conn.execute("CREATE TABLE compute_pool_members (resource_id TEXT, pool_id TEXT)")
+            conn.execute("INSERT INTO compute_pool_members VALUES ('res-member', 'pool-1')")
+
+        _migrate_derived_compute_listing_pool_ids(conn)
+
+        assert dict(conn.execute("SELECT listing_id, pool_id FROM derived_compute_listings")) == {
+            "listing-member": "res-member",
+            "listing-alone": "res-alone",
         }
-        assert tables == {"compute_capacity_pools"}
-    finally:
-        conn.close()
-
-
-def test_rename_migration_is_noop_when_neither_table_exists(tmp_path):
-    """An empty database (no pools table at all yet) must not error."""
-    conn = sqlite3.connect(str(tmp_path / "empty.db"))
-    try:
-        _migrate_rename_compute_capacity_pools(conn)  # must not raise
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        assert tables == set()
-    finally:
-        conn.close()
-
-
-def test_rename_migration_rejects_ambiguous_two_table_state(tmp_path):
-    """Both table names indicate schema drift and must not be silently ignored."""
-    conn = sqlite3.connect(str(tmp_path / "ambiguous.db"))
-    try:
-        conn.execute("CREATE TABLE compute_inventory_pools (pool_id TEXT PRIMARY KEY)")
-        conn.execute("CREATE TABLE compute_capacity_pools (pool_id TEXT PRIMARY KEY)")
-        conn.commit()
-
-        import pytest
-
-        with pytest.raises(RuntimeError, match="manual reconciliation"):
-            _migrate_rename_compute_capacity_pools(conn)
-    finally:
-        conn.close()
+        if retained_members:
+            assert conn.execute("SELECT * FROM compute_pool_members").fetchall() == [
+                ("res-member", "pool-1")
+            ]
 
 
 def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> None:

@@ -501,10 +501,7 @@ async def publication_app(
         stack.enter_context(
             settings_overrides(
                 enable_registry_discovery=registries,
-                **{
-                    "capacity.use_site_projection_for_listings": True,
-                    "wallet.address": _WALLET,
-                },
+                **{"wallet.address": _WALLET},
             )
         )
         # Replaced rather than overridden: an override merges into the test

@@ -25,15 +25,15 @@ from market_pool_overrides.store import SQLitePoolOverrideStore
 logger = logging.getLogger(__name__)
 
 #: Every stored override reports exactly one of these.
-OVERRIDE_INACTIVE = "inactive"
 OVERRIDE_SITE_UNCONFIGURED = "site_unconfigured"
 OVERRIDE_UNKNOWN = "unknown"
 OVERRIDE_ORPHANED = "orphaned"
 OVERRIDE_APPLIED = "applied"
 
-#: The source listings derive from: ``None`` when they derive from local tables,
-#: otherwise each site whose projection is known mapped to its pools.
-ProjectionSource = Callable[[], Mapping[str, list[Mapping[str, Any]]] | None]
+#: The source listings derive from: each site whose projection is known mapped
+#: to its pools. A storefront that knows no site's projection returns an empty
+#: mapping, and every override it stores is then ``unknown``.
+ProjectionSource = Callable[[], Mapping[str, list[Mapping[str, Any]]]]
 
 
 class PoolOverrideRefused(Exception):
@@ -50,7 +50,7 @@ def override_state(
     site_id: str,
     pool_id: str,
     site_ids: Collection[str],
-    projection: Mapping[str, list[Mapping[str, Any]]] | None,
+    projection: Mapping[str, list[Mapping[str, Any]]],
 ) -> str:
     """The one state an override is in, judged against ``projection``.
 
@@ -58,8 +58,6 @@ def override_state(
     so its override is never called orphaned on the strength of an answer the
     storefront does not have.
     """
-    if projection is None:
-        return OVERRIDE_INACTIVE
     if site_id not in site_ids:
         return OVERRIDE_SITE_UNCONFIGURED
     pools = projection.get(site_id)
@@ -246,7 +244,6 @@ class PoolOverrideService:
 
 __all__ = [
     "OVERRIDE_APPLIED",
-    "OVERRIDE_INACTIVE",
     "OVERRIDE_ORPHANED",
     "OVERRIDE_SITE_UNCONFIGURED",
     "OVERRIDE_UNKNOWN",

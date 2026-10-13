@@ -525,9 +525,9 @@ A listing's capacity backing is declared by the pool it derives from and read fr
 
 Every VM listing is a listing shape, and a published dimension is a commitment: the claim a VM listing produces reserves every quantity it publishes, so it publishes exactly the quantities its shape declares. A dimension its shape omits is outside the commitment; fulfillment may supply it from the pool's configured VM defaults or leave it to downstream provisioning, and the operator keeps capacity sufficient for it. A VM shape comes from the storefront's own override for that site and pool, else the pool's `listing_shapes` hint, else the VM domain's default generator, and it is published only where a source member is feasible for it.
 
-A bare-metal listing's shape is derived, not chosen: it is its Physical Resource's declaration read through the compute-family schema, published under the same flat names so the compute filters read both domains alike. Its commitment is one whole unit: the claim reserves exactly one `units` of the resource, exclusively, and requires the shape's attributes, while the shape's quantities describe what that unit contains rather than being reserved one by one. The shape's digest completes the listing's derivation identity, so a corrected declaration closes the listing and publishes a successor. API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived from local tables in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
+A bare-metal listing's shape is derived, not chosen: it is its Physical Resource's declaration read through the compute-family schema, published under the same flat names so the compute filters read both domains alike. Its commitment is one whole unit: the claim reserves exactly one `units` of the resource, exclusively, and requires the shape's attributes, while the shape's quantities describe what that unit contains rather than being reserved one by one. The shape's digest completes the listing's derivation identity, so a corrected declaration closes the listing and publishes a successor. API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
 
-VM publication runs on its own as a storefront lifecycle loop over the site projections the storefront trusts; a storefront that disables projection-backed derivation still derives capacity-backed listings from its local tables, and unbacked listings only ever from projections. Bare-metal publication remains operator-invoked. Terms of sale come only from durable sources — pool declarations, per-pool overrides, and configuration — never from a command's arguments.
+VM publication runs on its own as a storefront lifecycle loop over the site projections the storefront trusts, and every listing, backed or unbacked, derives only from those projections: a storefront holds no physical inventory to derive from. Bare-metal publication remains operator-invoked. Terms of sale come only from durable sources — pool declarations, per-pool overrides, and configuration — never from a command's arguments.
 
 Which registry a listing is published to is an operator curation decision, expressed by forking a filter spec, rather than a property of the listing. A registry deployment serves one filter spec and buyer commands match its declared schema identity, so listing shape is deployment-scoped — but the compute family's form factors share one schema identity rather than needing a registry each. Separate profiles exist for listings whose shape genuinely differs, such as the sparse option-only profile an introduction market ships.
 
@@ -641,11 +641,10 @@ consistently does not merge the two.
 The host is named `host_id` on every interface that names it: the host
 registry's key, a capacity declaration's host link, a reservation's
 `executor_ref`, fulfillment metadata, job parameters, lease APIs, playbook
-variables, and the bare-metal listing. One exception remains: the VM
-storefront's local physical-inventory tables and the plumbing that reads them
-still say `vm_host`. They are no longer an authority for anything this
-paragraph lists and are scheduled for removal rather than renaming, as
-[`ROADMAP.md`](ROADMAP.md)'s Goal 1 records. The address the provisioner connects to is the host's
+variables, and the bare-metal listing. The VM listing model still accepts a
+`vm_host` field so older payloads parse, but no storefront sets it: which host
+serves a slice is provisioning's, and a VM storefront database written before
+that boundary keeps `vm_host` only in its frozen inventory tables. The address the provisioner connects to is the host's
 `ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
 stable identity of a physical machine across hosts. A host belongs to exactly one
 Resource Pool, so one machine offered both as VM slices and as a whole host is

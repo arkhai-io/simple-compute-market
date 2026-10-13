@@ -4,29 +4,7 @@ from pathlib import Path
 
 from market_storefront.publication_migration import (
     migrate_publication_config,
-    migrate_publication_csv,
 )
-
-
-def test_csv_hidden_reserve_conflict_is_atomic(tmp_path: Path) -> None:
-    path = tmp_path / "resources.csv"
-    original = (
-        b"resource_id,resource_type,state,min_price,token\n"
-        b"gpu-1,compute.gpu,available,,0x1111111111111111111111111111111111111111\n"
-    )
-    path.write_bytes(original)
-
-    result = migrate_publication_csv(
-        path,
-        storefront_config={
-            "Settlement": {"alkahest": {"enabled": True}},
-            "Chains": {"anvil": {"rpc_url": "http://localhost:8545"}},
-        },
-        check=True,
-    )
-
-    assert result.conflicts == ("row 2: hidden-reserve pricing has no explicit rate",)
-    assert path.read_bytes() == original
 
 
 def test_config_per_model_legacy_pricing_is_a_manual_conflict(
@@ -100,26 +78,5 @@ def test_config_invalid_legacy_token_is_rejected_without_mutation(
 
     assert result.conflicts == (
         "Alkahest token address must be a canonical 20-byte hexadecimal address",
-    )
-    assert path.read_bytes() == original
-
-
-def test_csv_accepted_escrows_without_scalar_pricing_is_a_manual_conflict(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "resources.csv"
-    original = (
-        b'resource_id,resource_type,accepted_escrows\ngpu-1,compute.gpu,"legacy=100"\n'
-    )
-    path.write_bytes(original)
-
-    result = migrate_publication_csv(
-        path,
-        storefront_config={"Settlement": {"alkahest": {"enabled": True}}},
-        check=True,
-    )
-
-    assert result.conflicts == (
-        "row 2: accepted_escrows requires manual settlement clauses",
     )
     assert path.read_bytes() == original

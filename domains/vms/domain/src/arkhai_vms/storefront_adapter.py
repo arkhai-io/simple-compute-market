@@ -2,8 +2,8 @@
 
 The VM domain package owns this lightweight adapter because it defines how VM
 publication candidates map into the core storefront publication-source slots.
-Concrete storefront executables still inject local inventory, tracking, close,
-and registry-publish callbacks.
+Concrete storefront executables inject the candidate, tracking, close, and
+registry-publish callbacks.
 """
 
 from __future__ import annotations

@@ -46,8 +46,6 @@ dependencies = [
     "fastapi-utils[all]>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-    # Required by FastAPI routes that accept UploadFile/File form data.
-    "python-multipart>=0.0.20",
     "alkahest-py==1.1.2",
     "web3>=7.14.0",
     "websockets>=15.0.1",

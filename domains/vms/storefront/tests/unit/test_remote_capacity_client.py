@@ -27,7 +27,6 @@ from market_capacity_publication import (
 from dynaconf import Dynaconf
 
 from market_storefront.services import capacity_client as cc
-from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     TEST_SITE_AUTHORITIES,
@@ -92,7 +91,6 @@ def _settings(
     url: str = "http://site-authority:8081",
     sites: dict | None = None,
     placement: str = "fill_first",
-    use_site_projection_for_listings: bool = False,
 ) -> Dynaconf:
     source = Dynaconf(environments=False)
     source.set(
@@ -110,10 +108,6 @@ def _settings(
     source.set("capacity.poll_interval", 0.01)
     source.set("capacity.sites", sites if sites is not None else {"default": url})
     source.set("capacity.placement", placement)
-    source.set(
-        "capacity.use_site_projection_for_listings",
-        use_site_projection_for_listings,
-    )
     source.set("provisioning.service_url", "http://prov:8081")
     return source
 
@@ -334,7 +328,6 @@ async def test_domain_hook_closes_and_reopens_with_exact_site_availability():
             "reopen_available_compute_listings_after_capacity_change",
             fake_reopen,
         ),
-        patch("market_storefront.services.capacity_client.settings", _settings()),
     ):
         await reconcile(
             CapacityReconcileContext(
@@ -380,7 +373,6 @@ async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
             "reopen_available_compute_listings_after_capacity_change",
             fake_reopen,
         ),
-        patch("market_storefront.services.capacity_client.settings", _settings()),
     ):
         await reconcile(
             CapacityReconcileContext(
@@ -458,10 +450,8 @@ class TestSitePoolProjection:
     def test_excludes_a_site_with_no_cached_value(self):
         """A site whose projection has never loaded (or is currently
         unavailable/invalid) has value=None -- it must not appear at all,
-        not as an empty list -- reconciler's projection-sourced path
-        falls back to local tables only when the whole mapping is empty,
-        and a present-but-empty-list site would incorrectly look like
-        "this site genuinely has zero pools"."""
+        not as an empty list -- a present-but-empty-list site would
+        incorrectly look like "this site genuinely has zero pools"."""
         fake_cache = MagicMock()
         fake_cache.resource_pools.view.return_value.value = None
         with patch(
@@ -478,8 +468,8 @@ class TestSitePoolProjection:
         excluded the way an unloaded site is. Regression case for a
         real bug: `if value:` (truthy) treated a loaded-empty site
         identically to a never-loaded site, so an authoritative "zero
-        pools" answer silently fell back to stale local-table data
-        instead of correctly registering zero capacity."""
+        pools" answer was read as unknown instead of correctly
+        registering zero capacity."""
         fake_cache = MagicMock()
         fake_cache.resource_pools.view.return_value.value = []
         with patch(
@@ -573,14 +563,14 @@ class TestSiteCapacityBuckets:
 # ---------------------------------------------------------------------------
 
 
-class TestReconcileListingsUsesCachedProjectionWhenEnabled:
+class TestReconcileListingsUsesCachedProjection:
     async def test_a_real_loaded_cache_entry_reaches_the_close_call(
         self,
         client: cc.SiteCapacityClient,
     ):
         """End to end: populate site_projection_cache's real module-level
         cache with a real (not mocked) ProjectionCache in the `loaded`
-        state, enable the feature flag, trigger the real subscriber with
+        state, trigger the real subscriber with
         a real CapacityDelta, and confirm the exact cached rows arrive as
         the site_pool_projection argument to the close call -- proving
         the wiring from cache to reconciliation is actually connected,
@@ -626,7 +616,6 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             db_path,
             *,
             sqlite_client,
-            home_site=None,
             configured_sites=(),
             member_availability=None,
             site_pool_projection=None,
@@ -641,7 +630,6 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             db_path,
             *,
             sqlite_client,
-            home_site=None,
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
@@ -652,7 +640,6 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         reconcile = cc._capacity_reconciler(lambda: repository)
         with (
             patch.dict(spc._caches, {"default": caches}, clear=True),
-            settings_overrides(**{"capacity.use_site_projection_for_listings": True}),
             patch(
                 "market_storefront.services.publication_service."
                 "close_stale_compute_listings_after_capacity_change",
@@ -675,86 +662,3 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         assert received["site_pool_projection"] == {"default": pool_rows}
         assert received["site_capacity_buckets"] == {"default": bucket_rows}
 
-    async def test_flag_disabled_reaches_the_close_call_as_none(
-        self,
-        client: cc.SiteCapacityClient,
-    ):
-        """Same cache state, flag off: the cached projection must not be
-        used at all -- close still runs (reconciliation itself isn't
-        gated), but with site_pool_projection=None (and, following from
-        it, site_capacity_buckets=None -- the buckets fetch is itself
-        gated on the projection having been fetched)."""
-        from core_storefront.site_projections import (
-            ProjectionCache,
-            ProjectionIdentity,
-            ProjectionState,
-        )
-
-        from market_storefront.services import site_projection_cache as spc
-
-        resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
-        resource_pools_cache._value = [
-            {"pool_id": "gpu-pool", "resources": []}
-        ]
-        resource_pools_cache._state = ProjectionState.loaded
-        resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
-        caches = spc.SiteProjectionCaches(
-            resource_pools=resource_pools_cache,
-            capacity_buckets=ProjectionCache(client=None),
-        )
-
-        received: dict = {}
-        repository = SimpleNamespace(db_path="/tmp/x.db")
-
-        async def fake_close(
-            db_path,
-            *,
-            sqlite_client,
-            home_site=None,
-            configured_sites=(),
-            member_availability=None,
-            site_pool_projection=None,
-            site_capacity_buckets=None,
-        ):
-            assert sqlite_client is repository
-            received["site_pool_projection"] = site_pool_projection
-            received["site_capacity_buckets"] = site_capacity_buckets
-            return []
-
-        async def fake_reopen(
-            db_path,
-            *,
-            sqlite_client,
-            home_site=None,
-            member_availability=None,
-            site_pool_projection=None,
-            site_capacity_buckets=None,
-        ):
-            assert sqlite_client is repository
-            return []
-
-        reconcile = cc._capacity_reconciler(lambda: repository)
-        with (
-            patch.dict(spc._caches, {"default": caches}, clear=True),
-            settings_overrides(**{"capacity.use_site_projection_for_listings": False}),
-            patch(
-                "market_storefront.services.publication_service."
-                "close_stale_compute_listings_after_capacity_change",
-                fake_close,
-            ),
-            patch(
-                "market_storefront.services.publication_service."
-                "reopen_available_compute_listings_after_capacity_change",
-                fake_reopen,
-            ),
-        ):
-            await reconcile(
-                CapacityReconcileContext(
-                    projections=(CapacityProjection("default", ()),),
-                    availability={},
-                    delta=CapacityDelta(kind="reserved", version=1),
-                )
-            )
-
-        assert received["site_pool_projection"] is None
-        assert received["site_capacity_buckets"] is None

@@ -39,10 +39,13 @@ def escrow_proposal_from_accepted_entry(
         if not demand.get("chain_name") or demand.get("chain_name") == selected_chain
     ]
     selected_demand = matching_demands[0] if matching_demands else None
+    # A native-token escrow has no token. Naming one as None would put a
+    # ``token`` key into the materialized obligation data that the chain's
+    # obligation never carries, so the escrow could never verify.
     return EscrowProposal(
         chain_name=selected_chain,
         escrow_address=entry["escrow_address"],
-        fields={"token": token},
+        fields={"token": token} if token else {},
         literal_fields=literal_fields,
         rates=entry.get("rates") or [],
         demand=selected_demand,

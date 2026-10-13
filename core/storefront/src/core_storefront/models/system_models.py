@@ -35,7 +35,6 @@ class HealthResponse(BaseModel):
     paused: bool | None = None
     agent_id: str | None = None
     chain_id: int | None = None
-    resource_count: int | None = None
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
     # Per-site, per-pool operator-visible notice about a projected
     # `listing_cardinality_mode`: either its supplied value was unrecognized

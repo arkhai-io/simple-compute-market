@@ -8,12 +8,6 @@ port                = 8001
 base_url            = "http://bob-storefront:8001/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/bob.log"
-# Seed the resources table from this CSV on startup when the table is empty.
-# The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
-# the container at /app/resources.csv by `make deploy-storefront`.
-# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
-# the CSV content is delivered through the agent Secret, not a file path.
-resources_csv_path  = "/app/resources.csv"
 
 # Timer-loop intervals, shortened for this stack only. A scenario pauses the
 # storefront and then advances each loop deliberately, and a pause is observed

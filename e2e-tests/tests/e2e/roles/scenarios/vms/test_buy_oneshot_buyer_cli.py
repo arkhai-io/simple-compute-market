@@ -18,8 +18,9 @@ service / ``make test-buyer-machine``), not the host.
 Stage map
 ---------
 B0  Readiness:        storefront health + provisioning mock mode + alkahest
-B1  Resource seed:    import the buy-specific compute row (distinct gpu_model
-                      so discovery returns only this listing)
+B1a Supply:           register the executor and declare its capacity at
+                      provisioning (distinct gpu_model so discovery returns
+                      only this listing)
 B2  Publish listing:  create paused → resume → confirm present in registry
 B3  Arm provisioning: non-pausing mock create rule that returns tenant creds
 B4  market buy:       discovery-driven one-shot reaches status=ready, exit 0
@@ -172,13 +173,6 @@ BUYER_INITIAL_PRICE = 7
 BUYER_MAX_PRICE = 12
 BUY_RULE_ID = "e2e-buy-create"  # non-pausing mock rule: create job returns immediately
 
-BUY_RESOURCE_CSV = (
-    "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-    "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-    f"{BUY_RESOURCE_ID},compute.gpu,rtx4090,count,1,available,10,{DEMAND_TOKEN_ADDRESS},,"
-    f'{BUY_GPU_MODEL},90.0,"California, US",kvm1\n'
-)
-
 _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 
 
@@ -235,28 +229,6 @@ class TestStageB0_Readiness:
 
 
 # ===========================================================================
-# Phase B1 — resource seed
-# ===========================================================================
-
-
-class TestStageB1_ResourceSeed:
-    def test_b1_imports_buy_resource_inventory(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Import the buy-specific compute row via the admin API."""
-        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
-
-        result = storefront_admin_client.admin_import_resources(
-            BUY_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-buy-resources.csv",
-        )
-        assert result.failed_count == 0, f"Buy resource import failed: {result}"
-        assert result.imported_count >= 1, f"No rows imported: {result}"
-        deal_state._resources_seeded = True
-        log.info("[B1] Imported buy resource %s", BUY_RESOURCE_ID)
-
-
-# ===========================================================================
 # Phase B2 — create + publish listing (so discovery can find it)
 # ===========================================================================
 
@@ -266,7 +238,7 @@ class TestStageB1a_ExecutorHostRegistry:
         self, provisioning_client, storefront_admin_client,
         site_capacity_admin_client, deal_state: DealState,
     ):
-        """Register the executor host the seeded buy resource sits on.
+        """Register the executor host and declare the buy resource it sells.
 
         The site authority projects capacity by iterating host rows. With no host
         registered the projection is empty, so B4's negotiation is refused with
@@ -280,7 +252,7 @@ class TestStageB1a_ExecutorHostRegistry:
         projections immediately and the pull is asserted, rather than sleeping
         out the poller interval.
         """
-        require_state(deal_state, "_resources_seeded")
+        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
 
         # The host is executor identity; the capacity declaration is what `probe`,
         # `reserve`, and the seller's inventory guard match against, and only a
@@ -327,7 +299,7 @@ class TestStageB2_PublishListing:
         there before ``market buy`` runs. Resume publishes synchronously, so
         the registry row exists by the time resume returns.
         """
-        require_state(deal_state, "_resources_seeded")
+        require_state(deal_state, "_executor_host_registered")
 
         resp = storefront_seller_client.create_listing(
             listing_resource=OFFER_RESOURCE,
@@ -560,8 +532,7 @@ class TestStageB4c_CapacityEventCycle:
             "which are supposed to emit nothing and reconcile nothing"
         )
 
-        # Projections before deltas. With `use_site_projection_for_listings`
-        # on (the shipped default) the close path decides from the
+        # Projections before deltas. The close path decides from the
         # storefront's own projection cache, and only the site-projections
         # loop refills it -- held here like every other loop. Applying the
         # deltas against a pre-deal projection closes nothing however many of

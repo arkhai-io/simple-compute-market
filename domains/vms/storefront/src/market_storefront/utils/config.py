@@ -24,9 +24,7 @@ from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
-    EscrowTemplate,
     chains_from_config,
-    escrow_templates_from_config,
     storefront_config_files,
 )
 from market_config.registry_url import normalize_registry_url
@@ -191,63 +189,8 @@ def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
     return chains_from_config({"chains": _coerce_chains_table(raw)})
 
 
-def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
-    """Materialise dynaconf's ``settings.escrow_templates`` into a plain dict.
-
-    Mirror of :func:`_coerce_chains_table`. The values can include nested
-    ``literal`` / ``rates`` sub-tables, so recurse one level deep — that's
-    enough for the current schema (no four-level nesting).
-    """
-    if raw is None or not hasattr(raw, "items"):
-        return {}
-    out: dict[str, dict[str, Any]] = {}
-    for name, sub in raw.items():
-        if not isinstance(name, str) or not hasattr(sub, "items"):
-            continue
-        coerced: dict[str, Any] = {}
-        for k, v in sub.items():
-            if hasattr(v, "items") and not isinstance(v, dict):
-                coerced[k] = dict(v.items())
-            else:
-                coerced[k] = v
-        out[name] = coerced
-    return out
-
-
-def _build_escrow_templates(
-    s: Dynaconf, chains: dict[str, ChainConfig]
-) -> dict[str, EscrowTemplate]:
-    """Build the typed templates with the installed Alkahest address resolver."""
-    raw = s.get("escrow_templates")
-    settlement = _plain_config_value(s.get("settlement") or {})
-    alkahest = settlement.get("alkahest", {}) if isinstance(settlement, dict) else {}
-    address_config_path = (
-        alkahest.get("address_config_path") if isinstance(alkahest, dict) else None
-    )
-
-    def resolve_address(key: str, chain: ChainConfig) -> str:
-        from market_alkahest import alkahest as alkahest_module
-
-        resolver = getattr(alkahest_module, f"get_{key}", None)
-        if not callable(resolver):
-            raise ValueError(f"unknown Alkahest address key {key!r}")
-        return str(
-            resolver(
-                chain.name,
-                config_path=address_config_path,
-            )
-        )
-
-    return escrow_templates_from_config(
-        {"escrow_templates": _coerce_templates_table(raw)},
-        chains=chains,
-        address_resolver=resolve_address,
-    )
-
-
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
-ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
 
 
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:

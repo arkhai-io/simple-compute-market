@@ -229,25 +229,6 @@ async def _seed_listing(
         demand_amount=demand_amount,
         max_duration_seconds=max_duration_seconds,
     )
-    # Seed at least one matching available compute resource so the
-    # seller's pre-thread guard composite (default
-    # `negotiate_request.default.v1` → `negotiate.guard.has_matching_inventory`)
-    # lets the negotiation start. Tests that exercise a refusal path use
-    # _upsert_bound_listing directly so the durable binding remains present
-    # without adding matching inventory.
-    await db.upsert_resource(
-        resource_id=f"res-{listing_id}",
-        resource_type="compute.gpu",
-        resource_subtype=None,
-        unit="vm",
-        value=1,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "kvm1",
-        },
-    )
 
 
 @pytest_asyncio.fixture
@@ -354,7 +335,6 @@ async def client(db, monkeypatch):
                 _SELLER_SIGNER.identity.model_dump(mode="json"),
             ],
             "wallet.address": _RECIPIENT,
-            "capacity.use_site_projection_for_listings": True,
         }
     ), _patch.dict(
         site_projection_cache._caches,
@@ -556,21 +536,6 @@ class TestNegotiateNew:
             "neg-listing-priceless",
             demand_amount=None,
         )
-        # Seed a matching available resource so the inventory check passes
-        # and we test the price-less guard specifically.
-        await db.upsert_resource(
-            resource_id="res-priceless",
-            resource_type="compute.gpu",
-            resource_subtype=None,
-            unit="vm",
-            value=1,
-            state="available",
-            attributes={
-                "gpu_model": "H200",
-                "region": "California, US",
-                "vm_host": "kvm1",
-            },
-        )
         # default_min_price is None in the test config — falls through.
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_new(
@@ -600,19 +565,6 @@ class TestNegotiateNew:
             demand_amount=None,
             escrow_address=escrow_address,
             literal_fields=literals,
-        )
-        await db.upsert_resource(
-            resource_id="res-attestation",
-            resource_type="compute.gpu",
-            resource_subtype=None,
-            unit="vm",
-            value=1,
-            state="available",
-            attributes={
-                "gpu_model": "H200",
-                "region": "California, US",
-                "vm_host": "kvm1",
-            },
         )
 
         with settings_overrides(

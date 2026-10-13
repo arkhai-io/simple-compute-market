@@ -3,7 +3,7 @@
 The site authority's capacity reservation is the allocation record. A fresh
 storefront database has no allocation table; one an older storefront created
 keeps its schema, rows, and migration history exactly as they were, through
-every initialization and every resource transition.
+every initialization.
 """
 
 from __future__ import annotations
@@ -190,26 +190,4 @@ def test_initialization_leaves_an_existing_ledger_exactly_as_it_was(tmp_path, hi
     assert _snapshot(db_path) == before
 
     _client(db_path)
-    assert _snapshot(db_path) == before
-
-
-@pytest.mark.parametrize("history", [None, "both-recorded"])
-async def test_a_release_transition_writes_no_allocation(tmp_path, history):
-    db_path = tmp_path / "transition.db"
-    if history is not None:
-        _seed_history(db_path, history)
-    client = _client(db_path)
-    await client.upsert_resource(
-        resource_id="res-1", resource_type="compute.gpu", state="leased"
-    )
-    before = _snapshot(db_path)
-
-    result = await client.apply_resource_transition(
-        resource_id="res-1",
-        event_type="reservation_released_by_admin",
-        idempotency_key="release-res-1",
-        set_state="available",
-    )
-
-    assert result["applied"] is True
     assert _snapshot(db_path) == before

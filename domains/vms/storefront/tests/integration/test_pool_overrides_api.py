@@ -14,7 +14,6 @@ Rejection-path cases assert status and stored state; the typed client raises
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import asdict
 
 import pytest
@@ -22,7 +21,6 @@ from market_pool_overrides import PoolOverrideClient, pool_override_statuses
 from storefront_client import StorefrontClientError
 
 from market_storefront.services import site_projection_cache
-from tests._settings_overrides import settings_overrides
 from tests.publication_app import SITE, SITE_B, pool, publication_app, settlement_clause
 
 pytestmark = pytest.mark.asyncio
@@ -484,19 +482,10 @@ async def test_a_site_with_no_projection_holds_its_listings_and_its_override_is_
         assert (await _cycle(world))["counts"] == {"close": 1}
 
 
-async def test_with_no_site_known_nothing_is_derived_from_local_tables_or_closed(world):
+async def test_with_no_site_known_nothing_is_derived_or_closed(world):
     world.pools.append(_shaped())
     await _cycle(world)
     before = await _open_listings(world)
-    # Service-internal state setup: a legacy local row a local-table fallback
-    # would publish; no API writes local physical inventory alone.
-    conn = sqlite3.connect(world.db.db_path)
-    with conn:
-        conn.execute(
-            "INSERT INTO compute_capacity_pools (pool_id, gpu_model, total_gpu_count) "
-            "VALUES ('local-only', 'A100', 4)"
-        )
-    conn.close()
 
     site_projection_cache._caches.pop(SITE)
     result = await _cycle(world)
@@ -563,39 +552,3 @@ async def test_a_release_callback_reopens_what_its_release_made_available(tmp_pa
 
         assert set(released["reopened_listing_ids"]) == {by_count[2]}
         assert set(await _open_listings(world)) == {by_count[1], by_count[2]}
-
-
-async def test_under_local_table_derivation_an_override_is_stored_but_inactive(world):
-    world.pools.append(_shaped())
-    with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
-        await _overrides(world).put_pool_override(_record(listing_shapes=[OVERRIDE_SHAPE]))
-
-        assert await _states(world) == {(SITE, "gpu", "vm"): "inactive"}
-        await _cycle(world)
-        assert await _open_listings(world) == {}
-
-
-async def test_deleting_an_override_over_a_legacy_value_restores_and_reports_it(world):
-    world.pools.append(_shaped())
-    # Service-internal state setup: the legacy override row's only writer is
-    # the resource import, which also writes physical inventory this test does
-    # not want; no API writes the row alone.
-    conn = sqlite3.connect(world.db.db_path)
-    with conn:
-        conn.execute(
-            "INSERT INTO compute_capacity_pools (pool_id, gpu_model, sla) VALUES (?, ?, ?)",
-            ("gpu", "H100", 90.0),
-        )
-    conn.close()
-    await _overrides(world).put_pool_override(_record(terms={"sla": 99.0}))
-    await _cycle(world)
-    derivation = (await world.client.get_system_status()).publication_derivation[SITE]
-    assert derivation["legacy_overrides_in_effect"] == {}
-
-    await _overrides(world).delete_pool_override(SITE, "gpu", "vm")
-    await _cycle(world)
-
-    derivation = (await world.client.get_system_status()).publication_derivation[SITE]
-    assert derivation["legacy_overrides_in_effect"] == {"gpu": ["sla"]}
-    ((_, resource),) = (await _open_listings(world)).items()
-    assert resource["sla"] == 90.0

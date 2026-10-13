@@ -305,22 +305,6 @@ class VmSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
-def build_storefront_publication_clause_compiler() -> Callable[
-    [Mapping[str, Any]], SettlementPublicationClause
-]:
-    registry = build_storefront_settlement_registry()
-    config = registry.resolve(
-        storefront_config.settlement_config_mapping(),
-        role="seller",
-    )
-    return partial(
-        compile_settlement_publication_clause,
-        registry=registry,
-        config=config,
-        role="seller",
-    )
-
-
 def _settlement_plan_obligations(
     *,
     domain: MarketDomainContract,

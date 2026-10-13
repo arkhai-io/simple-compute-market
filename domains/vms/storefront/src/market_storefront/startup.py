@@ -176,30 +176,6 @@ def _initialize_negotiation_thread_store() -> None:
     )
 
 
-async def _seed_resources_if_empty() -> None:
-    import market_storefront.container as _container
-
-    result = await _container.resolved_system_service.seed_resources_if_empty(
-        csv_inline=settings.resources_csv_inline,
-        csv_path=settings.resources_csv_path,
-    )
-    if result["seeded"]:
-        logger.info(
-            "[STARTUP] Seeded %d resource(s) from %s",
-            result["imported_count"],
-            result["source"],
-        )
-    elif result["source"] is None:
-        logger.info(
-            "[STARTUP] No resource source configured - starting with empty inventory"
-        )
-    else:
-        logger.info(
-            "[STARTUP] Resource seeding skipped - %d resource(s) already present",
-            result["imported_count"],
-        )
-
-
 def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
     return NegotiationWatchdogPolicy(
         timeout_seconds=float(settings.negotiation_timeout_seconds),
@@ -426,11 +402,6 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep(
                 "negotiation_thread_store",
                 _initialize_negotiation_thread_store,
-            ),
-            StorefrontStartupStep(
-                "seed_resources",
-                _seed_resources_if_empty,
-                error_message="[STARTUP] Resource seeding failed: %s",
             ),
             # Before any lifecycle loop: the first publication cycle would
             # otherwise publish a pre-shape listing's successor without the
