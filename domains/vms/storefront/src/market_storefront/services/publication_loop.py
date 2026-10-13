@@ -37,6 +37,7 @@ from arkhai_vms_listings.listing_comparison import (
 from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
+    derivation_reports,
     open_listing_resource_keys,
     stale_open_listing_ids,
 )
@@ -230,18 +231,16 @@ class VmPublicationCycle:
         # Every VM listing publishes a region, which only its pool states. A
         # pool stating none publishes and refreshes nothing; its candidates
         # still count as present, so source reconciliation does not close the
-        # listings it already published.
-        regionless = sorted(
-            {
-                (str(candidate["site_id"]), str(candidate["pool_id"]))
-                for candidate in candidates
-                if candidate.get("region") is None
-            }
-        )
-        for site_id, pool_id in regionless:
-            self.report.record(
-                "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
-            )
+        # listings it already published. The hold is reported from the
+        # derivation's own report rather than from the candidates, because a
+        # pool with no available slice yields no candidate and is held all
+        # the same.
+        reports = derivation_reports()
+        for site_id in sorted(self._projection):
+            for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
+                self.report.record(
+                    "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
+                )
         return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:

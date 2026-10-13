@@ -13,7 +13,7 @@ decision was promoted.
 
 ## 0. Fix a pool's executor at creation
 
-Owned by [`fix-resource-pool-provider-at-creation`](../fix-resource-pool-provider-at-creation/tasks.md).
+Owned by [`fix-resource-pool-provider-at-creation`](../../fix-resource-pool-provider-at-creation/tasks.md).
 
 ## 1. Re-ground
 
@@ -30,7 +30,7 @@ Owned by [`fix-resource-pool-provider-at-creation`](../fix-resource-pool-provide
 
 ## 2. Retire `compute_allocations`
 
-Delivered by [`remove-dead-storefront-physical-surfaces`](../archive/2026-10-08-remove-dead-storefront-physical-surfaces/tasks.md).
+Delivered by [`remove-dead-storefront-physical-surfaces`](../2026-10-08-remove-dead-storefront-physical-surfaces/tasks.md).
 
 ## 3. Remove dead physical surfaces
 
@@ -107,7 +107,10 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
       region on the pool and its members. Evidence:
       `test_publication_loop.py` (`test_a_pool_stating_no_region_publishes_nothing_and_is_reported`,
       `test_a_pool_losing_its_region_holds_its_listings_open`,
-      `test_a_regionless_pools_sold_out_listing_still_closes`),
+      `test_a_regionless_pools_sold_out_listing_still_closes`,
+      `test_a_regionless_pool_with_no_available_slice_is_still_reported`;
+      the run reports the hold from the derivation report, so a pool with
+      no available slice is reported too),
       `test_reconciler_projection.py::test_a_pool_stating_no_region_is_reported_and_still_derived`,
       and the `test_reconciler.py` row case; every one except the
       held-open case fails without the change, which the old refusal also

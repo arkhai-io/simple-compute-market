@@ -243,6 +243,23 @@ async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world)
     assert report["regionless_pools"] == ["broker-a"]
 
 
+async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
+    """A backed pool with nothing available yields no candidate; publication
+    still reports it as held for its missing region."""
+    world.pools.append(
+        _without_region(pool("pool-b", backing="backed", available={"gpu_count": 0}))
+    )
+
+    result = await _cycle(world)
+
+    assert await _listings(world) == {}
+    assert [
+        (action["pool_id"], action["reason"])
+        for action in result["actions"]
+        if action["action"] == "hold"
+    ] == [("pool-b", "pool_region_missing")]
+
+
 async def test_a_pool_losing_its_region_holds_its_listings_open(world):
     world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
     await _cycle(world)
