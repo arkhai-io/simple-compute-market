@@ -95,7 +95,7 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
 - [x] 4.6 The upgrade is fail-forward for this change only, and retained
       tables stay for extraction: `DEPLOYMENT_AND_CONFIG.md`, "Migrations at
       startup"; `docs/seller-quickstart.md`, "Upgrading from CSV inventory".
-- [x] 4.7 The VM storefront suite passes on the final tree: 1374 passed and 1
+- [x] 4.7 The VM storefront suite passes on the final tree: 1375 passed and 1
       skipped, with the two `test_alkahest.py` cases excluded because they need
       a live chain environment and predate this change. The VM e2e scenarios
       pass (see 7.9).
@@ -243,8 +243,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
         version of the hold, at `597fac49`, failed seven VM scenarios in run
         38379186498 because it also removed the pool from the round-zero
         inventory guard; see `design.md`.
-      - **After `f48e2f71`.** Comments, docstrings, the task ledger, and
-        `design.md` only.
+      - **`8b25c8cf`.** Since `f48e2f71`: comments, docstrings, documents, the
+        archive, and the run reporting a regionless pool's hold from the
+        derivation report, so a pool with no available slice is reported too.
+        Pipeline run 38383205945 passed all three lanes, the VM lane 131.
 
       The deployed smoke suite was not re-run after `c30cb4de`: nothing since
       changes chart rendering, configuration, service readiness, or projection
