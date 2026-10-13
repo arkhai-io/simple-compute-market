@@ -485,7 +485,9 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         timeout=15.0,
     )
-    assert event.data.get("resource_id") == case.resource_id
+    # The seller holds no physical resource identity: provisioning picks the
+    # host, so the event names the fulfillment rather than a resource.
+    assert event.data.get("fulfillment_id"), event.data
 
     status = storefront_client.get_settle_status(
         escrow_uid,
@@ -494,7 +496,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     # path; fulfillment_id is that path's durable identity. See
     # core_storefront.models.settle_models.SettleStatusResponse.
     fulfillment_id = status.fulfillment_id
-    assert fulfillment_id, status
+    assert fulfillment_id == event.data["fulfillment_id"], status
 
     provisioning_test_client.resume_rule(case.rule_id)
     provisioning_test_client.drain(timeout=30)
