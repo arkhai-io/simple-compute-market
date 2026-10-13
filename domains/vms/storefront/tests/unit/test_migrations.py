@@ -1,8 +1,8 @@
 """Storefront schema across bootstrap, restart, and legacy migrations.
 
 A fresh database carries no retired inventory schema; a restart preserves the
-schema and every persisted identifier; and the one retained migration that
-reads a retired table works whether or not that table exists.
+schema and every persisted identifier; and the legacy derived-listing backfill
+never reads a retired table, whether or not one exists.
 """
 
 from __future__ import annotations
@@ -81,23 +81,14 @@ def _derived_listings(conn: sqlite3.Connection) -> None:
     )
 
 
-def test_derived_listing_pool_ids_take_the_members_pool_when_recorded(tmp_path):
+@pytest.mark.parametrize("retained_members", [True, False])
+def test_derived_listing_pool_ids_take_the_listings_own_resource(tmp_path, retained_members):
+    """A retained membership table is frozen data the backfill never reads."""
     with sqlite3.connect(tmp_path / "legacy.db") as conn:
         _derived_listings(conn)
-        conn.execute("CREATE TABLE compute_pool_members (resource_id TEXT, pool_id TEXT)")
-        conn.execute("INSERT INTO compute_pool_members VALUES ('res-member', 'pool-1')")
-
-        _migrate_derived_compute_listing_pool_ids(conn)
-
-        assert dict(conn.execute("SELECT listing_id, pool_id FROM derived_compute_listings")) == {
-            "listing-member": "pool-1",
-            "listing-alone": "res-alone",
-        }
-
-
-def test_derived_listing_pool_ids_fall_back_to_the_resource_without_members(tmp_path):
-    with sqlite3.connect(tmp_path / "legacy.db") as conn:
-        _derived_listings(conn)
+        if retained_members:
+            conn.execute("CREATE TABLE compute_pool_members (resource_id TEXT, pool_id TEXT)")
+            conn.execute("INSERT INTO compute_pool_members VALUES ('res-member', 'pool-1')")
 
         _migrate_derived_compute_listing_pool_ids(conn)
 
@@ -105,9 +96,10 @@ def test_derived_listing_pool_ids_fall_back_to_the_resource_without_members(tmp_
             "listing-member": "res-member",
             "listing-alone": "res-alone",
         }
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE name = 'compute_pool_members'"
-        ).fetchone() is None
+        if retained_members:
+            assert conn.execute("SELECT * FROM compute_pool_members").fetchall() == [
+                ("res-member", "pool-1")
+            ]
 
 
 def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> None:

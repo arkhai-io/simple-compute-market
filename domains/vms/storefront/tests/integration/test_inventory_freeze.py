@@ -162,13 +162,32 @@ _INDEXES = (
     "CREATE INDEX idx_compute_pool_members_pool ON compute_pool_members(pool_id, status)",
 )
 
-# The last shape a storefront created, and one that never applied the later
-# pool migrations: its pool table keeps its original name and its members
-# carry no site.
+# Each history is (pool table, current pool shapes, recorded retired migrations,
+# resource timestamps). The last shape a storefront created; one that never
+# applied the later pool migrations, so its pool table keeps its original name
+# and its members carry no site; one whose resource rows have timestamps and
+# their trigger while the core timestamp migration is still pending, so an
+# UPDATE there would fire the trigger; and one older than resource timestamps.
 _HISTORIES = {
-    "all-recorded": ("compute_capacity_pools", True, _RETIRED_IDS),
-    "pools-only-recorded": ("compute_inventory_pools", False, (_POOLS_ID,)),
+    "all-recorded": ("compute_capacity_pools", True, _RETIRED_IDS, "recorded"),
+    "pools-only-recorded": ("compute_inventory_pools", False, (_POOLS_ID,), "recorded"),
+    "timestamps-pending": ("compute_inventory_pools", False, (), "pending"),
+    "before-timestamps": ("compute_inventory_pools", False, (), "absent"),
 }
+
+# The resource table before it carried creation and update timestamps.
+_RESOURCES_BEFORE_TIMESTAMPS = """
+CREATE TABLE resources (
+  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+  resource_id TEXT NOT NULL UNIQUE,
+  resource_type TEXT NOT NULL,
+  resource_subtype TEXT,
+  unit TEXT,
+  value NUMERIC,
+  state TEXT,
+  attributes TEXT
+)
+"""
 
 
 def _client(db_path: Path) -> SQLiteClient:
@@ -179,12 +198,15 @@ def _client(db_path: Path) -> SQLiteClient:
 
 
 def _seed_history(db_path: Path, history: str) -> None:
-    pools, current, recorded = _HISTORIES[history]
+    pools, current, recorded, timestamps = _HISTORIES[history]
     conn = sqlite3.connect(db_path)
     with conn:
         conn.execute(_SCHEMA_MIGRATIONS)
-        conn.execute(_RESOURCES)
-        conn.execute(_RESOURCES_TRIGGER)
+        if timestamps == "absent":
+            conn.execute(_RESOURCES_BEFORE_TIMESTAMPS)
+        else:
+            conn.execute(_RESOURCES)
+            conn.execute(_RESOURCES_TRIGGER)
         conn.execute(_HOSTS)
         conn.execute(_HOSTS_TRIGGER)
         conn.execute(_TRANSITIONS)
@@ -193,12 +215,21 @@ def _seed_history(db_path: Path, history: str) -> None:
         )
         conn.execute(_MEMBERS.format(site=",\n  site TEXT" if current else "", pools=pools))
         for index in _INDEXES:
+            if timestamps == "absent" and "updated_at" in index:
+                continue
             conn.execute(index)
-        conn.execute(
-            "INSERT INTO resources(resource_id, resource_type, value, state, attributes,"
-            " created_at, updated_at) VALUES ('res-1', 'compute.gpu', 4, 'leased',"
-            " '{\"gpu_model\": \"H200\", \"vm_host\": \"kvm1\"}', '2026-05-01', '2026-05-02')"
-        )
+        if timestamps == "absent":
+            conn.execute(
+                "INSERT INTO resources(resource_id, resource_type, value, state, attributes)"
+                " VALUES ('res-1', 'compute.gpu', 4, 'leased',"
+                " '{\"gpu_model\": \"H200\", \"vm_host\": \"kvm1\"}')"
+            )
+        else:
+            conn.execute(
+                "INSERT INTO resources(resource_id, resource_type, value, state, attributes,"
+                " created_at, updated_at) VALUES ('res-1', 'compute.gpu', 4, 'leased',"
+                " '{\"gpu_model\": \"H200\", \"vm_host\": \"kvm1\"}', '2026-05-01', '2026-05-02')"
+            )
         conn.execute(
             "INSERT INTO hosts(name, total_gpu_count, gpu_model, created_at, updated_at)"
             " VALUES ('kvm1', 8, 'H200', '2026-05-01', '2026-05-01')"
@@ -221,7 +252,13 @@ def _seed_history(db_path: Path, history: str) -> None:
         )
         conn.executemany(
             "INSERT INTO schema_migrations(id, applied_at) VALUES (?, '2026-06-30')",
-            [(migration_id,) for migration_id in (_TIMESTAMPS_ID, *recorded)],
+            [
+                (migration_id,)
+                for migration_id in (
+                    *((_TIMESTAMPS_ID,) if timestamps == "recorded" else ()),
+                    *recorded,
+                )
+            ],
         )
     conn.close()
 
@@ -266,7 +303,8 @@ def test_initialization_leaves_retained_inventory_exactly_as_it_was(tmp_path, hi
     _seed_history(db_path, history)
     before = _snapshot(db_path)
     assert before["rows"]["resource_transition_events"]
-    assert any(row[1] == "trg_resources_updated_at" for row in before["schema"])
+    if _HISTORIES[history][3] != "absent":
+        assert any(row[1] == "trg_resources_updated_at" for row in before["schema"])
 
     _client(db_path)
     assert _snapshot(db_path) == before

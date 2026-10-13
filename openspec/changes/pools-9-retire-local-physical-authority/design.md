@@ -270,15 +270,26 @@ Mechanics:
   an upgraded database keeps its history unchanged and a fresh one never
   records them. A database old enough to have one still pending keeps that
   table as it is, which is what extraction needs.
-- **Migration `20260604_003` stays.** It adds and backfills
-  `derived_compute_listings.pool_id`, which the legacy listing-binding
-  adapter (`config migrate --scope storefront-domains`) requires. Its backfill
-  reads `compute_pool_members`; it must fall back to `resource_id`, as it
-  already does per row, when that table is absent.
-- **Core `_migrate_listing_resource_timestamps` stays.** It belongs to the
-  shared core chain, also covers `listings`, and already skips an absent
-  `resources` table. Only a database older than it would see timestamp columns
-  added to a retained `resources` table, which loses no data.
+- **Migration `20260604_003` stays and reads no retired table.** It adds and
+  backfills `derived_compute_listings.pool_id`, which the legacy
+  listing-binding adapter (`config migrate --scope storefront-domains`)
+  requires. Its backfill takes each listing's own `resource_id` as its pool.
+  Revised 2026-10-13 after implementation review: it previously recovered the
+  pool from `compute_pool_members`, which contradicted the requirement that no
+  storefront code reads retired data, including at startup. A bounded
+  read-only exception was considered and declined. The cost is borne only by a
+  database that never applied `003` (last started before 2026-06-04): a
+  fungible-pool listing there binds to its resource rather than its pool, so
+  publication closes it and publishes a successor, and its seller's close or
+  pause does not carry over.
+- **Core `_migrate_listing_resource_timestamps` covers `listings` only.**
+  Revised 2026-10-13 after implementation review: as first decided it stayed
+  unchanged, but on a database that had not applied it, it added columns to a
+  retained `resources` table and ran an `UPDATE` over every row, which fires
+  the retained `trg_resources_updated_at` trigger and rewrites `updated_at`.
+  Narrowing it also removes a VM table from core. A database that never
+  applied it keeps `resources` in whatever shape it had, as the frozen-table
+  rule says.
 
 Alternatives:
 

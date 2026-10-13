@@ -262,11 +262,10 @@ class ComputeResource(ComputeDomainResource):
     (gpu_count + vcpu_count + ram_gb + disk_gb) when publishing; one host
     can be split into multiple concurrent slices.
 
-    Wire format is denormalized: host context fields (cpu_type, motherboard,
-    host_cpu_cores, host_ram_gb, etc.) are populated from a join against the
-    seller's ``hosts`` table at publish time so buyers see one flat record
-    per listing. Stored-row form keeps only slice fields + the ``vm_host``
-    FK; the storefront's ``ComputeGpuResourceAdapter`` handles the join.
+    Wire format is flat: optional host context fields (cpu_type, motherboard,
+    host_cpu_cores, host_ram_gb, etc.) describe the hardware behind the slice
+    on the same record, so buyers see one record per listing. Physical host
+    identity is provisioning-owned and is not part of a listing.
 
     Configuration-only — values derivable from another field (VRAM from
     gpu_model, PCIe lanes/generation from motherboard, AVX from cpu_type)
@@ -281,7 +280,7 @@ class ComputeResource(ComputeDomainResource):
 
     resource_id: str | None = Field(
         default=None,
-        description="Canonical DB resource identifier for this compute slice",
+        description="The site resource a specific-resource slice is declared against",
     )
     pool_id: str | None = Field(
         default=None,
@@ -301,7 +300,10 @@ class ComputeResource(ComputeDomainResource):
     )
     vm_host: str | None = Field(
         default=None,
-        description="FK to hosts.name — which host this slice is allocated from",
+        description=(
+            "Not set by storefronts: which host serves a slice is "
+            "provisioning-owned. Accepted so older payloads still parse."
+        ),
     )
     vcpu_count: int | None = Field(
         default=None, description="vCPUs allocated to this slice"

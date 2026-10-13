@@ -3,9 +3,9 @@
 Domain-neutral market-state persistence (listings, negotiations,
 escrows, claims, publications, …) lives in
 ``core_storefront.sqlite_client``; this subclass adds the VM domain's
-inventory surface — resources/hosts/pools, the embedded compute
-allocation ledger and derived-listing bookkeeping — plus the
-settings-bound module factory.
+settlement records, migrations, and listing-source reads, plus the
+settings-bound module factory. It holds no physical inventory: that is
+read from site projections.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLiteClient(VmSettlementRepository, CoreSQLiteClient):
-    """Core market-state client + the VM domain's inventory tables."""
+    """Core market-state client + the VM domain's settlement and listing state."""
 
     def __init__(
         self,

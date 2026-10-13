@@ -275,6 +275,13 @@ provisioning can trust two principals leaves it with no listing source.
       `20260604_003` and make its `pool_id` backfill fall back to
       `resource_id` when `compute_pool_members` is absent; leave core
       `_migrate_listing_resource_timestamps` unchanged.
+      Amended 2026-10-13 (implementation review): `20260604_003` takes each
+      listing's own `resource_id` and never reads `compute_pool_members`, and
+      core `_migrate_listing_resource_timestamps` stamps `listings` only.
+      `tests/integration/test_inventory_freeze.py` adds a history with the
+      core migration pending over timestamped rows and their trigger, and one
+      older than resource timestamps; both fail against the previous core
+      migration. See `design.md`, "Freeze, do not `DROP`".
 - [x] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
       with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host` with
       `_host_row_to_dict`, `list_resources`, and `apply_resource_transition`
@@ -660,7 +667,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "The legacy override tier retires with the import, without carry-over" |
 | Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" frozen-table paragraph names the inventory tables beside `compute_allocations` |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
-| Why the retired migrations leave the chain rather than being gated or emptied, and why `20260604_003` and the core timestamp migration stay | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
+| Why the retired migrations leave the chain rather than being gated or emptied, why `20260604_003` stays without reading a retired table, and why the core timestamp migration covers `listings` only | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
 | Retired settings are refused at chart render and by `config set`, as retired settlement settings are, and ignored at runtime | `openspec/specs/deployment-state/spec.md` (existing retired-values rule, no text change); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why retired settings are not refused at startup | This change's `design.md`, "Retired configuration keys follow the settlement retirement convention" |
 | Code describing the retired inventory, including the `Host` model and `[escrow_templates]` configuration, is deleted rather than left without a caller | This change's `design.md`, "Code describing the retired inventory leaves with it"; nothing permanent to promote once the code is gone |

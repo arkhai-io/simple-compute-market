@@ -107,33 +107,15 @@ VM_LEGACY_MIGRATION_INPUTS = LegacyMigrationInputs(
 
 
 def _migrate_derived_compute_listing_pool_ids(conn: sqlite3.Connection) -> None:
-    """Give each legacy derived listing a pool, its member's pool if recorded.
+    """Give each legacy derived listing a pool: its own resource.
 
     Only a database written before the common listing binding existed has
-    ``derived_compute_listings``. Its ``compute_pool_members`` table is frozen
-    retained data that a database may never have had, so a listing whose
-    member pool cannot be read takes its own resource as its pool.
+    ``derived_compute_listings``. The pool membership such a database recorded
+    lives in a retired inventory table, which no storefront code reads, so a
+    listing without a pool takes its resource as one.
     """
     _add_column_if_missing(conn, "derived_compute_listings", "pool_id", "TEXT")
-    if not _table_exists(conn, "derived_compute_listings"):
-        return
-    if _table_exists(conn, "compute_pool_members"):
-        conn.execute(
-            """
-            UPDATE derived_compute_listings
-            SET pool_id = COALESCE(
-              pool_id,
-              (
-                SELECT pool_id
-                FROM compute_pool_members
-                WHERE compute_pool_members.resource_id = derived_compute_listings.resource_id
-              ),
-              resource_id
-            )
-            WHERE pool_id IS NULL
-            """
-        )
-    else:
+    if _table_exists(conn, "derived_compute_listings"):
         conn.execute(
             "UPDATE derived_compute_listings SET pool_id = resource_id "
             "WHERE pool_id IS NULL"
