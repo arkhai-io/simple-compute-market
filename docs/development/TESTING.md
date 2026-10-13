@@ -652,8 +652,10 @@ relocated unit tests. Validate:
 
 - package build and wheel contents;
 - typing markers and static type checks where the contract moved;
-- allowed dependency direction, including `TYPE_CHECKING` imports (see
-  `AGENTS.md`'s "Package and dependency discipline");
+- allowed dependency direction, including `TYPE_CHECKING` imports, with
+  `make check-architecture` (see `AGENTS.md`'s "Package and dependency
+  discipline"); write a package's own boundary test only for what that check
+  cannot express, such as which module of a package may import what;
 - old import removal, or an explicit, deliberate compatibility path;
 - every changed consumer's unit and integration suites, not just the
   producer's;

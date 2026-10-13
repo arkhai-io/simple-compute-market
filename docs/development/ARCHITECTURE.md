@@ -83,7 +83,7 @@ Three questions decide whether a package is in the right place, and they are ind
 - **Knowledge.** May this package know about that family, domain, or mechanism? Market-neutral code must not learn a market by accident. This is the **scope** question, and a dependency graph answers it.
 - **Ownership.** Does this package hold the right responsibilities, even where every edge points a permitted way? A storefront that imports an authority's matching predicate, a kit that reads a user's configuration file, a composition root whose non-root modules name a contribution — each passes the first two questions. This one is architectural judgement, and review answers it.
 
-The first two are stated below as rules a check can hold; the third is stated as placement tests. A package's **kind** names what it defines and, for a few kinds that exist to be light, bounds what it may depend on.
+The first two are stated below as rules a check can hold; the third is stated as placement tests. A package's **kind** names what it defines and, for a few kinds that exist to be light, bounds what it may depend on. `make check-architecture` holds the layer, scope, and kind rules over every project, reading them from [`ARCHITECTURE.toml`](ARCHITECTURE.toml) beside this document; it runs in CI and in `make check-packaging`, so it is part of every change's closeout. That file encodes this section and nothing more, and records every divergence the check can see with the change that owns it.
 
 ### Repository layers
 
@@ -113,7 +113,18 @@ One rule follows: **a package may depend only on packages whose scope is a subse
 
 Scope is permission, declared independently of the imports it governs, and the declaration is the package's place in the tree: a package under a domain's directory is scoped to that domain, a package under a family's directory to that family, a kit to nothing — or to the one mechanism it *is* — and a specialization that knows a mechanism carries the mechanism in its name. A composition is scoped to the domain it lives under and composes only that domain; a composition under a family directory composes that family's domains, which is what makes it a family composition root rather than a label making it one. The one knowledge a package does not declare is which mechanisms a composition installs: a storefront's mechanisms are whatever mechanism kits it composes, bounded to the domain it lives under.
 
-Placing a package is therefore the same act as declaring its scope. A package that serves one domain goes under that domain; one that several domains of a family share goes under the family; one that knows no market goes under `kit/`; one that composes goes with the domain or family it composes. A contracts, client, or plugin package carries that kind in its name. Nothing elsewhere — a label in `pyproject.toml`, a comment at an import — may widen what the path grants.
+Placing a package is therefore the same act as declaring its scope. A package that serves one domain goes under that domain; one that several domains of a family share goes under the family; one that knows no market goes under `kit/`; one that composes goes with the domain or family it composes. A contracts or client package carries that kind in its name. Nothing elsewhere — a label in `pyproject.toml`, a comment at an import — may widen what the path grants.
+
+Each layer bounds the scope a package in it may hold:
+
+| Layer | Scope may contain |
+|---|---|
+| core | nothing |
+| kit | nothing, or exactly one mechanism — and only the kit that *is* that mechanism holds it |
+| specialization | at least one family or domain, plus any mechanisms its name carries |
+| composition | the domain or family it lives under, plus the mechanisms it composes |
+
+What a composition composes is not knowledge its dependents gain: depending on a composition is a layer violation in its own right, and the scope rule compares only the scope a package's place grants it.
 
 Consequences worth stating: a kit that comes to know a family is a specialization in the wrong directory; a kit that comes to know two mechanisms cannot exist, because the knowledge is either a mechanism-neutral abstraction or composition logic; a specialization that knows nothing specific is a kit in the wrong directory; a composition under one domain that imports a sibling domain is composing something it does not live with. The family-kit placement tests below are the scope rule applied to the compute family.
 
@@ -126,11 +137,25 @@ Kind names what a package defines. Most packages are a **library** of mechanisms
 
 Being a **plugin** is a property a package of any kind may have, not a kind: a package that registers into one of the entry-point groups a host discovers at startup — a buyer domain, a storefront contribution, a delivery sink other than the built-in ones — is imported by nobody. A buyer is an executable that is a plugin; a delivery sink is a kit library that is one. A host declares a plugin to have it installed, which is composition, and never names it in an import. Registering into an extension point that libraries contribute to, such as a domain's vocabulary registering its storefront domain, does not make a package a plugin.
 
-The tree carries kind in a package's name — `kit/site-client`, `kit/resource-pools-contracts`, `domains/vms/storefront` — and is converging on that convention; the exact conventions a check reads, and the budgets it holds the light kinds to, are owned by the enforcement change in the [change index](../../openspec/changes/README.md).
+The tree carries layer, scope, and kind in a package's path and name, and the check reads them this way:
+
+| Path | Layer | Kind |
+|---|---|---|
+| `core/<name>` | core | library |
+| `kit/<name>` | kit | library, or the kind word after its last hyphen |
+| `domains/<scope>/…/<last>` | composition for an executable, else specialization | the kind or role word that is `<last>` or follows its last hyphen, else library |
+
+The kind words are `contracts` and `client`; the role words `storefront`, `buyer`, `service`, and `app` make an executable. A word is read only when it is one of these, so `kit/capability-shape` is a library, and role words are not read under `kit/`, because a kit composes nothing: `kit/storefront` is a library. The scope directory names a family or a domain, a domain bringing its family when it has one, and a mechanism's name in `<last>` adds that mechanism. A project at a scope directory's root, or under a nested path such as `domains/apicredits/middleware/python`, reads the same way. Tooling projects — `e2e-tests`, `tools/`, `scripts`, and `dev-env` — and virtual projects are outside the architecture.
+
+The light kinds' budgets: a **contracts** package may depend on core, the identity and capability-shape foundation kits, and its own family's vocabulary; a **client** on contracts, core, and the identity kit. A package whose lightness is part of its contract — the shape and pricing kits, which import only the standard library and each other, the identity kit, the settlement runtime, and the thin contracts and clients — also has an **external budget** in the rules file: every import root it may use outside the standard library and its own package, internal or third-party. The plugin entry-point groups are `market.buyer_domains`, `market.storefront_contributions`, and `market.delivery_sinks`, whose owner `kit/delivery` registers its built-in sinks without becoming a plugin.
+
+A project whose path does not yet say what it is carries an **override** row stating the layer, kind, and scope the path should yield and the change that will move or rename it. The row fails once the path yields the same, or once a mechanism it grants is known by none of the project's dependencies.
 
 ### Where the current tree diverges
 
-The rules above are the contract; the tree does not yet meet all of it, and no complete audit against them has run. The divergences known from review are owned by changes in the [change index](../../openspec/changes/README.md); none is a sanctioned edge, and no new dependency of the same shape should be added while one stands. In outline: the compute family kit and the repository-wide roles and clients sit under directories that say the wrong layer; the VM storefront is the compute-family storefront shell — it installs the bare-metal contribution — living under one domain's directory; `core/storefront` is a composition that two kits and both compute vocabulary packages depend on, and it imports distributions it does not declare, as do five other packages, while thirteen declared internal dependencies across seven projects have no import and no recorded reason; two foundation kits and the storefront kit depend on `kit/alkahest`, `kit/alkahest` reads `kit/config`, and `kit/config` imports the settlement runtime and carries mechanism identifiers; `kit/site` imports the pool authority (see "Kit areas" below), and three read-only pool declaration modules sit in that authority rather than in its contracts package; `market_core.schemas` carries Alkahest-shaped escrow fields. The enforcement change in the change index owns the complete, audited list; this paragraph is the outline.
+The rules above are the contract, and the tree does not yet meet all of it. Every divergence the check can see is an **exception** row in [`ARCHITECTURE.toml`](ARCHITECTURE.toml), which is the authoritative list: each row names the rule it excuses, the change that owns the remedy, and the date, and it fails the check once it excuses nothing, so the list cannot outlive its causes. A change may not be archived while it owns a row (`make check-architecture-change CHANGE=<name>`). An internal distribution declared without an import carries a **declarations** row giving its runtime reason, unless it is a plugin the declaration installs. None of these is a sanctioned edge, and no new dependency of the same shape should be added while one stands.
+
+Divergences the layer and scope rules cannot see stay with review and with the owning kit's own boundary test: `kit/site` imports the pool authority (see "Kit areas" below), an edge two kits of empty scope may form under the rules but the kit-area order forbids; three read-only pool declaration modules sit in that authority rather than in its contracts package; and `kit/alkahest` reads a user configuration file, a content judgement. Each is owned by a change in the [change index](../../openspec/changes/README.md).
 
 ### Family kits
 

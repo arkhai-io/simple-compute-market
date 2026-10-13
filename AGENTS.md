@@ -99,7 +99,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - Follow the package layers, scope, and kind rules in `ARCHITECTURE.md#package-and-dependency-layers` and the relevant subsystem specification. A change whose edges all point a permitted way has answered the direction and knowledge questions, not the ownership one; that one is review's.
 - Any import is an architectural dependency: module-level, function-local, under `TYPE_CHECKING`, or behind `try`/`except`. A "lazy" or "call-path" import does not soften the edge; if the edge is wrong, move the code rather than defer the import.
 - Place a new package where `ARCHITECTURE.md` says its scope puts it, and declare every distribution it imports in its `pyproject.toml`. A declared internal distribution the source never imports is removed or kept for a stated runtime reason.
-- These rules are enforced by the per-package boundary tests and by review; an edge no test forbids is still a violation. Record a known divergence in `ARCHITECTURE.md`'s "Where the current tree diverges" and the change that owns it, never as a comment at the import.
+- `make check-architecture` enforces the layer, scope, and kind rules over every package, in CI and in `make check-packaging`; a per-package boundary test exists only for what it cannot express, and review answers ownership. A known divergence is an exception row in `docs/development/ARCHITECTURE.toml` naming its owning change — never a comment at the import — and a declaration kept without an import is a declarations row giving its runtime reason.
 
 ## Tests and diagnostics
 

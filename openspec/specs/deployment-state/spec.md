@@ -768,11 +768,11 @@ building MAY disagree with it.
 ### Requirement: Packaging conventions are checked mechanically
 
 One repository target MUST build the repository wheelhouse and then run every
-packaging check — environment setup, lock currency, Python version, and project layout —
-failing if any fails. Each check MUST also be runnable alone. The checks MUST read only
-the committed tree and the built wheelhouse, and MUST NOT resolve dependencies, relock,
-or contact a package index; building the wheelhouse retains whatever its isolated builds
-need.
+packaging check — environment setup, lock currency, Python version, project layout, and
+package architecture — failing if any fails. Each check MUST also be runnable alone. The
+checks MUST read only the committed tree and the built wheelhouse, and MUST NOT resolve
+dependencies, relock, or contact a package index; building the wheelhouse retains
+whatever its isolated builds need.
 
 Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
 pins an internal package at a version the tree does not build; and on a lock whose
@@ -799,6 +799,14 @@ a locked dependency version the wheel's requirement no longer admits.
   consumer lock not refreshed since
 - **WHEN** the packaging check runs
 - **THEN** it fails and names the consumer, the package, and the requirement
+
+#### Scenario: A package breaks an architecture rule
+
+- **WHEN** a project's source imports an internal distribution its `pyproject.toml` does
+  not declare, or depends on a package its layer or scope does not permit, and no
+  exception row excuses it
+- **THEN** the packaging check fails and names the project, the file and line, and the
+  rule
 
 #### Scenario: Every convention holds
 
@@ -827,6 +835,7 @@ but the aggregate MUST NOT silently omit a kit.
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
 - Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/unit/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
+- Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
 - Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.
 - Packaging checks: `scripts/check_uv_setup.py`, `scripts/check_locks.py`, `scripts/check_python_version.py` and their tests under `scripts/tests/`; `make check-packaging`.
 - One project layout: `scripts/check_project_layout.py` and its tests; every project's `[tool.hatch.build.targets.wheel]`.

@@ -62,6 +62,8 @@ Dependency direction protects substitutability and testability:
 
 Type-only imports still couple packages and therefore obey the same direction.
 
+The direction and knowledge rules are held mechanically: `make check-architecture` classifies every project by layer, kind, and scope from its path and name, treats every import and every declared internal dependency as an edge, and fails on any the rules forbid that no owned exception row excuses (`docs/development/ARCHITECTURE.md`, "Package and dependency layers"). Ownership — whether a package holds the right responsibilities when every edge points a permitted way — remains review's.
+
 ## The compute family vocabulary
 
 The VM and bare-metal domains sell the same kind of thing in different units: a slice of a host, or a whole one. What a buyer compares across them (GPU count and model, vCPUs, memory, storage) must therefore mean one thing in both. The compute-family capability schema lives once, in `domains/compute` (`arkhai_compute`), and both domains bind it, so a VM slice and a whole machine with the same hardware publish the same flat fields and one registry filter finds both.
