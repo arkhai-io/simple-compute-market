@@ -3,7 +3,7 @@
 Nothing in this section fails a build. It lands first so the changes that own
 findings can cite the baseline.
 
-- [ ] 1.1 Create `docs/development/ARCHITECTURE.toml`, beside the prose it
+- [x] 1.1 Create `docs/development/ARCHITECTURE.toml`, beside the prose it
       encodes. It lives under `docs/` because `make check-comment-hygiene` exempts
       `docs/` and every exception row names its owning change. Tables:
       - `[layers]`: the order `core` < `kit` < `specialization` < `composition` and
@@ -27,7 +27,7 @@ findings can cite the baseline.
       - `[budgets]`: `contracts` and `client`, as the design states them.
       - Empty `[[overrides]]`, `[[exceptions]]`, `[[declarations]]`, and
         `[external_budgets]`, filled by 1.5 and 2.1.
-- [ ] 1.2 Add `scripts/architecture.py`, a standard-library module with no
+- [x] 1.2 Add `scripts/architecture.py`, a standard-library module with no
       dependency on any project environment:
       - **Projects.** Every `pyproject.toml` outside the skipped paths, with its
         distribution name, `src/<package>` import root (the layout
@@ -57,7 +57,7 @@ findings can cite the baseline.
         uses).
       - **Exceptions.** An exception suppresses only the finding of the rule it
         names; `strict=True` applies none.
-- [ ] 1.3 Add `scripts/tests/test_architecture.py`. It loads the module the way
+- [x] 1.3 Add `scripts/tests/test_architecture.py`. It loads the module the way
       `scripts/tests/test_check_project_layout.py` loads its checker and builds
       synthetic trees under `tmp_path`, with a passing and a failing tree for
       every rule in 1.2. It also covers:
@@ -77,7 +77,7 @@ findings can cite the baseline.
 
       The suite runs under the existing `make test-release-tooling`, which
       collects `scripts/tests`.
-- [ ] 1.4 Add `scripts/architecture_report.py` and
+- [x] 1.4 Add `scripts/architecture_report.py` and
       `make architecture-report [OUT=<path>]`. It runs every rule in strict mode
       over the tree and writes a Markdown report to `OUT`, or to standard output.
       Neither the script nor the target names a change directory, which
@@ -90,7 +90,7 @@ findings can cite the baseline.
 
       The baseline is a change document, so it leaves with the change at
       archive.
-- [ ] 1.5 Seed `[[overrides]]` for the projects whose path does not yet say what
+- [x] 1.5 Seed `[[overrides]]` for the projects whose path does not yet say what
       they are, each owned by `align-package-paths-with-layers` and dated:
       - `core/buyer`, `core/storefront`, and `core/registry` as compositions;
       - `core/storefront-client` and `core/registry-client` as kit clients;
@@ -103,14 +103,14 @@ findings can cite the baseline.
       Also seed the mechanism grants for `arkhai_vms_settlement` (`alkahest`) and
       `arkhai_apicredits` (`alkahest`, `arkhai-payments`). Any other override the
       report shows is needed is added at the 1.7 gate, not here.
-- [ ] 1.6 Run
+- [x] 1.6 Run
       `make architecture-report OUT=openspec/changes/enforce-package-layers/baseline.md`
       and confirm every project outside the
       skipped paths is classified, with none unread. Reconcile the findings with
       `ARCHITECTURE.md`'s "Where the current tree diverges": every divergence it
       outlines appears in the baseline, or is listed under "What the rules
       deliberately do not catch" in `design.md`.
-- [ ] 1.7 **Decision gate: classify the baseline with the maintainer.** Classify
+- [x] 1.7 **Decision gate: classify the baseline with the maintainer.** Classify
       every finding as one of:
       - a **defect**, naming its owning change;
       - **accepted**, with its reason: a `[[declarations]]` row for an
@@ -123,10 +123,21 @@ findings can cite the baseline.
       `openspec/changes/README.md` under this change's campaign; it does not get
       an exception row. Section 2 does not start until the classified baseline is
       accepted.
+      *Done.* Classified with the maintainer's rule that a purely declarative
+      remedy is fixed here (design, "Audit before gate"). Results:
+      - four missing declarations added and eight unexplained ones removed;
+      - two declarations kept with a reason;
+      - fifteen exception rows: four for
+        `kit-owned-storefront-auth-and-persistence`, two for
+        `kit-owned-storefront-shell`, eight for `move-escrow-into-alkahest`, one
+        for `deduplicate-dynaconf-bootstrap`;
+      - eight rule errors revised in `design.md`, "Rule errors the audit found".
+
+      No defect is unowned. The baseline is `baseline.md`.
 
 ## 2. Gate
 
-- [ ] 2.1 Seed the rules file from the classified baseline:
+- [x] 2.1 Seed the rules file from the classified baseline:
       - `[[exceptions]]` from the defects, each naming its owning change, the
         rule, the edge or token, and the date;
       - `[[declarations]]` from the accepted unimported declarations, each with
@@ -141,7 +152,7 @@ findings can cite the baseline.
 
       Confirm `exception_expiry` reports nothing, so that no row is seeded for an
       edge the rules do not report.
-- [ ] 2.2 Add the four check scripts. Each has `check_project_layout.py`'s
+- [x] 2.2 Add the four check scripts. Each has `check_project_layout.py`'s
       shape: a docstring naming its rules and citing
       `docs/development/ARCHITECTURE.md#package-and-dependency-layers`, a
       `problems(root)` built on `scripts/architecture.py`, and a `main()` that
@@ -157,14 +168,14 @@ findings can cite the baseline.
       Each script also evaluates `exception_expiry` for the rows that name its
       rules. Each accepts `--strict`, which applies no exceptions, and
       `--change <name>`.
-- [ ] 2.3 Set the failure modes the design fixes:
+- [x] 2.3 Set the failure modes the design fixes:
       - `unused_declaration` warns.
       - `vocabulary` warns everywhere and fails in the `core` and `kit` layers.
       - `kind_budget` fails only for a kind the baseline showed clean or
         seeded; any other kind warns until it is.
 
       Record the kinds in each mode in the script's docstring.
-- [ ] 2.4 Add the Makefile targets and add them to `.PHONY`:
+- [x] 2.4 Add the Makefile targets and add them to `.PHONY`:
       - `check-architecture`, which runs the four scripts and fails if any fails;
       - `check-architecture-layers`, `check-architecture-scope`,
         `check-architecture-dependencies`, and `check-architecture-kinds`;
@@ -172,15 +183,20 @@ findings can cite the baseline.
         `<name>` owns and fails while any remains.
 
       Add `check-architecture` to `check-packaging`'s sub-make line.
-- [ ] 2.5 Add a `make check-architecture` step to the `release-deployment` job in
+- [x] 2.5 Add a `make check-architecture` step to the `release-deployment` job in
       `.github/workflows/tests.yml`, before `make test-release-tooling`. It needs
       plain `python3`, no wheelhouse and no uv.
-- [ ] 2.6 Add `scripts/tests/test_check_architecture.py`. It covers each script's
+- [x] 2.6 Add `scripts/tests/test_check_architecture.py`. It covers each script's
       exit code on a failing tree, a warning-only tree, and a clean tree, plus
       `--strict` and `--change`. It checks that `check-architecture-change` fails
       while the named change owns a row and passes once none remains.
-- [ ] 2.7 Run `make check-architecture` on the tree and confirm it passes with
+- [x] 2.7 Run `make check-architecture` on the tree and confirm it passes with
       only the documented warnings; run `make test-release-tooling`.
+      *Done.* `make check-architecture` passes with no warnings. The tooling
+      suite passes after the release guide's internal-dependency column was
+      regenerated for the eight changed projects. The suites of the seven
+      relocked projects pass. The VM buyer's and VM storefront's locks are
+      stale until `download.pytorch.org` is reachable; see 5.8.
 
 ## 3. Retire the per-package boundary tests
 
@@ -190,7 +206,7 @@ synthetic tree that fails on the same violation; and no exception row excuses an
 edge the test forbids. Only a test's import-boundary assertions retire. Its other
 assertions stay, and a test that asserts what the check cannot express is kept.
 
-- [ ] 3.1 Inventory every per-package boundary assertion. Twenty test modules
+- [x] 3.1 Inventory every per-package boundary assertion. Twenty test modules
       and one function in `kit/config` hold them today, not the eighteen
       `proposal.md` first counted. Record for each the rule or rules that subsume
       it, what is kept, and whether an exception row blocks it. The expected
@@ -198,7 +214,7 @@ assertions stay, and a test that asserts what the check cannot express is kept.
 
       | Test | Subsumed by | Kept |
       |---|---|---|
-      | `kit/identity/tests/unit/test_package_boundary.py` | `external_budget`, `scope` | — |
+      | `kit/identity/tests/unit/test_package_boundary.py` | `external_budget` | — |
       | `kit/settlement-runtime/tests/unit/test_import_boundaries.py` | `external_budget`, `scope`, `vocabulary` | — |
       | `kit/capability-shape/tests/unit/test_import_boundary.py` | `external_budget` | — |
       | `kit/capability-pricing/tests/unit/test_import_boundary.py` | `external_budget`, `layer` | — |
@@ -207,31 +223,41 @@ assertions stay, and a test that asserts what the check cannot express is kept.
       | `kit/fulfillment/tests/unit/test_import_boundaries.py` | the denylist: `layer`, `scope` | the per-module carrier allowlist |
       | `kit/contact-exchange/tests/unit/test_package_boundary.py` | `external_budget`, `scope` | — |
       | `kit/site/tests/unit/test_import_boundaries.py` | the denylist: `layer`, `scope` | any `market_resource_pools` assertion `inject-site-pool-authority` adds |
-      | `kit/config/tests/unit/test_resolution.py::test_common_config_has_no_concrete_mechanism_imports` | `scope` | — |
+      | `kit/config/tests/unit/test_resolution.py::test_common_config_has_no_concrete_mechanism_imports` | `market_alkahest`: `scope` | all, as found: it also forbids `stripe` and `web3`, and `kit/config` has no external budget |
       | `core/tests/unit/test_carrier_purity.py` | `layer`, `external_budget` | — |
-      | `core/tests/unit/test_domain_boundaries.py` | imports: `scope`; literals: `vocabulary` | — |
-      | `core/buyer/tests/unit/test_delivery_boundary.py` | the AST check: `scope` | the runtime entry-point tests |
-      | `domains/vms/storefront/tests/unit/test_architecture_imports.py` | kit and concept-root scans: `layer`, `scope` | the construction-site and `pyproject.toml` checks |
+      | `core/tests/unit/test_domain_boundaries.py` | imports: `layer`, `scope` | identity branching, as found: it scans the roles too, where `vocabulary` only warns |
+      | `core/buyer/tests/unit/test_delivery_boundary.py` | — | all, as found: a composition composes mechanisms by rule, so the buyer role staying mechanism-neutral is not a graph rule |
+      | `domains/vms/storefront/tests/unit/test_architecture_imports.py` | the kit scan and core storefront's domain-free scan: `layer`, `scope` | the concept-module scan, which forbids even `market_core`; the construction-site and `pyproject.toml` checks; and the no-bare-metal import test, blocked by `kit-owned-storefront-shell`'s rows |
       | `domains/compute/tests/test_import_boundary.py` | `scope`, `external_budget` | — |
       | `domains/bare_metal/tests/test_import_boundary.py` | `scope` | — |
       | `domains/bare_metal/storefront/tests/test_import_boundaries.py` | `layer`, `scope` | the runtime import smoke test |
-      | `provisioning/compute/service/tests/unit/test_import_boundaries.py` | adapter isolation and the operator-client rule: `scope` | the adapter-entrypoint allowlist, the Ansible module separation, and the deployment-config regex |
+      | `provisioning/compute/service/tests/unit/test_import_boundaries.py` | adapter isolation and the operator-client rule: `layer`, `scope` | the adapter-entrypoint allowlist, the Ansible module separation, the deployment-config regex, and the Ansible distribution's runtime check |
       | `provisioning/compute/client/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
       | `provisioning/compute/contracts/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
       | `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` | — | all: it asserts what importing a module loads at runtime |
 
-- [ ] 3.2 Retire every unblocked test from 3.1, one package per commit. Before
+- [x] 3.2 Retire every unblocked test from 3.1, one package per commit. Before
       each deletion, add its synthetic failing case to
       `scripts/tests/test_architecture.py` and run the package's own suite.
-- [ ] 3.3 For each test still blocked by an exception row at this change's
+- [x] 3.3 For each test still blocked by an exception row at this change's
       closeout, add a task to the owning change: retire the test once its row is
       gone. Record the hand-off here.
+      *Done.*
+      - `kit-owned-storefront-shell`'s design now retires
+        `test_vm_storefront_imports_no_bare_metal_composition` with its rows.
+      - Thirteen modules were deleted, and import-boundary tests were removed
+        from five others.
+      - `inject-site-pool-authority`'s design now adds, rather than keeps,
+        `kit/site`'s planned test.
+      - The external budgets list internal roots as well as third-party ones,
+        which is what let the allowlist tests retire (design, "Rule errors the
+        audit found").
 
 ## 4. Promotion
 
 This runs after code review, to reduce churn.
 
-- [ ] 4.1 `docs/development/ARCHITECTURE.md`, "Package and dependency layers":
+- [x] 4.1 `docs/development/ARCHITECTURE.md`, "Package and dependency layers":
       - "Where the current tree diverges" points at the exceptions table in
         `ARCHITECTURE.toml` as the authoritative list. It keeps prose only for
         what the check cannot see, the kit-area order.
@@ -239,23 +265,23 @@ This runs after code review, to reduce churn.
         groups, and the `contracts` and `client` budgets, replacing the sentence
         that defers them to this change.
       - "Repository layers" gains the per-layer scope bounds table.
-- [ ] 4.2 `openspec/specs/market-composition/spec.md`: sync the "From-below kit
+- [x] 4.2 `openspec/specs/market-composition/spec.md`: sync the "From-below kit
       dependencies" delta. Add the repository check as evidence in its Evidence
       section. In `openspec/specs/market-composition/architecture.md`, "Package
       ownership" says the check holds the layer and scope rules and that
       ownership remains review's.
-- [ ] 4.3 `openspec/specs/planning-governance/spec.md`: sync the delta. Add the
+- [x] 4.3 `openspec/specs/planning-governance/spec.md`: sync the delta. Add the
       architecture check to the Evidence list. In `openspec/README.md`'s
       plan-closeout part 8, `make check-packaging` covers architecture and
       `make check-architecture-change CHANGE=<name>` gates archive.
-- [ ] 4.4 `openspec/specs/deployment-state/spec.md`: sync the delta.
+- [x] 4.4 `openspec/specs/deployment-state/spec.md`: sync the delta.
       `docs/development/BUILD_AND_PACKAGING.md`'s "Checks" table gains the four
       `check-architecture-*` rows.
-- [ ] 4.5 `AGENTS.md`, "Package and dependency discipline": the rules are
+- [x] 4.5 `AGENTS.md`, "Package and dependency discipline": the rules are
       enforced by `make check-architecture`, by the per-package tests it keeps,
       and by review for what neither expresses. A known divergence is an
       exception row naming its owning change, never a comment at the import.
-- [ ] 4.6 `docs/development/TESTING.md`, "Boundary-Change Validation", and
+- [x] 4.6 `docs/development/TESTING.md`, "Boundary-Change Validation", and
       `openspec/specs/test-compatibility/architecture.md`: dependency direction is
       validated by `make check-architecture`, and a per-package architecture test
       is written only for what it cannot express.

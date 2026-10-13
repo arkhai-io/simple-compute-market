@@ -41,7 +41,7 @@ so.
 
 | Path | Layer | Kind |
 |---|---|---|
-| `core/<name>` | core | carrier |
+| `core/<name>` | core | library |
 | `kit/<name>` | kit | library |
 | `kit/<name>-<kind>` | kit | the suffix |
 | `roles/<name>` | composition | executable |
@@ -143,7 +143,7 @@ found six projects with undeclared direct internal imports —
 `arkhai-core-storefront`, `arkhai-apicredits-buyer`, `arkhai-bare-metal-storefront`,
 `arkhai-kit-alkahest`, `arkhai-kit-policy`, and `arkhai-kit-storefront`
 (`arkhai-core` and `arkhai-kit-identity`, reached today only through
-`arkhai-core-storefront`) — and thirteen declared internal dependencies across
+`arkhai-core-storefront`) — and twelve declared internal dependencies across
 seven projects with no import; the audit classifies each as a row or a removal.
 
 ### Rules are independent and each names a file and line
@@ -179,6 +179,19 @@ defects. This is the order because the first draft of this change promised to
 seed every known exception and pass on day one, and a single scan showed the known
 set was five short. A gate turned on against an unaudited tree becomes an
 exercise in loosening rules or adding exceptions after the fact.
+
+A finding is fixed in this change, during the audit, when its remedy is purely
+declarative — a missing declaration added, or a declaration with no import and no
+runtime reason removed — and changes no edge, no behaviour, and no package's place.
+Every other finding is owned by a change and seeded as a row. The exceptions table
+exists to park findings whose remedy needs design — a move, a split, a redesigned
+seam — with the change that will do the designing; a declaration needs none, and
+parking one under a placeholder owner would make the first row that never expires.
+A new declaration matches the specifier of the distribution that provided it
+transitively, so the lock resolves the same version. The baseline records each
+finding resolved this way, so the classification stays complete. The rule does not
+reach an undeclared import whose edge another change is removing: declaring
+`core/storefront`'s `market_alkahest` would ratify the edge, so it keeps its row.
 
 ### Exceptions are owned and expire
 
@@ -358,6 +371,44 @@ Taken while writing `tasks.md`; each is a default the maintainer may revise.
   edge is still excused by another change's row at this change's closeout cannot
   retire here without breaking the design's rule. The owning change gains the
   retirement task instead, so archiving this change does not wait on every owner.
+
+## Rule errors the audit found
+
+The audit is where a rule meets the tree; these revisions were made to the rules
+in "Rules are independent and each names a file and line" and are what
+`scripts/architecture.py` implements.
+
+- **An override's unused-grant expiry covers mechanisms only.** A family or
+  domain an override grants is where the project belongs: the compute family's
+  provisioning contracts depend on nothing compute-scoped, and a contract's
+  scope is its widest consumer's, not its own imports'. A mechanism granted is
+  knowledge, and expires once nothing the project depends on knows it.
+- **A composition's composed mechanisms do not pass to its dependents.** The
+  scope rule compares a dependency's own scope, from its path or override, not
+  the mechanisms a composition gains from what it composes. Depending on a
+  composition is the layer rule's finding; without this, every package depending
+  on `core/storefront` also reported a scope finding for Alkahest.
+- **Declaring a plugin needs no declarations row.** Installing a plugin is the
+  runtime reason, and the classification already knows the target is one.
+- **An unread project is a finding of its own.** `unclassified` reports a project
+  whose path yields nothing and that has no override row, rather than defaulting
+  it to a layer.
+- **A declarations row expires.** `declaration_expiry` fails a row whose
+  dependency is no longer declared or is now imported, for the same reason
+  exception and override rows expire.
+- **An external budget lists internal roots too.** The per-package allowlist
+  tests it replaces say what a package may import at all — the shape kit "only
+  the standard library", the pool client "only the contracts" — and a budget of
+  third-party roots alone would let a light kit grow an internal dependency the
+  layer rule allows. A budget is therefore every import root outside the
+  standard library and the package itself, internal or third-party.
+- **Two planned retirements were not graph rules.** The core buyer's "imports no
+  settlement mechanism" test holds the buyer role mechanism-neutral, but a
+  composition composes mechanisms by rule; and `kit/config`'s mechanism denylist
+  also forbids `stripe` and `web3`, for which `kit/config` has no budget. Both
+  tests stay.
+- **A core package's kind is library.** The reading table's `carrier` names the
+  layer's content, not a fifth kind.
 
 ## Open questions
 

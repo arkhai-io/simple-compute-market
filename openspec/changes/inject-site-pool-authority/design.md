@@ -98,7 +98,9 @@ only when `kit/site`'s boundary test forbids `market_resource_pools` and
   if the pool authority becomes a compute family-kit distribution, the edge is a
   kit depending on family knowledge and the scope rule fails it; if the authority
   stays repository-wide, the port removes the import and the per-package test this
-  design plans (`kit/site` forbids `market_resource_pools`) is kept as the guard,
-  since it asserts what the repository check cannot. `apicredits_service` →
+  design plans (`kit/site` forbids `market_resource_pools`) is added as the guard
+  and kept, since it asserts what the repository check cannot. `kit/site` has no
+  boundary test of its own today: the repository check subsumed the one it had,
+  which forbade only lifecycle, executor, and domain imports. `apicredits_service` →
   `kit/resource-pools` is a composition depending on a kit and is legal until the
   authority is scoped, at which point the same scope rule reports it.
