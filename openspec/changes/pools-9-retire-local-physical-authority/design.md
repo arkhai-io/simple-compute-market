@@ -661,12 +661,22 @@ happened before reconciliation reached it. Any pool without a hint behaved
 this way; this change adds every home-site pool whose region came from the
 CSV.
 
-The pool is now held, as bare metal holds a pool without a region: no new
-listing, existing listings neither closed nor refreshed, and the pool named
-in the site's derivation report (`regionless_pools`) and logged once per
-report change. A missing region is a declaration to repair, not a withdrawn
-source, so closing the listings would discard seller state for an operator
-error the operator can fix.
+Publication now holds the pool, as bare metal holds a pool without a region:
+no new listing, existing listings neither closed nor refreshed, a `hold`
+action with reason `pool_region_missing` in the run, and the pool named in
+the site's derivation report (`regionless_pools`) and logged once per report
+change. A missing region is a declaration to repair, not a withdrawn source,
+so closing the listings would discard seller state for an operator error the
+operator can fix.
+
+The hold is publication's alone. Derivation still yields the pool's rows,
+because availability reconciliation keys on them and region does not bear on
+capacity: a sold-out listing of such a pool still closes. Holding the pool in
+derivation, as an unreadable declaration is held, was tried first and
+rejected: it kept a sold-out listing open, offering capacity the site no
+longer had. A listing closed that way reopens only once the pool states its
+region again, because the reopen check compares the published region with the
+source's.
 
 Alternatives:
 

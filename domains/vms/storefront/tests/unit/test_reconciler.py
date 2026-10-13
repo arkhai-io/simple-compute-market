@@ -484,7 +484,7 @@ class TestProjectedPoolRows:
         member_availability=None, capacity_buckets=None,)
         assert rows[0]["region"] == "Nevada, US"
 
-    def test_a_pool_without_a_region_hint_is_held(self):
+    def test_a_pool_without_a_region_hint_is_reported(self):
         holds: set = set()
         report = _SiteDerivationReport()
         rows = _projected_pool_rows({
@@ -497,8 +497,8 @@ class TestProjectedPoolRows:
         },
         site_id="site-a", holds=holds, report=report,
         member_availability=None, capacity_buckets=None,)
-        assert rows == []
-        assert holds == {("pool", "site-a", "gpu-pool")}
+        assert rows and rows[0]["region"] is None
+        assert holds == set()
         assert report.as_dict()["regionless_pools"] == ["gpu-pool"]
 
     def test_sla_storefront_override_wins_over_pool_hint_by_default(self):

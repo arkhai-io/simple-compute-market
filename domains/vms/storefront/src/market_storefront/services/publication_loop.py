@@ -227,7 +227,22 @@ class VmPublicationCycle:
                 self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
             else:
                 self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
-        return candidates
+        # Every VM listing publishes a region, which only its pool states. A
+        # pool stating none publishes and refreshes nothing; its candidates
+        # still count as present, so source reconciliation does not close the
+        # listings it already published.
+        regionless = sorted(
+            {
+                (str(candidate["site_id"]), str(candidate["pool_id"]))
+                for candidate in candidates
+                if candidate.get("region") is None
+            }
+        )
+        for site_id, pool_id in regionless:
+            self.report.record(
+                "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
+            )
+        return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
         stale = stale_open_listing_ids(

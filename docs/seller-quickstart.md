@@ -161,8 +161,8 @@ A listing's commercial terms come from three places, highest first:
 - the storefront configuration's defaults, such as `[pricing].settlements`.
 
 Region is a physical fact, so only the pool states it; no override does. A
-pool that states no region publishes nothing new and holds the listings it
-already published; system status names it under `regionless_pools`.
+pool that states no region publishes nothing new and leaves the listings it
+already published unrefreshed; system status names it under `regionless_pools`.
 `DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.

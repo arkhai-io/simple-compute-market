@@ -334,28 +334,14 @@ def _regionless_pool() -> dict:
     return pool
 
 
-def test_a_pool_stating_no_region_is_held_and_reported(db_path):
+def test_a_pool_stating_no_region_is_reported_and_still_derived(db_path):
+    """Publication holds the pool; derivation still yields its rows, because
+    availability reconciliation keys on them and region does not bear on
+    capacity."""
     holds: set = set()
 
     slices = _shape_slices(db_path, [_regionless_pool()], holds=holds)
 
-    assert slices == []
-    assert ("pool", "site-a", "gpu") in holds
+    assert slices and all(row["region"] is None for row in slices)
+    assert holds == set()
     assert derivation_reports()["site-a"]["regionless_pools"] == ["gpu"]
-
-
-def test_a_regionless_pools_published_listing_stays_open(db_path):
-    """A missing region is a declaration to repair, not a withdrawn source."""
-    _seed_listing(db_path, listing_id="from-gpu", pool_id="gpu", site_id="site-a")
-
-    held = stale_open_listing_ids(
-        db_path, configured_sites=("site-a",),
-        site_pool_projection={"site-a": [_regionless_pool()]}, backed_only=False,
-    )
-    withdrawn = stale_open_listing_ids(
-        db_path, configured_sites=("site-a",),
-        site_pool_projection={"site-a": []}, backed_only=False,
-    )
-
-    assert held == []
-    assert withdrawn == ["from-gpu"]

@@ -500,7 +500,8 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
         )
     for pool_id in current["regionless_pools"]:
         logger.warning(
-            "[PUBLICATION] site %s pool %s states no region; its listings are held",
+            "[PUBLICATION] site %s pool %s states no region; publication holds "
+            "its listings",
             site_id,
             pool_id,
         )
@@ -759,14 +760,13 @@ def _projected_pool_rows(
         return None
 
     # Region is a physical fact, so no override states it: it is the pool's
-    # own hint or nothing. Every VM listing publishes one, so a pool stating
-    # none is held rather than withdrawn: the missing hint is a declaration to
-    # repair, and the listings it already published stay as they are.
+    # own hint or nothing. Every VM listing publishes one, so publication
+    # publishes and refreshes nothing from a pool stating none. The rows are
+    # still derived: region does not bear on capacity, so availability
+    # reconciliation keeps closing a sold-out listing of such a pool.
     region = resolve_region(policy_tags)
     if region is None:
         report.regionless_pools.add(pool_id)
-        holds.add(("pool", site_id, pool_id))
-        return []
     sla = resolve_sla(
         policy_tags,
         accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,

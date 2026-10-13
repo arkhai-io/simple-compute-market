@@ -323,18 +323,27 @@ Configured defaults, pool-declared hints, storefront pool overrides, and reconci
 
 Every VM listing MUST publish `region` from its pool's `region` hint, which is the only
 source: no storefront override states it and nothing stands in for an absent hint. A
-pool whose `region` hint is absent or is not a non-empty string MUST be held: it yields
-no new listing, its existing listings are neither closed nor refreshed, and system
-status reports the pool. A missing region is a declaration to repair, not a withdrawn
-source.
+pool whose `region` hint is absent or is not a non-empty string MUST be held by
+publication: it yields no new listing, publication neither refreshes nor closes its
+existing listings, and both the publication run and system status report the pool. A
+missing region is a declaration to repair, not a withdrawn source. Region does not bear
+on capacity, so availability reconciliation MUST continue to close such a pool's
+capacity-backed listing when its slice is no longer available.
 
 #### Scenario: A pool states no region
 
 - **WHEN** a pool advertising the VM mode carries no region hint
-- **THEN** no VM listing is derived from it and system status names the pool
+- **THEN** no VM listing is derived from it, and the publication run and system status name
+  the pool
 
 #### Scenario: A pool with published listings loses its region
 
 - **GIVEN** an open VM listing derived from a pool
 - **WHEN** a later projection generation carries no region hint for that pool
-- **THEN** the listing is neither closed nor refreshed until the pool states a region
+- **THEN** publication neither closes nor refreshes the listing until the pool states a region
+
+#### Scenario: A regionless pool's capacity is taken
+
+- **GIVEN** an open capacity-backed VM listing whose pool carries no region hint
+- **WHEN** its slice is no longer available
+- **THEN** availability reconciliation closes the listing

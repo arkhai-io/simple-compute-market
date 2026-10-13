@@ -509,8 +509,9 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
   its declarations, which reservations match.** A VM listing's claim requests the
   region and model it publishes, so a pool whose listings claim a region or model
   no member declares publishes nothing and is reported per pool; a region stated
-  only on the pool publishes nothing, and a pool stating no region is held:
-  nothing new publishes, its listings stay as they are, and system status names it.
+  only on the pool publishes nothing, and a pool stating no region is held by
+  publication: nothing new publishes, its listings are neither refreshed nor
+  closed except for availability, and system status names it.
 - **A bare-metal declaration describes one whole machine.** Set
   `capacity.units` to `1`, and state its hardware under the compute family's
   capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and

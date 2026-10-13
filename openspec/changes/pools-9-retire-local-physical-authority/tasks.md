@@ -99,12 +99,19 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
       the two `test_alkahest.py` failures need a live chain environment and
       predate this change) pass on the final tree; the VM e2e scenarios pass
       (see 7.9).
-- [x] 4.8 A VM pool that states no region is held and reported rather than
-      refused on every cycle with a validation message
-      (`arkhai_vms_listings/reconciler.py`, `regionless_pools`). Evidence:
-      `test_reconciler_projection.py::test_a_pool_stating_no_region_is_held_and_reported`
-      and `::test_a_regionless_pools_published_listing_stays_open`, both
-      failing before the hold. Promoted: `storefront-publication` spec, "A VM
+- [x] 4.8 Publication holds a VM pool that states no region and reports it,
+      rather than refusing it on every cycle with a validation message; the
+      pool's rows are still derived, so availability reconciliation closes a
+      sold-out listing (`publication_loop.py`, `pool_region_missing`;
+      `reconciler.py`, `regionless_pools`). The VM test fixtures state a
+      region on the pool and its members. Evidence:
+      `test_publication_loop.py` (`test_a_pool_stating_no_region_publishes_nothing_and_is_reported`,
+      `test_a_pool_losing_its_region_holds_its_listings_open`,
+      `test_a_regionless_pools_sold_out_listing_still_closes`),
+      `test_reconciler_projection.py::test_a_pool_stating_no_region_is_reported_and_still_derived`,
+      and the `test_reconciler.py` row case; every one except the
+      held-open case fails without the change, which the old refusal also
+      satisfied. Promoted: `storefront-publication` spec, "A VM
       pool that states no region holds its listings"; companion `architecture.md`;
       `DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`.
 

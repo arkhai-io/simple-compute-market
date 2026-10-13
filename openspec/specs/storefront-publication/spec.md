@@ -1388,21 +1388,30 @@ match.
 
 Every VM listing MUST publish `region` from its pool's `region` hint, which is the only
 source: no storefront override states it and nothing stands in for an absent hint. A
-pool whose `region` hint is absent or is not a non-empty string MUST be held: it yields
-no new listing, its existing listings are neither closed nor refreshed, and system
-status reports the pool. A missing region is a declaration to repair, not a withdrawn
-source.
+pool whose `region` hint is absent or is not a non-empty string MUST be held by
+publication: it yields no new listing, publication neither refreshes nor closes its
+existing listings, and both the publication run and system status report the pool. A
+missing region is a declaration to repair, not a withdrawn source. Region does not bear
+on capacity, so availability reconciliation MUST continue to close such a pool's
+capacity-backed listing when its slice is no longer available.
 
 #### Scenario: A pool states no region
 
 - **WHEN** a pool advertising the VM mode carries no region hint
-- **THEN** no VM listing is derived from it and system status names the pool
+- **THEN** no VM listing is derived from it, and the publication run and system status name
+  the pool
 
 #### Scenario: A pool with published listings loses its region
 
 - **GIVEN** an open VM listing derived from a pool
 - **WHEN** a later projection generation carries no region hint for that pool
-- **THEN** the listing is neither closed nor refreshed until the pool states a region
+- **THEN** publication neither closes nor refreshes the listing until the pool states a region
+
+#### Scenario: A regionless pool's capacity is taken
+
+- **GIVEN** an open capacity-backed VM listing whose pool carries no region hint
+- **WHEN** its slice is no longer available
+- **THEN** availability reconciliation closes the listing
 
 ### Requirement: A VM listing's derivation identity includes its shape
 
@@ -2275,7 +2284,7 @@ The bare-metal storefront's administrator status MUST report its registry's reac
 - Shape-bearing derivation identity and the seller-state carry-over across it, reported through system status: `domains/vms/storefront/tests/integration/test_listing_identity_carryover.py` and `test_publication_loop.py`.
 - Storefront pool overrides — the kit's store, reader, write check, status, and signed-resource contract: `kit/pool-overrides/tests/unit/` and `kit/pool-overrides/tests/integration/`; through the storefront app and its typed clients, including a non-home site, refused writes, and commercial terms reaching a listing: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`; a home-site pool ignoring a retained legacy record: `domains/vms/storefront/tests/integration/test_reconciler_derivation.py`; the VM vocabulary: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; the administrator contract: `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
 - A site whose projection is not held holds its listings, and an empty projection derives nothing: `domains/vms/storefront/tests/integration/test_reconciler_projection.py` and `test_pool_overrides_api.py`.
-- A VM pool that states no region is held and reported, and its published listings stay open: `domains/vms/storefront/tests/integration/test_reconciler_projection.py`.
+- A VM pool that states no region is held by publication and reported, its published listings stay open, and availability reconciliation still closes a sold-out one: `domains/vms/storefront/tests/integration/test_publication_loop.py` and `test_reconciler_projection.py`.
 - An operation that changes a site's capacity refreshes that site before reconciling inline: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py` and `e2e-tests/tests/e2e/roles/scenarios/vms/test_compute_dynamic_listings.py`.
 - Asking rates through each storefront app and its typed clients — declared and override rates reaching the listing a buyer reads, an empty override withholding a rate, in-place refresh, independence from settlement rates, each seller site's rate reaching only its own listing, and holds on an unreadable declaration or a bound conflict: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py` and `domains/bare_metal/storefront/tests/test_http_publication_rates.py`; resolution and the edge matrix: `kit/resource-pools/tests/unit/test_asking_rates.py`, `domains/vms/storefront/tests/integration/test_reconciler_projection.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`; across running services: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py` (stages 05b–05d).
 - Bare metal's pool overrides — the route service, the administrator routes and their refusals, override status against the durable accepted-generation record, effective lease bounds, and the command: `kit/pool-overrides/tests/unit/test_route_service.py`, `domains/bare_metal/storefront/tests/test_pool_overrides_api.py`, `test_pool_override_terms.py`, `test_publication_cycle.py`, `test_pool_override_cli.py`, and `test_runtime_environment.py`.
