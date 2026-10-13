@@ -507,12 +507,40 @@ storefront, and registry boundary as its base shape. Implements D5 and D10 at th
 level. Touches `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`. No Helm
 checks owed unless the lane's configuration changes.
 
-- [ ] 6.1 Extend the listing-shapes scenario: the pool states a shape with
+- [x] 6.1 Extend the listing-shapes scenario: the pool states a shape with
       `gpu.count {offer: 1, max: 4}` and `memory.gib {max: 512}` through the site's
       operator client; one publication cycle publishes a listing with a GPU count of 1 and
       no `ram_gb`, and the registry listing carries no constraint. Use typed clients only.
+      Done: `TestStage08_ShapeConstraints` in `test_listing_shapes.py` (marker
+      `e2e_listing_shapes`). 08a patches the pool's `listing_shapes` through
+      `SyncResourcePoolClient`, keeping its other tags, and reads the stored constraints
+      back; 08b runs one publication cycle and asserts one listing for the pool with GPU
+      count 1, model L40S, no `ram_gb`, `vcpu_count`, or `disk_gb`, and no constraint keys
+      anywhere in the storefront's or the registry's `listing_resource`. The base shape
+      differs from the hint's earlier shape, so the cycle closes that listing and
+      publishes this one. No configured default is set in the lane, so the policy is the
+      hint's alone; the capacity claim's dimensions are not asserted end to end (unit
+      and derivation evidence cover them). Evidence so far: collected locally (16 cases)
+      and `make -C e2e-tests test-unit` 22 passed; the stage has not run against a
+      stack.
 - [ ] 6.2 Verify: run the VM lane with `make run-e2e` and
       `make fetch-e2e-logs E2E_RUN_ID=<run>`; the evidence is recorded in 7.9.
+      Not run in the implementation session: running the pipeline needs a push, and
+      pushing belongs to validation. `make validate CHANGE=capacity-shape-envelope`
+      owes it; this task closes on that run's record.
+
+Handoff from section 6:
+
+- The section's end-to-end scenario is `e2e_listing_shapes`; stages 00–07 are
+  regression evidence, and stage 08 is this change's first system evidence for a
+  constrained stated shape. No scenario covers the configured default or the override
+  write check.
+- Stage 08 depends on 06c and 07b having deleted the override; a left-over override
+  stating shapes would make 08b fail rather than skip.
+- The fresh-context check found nothing blocking; its three low points (a comment
+  claiming the projection, the `require_state` field, a shallow constraint check) were
+  fixed. It noted for 7.10 that the spec's Evidence entry for this scenario should name
+  the constrained stage.
 
 ## 6A. Pilot merge reconciliation
 
@@ -648,7 +676,8 @@ pre-closeout review, as `AGENTS.md` asks.
         the configured default admits.
       - `openspec/specs/storefront-publication/spec.md`, `## Evidence`: cite
         `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py` and the
-        section 4 derivation tests.
+        section 4 derivation tests, and extend the `test_listing_shapes.py` entry with
+        its constrained stage (08).
       - `openspec/specs/README.md`: unchanged, since every companion already exists;
         record that disposition.
       - Not promoted here: the negotiation invariant and omitted-dimension policy, which
