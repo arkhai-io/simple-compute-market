@@ -526,13 +526,13 @@ def test_a_package_allowlist_lists_internal_distributions_too(tmp_path):
     assert ("package_allowlist", "kit-shape", "kit-base") in tree.keys()
 
 
-# ------------------------------------------------------------------ retired per-package tests
+# ------------------------------------------------------------------ package boundary cases
 #
-# Each case is the violation a per-package boundary test used to catch, named
-# for that test, so the repository check is shown to fail where it did.
+# Each case is one package's boundary, named in its comment, shown as a
+# synthetic violation the repository check fails on.
 
 
-def _retired_case_tree(tmp_path: Path) -> Tree:
+def _boundary_case_tree(tmp_path: Path) -> Tree:
     tree = _tree(tmp_path)
     tree.project("kit/mech", "kit-mech")
     tree.project("kit/plain", "kit-plain")
@@ -550,7 +550,7 @@ def _retired_case_tree(tmp_path: Path) -> Tree:
     return tree
 
 
-RETIRED_CASES = {
+BOUNDARY_CASES = {
     # kit identity, settlement runtime, capability shape and pricing, pool
     # contracts and client, contact exchange, compute vocabulary, provisioning
     # contracts and client: an import outside the package's allowlist.
@@ -584,10 +584,10 @@ RETIRED_CASES = {
 }
 
 
-@pytest.mark.parametrize("case", sorted(RETIRED_CASES))
-def test_the_check_fails_where_a_retired_boundary_test_did(tmp_path, case):
-    tree = _retired_case_tree(tmp_path)
-    path, name, source, expected = RETIRED_CASES[case]
+@pytest.mark.parametrize("case", sorted(BOUNDARY_CASES))
+def test_the_check_fails_on_each_package_boundary_case(tmp_path, case):
+    tree = _boundary_case_tree(tmp_path)
+    path, name, source, expected = BOUNDARY_CASES[case]
     tree.project(path, name, modules={"a.py": source}, settings=_package_allowlist("pydantic") if name == "kit-light" else "")
 
     keys = tree.keys()

@@ -17,8 +17,10 @@ Every import node is an edge, at module level, inside a function, under
 see where an edge is, and no rule consults it.
 
 Standard library only, so the checks run with a plain ``python3`` and no
-project environment. Third-party imports are mapped to nothing: an import root
-is internal only when some project ships it as ``src/<package>``.
+project environment. An import root is internal only when some project ships
+it as ``src/<package>``. A third-party root is mapped to a distribution only
+where a package allowlist needs it: by its normalized name, or through the
+package's own ``import-roots``.
 """
 
 from __future__ import annotations
