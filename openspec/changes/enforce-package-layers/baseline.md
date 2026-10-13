@@ -118,7 +118,7 @@ package's place (`design.md`, "Audit before gate").
 | `arkhai-core-storefront` | drops `arkhai-kit-policy` | unused declaration | never imported or discovered; every importer of `market_policy` declares it |
 | `arkhai-kit-capacity-publication` | drops `arkhai-core-registry-client` | unused declaration | the registry client is injected through a factory, never imported |
 | `arkhai-compute-provisioning` | drops `arkhai-kit-identity` | unused declaration | never imported; its contracts declare it |
-| `arkhai-vms-buyer` | drops `arkhai-vms-settlement` | unused declaration | never imported or named; only the VM storefront uses it |
+| `arkhai-vms-buyer` | moves `arkhai-vms-settlement` to its `dev` dependency group | unused declaration | never imported by the package; one of its tests checks escrow selection against the settlement codec |
 
 Two unimported declarations have a runtime reason (above), which each declaring
 package now gives in its own `pyproject.toml` under

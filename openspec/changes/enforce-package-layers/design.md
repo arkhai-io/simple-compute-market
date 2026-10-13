@@ -407,6 +407,14 @@ in "Rules are independent and each names a file and line" and are what
   composition composes mechanisms by rule; and `kit/config`'s mechanism denylist
   also forbids `stripe` and `web3`, for which `kit/config` has no budget. Both
   tests stay.
+- **A declaration can serve a project's tests.** The audit removed a
+  declaration when the package source never imported it, but a project's
+  tests run in the same environment, and the VM buyer's tests import the VM
+  settlement codec. The CI suite caught the removal; the dependency moved to
+  the buyer's `dev` dependency group, where a test-only dependency belongs and
+  the architecture check, which reads runtime dependencies and extras only,
+  does not look. Removing an unexplained declaration therefore also requires
+  that the project's tests not import it.
 - **A core package's kind is library.** The reading table's `carrier` names the
   layer's content, not a fifth kind.
 
