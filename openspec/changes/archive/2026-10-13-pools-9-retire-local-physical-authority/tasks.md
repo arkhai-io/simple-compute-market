@@ -1,6 +1,6 @@
 # Tasks
 
-## Status: implemented, reviewed, and validated end to end 2026-10-13
+## Status: archived 2026-10-13; implemented, reviewed, and validated end to end
 
 Section numbers keep the original plan's. Section 0 is
 `fix-resource-pool-provider-at-creation`'s, and Section 2 and most of Section 3
