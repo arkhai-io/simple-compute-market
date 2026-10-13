@@ -118,6 +118,8 @@ jobs:
         with:
           version: "0.11.17"
       - uses: azure/setup-helm@v4
+      - name: Check package architecture
+        run: make check-architecture
       - name: Run release and package boundary tests
         run: make test-release-tooling
       - name: Run Helm schema and render contracts
