@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Fail if a light kind outgrows its budget or a plugin is imported.
+"""Fail if a package depends outside its allowlist or a plugin is imported.
 
 Rules (docs/development/ARCHITECTURE.md, "Kind"):
 
-- ``kind_budget``: a ``contracts`` or ``client`` package depending outside the
-  budget docs/development/ARCHITECTURE.toml gives its kind. Fails for a kind
-  whose budget sets ``enforce = true`` and warns for the others;
-- ``external_budget``: a package with an external budget importing a
-  third-party root the budget does not list. Fails;
+- ``kind_allowlist``: a ``contracts`` or ``client`` package depending on
+  something its kind's allowlist in docs/development/ARCHITECTURE.toml does not
+  name. Fails for a kind whose allowlist sets ``enforce = true`` and warns for
+  the others;
+- ``package_allowlist``: a package whose own ``pyproject.toml`` lists
+  ``allowed-dependencies`` declaring or importing a distribution the list does
+  not name, or importing a third-party distribution it does not declare. Fails;
 - ``plugin_in_degree``: any package importing a plugin, a package that
   registers into a listed plugin entry-point group. Fails; declaring a plugin
   to install it is permitted.

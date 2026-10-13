@@ -74,17 +74,17 @@ name = "market.storefront_contributions"
 name = "market.delivery_sinks"
 owner = "arkhai-kit-delivery"
 
-# The light kinds. A dependency is within budget when its layer, kind, or
-# distribution is listed, or, with family_vocabulary, when it is the
-# vocabulary of a family in the package's scope. enforce = false reports a
-# breach as a warning.
-[budgets.contracts]
+# The kind allowlists: what a package of each light kind may depend on. A
+# dependency is on the allowlist when its layer, kind, or distribution is
+# listed, or, with family_vocabulary, when it is the vocabulary of a family in
+# the package's scope. enforce = false reports a breach as a warning.
+[kind_allowlists.contracts]
 layers = ["core"]
 distributions = ["arkhai-kit-identity", "arkhai-kit-capability-shape"]
 family_vocabulary = true
 enforce = true
 
-[budgets.client]
+[kind_allowlists.client]
 layers = ["core"]
 kinds = ["contracts"]
 distributions = ["arkhai-kit-identity"]

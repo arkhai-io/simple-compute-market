@@ -53,12 +53,12 @@ name = "host.plugins"
 [[plugin_groups]]
 name = "host.sinks"
 owner = "kit-sinks"
-[budgets.contracts]
+[kind_allowlists.contracts]
 layers = ["core"]
 distributions = []
 family_vocabulary = true
 enforce = true
-[budgets.client]
+[kind_allowlists.client]
 layers = ["core"]
 kinds = ["contracts"]
 distributions = []
@@ -346,7 +346,7 @@ def test_a_runtime_reason_expires_once_the_dependency_is_imported(tmp_path):
     assert ("declaration_expiry", "kit-c", "core-carrier") in tree.keys()
 
 
-def test_kind_budget_holds_contracts_and_clients(tmp_path):
+def test_kind_allowlist_holds_contracts_and_clients(tmp_path):
     tree = _tree(tmp_path)
     tree.project("domains/fam", "fam-vocab")
     tree.project("domains/fam/jobs-contracts", "fam-contracts", deps=["fam-vocab", "kit-base"],
@@ -355,43 +355,44 @@ def test_kind_budget_holds_contracts_and_clients(tmp_path):
                  modules={"a.py": "import fam_contracts, core_carrier, fam_vocab\n"})
     keys = tree.keys()
 
-    assert ("kind_budget", "fam-contracts", "kit-base") in keys
-    assert ("kind_budget", "fam-contracts", "fam-vocab") not in keys
-    assert ("kind_budget", "fam-client", "fam-vocab") in keys
-    assert {k for k in keys if k[0] == "kind_budget"} == {
-        ("kind_budget", "fam-contracts", "kit-base"), ("kind_budget", "fam-client", "fam-vocab")}
+    assert ("kind_allowlist", "fam-contracts", "kit-base") in keys
+    assert ("kind_allowlist", "fam-contracts", "fam-vocab") not in keys
+    assert ("kind_allowlist", "fam-client", "fam-vocab") in keys
+    assert {k for k in keys if k[0] == "kind_allowlist"} == {
+        ("kind_allowlist", "fam-contracts", "kit-base"), ("kind_allowlist", "fam-client", "fam-vocab")}
 
 
-def _budget(*dists: str, extra: str = "") -> str:
+def _package_allowlist(*dists: str, extra: str = "") -> str:
     return ("[tool.arkhai.architecture]\nallowed-dependencies = ["
             + ", ".join(f'"{d}"' for d in dists) + "]\n" + extra)
 
 
-def test_external_budget_allows_only_the_listed_imports(tmp_path):
+def test_package_allowlist_allows_only_the_listed_imports(tmp_path):
     tree = _tree(tmp_path)
-    tree.project("kit/light", "kit-light", modules={"a.py": "import json\nimport pydantic\nimport httpx\n"},
-                 settings=_budget("pydantic"))
+    tree.project("kit/light", "kit-light", deps=["pydantic"],
+                 modules={"a.py": "import json\nimport pydantic\nimport httpx\n"},
+                 settings=_package_allowlist("pydantic"))
 
-    assert {k for k in tree.keys() if k[0] == "external_budget"} == {("external_budget", "kit-light", "httpx")}
+    assert {k for k in tree.keys() if k[0] == "package_allowlist"} == {("package_allowlist", "kit-light", "httpx")}
 
 
-def test_external_budget_holds_declarations_without_an_import(tmp_path):
+def test_package_allowlist_holds_declarations_without_an_import(tmp_path):
     tree = _tree(tmp_path)
     tree.project("kit/light", "kit-light", deps=["pydantic>=2", "sqlalchemy>=2"],
-                 modules={"a.py": "import pydantic\n"}, settings=_budget("pydantic"))
+                 modules={"a.py": "import pydantic\n"}, settings=_package_allowlist("pydantic"))
     found = {f.key: f for f in tree.findings()}
 
-    assert set(k for k in found if k[0] == "external_budget") == {("external_budget", "kit-light", "sqlalchemy")}
-    assert found[("external_budget", "kit-light", "sqlalchemy")].sites[0].context == "declaration"
+    assert set(k for k in found if k[0] == "package_allowlist") == {("package_allowlist", "kit-light", "sqlalchemy")}
+    assert found[("package_allowlist", "kit-light", "sqlalchemy")].sites[0].context == "declaration"
 
 
-def test_external_budget_matches_a_root_by_normalized_name_or_alias(tmp_path):
+def test_package_allowlist_matches_a_root_by_normalized_name_or_alias(tmp_path):
     tree = _tree(tmp_path)
     tree.project("kit/light", "kit-light", deps=["eth-account", "PyYAML"],
                  modules={"a.py": "import eth_account\nimport yaml\n"},
-                 settings=_budget("eth-account", "pyyaml", extra='[tool.arkhai.architecture.import-roots]\nyaml = "PyYAML"\n'))
+                 settings=_package_allowlist("eth-account", "pyyaml", extra='[tool.arkhai.architecture.import-roots]\nyaml = "PyYAML"\n'))
 
-    assert not {k for k in tree.keys() if k[0] == "external_budget"}
+    assert not {k for k in tree.keys() if k[0] == "package_allowlist"}
 
 
 def test_a_plugin_is_declared_and_never_imported(tmp_path):
@@ -517,12 +518,12 @@ def test_owned_rows_lists_a_changes_exceptions_and_overrides(tmp_path):
     assert architecture.owned_rows(model, "other") == []
 
 
-def test_an_external_budget_lists_internal_roots_too(tmp_path):
+def test_a_package_allowlist_lists_internal_distributions_too(tmp_path):
     tree = _tree(tmp_path)
     tree.project("kit/shape", "kit-shape", deps=["kit-base"], modules={"a.py": "import kit_base\n"},
-                 settings=_budget())
+                 settings=_package_allowlist())
 
-    assert ("external_budget", "kit-shape", "kit-base") in tree.keys()
+    assert ("package_allowlist", "kit-shape", "kit-base") in tree.keys()
 
 
 # ------------------------------------------------------------------ retired per-package tests
@@ -554,7 +555,7 @@ RETIRED_CASES = {
     # contracts and client, contact exchange, compute vocabulary, provisioning
     # contracts and client: an import outside the package's allowlist.
     "allowlist": ("kit/light", "kit-light", "import kit_plain\nimport fastapi\n",
-                  [("external_budget", "kit-light", "kit-plain"), ("external_budget", "kit-light", "fastapi")]),
+                  [("package_allowlist", "kit-light", "kit-plain"), ("package_allowlist", "kit-light", "fastapi")]),
     # core carrier purity: a carrier importing anything internal.
     "carrier purity": ("core/extra", "core-extra", "import kit_plain\n", [("layer", "core-extra", "kit-plain")]),
     # core domain boundaries: a core role importing a concrete domain.
@@ -587,7 +588,7 @@ RETIRED_CASES = {
 def test_the_check_fails_where_a_retired_boundary_test_did(tmp_path, case):
     tree = _retired_case_tree(tmp_path)
     path, name, source, expected = RETIRED_CASES[case]
-    tree.project(path, name, modules={"a.py": source}, settings=_budget("pydantic") if name == "kit-light" else "")
+    tree.project(path, name, modules={"a.py": source}, settings=_package_allowlist("pydantic") if name == "kit-light" else "")
 
     keys = tree.keys()
 
@@ -675,3 +676,48 @@ def test_a_package_table_may_not_classify_its_package(tmp_path):
     tree.project("kit/self", "kit-self", settings='[tool.arkhai.architecture]\nscope = ["dom"]\n')
 
     assert ("configuration", "kit-self", "scope") in _configuration(tree)
+
+
+def test_package_allowlist_requires_an_imported_third_party_distribution_be_declared(tmp_path):
+    tree = _tree(tmp_path)
+    tree.project("kit/light", "kit-light", modules={"a.py": "import sqlalchemy\n"},
+                 settings=_package_allowlist("sqlalchemy"))
+    found = {f.key: f for f in tree.findings()}
+
+    assert "does not declare" in found[("package_allowlist", "kit-light", "sqlalchemy")].message
+
+
+def test_a_wheel_naming_a_missing_package_fails_closed(tmp_path):
+    tree = _tree(tmp_path)
+    project = tmp_path / "kit" / "odd"
+    (project / "src" / "odd").mkdir(parents=True)
+    (project / "src" / "odd" / "a.py").write_text("import anything_at_all\n", "utf-8")
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "kit-odd"\nversion = "0.1.0"\n'
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/nonexistent"]\n', "utf-8")
+
+    assert ("unclassified", "kit-odd", "kit/odd") in tree.keys()
+
+
+def test_configuration_refuses_an_archived_change_named_by_its_path(tmp_path):
+    tree = _configured(tmp_path)
+    (tmp_path / "openspec" / "changes" / "archive" / "2026-10-01-gone").mkdir(parents=True)
+    tree.write_rules('[[exceptions]]\nrule = "layer"\nproject = "kit-base"\ntarget = "x"\n'
+                     'owner = "archive/2026-10-01-gone"\n', changes=False)
+
+    assert ("configuration", "kit-base", "owner:layer:x") in _configuration(tree)
+
+
+def test_configuration_finds_duplicates_under_different_spellings(tmp_path):
+    tree = _configured(tmp_path)
+    tree.write_rules('[[exceptions]]\nrule = "layer"\nproject = "kit-base"\ntarget = "x"\nowner = "fix-it"\n'
+                     '[[exceptions]]\nrule = "layer"\nproject = "Kit_Base"\ntarget = "x"\nowner = "fix-it"\n')
+
+    assert any(k[0] == "configuration" and k[1] == "exception" for k in _configuration(tree))
+
+
+def test_configuration_refuses_an_exception_for_an_unknown_rule(tmp_path):
+    tree = _configured(tmp_path)
+    tree.write_rules('[[exceptions]]\nrule = "layr"\nproject = "kit-base"\ntarget = "x"\nowner = "fix-it"\n')
+
+    assert ("configuration", "kit-base", "rule:layr") in _configuration(tree)

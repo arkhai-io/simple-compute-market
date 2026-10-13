@@ -32,6 +32,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from check_project_layout import wheel_package  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 RULES_FILE = Path("docs/development/ARCHITECTURE.toml")
 SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git", ".dist", "build", "__pycache__"}
@@ -43,7 +47,7 @@ GROUPS = {
     "layers": ("configuration", "unclassified", "layer", "cycle", "layer_scope", "override_expiry"),
     "scope": ("scope", "vocabulary"),
     "dependencies": ("undeclared_import", "unused_declaration", "declaration_expiry"),
-    "kinds": ("kind_budget", "external_budget", "plugin_in_degree"),
+    "kinds": ("kind_allowlist", "package_allowlist", "plugin_in_degree"),
 }
 RULES = tuple(rule for rules in GROUPS.values() for rule in rules)
 
@@ -74,7 +78,7 @@ class Rules:
     domains: dict[str, dict]
     mechanisms: dict[str, dict]
     plugin_groups: dict[str, str | None]
-    budgets: dict[str, dict]
+    kind_allowlists: dict[str, dict]
     vocabulary_fail_layers: frozenset[str]
     overrides: tuple[dict, ...]
     exceptions: tuple[dict, ...]
@@ -109,7 +113,7 @@ def load_rules(root: Path) -> Rules:
             row["name"]: normalize(row["owner"]) if row.get("owner") else None
             for row in data.get("plugin_groups", ())
         },
-        budgets=data.get("budgets", {}),
+        kind_allowlists=data.get("kind_allowlists", {}),
         vocabulary_fail_layers=frozenset(data.get("vocabulary", {}).get("fail_layers", ())),
         overrides=tuple(data.get("overrides", ())),
         exceptions=tuple(data.get("exceptions", ())),
@@ -228,15 +232,14 @@ def discover(root: Path, rules: Rules) -> dict[str, Project]:
         data = tomllib.loads(text)
         if "project" not in data or data.get("tool", {}).get("uv", {}).get("package") is False:
             continue
-        packages = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get(
-            "wheel", {}).get("packages", [])
+        package = wheel_package(pyproject.parent, data)
         name = normalize(data["project"].get("name", relative.as_posix()))
-        malformed = len(packages) != 1
+        malformed = package is None
         declared = _declared(data["project"], text)
         projects[name] = Project(
             name=name,
             path=relative.as_posix(),
-            package="" if malformed else packages[0].rsplit("/", 1)[-1],
+            package=package or "",
             declared=declared,
             entry_groups=frozenset(data["project"].get("entry-points", {})),
             reading=None if malformed else read_path(relative.as_posix(), name, rules),
@@ -651,48 +654,53 @@ def declaration_expiry(model: Model) -> list[Finding]:
     return findings
 
 
-def _within_budget(model: Model, source: Project, target: Project, budget: dict) -> bool:
-    if target.layer in budget.get("layers", ()) or target.kind in budget.get("kinds", ()):
+def _within_kind_allowlist(model: Model, source: Project, target: Project, allowlist: dict) -> bool:
+    if target.layer in allowlist.get("layers", ()) or target.kind in allowlist.get("kinds", ()):
         return True
-    if target.name in {normalize(d) for d in budget.get("distributions", ())}:
+    if target.name in {normalize(d) for d in allowlist.get("distributions", ())}:
         return True
-    if budget.get("family_vocabulary"):
+    if allowlist.get("family_vocabulary"):
         vocabularies = {normalize(f["vocabulary"]) for n, f in model.rules.families.items()
                         if n in source.scope and f.get("vocabulary")}
         return target.name in vocabularies
     return False
 
 
-def kind_budget(model: Model) -> list[Finding]:
+def kind_allowlist(model: Model) -> list[Finding]:
+    """A contracts or client package depends only on what its kind's allowlist names."""
     findings = []
     for (source, target), edges in _grouped(model.edges).items():
         s, t = model.projects[source], model.projects[target]
-        budget = model.rules.budgets.get(s.kind)
-        if budget is None or _within_budget(model, s, t, budget):
+        allowlist = model.rules.kind_allowlists.get(s.kind)
+        if allowlist is None or _within_kind_allowlist(model, s, t, allowlist):
             continue
         findings.append(Finding(
-            "kind_budget", source, target,
-            f"is a {s.kind} package and depends on {target}, outside its kind's budget",
-            _sites(edges), "fail" if budget.get("enforce") else "warn"))
+            "kind_allowlist", source, target,
+            f"is a {s.kind} package and depends on {target}, which its kind's allowlist does not name",
+            _sites(edges), "fail" if allowlist.get("enforce") else "warn"))
     return findings
 
 
-def external_budget(model: Model) -> list[Finding]:
-    """A package with ``allowed-dependencies`` declares and imports only those.
+def package_allowlist(model: Model) -> list[Finding]:
+    """A package with ``allowed-dependencies`` declares and imports only those, and declares what it imports.
 
     The list names distributions, internal or third-party. A declaration is
     checked by name. An internal import root maps to its distribution through
     the tree; a third-party root to the distribution of the same normalized
-    name, or through ``import-roots`` where the two are named differently.
+    name, or through ``import-roots`` where the two are named differently. That
+    mapping is complete for a package with an allowlist, because an import it
+    cannot map fails, so a mapped third-party distribution must also be
+    declared. Outside such packages the mapping would be a guess, and whether
+    third-party declarations are complete is left to each project's own
+    environment. An ``import-roots`` entry is taken as the package states it.
     """
     owner = {p.package: p.name for p in model.projects.values() if p.package}
     findings: dict[tuple[str, str], Finding] = {}
 
-    def breach(p: Project, dist: str, site: Site, how: str) -> None:
+    def breach(p: Project, dist: str, site: Site, message: str) -> None:
         key = (p.name, dist)
         if key not in findings:
-            findings[key] = Finding("external_budget", p.name, dist,
-                                    f"{how} {dist}, which its allowed-dependencies do not list")
+            findings[key] = Finding("package_allowlist", p.name, dist, message)
         findings[key].sites.append(site)
 
     for p in model.projects.values():
@@ -703,11 +711,14 @@ def external_budget(model: Model) -> list[Finding]:
         for dist, (extra, line) in sorted(p.declared_all.items()):
             if dist not in allowed:
                 context = f"declaration [{extra}]" if extra else "declaration"
-                breach(p, dist, Site(p.pyproject, line, context), "declares")
+                breach(p, dist, Site(p.pyproject, line, context),
+                       f"declares {dist}, which its allowed-dependencies do not list")
         for root, site in model.externals.get(p.name, ()):
             dist = owner.get(root) or aliases.get(root) or normalize(root)
             if dist not in allowed:
-                breach(p, dist, site, "imports")
+                breach(p, dist, site, f"imports {dist}, which its allowed-dependencies do not list")
+            elif root not in owner and dist not in p.declared_all:
+                breach(p, dist, site, f"imports {dist}, which its pyproject.toml does not declare")
     return list(findings.values())
 
 
@@ -715,7 +726,7 @@ def _owner_problem(model: Model, owner: str | None) -> str | None:
     changes = model.root / "openspec" / "changes"
     if not owner:
         return "names no owning change"
-    if owner == "archive" or not (changes / owner).is_dir():
+    if "/" in owner or "\\" in owner or owner in (".", "..", "archive") or not (changes / owner).is_dir():
         return f"names {owner!r}, which is not an unarchived change under openspec/changes/"
     return None
 
@@ -735,7 +746,7 @@ def configuration(model: Model) -> list[Finding]:
                 problems.append((table, str(k), f"has a duplicate {table} row for {k}"))
             seen.add(k)
 
-    unique(rules.exceptions, lambda r: (r.get("rule"), r.get("project"), r.get("target")), "exception")
+    unique(rules.exceptions, _exception_key, "exception")
     unique(rules.overrides, lambda r: normalize(r.get("project", "")), "override")
     unique(rules.plugin_group_rows, lambda r: r.get("name"), "plugin-group")
     for name, family in rules.families.items():
@@ -751,10 +762,16 @@ def configuration(model: Model) -> list[Finding]:
     for group, owner in rules.plugin_groups.items():
         if owner and owner not in model.projects:
             problems.append(("plugin-group", group, f"plugin group {group} names owner {owner}, which is not a project"))
-    for kind, budget in rules.budgets.items():
-        for dist in budget.get("distributions", ()):
+    for kind, allowlist in rules.kind_allowlists.items():
+        for dist in allowlist.get("distributions", ()):
             if normalize(dist) not in model.projects:
-                problems.append(("budget", f"{kind}:{dist}", f"the {kind} budget names {dist}, which is not a project"))
+                problems.append(("kind-allowlist", f"{kind}:{dist}",
+                                 f"the {kind} kind allowlist names {dist}, which is not a project"))
+    excusable = set(CHECKS) - {"configuration"}
+    for row in rules.exceptions:
+        if row.get("rule") not in excusable:
+            problems.append((normalize(row.get("project", "")), f"rule:{row.get('rule')}",
+                             f"its exception row names rule {row.get('rule')!r}, which is no rule a row can excuse"))
     for row in rules.overrides:
         project = normalize(row.get("project", ""))
         for element in row.get("scope", ()):
@@ -827,11 +844,18 @@ CHECKS = {
     "undeclared_import": undeclared_import,
     "unused_declaration": unused_declaration,
     "declaration_expiry": declaration_expiry,
-    "kind_budget": kind_budget,
-    "external_budget": external_budget,
+    "kind_allowlist": kind_allowlist,
+    "package_allowlist": package_allowlist,
     "plugin_in_degree": plugin_in_degree,
     "override_expiry": override_expiry,
 }
+
+
+def _exception_key(row: dict) -> tuple[str, str, str]:
+    """The finding key an exception row excuses; a cycle row names its members as written."""
+    rule = row.get("rule", "")
+    project = row.get("project", "")
+    return (rule, project if rule == "cycle" else normalize(project), row.get("target", ""))
 
 
 def exception_expiry(model: Model, found: list[Finding], rules: tuple[str, ...]) -> list[Finding]:
@@ -842,7 +866,7 @@ def exception_expiry(model: Model, found: list[Finding], rules: tuple[str, ...])
         rule = row.get("rule", "")
         if rule not in rules:
             continue
-        key = (rule, normalize(row["project"]) if rule != "cycle" else row["project"], row["target"])
+        key = _exception_key(row)
         if key not in keys:
             expired.append(Finding(
                 "exception_expiry", key[1], f"{rule}:{row['target']}",
@@ -856,10 +880,7 @@ def problems(model: Model, rules: tuple[str, ...] = RULES, strict: bool = False)
     found = [finding for rule in rules if rule in CHECKS for finding in CHECKS[rule](model)]
     if strict:
         return found
-    rows = {}
-    for row in model.rules.exceptions:
-        key_project = row["project"] if row.get("rule") == "cycle" else normalize(row["project"])
-        rows[(row.get("rule"), key_project, row["target"])] = row
+    rows = {_exception_key(row): row for row in model.rules.exceptions}
     for finding in found:
         finding.excused_by = rows.get(finding.key)
     return found + exception_expiry(model, found, rules)

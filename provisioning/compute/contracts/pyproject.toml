@@ -32,8 +32,8 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
-# The package's lightness is part of its contract: every distribution it may
-# declare or import beyond the standard library. make check-architecture holds
-# it; see docs/development/ARCHITECTURE.md, "Kind".
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
 allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "pydantic"]
