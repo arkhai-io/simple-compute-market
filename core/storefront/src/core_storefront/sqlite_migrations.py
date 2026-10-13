@@ -5,9 +5,8 @@ alter existing tables to match new model columns. Keep additive compatibility
 changes here so persisted storefront DBs can upgrade across image versions.
 
 This module owns the migration engine plus the domain-neutral migrations
-(negotiation/escrow/listing tables). Domain composition roots keep their
-own inventory migrations and pass them through
-``SQLiteClient._domain_migrations``.
+(negotiation/escrow/listing tables). Each domain's composition root passes
+its own migrations through ``SQLiteClient._domain_migrations``.
 """
 
 from __future__ import annotations

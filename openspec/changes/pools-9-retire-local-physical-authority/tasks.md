@@ -204,8 +204,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `ARCHITECTURE.md` are corrected; operator documents were updated under
       4.6 and 5.5.
 - [x] 7.7 **Campaign index currency.** `openspec/changes/README.md` records the
-      change as implemented and reviewed, awaiting e2e and the deployed chart
-      smoke test; its place in the campaign graph is unchanged.
+      change as implemented, reviewed, and promoted, with the e2e and deployed
+      smoke evidence 7.9 records; its place in the campaign graph is unchanged.
 - [x] 7.8 **Documentation citations.** Every citation in this change's
       documents and in the promoted Evidence resolves. The repository-wide
       check's remaining failures are in files this change does not touch.

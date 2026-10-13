@@ -1,4 +1,4 @@
-"""A native-token escrow built from a listing entry verifies against the chain.
+"""A native-token escrow built from a listing entry verifies against its decoded obligation.
 
 Runs the proposal a seller derives from its accepted escrow entry through the
 settlement verifier, with the chain read replaced by the SDK's own decoded
