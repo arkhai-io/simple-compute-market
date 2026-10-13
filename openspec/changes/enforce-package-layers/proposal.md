@@ -36,13 +36,16 @@ In two phases. The first is a report; nothing gates until the second.
   the prose it encodes: the layer order and each layer's permitted scope elements;
   the families, domains, and mechanisms with their directories, owning kits, and
   identifying literals; the path conventions that yield layer, scope, and kind; the
-  kind table with its dependency budgets; and an **overrides** table for projects
+  plugin entry-point groups and their owners; the kind table with its dependency
+  budgets; a **declarations** table recording the runtime reason for each internal
+  dependency declared without an import; and an **overrides** table for projects
   whose path does not yet say what they are.
 - One stdlib library module, `architecture.py` under `scripts`, that classifies
   every project, walks every import node under `src/` (module-level,
-  function-local, `TYPE_CHECKING`, `try`), and exposes one `problems()` per rule:
+  function-local, `TYPE_CHECKING`, `try`), unions those edges with the internal
+  distributions each project declares, and exposes one `problems()` per rule:
   layer direction, same-layer cycles, scope subset, layer/scope bounds,
-  undeclared imports, declared-but-unimported internal distributions, kind
+  undeclared imports, declarations without an import or a recorded reason, kind
   budgets, plugin in-degree, scope-vocabulary literals, and the two table-expiry
   rules.
 - A report script that runs every rule over the whole tree and writes a classified
@@ -57,7 +60,8 @@ In two phases. The first is a report; nothing gates until the second.
   fails, and an override row whose path now conforms fails, so neither table
   outlives its cause.
 - Four check scripts in `check_project_layout.py`'s shape under
-  `make check-architecture`, which `make check-packaging` runs;
+  `make check-architecture`, which `make check-packaging` runs and the
+  deployment-contracts CI job runs on every push;
   `make check-architecture-change CHANGE=<name>` scopes the checks to one change's
   review scope. The declared-but-unimported rule and the vocabulary-literal rule
   warn rather than fail; the kind budgets fail only for rules the audit showed
@@ -99,9 +103,9 @@ None.
 ## Impact
 
 - Affected code: `scripts/` (one library, five scripts, one test module),
-  `Makefile` (six targets, one addition to `check-packaging`), the eighteen boundary
-  tests (retired), and the new `ARCHITECTURE.toml` beside
-  `docs/development/ARCHITECTURE.md`.
+  `Makefile` (six targets, one addition to `check-packaging`), one CI workflow
+  step, the eighteen boundary tests (retired), and the new `ARCHITECTURE.toml`
+  beside `docs/development/ARCHITECTURE.md`.
 - Affected documentation: `docs/development/ARCHITECTURE.md` (the "Where the current
   tree diverges" paragraph becomes a pointer to the exceptions table, and the kind
   conventions and budgets this change owns are promoted once they hold),

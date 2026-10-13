@@ -33,7 +33,10 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `market_config` function-locally to read `[aggregation].best_price_timeout` from
     the user's configuration — the kit's only upward edge, with one consumer,
     `arkhai_vms_buyer/aggregation.py`. The buyer resolves the timeout and passes it;
-    the kit stops reading configuration.
+    the kit stops reading configuration. The same module registers
+    `market.buyer_aggregation_policies` entry points, so a mechanism kit every
+    package imports is also a buyer-side extension; whether the policies move to
+    the Alkahest buyer plugin is decided with the resource-model work above.
   - `core_storefront`'s `refund.py`, `token_transfer.py`, and `escrow_identity.py`
     are Alkahest and EVM helpers in the storefront role package, the first two
     importing `market_alkahest.schemas` and `web3` without declaring them. They move

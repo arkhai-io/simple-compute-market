@@ -38,9 +38,11 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
   reason" to the acceptance criterion for every ratcheted package, and sequence the `core/storefront` step after
   `kit-owned-storefront-auth-and-persistence` and `move-escrow-into-alkahest` decide
   whether `refund`, `token_transfer`, and `escrow_identity` leave for `kit/alkahest`
-  (the recommended outcome) or stay and are declared. The reverse direction catches
-  `domains/vms/storefront/pyproject.toml`'s two bare-metal declarations with no
-  import, owned by `kit-owned-storefront-shell`. Task 2.5 is the decision gate for
+  (the recommended outcome) or stay and are declared. The reverse direction is a warning
+  rather than a defect, since a declaration can exist to install a plugin or a
+  driver — the VM storefront's two bare-metal declarations install the bare-metal
+  contribution into the compute shell — and `enforce-package-layers`'s
+  declarations table is where such a reason is recorded. Task 2.5 is the decision gate for
   the "`kit/site` question" and stays one; the recommended answer for it is that
   `kit/site` passes `ARCHITECTURE.md`'s third-domain placement test because API
   credits composes it, stays repository-wide, and belongs in a kit typing ratchet

@@ -47,15 +47,46 @@ so.
 | `roles/<name>` | composition | executable |
 | `domains/<scope>/…/<last>` | by kind | the last segment if it names a kind, else a `-<kind>` suffix, else library |
 
-Kinds are five: `library`, `executable`, `contracts`, `client`, `plugin`. A last
-segment or suffix naming an executable role (`storefront`, `buyer`, `service`,
-`app`) yields `executable`; `adapter`, `vocabulary`, `listings`, `negotiation`,
-and `settlement` are descriptive segments that yield `library` — what a VM
-specialization is about is not a kind. A project declaring any entry-point group
-other than `console_scripts` is a `plugin` whatever its name says. Where the
-current tree does not match these readings, an **override row** states the
-attributes and names the change that will move the project; the row fails once
-the path conforms.
+Kinds are five: `library`, `executable`, `contracts`, `client`, `plugin`. A
+`-<kind>` suffix is read only when the word after the hyphen is one of the kind
+words; `kit/capability-shape` is a library, not a kind "shape". A last segment or
+suffix naming an executable role (`storefront`, `buyer`, `service`, `app`) yields
+`executable`; `adapter`, `vocabulary`, `listings`, `negotiation`, and
+`settlement` are descriptive segments that yield `library` — what a VM
+specialization is about is not a kind. The reading needs no special case for a
+vocabulary project at a scope directory's root or for the nested
+`domains/apicredits/middleware/python`: both classify as libraries in the right
+scope. Where the current tree does not match these readings, an **override row**
+states the attributes and names the change that will move the project; the row
+fails once the path conforms.
+
+### A plugin is a registrant in a listed group, not any entry point
+
+The first draft made any non-console entry point a plugin that nothing may
+import. That fails correct code: `arkhai-vms` and `arkhai-bare-metal` register
+`market.storefront_domains` and are imported by their own buyers and storefronts,
+`kit/alkahest` registers `market.buyer_aggregation_policies` and is imported
+everywhere, and `kit/delivery` registers its built-in sinks. The rules file
+therefore lists the **plugin groups** — `market.buyer_domains`,
+`market.storefront_contributions`, `market.delivery_sinks` — and a package that
+registers into one is a plugin. A group may name an **owner**, the package that
+discovers the group and may also register into it; `kit/delivery` owns
+`market.delivery_sinks`, so its built-in sinks are a library and
+`kit/delivery-apprise` is a plugin. Every other group is an extension point
+libraries contribute to and confers no kind. The in-degree rule is about imports:
+a host declares a plugin to have it installed, and that declaration is judged by
+the scope rule like any other.
+
+### Declarations are dependencies
+
+Layer, scope, and cycle rules run over the union of a package's imports and the
+internal distributions it declares, optional extras included. A declaration with
+no import is still knowledge: the VM storefront declares
+`arkhai-bare-metal-storefront` and `arkhai-bare-metal` because it is the
+compute-family storefront shell that installs the bare-metal contribution, and a
+domain-scoped package installing a sibling domain is the scope rule's own example
+of a violation. That finding is owned by `kit-owned-storefront-shell`, which
+decides where the shell lives; it is not a stale declaration to delete.
 
 ### What each layer's scope may contain
 
@@ -84,14 +115,18 @@ imports whose comments argued they were not dependencies.
 An imported distribution that is not declared is a defect; the environment that
 happens to resolve it transitively is the next one to break. The reverse is not a
 defect: a distribution may be declared for an entry point, a database driver,
-form handling, or an optional extra with no static import. So a declared internal
-distribution that is never imported is a warning that asks for a reason, and a
-declared external distribution is not examined. The scan on 2026-10-11 found six
-projects with undeclared direct internal imports — `arkhai-core-storefront`,
-`arkhai-apicredits-buyer`, `arkhai-bare-metal-storefront`, `arkhai-kit-alkahest`,
-`arkhai-kit-policy`, and `arkhai-kit-storefront` (`arkhai-core` and
-`arkhai-kit-identity`, reached today only through `arkhai-core-storefront`) — and
-two stale internal declarations, both on the VM storefront.
+form handling, a plugin to install, or an optional extra with no static import.
+`ARCHITECTURE.md` requires such a declaration to carry a stated runtime reason and
+gives it no home, so the rules file has a **declarations table** — distribution,
+dependency, reason — and the warning applies only to a declared internal
+distribution with neither an import nor a row, which lets it become a failure
+later. Declared external distributions are not examined. The scan on 2026-10-11
+found six projects with undeclared direct internal imports —
+`arkhai-core-storefront`, `arkhai-apicredits-buyer`, `arkhai-bare-metal-storefront`,
+`arkhai-kit-alkahest`, `arkhai-kit-policy`, and `arkhai-kit-storefront`
+(`arkhai-core` and `arkhai-kit-identity`, reached today only through
+`arkhai-core-storefront`) — and thirteen declared internal dependencies across
+seven projects with no import; the audit classifies each as a row or a removal.
 
 ### Rules are independent and each names a file and line
 
@@ -102,9 +137,9 @@ two stale internal declarations, both on the VM storefront.
 | scope subset | `scope(dst) ⊄ scope(src)` | fail |
 | layer/scope | a scope violates its layer's bounds, or a kit holds `{m}` without being `m`'s kit | fail |
 | undeclared import | an imported distribution is not declared | fail |
-| unused declaration | a declared internal distribution is never imported | warn |
+| unused declaration | a declared internal distribution has neither an import nor a declarations-table row | warn |
 | kind budget | a `contracts`, `client`, or `plugin` package exceeds its budget (below) | fail once the audit shows the kind clean |
-| plugin in-degree | any package imports a `plugin` | fail |
+| plugin in-degree | any package imports a `plugin`; declaring one is permitted | fail |
 | vocabulary | a package's string literals contain a scope element's token outside its scope | warn; fail at core and kit after one cycle |
 | exception expiry | an `[[exceptions]]` row names an edge or token that no longer exists | fail |
 | override expiry | an `[overrides]` row names a path that now classifies without it | fail |
@@ -140,7 +175,12 @@ Once the gate exists, the table is the authoritative list of divergences and
 
 `planning-governance` already requires every closeout to run the packaging check
 and resolve every failure. Adding `check-architecture` to that target puts
-architecture on every closeout with no new process step.
+architecture on every closeout with no new process step. Closeout is not enough
+on its own: about eight of the per-package tests this change retires run in the
+CI matrix today, so retiring them against a closeout-only check would weaken
+continuous enforcement. `make check-architecture` therefore also runs in the
+existing deployment-contracts CI job, which it can, since it needs plain
+`python3` and no wheelhouse.
 
 ### Per-package tests are subsumed, not deleted in bulk
 
@@ -166,30 +206,41 @@ family composition and which of its modules may name an adapter is a wiring
 judgement. Each is owned elsewhere. The ownership question in `ARCHITECTURE.md` is
 the review's, by design.
 
+## Resolved questions
+
+- **Rules file home.** `ARCHITECTURE.toml` under `docs/development`. Forced:
+  `make check-comment-hygiene` rejects any `.toml` outside `docs/` and `openspec/`
+  that names a change directory, and every exception row names its owning change.
+- **Mechanism in the name for existing specializations.** Override rows, no
+  renames here. `arkhai_vms_settlement`, `arkhai_vms_listings`,
+  `arkhai_vms_negotiation`, and `arkhai_apicredits` (which imports both
+  `kit/alkahest` and `kit/arkhai-payments`) each get a row naming
+  `align-package-paths-with-layers` as the change that renames them and noting
+  that `move-escrow-into-alkahest` may remove the import first; a row expires
+  either way.
+- **Vocabulary projects at a scope root, and nested paths.** No rule and no
+  override: the path reading classifies `domains/vms/domain`, the three root
+  vocabulary projects, and `domains/apicredits/middleware/python` as libraries in
+  the right scope. Where they live is `align-package-paths-with-layers`'s
+  navigability decision, not the check's.
+- **External dependency budgets.** An optional table, filled only for the packages
+  whose per-package tests assert one today — `settlement-runtime`,
+  `capability-shape`, `capability-pricing`, `identity`, and the contracts
+  packages — so those tests can retire against it.
+- **Tooling projects.** `e2e-tests`, `tools/*`, `scripts`, `dev-env`, and the
+  virtual IaC project are skipped; `domains/apicredits/sample-app` is checked as
+  an executable composition.
+- **A domain with no family.** API credits has no shared vocabulary beneath it and
+  no family entry in the rules file; its scope is `{apicredits}`. The
+  `domains/<domain>/` reading yields `{family, domain}` only when the rules file
+  names a family.
+- **Dynamic imports.** No package loads another internal package through
+  `importlib` or `__import__`; the few dynamic loads are third-party (`uvicorn`,
+  `torch`, `keyring`). Scanning import statements is sufficient.
+
 ## Open questions
 
-- **Rules file home.** `ARCHITECTURE.toml` under `docs/development`, beside the
-  prose it encodes, or at the repository root beside `Makefile` where tooling
-  configuration usually sits. The prose links to it either way.
-- **Mechanism-in-name for existing specializations.** Today `arkhai_vms_settlement`,
-  `arkhai_vms_listings`, `arkhai_vms_negotiation`, and `arkhai_apicredits` import
-  `kit/alkahest` without a mechanism in their names. `move-escrow-into-alkahest`
-  is expected to remove the listings and negotiation imports; the settlement codec
-  legitimately keeps its. Whether the surviving packages are renamed
-  (`settlement-alkahest`) or carry override rows until `align-package-paths-with-layers`
-  moves them is decided by the audit's classification.
-- **Vocabulary projects at a scope root.** `domains/compute`, `domains/bare_metal`,
-  and `domains/apicredits` each hold the vocabulary project at the scope directory's
-  root; `domains/vms/domain` is a subdirectory whose name is the scope word. Either a
-  scope root that is itself a project is the vocabulary, which needs no move, or every
-  vocabulary project moves to `domains/<scope>/vocabulary`. Decide with
-  `align-package-paths-with-layers`.
-- **Nested paths.** `domains/apicredits/middleware/python` has a segment the
-  convention does not read. An override row covers it; whether the move change
-  flattens it is that change's question.
-- **External dependency budgets.** Whether `external_budget` is a general attribute
-  every kit declares or exists only to carry the one per-package test that asserts
-  it today.
-- **Virtual and tooling projects.** `e2e-tests`, `dev-env`, `tools/*`, and `scripts`
-  are skipped. `domains/apicredits/sample-app` is an executable composition; confirm
-  it is checked rather than skipped as a demonstration.
+- **Which per-package test retires first.** The order should follow which owning
+  changes close first, so that no local test is deleted while the global check still
+  excuses the edge it guarded, and so that a test running in the CI matrix is not
+  removed before `check-architecture` runs there.

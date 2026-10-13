@@ -97,14 +97,25 @@ Design phase; not planned.
   must not design a second resource mechanism. If the edge is kept, the kit-areas
   item for `kit/storefront` is amended to say "foundation capabilities and mechanism
   kits" so the document and the code agree.
-- **The VM storefront's import name and stale dependencies.** The VM storefront's
-  package is `market_storefront`, the only domain package with a market-neutral
-  name, beside the shell's own `market_storefront_kit`. When the VM storefront
-  becomes a contribution plus an entry point, rename it `arkhai_vms_storefront` to
-  match its siblings. Its `pyproject.toml` declares `arkhai-bare-metal` and
-  `arkhai-bare-metal-storefront` with no source import of either; drop both in the
-  same step. Both are rows in `enforce-package-layers`'s exceptions table owned by
-  this change.
+- **The VM storefront is the compute-family shell, living under one domain.**
+  *Gates the executable-assembly step.* The VM storefront's package is
+  `market_storefront`, the only domain package with a market-neutral name, and
+  that name is accurate: `ARCHITECTURE.md` describes the storefront role as one
+  compute-family shell that discovers installed `market.storefront_contributions`,
+  and the VM storefront's `pyproject.toml` declares `arkhai-bare-metal` and
+  `arkhai-bare-metal-storefront` — with no import of either — so that the image
+  the shared chart deploys installs the bare-metal contribution. Those
+  declarations are not stale; they are how a host installs a plugin. But a
+  package under `domains/vms/` composing a sibling domain is the scope rule's own
+  example of a violation, and `enforce-package-layers` carries the row under this
+  change. The resolution is this change's central question stated in placement
+  terms: when every domain storefront becomes a contribution plus an entry point,
+  the shell is a composition that belongs either with the compute family
+  (`domains/compute/storefront`, if it stays a compute shell) or with the
+  repository-wide roles (if API credits composes it too), and the VM contribution
+  that remains under `domains/vms/` is named `arkhai_vms_storefront` like its
+  siblings and declares no sibling domain. Decide which home before planning
+  executable assembly; `align-package-paths-with-layers` moves it there.
 
 ## Decisions
 
