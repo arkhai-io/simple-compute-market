@@ -26,6 +26,10 @@ def _clean(tmp_path: Path) -> Tree:
     tree = Tree(tmp_path)
     tree.project("core", "core-carrier")
     tree.project("kit/base", "kit-base", deps=["core-carrier"], modules={"a.py": "import core_carrier\n"})
+    # Every project the shared rules file names, so the configuration holds.
+    tree.project("domains/fam", "fam-vocab")
+    tree.project("kit/mech", "kit-mech")
+    tree.project("kit/sinks", "kit-sinks")
     return tree
 
 

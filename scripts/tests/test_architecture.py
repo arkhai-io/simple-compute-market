@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -67,6 +68,9 @@ fail_layers = ["core", "kit"]
 """
 
 
+GRAPH_RULES = tuple(rule for rule in architecture.RULES if rule != "configuration")
+
+
 class Tree:
     """A repository of synthetic projects under ``tmp_path``."""
 
@@ -75,14 +79,19 @@ class Tree:
         self.rules = rules
         self.write_rules()
 
-    def write_rules(self, extra: str = "") -> None:
+    def write_rules(self, extra: str = "", *, changes: bool = True) -> None:
+        """Write the rules file; with ``changes``, create every owner's change directory."""
         self.rules += extra
         path = self.root / "docs" / "development" / "ARCHITECTURE.toml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(RULES_HEAD + self.rules, "utf-8")
+        if changes:
+            for owner in re.findall(r'owner = "([^"]+)"', self.rules):
+                if owner != "archive":
+                    (self.root / "openspec" / "changes" / owner).mkdir(parents=True, exist_ok=True)
 
     def project(self, path: str, name: str, *, deps=(), extras=None, entry_points=None,
-                modules=None, package: str | None = None) -> None:
+                modules=None, package: str | None = None, settings: str = "") -> None:
         package = package or name.replace("-", "_")
         project = self.root / path
         (project / "src" / package).mkdir(parents=True)
@@ -95,16 +104,21 @@ class Tree:
             body.append(f'[project.entry-points."{group}"]')
             body += [f'{k} = "{v}"' for k, v in entries.items()]
         body.append(f'[tool.hatch.build.targets.wheel]\npackages = ["src/{package}"]')
+        if settings:
+            body.append(settings)
         (project / "pyproject.toml").write_text("\n".join(body) + "\n", "utf-8")
         (project / "src" / package / "__init__.py").write_text("", "utf-8")
         for module, source in (modules or {}).items():
             (project / "src" / package / module).write_text(source, "utf-8")
 
-    def findings(self, rules=architecture.RULES, strict: bool = False):
+    def findings(self, rules=None, strict: bool = False):
+        # The configuration rule needs every project the rules file names; the
+        # graph tests build only the projects they exercise.
+        rules = rules or GRAPH_RULES
         model = architecture.build(self.root)
         return [f for f in architecture.problems(model, rules, strict) if not f.excused_by]
 
-    def keys(self, rules=architecture.RULES, strict: bool = False):
+    def keys(self, rules=None, strict: bool = False):
         return {f.key for f in self.findings(rules, strict)}
 
     def model(self):
@@ -319,15 +333,17 @@ def test_unused_declaration_warns_until_a_row_gives_the_reason(tmp_path):
 
     assert found[("unused_declaration", "kit-b", "core-carrier")].severity == "warn"
 
-    tree.write_rules('[[declarations]]\nproject = "kit-b"\ndependency = "core-carrier"\nreason = "a driver"\n')
-    assert tree.findings() == []
+    tree.project("kit/c", "kit-c", deps=["core-carrier"],
+                 settings='[tool.arkhai.architecture.runtime-dependencies]\ncore-carrier = "a driver"')
+    assert ("unused_declaration", "kit-c", "core-carrier") not in tree.keys()
 
 
-def test_a_declarations_row_expires_once_the_dependency_is_imported(tmp_path):
+def test_a_runtime_reason_expires_once_the_dependency_is_imported(tmp_path):
     tree = _tree(tmp_path)
-    tree.write_rules('[[declarations]]\nproject = "kit-base"\ndependency = "core-carrier"\nreason = "x"\n')
+    tree.project("kit/c", "kit-c", deps=["core-carrier"], modules={"a.py": "import core_carrier\n"},
+                 settings='[tool.arkhai.architecture.runtime-dependencies]\ncore-carrier = "x"')
 
-    assert ("declaration_expiry", "kit-base", "core-carrier") in tree.keys()
+    assert ("declaration_expiry", "kit-c", "core-carrier") in tree.keys()
 
 
 def test_kind_budget_holds_contracts_and_clients(tmp_path):
@@ -346,12 +362,36 @@ def test_kind_budget_holds_contracts_and_clients(tmp_path):
         ("kind_budget", "fam-contracts", "kit-base"), ("kind_budget", "fam-client", "fam-vocab")}
 
 
-def test_external_budget_allows_only_the_listed_roots(tmp_path):
+def _budget(*dists: str, extra: str = "") -> str:
+    return ("[tool.arkhai.architecture]\nallowed-dependencies = ["
+            + ", ".join(f'"{d}"' for d in dists) + "]\n" + extra)
+
+
+def test_external_budget_allows_only_the_listed_imports(tmp_path):
     tree = _tree(tmp_path)
-    tree.project("kit/light", "kit-light", modules={"a.py": "import json\nimport pydantic\nimport httpx\n"})
-    tree.write_rules('[external_budgets]\n"kit-light" = ["pydantic"]\n')
+    tree.project("kit/light", "kit-light", modules={"a.py": "import json\nimport pydantic\nimport httpx\n"},
+                 settings=_budget("pydantic"))
 
     assert {k for k in tree.keys() if k[0] == "external_budget"} == {("external_budget", "kit-light", "httpx")}
+
+
+def test_external_budget_holds_declarations_without_an_import(tmp_path):
+    tree = _tree(tmp_path)
+    tree.project("kit/light", "kit-light", deps=["pydantic>=2", "sqlalchemy>=2"],
+                 modules={"a.py": "import pydantic\n"}, settings=_budget("pydantic"))
+    found = {f.key: f for f in tree.findings()}
+
+    assert set(k for k in found if k[0] == "external_budget") == {("external_budget", "kit-light", "sqlalchemy")}
+    assert found[("external_budget", "kit-light", "sqlalchemy")].sites[0].context == "declaration"
+
+
+def test_external_budget_matches_a_root_by_normalized_name_or_alias(tmp_path):
+    tree = _tree(tmp_path)
+    tree.project("kit/light", "kit-light", deps=["eth-account", "PyYAML"],
+                 modules={"a.py": "import eth_account\nimport yaml\n"},
+                 settings=_budget("eth-account", "pyyaml", extra='[tool.arkhai.architecture.import-roots]\nyaml = "PyYAML"\n'))
+
+    assert not {k for k in tree.keys() if k[0] == "external_budget"}
 
 
 def test_a_plugin_is_declared_and_never_imported(tmp_path):
@@ -479,10 +519,10 @@ def test_owned_rows_lists_a_changes_exceptions_and_overrides(tmp_path):
 
 def test_an_external_budget_lists_internal_roots_too(tmp_path):
     tree = _tree(tmp_path)
-    tree.project("kit/shape", "kit-shape", deps=["kit-base"], modules={"a.py": "import kit_base\n"})
-    tree.write_rules('[external_budgets]\n"kit-shape" = []\n')
+    tree.project("kit/shape", "kit-shape", deps=["kit-base"], modules={"a.py": "import kit_base\n"},
+                 settings=_budget())
 
-    assert ("external_budget", "kit-shape", "kit_base") in tree.keys()
+    assert ("external_budget", "kit-shape", "kit-base") in tree.keys()
 
 
 # ------------------------------------------------------------------ retired per-package tests
@@ -506,7 +546,6 @@ def _retired_case_tree(tmp_path: Path) -> Tree:
     tree.project("domains/dom/provisioning/client", "dom-operator-client")
     tree.project("domains/fam/provisioning-service", "fam-service")
     tree.project("roles/storefront", "role-storefront")
-    tree.write_rules('[external_budgets]\n"kit-light" = ["pydantic"]\n')
     return tree
 
 
@@ -515,7 +554,7 @@ RETIRED_CASES = {
     # contracts and client, contact exchange, compute vocabulary, provisioning
     # contracts and client: an import outside the package's allowlist.
     "allowlist": ("kit/light", "kit-light", "import kit_plain\nimport fastapi\n",
-                  [("external_budget", "kit-light", "kit_plain"), ("external_budget", "kit-light", "fastapi")]),
+                  [("external_budget", "kit-light", "kit-plain"), ("external_budget", "kit-light", "fastapi")]),
     # core carrier purity: a carrier importing anything internal.
     "carrier purity": ("core/extra", "core-extra", "import kit_plain\n", [("layer", "core-extra", "kit-plain")]),
     # core domain boundaries: a core role importing a concrete domain.
@@ -548,8 +587,91 @@ RETIRED_CASES = {
 def test_the_check_fails_where_a_retired_boundary_test_did(tmp_path, case):
     tree = _retired_case_tree(tmp_path)
     path, name, source, expected = RETIRED_CASES[case]
-    tree.project(path, name, modules={"a.py": source})
+    tree.project(path, name, modules={"a.py": source}, settings=_budget("pydantic") if name == "kit-light" else "")
 
     keys = tree.keys()
 
     assert set(expected) <= keys, sorted(keys)
+
+
+# ------------------------------------------------------------------ fail closed and configuration
+
+
+def test_a_project_without_one_wheel_package_fails_closed(tmp_path):
+    tree = _tree(tmp_path)
+    project = tmp_path / "kit" / "odd"
+    project.mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[project]\nname = "kit-odd"\nversion = "0.1.0"\n', "utf-8")
+
+    found = {f.key: f for f in tree.findings()}
+
+    assert "cannot read it" in found[("unclassified", "kit-odd", "kit/odd")].message
+
+
+def test_a_virtual_project_is_not_a_package(tmp_path):
+    tree = _tree(tmp_path)
+    project = tmp_path / "domains" / "dom" / "iac"
+    project.mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[project]\nname = "dom-iac"\nversion = "0.1.0"\n'
+                                            '[tool.uv]\npackage = false\n', "utf-8")
+
+    assert "dom-iac" not in tree.model().projects
+
+
+def _configured(tmp_path: Path) -> Tree:
+    """A tree holding every project the shared rules file names."""
+    tree = _tree(tmp_path)
+    tree.project("domains/fam", "fam-vocab")
+    tree.project("kit/mech", "kit-mech")
+    tree.project("kit/sinks", "kit-sinks")
+    return tree
+
+
+def _configuration(tree: Tree) -> set[tuple[str, str, str]]:
+    return tree.keys(rules=("configuration",))
+
+
+def test_a_complete_configuration_passes(tmp_path):
+    assert _configuration(_configured(tmp_path)) == set()
+
+
+def test_configuration_fails_on_a_name_that_resolves_to_nothing(tmp_path):
+    tree = _tree(tmp_path)
+
+    keys = _configuration(tree)
+
+    assert ("configuration", "family", "fam") in keys
+    assert ("configuration", "mechanism", "mech") in keys
+    assert ("configuration", "plugin-group", "host.sinks") in keys
+
+
+def test_configuration_fails_on_duplicate_rows(tmp_path):
+    tree = _configured(tmp_path)
+    row = '[[exceptions]]\nrule = "layer"\nproject = "kit-base"\ntarget = "x"\nowner = "fix-it"\n'
+    tree.write_rules(row + row)
+
+    assert any(k[0] == "configuration" and k[1] == "exception" for k in _configuration(tree))
+
+
+def test_configuration_fails_on_an_owner_that_is_not_an_open_change(tmp_path):
+    tree = _configured(tmp_path)
+    tree.write_rules('[[exceptions]]\nrule = "layer"\nproject = "kit-base"\ntarget = "x"\nowner = "gone"\n',
+                     changes=False)
+    (tmp_path / "openspec" / "changes" / "archive" / "2026-01-01-gone").mkdir(parents=True)
+
+    assert ("configuration", "kit-base", "owner:layer:x") in _configuration(tree)
+
+
+def test_configuration_fails_on_an_override_granting_an_unknown_element(tmp_path):
+    tree = _configured(tmp_path)
+    tree.write_rules('[[overrides]]\nproject = "kit-base"\nlayer = "kit"\nkind = "library"\n'
+                     'scope = ["nowhere"]\nowner = "move-it"\n')
+
+    assert ("configuration", "kit-base", "scope:nowhere") in _configuration(tree)
+
+
+def test_a_package_table_may_not_classify_its_package(tmp_path):
+    tree = _configured(tmp_path)
+    tree.project("kit/self", "kit-self", settings='[tool.arkhai.architecture]\nscope = ["dom"]\n')
+
+    assert ("configuration", "kit-self", "scope") in _configuration(tree)

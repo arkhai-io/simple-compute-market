@@ -3,8 +3,8 @@
 
 Writes Markdown: every project's classification, then every finding of every
 rule grouped by rule. A finding a table already classifies carries that
-classification — the exception row's owner and reason, or the declarations
-row's reason — so the report reads as the audited state of the tree rather
+classification — the exception row's owner, or the runtime reason the
+declaring package gives — so the report reads as the audited state of the tree rather
 than only its failures. `make check-architecture` is the gate; this is the
 full view behind it.
 
@@ -43,8 +43,11 @@ def report(model: architecture.Model) -> str:
     for row in rules.exceptions:
         project = row["project"] if row.get("rule") == "cycle" else architecture.normalize(row["project"])
         exceptions[(row.get("rule"), project, row["target"])] = row
-    declarations = {(architecture.normalize(r["project"]), architecture.normalize(r["dependency"])): r
-                    for r in rules.declarations}
+    declarations = {
+        (project.name, architecture.normalize(dist)): reason
+        for project in model.projects.values()
+        for dist, reason in project.settings.get("runtime-dependencies", {}).items()
+    }
     found = architecture.problems(model, architecture.RULES, strict=True)
     lines += ["", "## Findings", ""]
     if not found:
@@ -66,15 +69,16 @@ def report(model: architecture.Model) -> str:
             if row:
                 classification = f"defect, owned by `{row.get('owner')}`"
             elif finding.rule == "unused_declaration" and (finding.project, finding.target) in declarations:
-                classification = f"accepted: {declarations[(finding.project, finding.target)]['reason']}"
+                classification = f"accepted: {declarations[(finding.project, finding.target)]}"
             elif finding.severity == "warn":
                 classification = "warning"
             lines.append(f"| {where} | `{finding.project}` | `{finding.target}` | "
                          f"{_cell(finding.message)} | {classification} |")
         lines.append("")
-    if rules.declarations:
+    if declarations:
         lines += ["## Declarations without an import", "", "| Project | Dependency | Reason |", "|---|---|---|"]
-        lines += [f"| `{r['project']}` | `{r['dependency']}` | {_cell(r['reason'])} |" for r in rules.declarations]
+        lines += [f"| `{project}` | `{dist}` | {_cell(reason)} |"
+                  for (project, dist), reason in sorted(declarations.items())]
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

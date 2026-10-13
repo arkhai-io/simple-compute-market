@@ -34,3 +34,8 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = ["pytest>=8.3.4,<10.0.0"]
+
+# Internal distributions declared without an import, each with the runtime
+# reason it is installed. make check-architecture warns on one without a reason.
+[tool.arkhai.architecture.runtime-dependencies]
+arkhai-kit-alkahest = "Installs Alkahest's named buyer aggregation policies, which the core buyer discovers through market.buyer_aggregation_policies."

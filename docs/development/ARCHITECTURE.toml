@@ -1,6 +1,9 @@
 # The package layer, scope, and kind rules of ARCHITECTURE.md, in the form
-# scripts/architecture.py reads. The prose is the contract; this file encodes it
-# and records every known divergence from it with the change that owns it.
+# scripts/architecture.py reads. The prose is the contract; this file encodes
+# what no one package owns and records every known divergence with the change
+# that owns it. What a package owns about itself -- the distributions it may
+# depend on, and why it installs one it never imports -- is in its own
+# pyproject.toml, under [tool.arkhai.architecture].
 # See ARCHITECTURE.md, "Package and dependency layers".
 
 version = 1
@@ -90,23 +93,6 @@ enforce = true
 [vocabulary]
 # Layers in which an out-of-scope identity literal fails; elsewhere it warns.
 fail_layers = ["core", "kit"]
-
-# Every import root a package may use outside the standard library and its own
-# package, internal or third-party. Present only where a package's lightness is
-# part of its contract, so that what it may import is listed rather than only
-# what it may not.
-[external_budgets]
-"arkhai-core" = ["pydantic"]
-"arkhai-kit-identity" = ["cryptography", "eth_account", "pydantic", "rfc8785"]
-"arkhai-kit-settlement-runtime" = ["market_core", "market_identity", "pydantic"]
-"arkhai-kit-capability-shape" = []
-"arkhai-kit-capability-pricing" = ["market_capability_shape"]
-"arkhai-kit-resource-pools-contracts" = ["market_capability_shape", "pydantic"]
-"arkhai-kit-resource-pools-client" = ["market_resource_pools_contracts"]
-"arkhai-kit-contact-exchange" = ["market_core", "market_identity", "market_settlement_runtime", "pydantic", "typer"]
-"arkhai-compute" = ["market_capability_shape"]
-"arkhai-compute-provisioning-contracts" = ["market_core", "market_identity", "pydantic"]
-"arkhai-compute-provisioning-client" = ["compute_provisioning_contracts", "httpx", "market_core", "market_identity"]
 
 # Projects whose path does not yet say what they are. Each row states the
 # attributes the path should yield and the change that will make it so. A row
@@ -219,18 +205,6 @@ scope = ["apicredits", "alkahest", "arkhai-payments"]
 owner = "align-package-paths-with-layers"
 since = 2026-10-13
 reason = "The API-credits domain holds both mechanisms' settlement codecs, and its name carries neither."
-
-# Internal distributions declared without an import, each with its reason.
-# Declaring a plugin to install it needs no row.
-[[declarations]]
-project = "arkhai-bare-metal-buyer"
-dependency = "arkhai-kit-alkahest"
-reason = "Installs Alkahest's named buyer aggregation policies, which the core buyer discovers through market.buyer_aggregation_policies."
-
-[[declarations]]
-project = "arkhai-vms-storefront"
-dependency = "arkhai-bare-metal"
-reason = "Registers the bare-metal storefront domain, which the compute-family shell discovers through market.storefront_domains."
 
 # Divergences the check reports, each owned by the change that removes it. A
 # row excuses one finding of the rule it names and fails once it excuses

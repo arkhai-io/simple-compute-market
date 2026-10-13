@@ -27,3 +27,9 @@ dev = [
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23",
 ]
+
+# The package's lightness is part of its contract: every distribution it may
+# declare or import beyond the standard library. make check-architecture holds
+# it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-core", "arkhai-kit-identity", "pydantic"]

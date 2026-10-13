@@ -40,7 +40,7 @@ SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git", ".dist", "build", "
 #: script that owns the rule a row names; override expiry runs with layers,
 #: because an override changes classification.
 GROUPS = {
-    "layers": ("unclassified", "layer", "cycle", "layer_scope", "override_expiry"),
+    "layers": ("configuration", "unclassified", "layer", "cycle", "layer_scope", "override_expiry"),
     "scope": ("scope", "vocabulary"),
     "dependencies": ("undeclared_import", "unused_declaration", "declaration_expiry"),
     "kinds": ("kind_budget", "external_budget", "plugin_in_degree"),
@@ -48,6 +48,10 @@ GROUPS = {
 RULES = tuple(rule for rules in GROUPS.values() for rule in rules)
 
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+#: The keys a package's own ``[tool.arkhai.architecture]`` table may hold. They
+#: narrow or annotate the package; none classifies it, so nothing a package
+#: declares about itself can widen what its path grants.
+PACKAGE_KEYS = frozenset({"allowed-dependencies", "import-roots", "runtime-dependencies"})
 _STDLIB = frozenset(sys.stdlib_module_names) | {"__future__"}
 
 
@@ -72,10 +76,9 @@ class Rules:
     plugin_groups: dict[str, str | None]
     budgets: dict[str, dict]
     vocabulary_fail_layers: frozenset[str]
-    external_budgets: dict[str, frozenset[str]]
     overrides: tuple[dict, ...]
-    declarations: tuple[dict, ...]
     exceptions: tuple[dict, ...]
+    plugin_group_rows: tuple[dict, ...] = ()
 
     def element_kind(self, element: str) -> str:
         if element in self.families:
@@ -108,13 +111,9 @@ def load_rules(root: Path) -> Rules:
         },
         budgets=data.get("budgets", {}),
         vocabulary_fail_layers=frozenset(data.get("vocabulary", {}).get("fail_layers", ())),
-        external_budgets={
-            normalize(name): frozenset(roots)
-            for name, roots in data.get("external_budgets", {}).items()
-        },
         overrides=tuple(data.get("overrides", ())),
-        declarations=tuple(data.get("declarations", ())),
         exceptions=tuple(data.get("exceptions", ())),
+        plugin_group_rows=tuple(data.get("plugin_groups", ())),
     )
 
 
@@ -135,9 +134,16 @@ class Project:
     name: str
     path: str
     package: str
-    declared: dict[str, tuple[str, int]]  # distribution -> (extra or "", line)
+    declared: dict[str, tuple[str, int]]  # internal distribution -> (extra or "", line)
     entry_groups: frozenset[str]
     reading: Reading | None
+    # Every declared distribution, internal or third-party, with its line.
+    declared_all: dict[str, tuple[str, int]] = field(default_factory=dict)
+    # The package's own [tool.arkhai.architecture] table.
+    settings: dict = field(default_factory=dict)
+    # A project whose wheel target is not one package under src/ cannot be
+    # read; it is reported rather than skipped.
+    malformed: bool = False
     override: dict | None = None
     plugin: bool = False
     layer: str = ""
@@ -224,16 +230,19 @@ def discover(root: Path, rules: Rules) -> dict[str, Project]:
             continue
         packages = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get(
             "wheel", {}).get("packages", [])
-        if len(packages) != 1:
-            continue
-        name = normalize(data["project"]["name"])
+        name = normalize(data["project"].get("name", relative.as_posix()))
+        malformed = len(packages) != 1
+        declared = _declared(data["project"], text)
         projects[name] = Project(
             name=name,
             path=relative.as_posix(),
-            package=packages[0].rsplit("/", 1)[-1],
-            declared=_declared(data["project"], text),
+            package="" if malformed else packages[0].rsplit("/", 1)[-1],
+            declared=declared,
             entry_groups=frozenset(data["project"].get("entry-points", {})),
-            reading=read_path(relative.as_posix(), name, rules),
+            reading=None if malformed else read_path(relative.as_posix(), name, rules),
+            declared_all={dist: where for dist, where in declared.items() if dist != name},
+            settings=data.get("tool", {}).get("arkhai", {}).get("architecture", {}),
+            malformed=malformed,
         )
     internal = set(projects)
     for project in projects.values():
@@ -249,6 +258,8 @@ def _classify(projects: dict[str, Project], rules: Rules, edges: list[Edge]) -> 
     for project in projects.values():
         row = overrides.get(project.name)
         project.override = row
+        if project.malformed:
+            continue
         if row:
             project.layer, project.kind = row["layer"], row["kind"]
             project.scope = frozenset(row.get("scope", ()))
@@ -393,6 +404,8 @@ def build(root: Path = ROOT) -> Model:
         for dist, (extra, line) in project.declared.items():
             context = f"declaration [{extra}]" if extra else "declaration"
             edges.append(Edge(project.name, dist, Site(project.pyproject, line, context), True))
+        if project.malformed:
+            continue
         source_root = root / project.path / "src" / project.package
         for module in sorted(source_root.rglob("*.py")):
             relative = module.relative_to(root).as_posix()
@@ -460,7 +473,8 @@ def _sites(edges: list[Edge]) -> list[Site]:
 def unclassified(model: Model) -> list[Finding]:
     return [
         Finding("unclassified", p.name, p.path,
-                f"{p.path} yields no layer, kind, or scope and has no override row",
+                f"{p.path} does not build exactly one package under src/, so the check cannot read it"
+                if p.malformed else f"{p.path} yields no layer, kind, or scope and has no override row",
                 [Site(p.pyproject, 1, "module")])
         for p in model.projects.values() if not p.layer
     ]
@@ -594,8 +608,13 @@ def undeclared_import(model: Model) -> list[Finding]:
     return findings
 
 
-def _declaration_rows(model: Model) -> dict[tuple[str, str], dict]:
-    return {(normalize(r["project"]), normalize(r["dependency"])): r for r in model.rules.declarations}
+def _declaration_rows(model: Model) -> dict[tuple[str, str], str]:
+    """Each package's runtime-dependency reasons, keyed by (package, dependency)."""
+    return {
+        (p.name, normalize(dist)): reason
+        for p in model.projects.values()
+        for dist, reason in p.settings.get("runtime-dependencies", {}).items()
+    }
 
 
 def unused_declaration(model: Model) -> list[Finding]:
@@ -611,7 +630,7 @@ def unused_declaration(model: Model) -> list[Finding]:
             context = f"declaration [{extra}]" if extra else "declaration"
             findings.append(Finding(
                 "unused_declaration", p.name, dist,
-                f"declares {dist} without importing it, and no declarations row gives the reason",
+                f"declares {dist} without importing it, and its runtime-dependencies give no reason",
                 [Site(p.pyproject, line, context)], "warn"))
     return findings
 
@@ -619,16 +638,16 @@ def unused_declaration(model: Model) -> list[Finding]:
 def declaration_expiry(model: Model) -> list[Finding]:
     imported = {(e.source, e.target) for e in model.edges if not e.declared}
     findings = []
-    for (project, dist), row in _declaration_rows(model).items():
-        p = model.projects.get(project)
-        if p is None or dist not in p.declared:
-            problem = f"has a declarations row for {dist}, which it no longer declares"
+    for (project, dist), _reason in _declaration_rows(model).items():
+        p = model.projects[project]
+        if dist not in p.declared:
+            problem = f"gives a runtime reason for {dist}, which it does not declare as an internal dependency"
         elif (project, dist) in imported:
-            problem = f"has a declarations row for {dist}, which it now imports"
+            problem = f"gives a runtime reason for {dist}, which it now imports"
         else:
             continue
         findings.append(Finding("declaration_expiry", project, dist, problem,
-                                [Site(RULES_FILE.as_posix(), 1, "module")]))
+                                [Site(p.pyproject, 1, "module")]))
     return findings
 
 
@@ -659,17 +678,102 @@ def kind_budget(model: Model) -> list[Finding]:
 
 
 def external_budget(model: Model) -> list[Finding]:
+    """A package with ``allowed-dependencies`` declares and imports only those.
+
+    The list names distributions, internal or third-party. A declaration is
+    checked by name. An internal import root maps to its distribution through
+    the tree; a third-party root to the distribution of the same normalized
+    name, or through ``import-roots`` where the two are named differently.
+    """
+    owner = {p.package: p.name for p in model.projects.values() if p.package}
     findings: dict[tuple[str, str], Finding] = {}
-    for name, allowed in model.rules.external_budgets.items():
-        for top, site in model.externals.get(name, ()):
-            if top in allowed:
-                continue
-            key = (name, top)
-            if key not in findings:
-                findings[key] = Finding("external_budget", name, top,
-                                        f"imports {top}, outside its external budget")
-            findings[key].sites.append(site)
+
+    def breach(p: Project, dist: str, site: Site, how: str) -> None:
+        key = (p.name, dist)
+        if key not in findings:
+            findings[key] = Finding("external_budget", p.name, dist,
+                                    f"{how} {dist}, which its allowed-dependencies do not list")
+        findings[key].sites.append(site)
+
+    for p in model.projects.values():
+        if "allowed-dependencies" not in p.settings:
+            continue
+        allowed = {normalize(d) for d in p.settings["allowed-dependencies"]}
+        aliases = {root: normalize(dist) for root, dist in p.settings.get("import-roots", {}).items()}
+        for dist, (extra, line) in sorted(p.declared_all.items()):
+            if dist not in allowed:
+                context = f"declaration [{extra}]" if extra else "declaration"
+                breach(p, dist, Site(p.pyproject, line, context), "declares")
+        for root, site in model.externals.get(p.name, ()):
+            dist = owner.get(root) or aliases.get(root) or normalize(root)
+            if dist not in allowed:
+                breach(p, dist, site, "imports")
     return list(findings.values())
+
+
+def _owner_problem(model: Model, owner: str | None) -> str | None:
+    changes = model.root / "openspec" / "changes"
+    if not owner:
+        return "names no owning change"
+    if owner == "archive" or not (changes / owner).is_dir():
+        return f"names {owner!r}, which is not an unarchived change under openspec/changes/"
+    return None
+
+
+def configuration(model: Model) -> list[Finding]:
+    """The rules file and the package tables refer only to things that exist."""
+    rules = model.rules
+    site = [Site(RULES_FILE.as_posix(), 1, "module")]
+    problems: list[tuple[str, str, str]] = []  # (project or table, target, message)
+    elements = set(rules.families) | set(rules.domains) | set(rules.mechanisms)
+
+    def unique(rows, key, table):
+        seen = set()
+        for row in rows:
+            k = key(row)
+            if k in seen:
+                problems.append((table, str(k), f"has a duplicate {table} row for {k}"))
+            seen.add(k)
+
+    unique(rules.exceptions, lambda r: (r.get("rule"), r.get("project"), r.get("target")), "exception")
+    unique(rules.overrides, lambda r: normalize(r.get("project", "")), "override")
+    unique(rules.plugin_group_rows, lambda r: r.get("name"), "plugin-group")
+    for name, family in rules.families.items():
+        vocabulary = family.get("vocabulary")
+        if vocabulary and normalize(vocabulary) not in model.projects:
+            problems.append(("family", name, f"family {name} names vocabulary {vocabulary}, which is not a project"))
+    for name, domain in rules.domains.items():
+        if domain.get("family") and domain["family"] not in rules.families:
+            problems.append(("domain", name, f"domain {name} names family {domain['family']}, which is not one"))
+    for name, mechanism in rules.mechanisms.items():
+        if normalize(mechanism["kit"]) not in model.projects:
+            problems.append(("mechanism", name, f"mechanism {name} names kit {mechanism['kit']}, which is not a project"))
+    for group, owner in rules.plugin_groups.items():
+        if owner and owner not in model.projects:
+            problems.append(("plugin-group", group, f"plugin group {group} names owner {owner}, which is not a project"))
+    for kind, budget in rules.budgets.items():
+        for dist in budget.get("distributions", ()):
+            if normalize(dist) not in model.projects:
+                problems.append(("budget", f"{kind}:{dist}", f"the {kind} budget names {dist}, which is not a project"))
+    for row in rules.overrides:
+        project = normalize(row.get("project", ""))
+        for element in row.get("scope", ()):
+            if element not in elements:
+                problems.append((project, f"scope:{element}", f"its override row grants {element}, which is no family, domain, or mechanism"))
+        if (why := _owner_problem(model, row.get("owner"))):
+            problems.append((project, "owner", f"its override row {why}"))
+    for row in rules.exceptions:
+        if (why := _owner_problem(model, row.get("owner"))):
+            problems.append((normalize(row.get("project", "")), f"owner:{row.get('rule')}:{row.get('target')}",
+                             f"its exception row for {row.get('rule')} on {row.get('target')} {why}"))
+    findings = [Finding("configuration", project, target, message, list(site))
+                for project, target, message in problems]
+    for p in model.projects.values():
+        for key in sorted(set(p.settings) - PACKAGE_KEYS):
+            findings.append(Finding("configuration", p.name, key,
+                                    f"its [tool.arkhai.architecture] table has {key!r}, which a package may not declare",
+                                    [Site(p.pyproject, 1, "module")]))
+    return findings
 
 
 def plugin_in_degree(model: Model) -> list[Finding]:
@@ -713,6 +817,7 @@ def override_expiry(model: Model) -> list[Finding]:
 
 
 CHECKS = {
+    "configuration": configuration,
     "unclassified": unclassified,
     "layer": layer,
     "cycle": cycle,

@@ -26,3 +26,9 @@ testpaths = ["tests"]
 dev = [
     "pytest>=8.0",
 ]
+
+# The package's lightness is part of its contract: every distribution it may
+# declare or import beyond the standard library. make check-architecture holds
+# it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-kit-capability-shape"]
