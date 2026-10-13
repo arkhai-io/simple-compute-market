@@ -91,9 +91,14 @@ only when `kit/site`'s boundary test forbids `market_resource_pools` and
   implementation by injection or uses the static single-pool authority the
   "API-credits pool storage" question above already contemplates. That question and
   this one are one decision.
-- **Where the boundary test lives.** The tests this design plans (`kit/site`
-  forbids `market_resource_pools`; the pool kit forbids `market_site`) are two of
-  the eighteen per-package tests `enforce-package-layers` subsumes. Decide whether
-  this change adds them or records its edge in that check's rules file; its
-  exceptions table already carries `kit/site` → `kit/resource-pools` and
-  `apicredits_service` → `kit/resource-pools` under this change.
+- **Where the boundary test lives.** The repository check `enforce-package-layers`
+  adds cannot see `kit/site` → `kit/resource-pools` as the tree stands: both are
+  kits of empty scope and the edge forms no cycle, so no exception row can excuse
+  it and none is seeded. Whether it becomes visible is this design's own decision:
+  if the pool authority becomes a compute family-kit distribution, the edge is a
+  kit depending on family knowledge and the scope rule fails it; if the authority
+  stays repository-wide, the port removes the import and the per-package test this
+  design plans (`kit/site` forbids `market_resource_pools`) is kept as the guard,
+  since it asserts what the repository check cannot. `apicredits_service` →
+  `kit/resource-pools` is a composition depending on a kit and is legal until the
+  authority is scoped, at which point the same scope rule reports it.
