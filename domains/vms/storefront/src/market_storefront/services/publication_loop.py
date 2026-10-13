@@ -40,6 +40,7 @@ from arkhai_vms_listings.reconciler import (
     open_listing_resource_keys,
     stale_open_listing_ids,
 )
+from market_capability_admissibility import Declaration
 from market_capacity_publication import (
     BoundListing,
     PublicationCycleDriver,
@@ -128,9 +129,11 @@ class VmPublicationCycle:
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
+        admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._admissibility_default = admissibility_default
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
@@ -225,7 +228,9 @@ class VmPublicationCycle:
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
-            hint_resolution=pool_hint_resolution_settings(),
+            hint_resolution=pool_hint_resolution_settings(
+                admissibility_default=self._admissibility_default
+            ),
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
@@ -248,7 +253,7 @@ class VmPublicationCycle:
             site_capacity_buckets=self._buckets,
             backed_only=False,
             shape_feasible=self._shape_feasible,
-            admissibility_default=None,
+            admissibility_default=self._admissibility_default,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -502,6 +507,7 @@ async def run_publication_cycle_once(*, dry_run: bool) -> dict[str, Any]:
         storefront_url=BASE_URL_OVERRIDE,
         wallet_address=get_evm_wallet_address() or "",
         dry_run=dry_run,
+        admissibility_default=container.resolved_admissibility_default,
     )
     return await cycle.run()
 

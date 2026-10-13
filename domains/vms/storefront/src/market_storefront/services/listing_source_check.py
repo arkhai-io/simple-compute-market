@@ -35,6 +35,7 @@ from arkhai_vms_listings.reconciler import (
 from market_capacity_publication import CapacityBinding
 from market_policy.listing_source import ListingSourceVerdict
 
+import market_storefront.container as container
 from market_storefront.services.capacity_client import (
     listing_source_projection,
     site_capacity_buckets,
@@ -152,7 +153,9 @@ async def _check_listing_source(
     buckets = _site_only(site_capacity_buckets(), site_id) if projection else None
     # Only the admissibility default affects which listings derive; the
     # terms these settings also carry are discarded by the comparison below.
-    admissibility = PoolHintResolutionSettings(admissibility_default=None)
+    admissibility = PoolHintResolutionSettings(
+        admissibility_default=container.resolved_admissibility_default
+    )
     declared = _slices_by_key(
         available_compute_slices(
             repository.db_path,

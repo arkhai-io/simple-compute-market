@@ -414,6 +414,56 @@ async def test_a_write_refusable_without_the_site_never_calls_it(world, record):
     assert await _stored(world) == []
 
 
+_H100 = {"model": "H100"}
+
+
+@pytest.mark.parametrize(
+    "shapes",
+    [
+        pytest.param(
+            [{"gpu": {"count": {"offer": 2, "max": 2}, **_H100}}],
+            id="a range that merges empty against the configured default",
+        ),
+        pytest.param(
+            [{"gpu": {"count": 2, **_H100}}],
+            id="an offer the configured default excludes",
+        ),
+        pytest.param(
+            [{"gpu": {"count": {"offer": 4, "max": 8}, **_H100}},
+             {"gpu": {"count": {"offer": 4, "max": 16}, **_H100}}],
+            id="one base shape stated twice with different constraints",
+        ),
+        pytest.param(
+            [{"gpu": {"count": 4, "model": {"max": 4}}}],
+            id="a constraint on an attribute",
+        ),
+    ],
+)
+async def test_a_write_publication_could_not_resolve_is_refused_before_the_site(
+    tmp_path, shapes
+):
+    # Rejection path: status, site calls, and stored state only.
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"min": 4}}},
+    ) as world:
+        world.pools.append(_shaped())
+        await _overrides(world).put_pool_override(_record(terms={"sla": 99.5}))
+        before = await _stored(world)
+        calls = len(_site_calls(world.site))
+
+        refusal = await _refused(
+            _overrides(world).put_pool_override(
+                _record(listing_shapes=shapes, terms={"sla": 99.5})
+            )
+        )
+
+        assert refusal.status_code == 422
+        assert len(_site_calls(world.site)) == calls
+        assert await _stored(world) == before
+
+
 # -- reads and deletes ---------------------------------------------------------
 
 

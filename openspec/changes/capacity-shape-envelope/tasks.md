@@ -381,7 +381,7 @@ override-write bullet. Touches `domains/vms/storefront`: `services/publication_t
 constructs the publication loop and the contribution. Owes the Helm check because it
 changes the storefront's configuration surface.
 
-- [ ] 5.1 Parse `[admissibility.defaults.vm]` once at startup with
+- [x] 5.1 Parse `[admissibility.defaults.vm]` once at startup with
       `parse_declaration(tier="configured_default", schema=VM_CAPABILITY_SCHEMA)`; absent and
       empty both mean no default; a malformed table stops startup naming each problem,
       as `_require_readable_family_rates` does. Hand the same `Declaration` to publication,
@@ -394,12 +394,35 @@ changes the storefront's configuration surface.
       `failure_actions.py`, and the inventory guard's settings in
       `services/listing_source_check.py`. Integration evidence that a configured default
       closes a listing through the publication loop belongs to 5.3.
-- [ ] 5.2 `VmPoolOverrideContribution.vocabulary_problems` splits the record's shapes
+      Done. `publication_terms.parse_configured_admissibility_default()` parses it; absent
+      and an empty table give `None`; a value that is not a table, or a table the kit
+      cannot read, raises `RuntimeError` naming each problem as
+      `admissibility.defaults.vm.<path>: …`. It runs first in
+      `server._build_vm_services`, before the database, signer, or any client is built,
+      rather than as a startup step beside `_require_readable_family_rates`, because the
+      override contribution is constructed there and needs the value. The result rides
+      `VmStorefrontServices.admissibility_default` into the container slot
+      `resolved_admissibility_default`; the contribution receives it by constructor,
+      `VmPublicationCycle` by a required keyword (from the container in
+      `run_publication_cycle_once`), `pool_hint_resolution_settings` by a required keyword,
+      and the capacity-event, admin-reconciliation, release-reopen, and inventory-guard
+      readers from the container. No `admissibility_default=None` remains in
+      `src/`. The storefront now imports the kit itself, so `pyproject.toml` declares it;
+      `make lock` (`.dist` rebuilt from empty first) added only that edge, to the
+      storefront's and e2e-tests' locks. The configuration template
+      (`groups/config.py`) gains a commented example; `settings.toml` states none.
+- [x] 5.2 `VmPoolOverrideContribution.vocabulary_problems` splits the record's shapes
       through the kit with the VM schema and resolves each against the configured default,
       refusing unreadable base shapes or constraints, conflicting duplicates, an empty
       range, and an inadmissible offer, all before any site call. `judge_shapes` reports
       feasibility for base shapes. (D10)
-- [ ] 5.3 Unit tests: a new `tests/unit/test_startup_admissibility_default.py` beside
+      Done. The contribution calls `split_listing_shapes` and `resolve` itself rather than
+      `resolve_stated_shapes`, because only the split carries each listing's list
+      positions, which every refusal names (`listing_shapes[0, 2] gpu.count: …`); an
+      inadmissible offer also names the tier that set the bound. `judge_shapes` reports one
+      entry per distinct base shape. The kit's `PoolOverrideRecord` already refuses an
+      empty list, so the contribution never sees one.
+- [x] 5.3 Unit tests: a new `tests/unit/test_startup_admissibility_default.py` beside
       `test_startup_family_rates.py`; extend `tests/unit/test_vm_pool_override_contribution.py`.
       Integration: `tests/integration/test_pool_overrides_api.py` covers each of the three
       override-write scenarios through the typed client, asserting the site was not called
@@ -410,10 +433,72 @@ changes the storefront's configuration surface.
       pool hint's constraint closing a listing — publish a constrained stated shape,
       tighten the hint so its offer becomes inadmissible, run another cycle through the
       typed client, and assert the stored listing is reconciliation-closed.
-- [ ] 5.4 Helm: run `make helm-values-schema` and confirm the generated schema is
+      Done.
+      - Unit: `test_startup_admissibility_default.py` (15 cases: absent, empty, readable
+        and labelled `configured_default`, six unreadable tables each named, every problem
+        named, five non-table values refused — these prove the parser refuses, not that
+        startup stops); `test_admissibility_default_composition.py`, at the composition
+        root: an unreadable default makes `_build_vm_services` raise before the database,
+        signer, or override service is built, and `_start_vm_services` publishes the
+        composed value to the container before startup tasks run (fails without that
+        assignment); `test_vm_pool_override_contribution.py` gains 10 cases (constrained shapes
+        within the default, identical and scalar/`{offer}` entries collapsing, a widening
+        shape admitted, an empty merged range naming both tiers, an excluded offer naming
+        its tier, a conflicting duplicate named once with both entries, four unreadable
+        shapes or constraints).
+      - Application integration, `test_pool_overrides_api.py`: four refusals with a
+        configured default in force (empty merge, excluded offer, conflicting duplicate,
+        attribute constraint), each asserting 422, no further site call, and the stored
+        override unchanged. Per the rejection-path rule they assert no detail, so the
+        refusal's wording (entries, paths, tiers) is unit evidence only, and two of the four
+        (duplicate, attribute) would be refused without the default.
+      - Application integration, `test_publication_loop.py`, through `run-cycle` and
+        system status: a configured default bounding a generated pool to one GPU,
+        withholding a stated two-GPU offer (`inadmissible_listing_shapes`, tier
+        `pool_hint`, problem tier `configured_default`), and withholding a listing whose
+        range it empties (`unusable_shape_constraints` naming both tiers; that shape is
+        never published, so its closing once open rests on section 4's derivation-level
+        cases); and a hint that first
+        widens the default for one listing, then changes only its maximum (identity kept,
+        still open), then drops it so the default's maximum excludes the offer — the next
+        cycle closes that listing, read back as `closed_by` `reconciliation`. Both cases
+        failed when `run_publication_cycle_once` was temporarily given no default (a
+        manual mutation check, not a test).
+      - `tests/publication_app.py` takes `admissibility_default` and composes it as the
+        lifespan does. It replaces the setting at its `admissibility` root: Dynaconf's
+        dotted `unset` leaves a nested table behind, which leaked the default into later
+        tests.
+- [x] 5.4 Helm: run `make helm-values-schema` and confirm the generated schema is
       unchanged (`[admissibility]` is an untyped section, as `[pricing]` is), or run the
       chart render tests if it changed.
-- [ ] 5.5 Verify: the VM storefront unit and integration suites, and `make check-packaging`.
+      Done: regenerated with no change to any tracked file, so no render test is owed.
+- [x] 5.5 Verify: the VM storefront unit and integration suites, and `make check-packaging`.
+      Done. VM storefront `make test`: unit 1116 passed, 1 skipped; integration 406
+      passed. Repository `make test` (before the fresh-context fixes, which touched only
+      the storefront): exit 0, no failures. `make helm-values-schema`: no change.
+      `make check-packaging`, `make check-comment-hygiene`, and
+      `make check-doc-citations CHANGE=capacity-shape-envelope`: OK.
+      End-to-end coverage: no scenario configures `[admissibility.defaults.vm]` or writes
+      a constrained override, so none exercises this section's behaviour.
+      `e2e_listing_shapes` (`test_listing_shapes.py`) writes unconstrained override shapes
+      through the changed contribution and publishes through the changed cycle, so it is
+      regression evidence for the composition only; section 6 adds a constrained hint but
+      no configured default.
+
+Handoff from section 5:
+
+- The parse runs in `server._build_vm_services`, not as a `StorefrontStartupStep`, so a
+  refused default fails the lifespan with the `RuntimeError` rather than under a named
+  step in the startup log. Kept: the override contribution is constructed there.
+- `tests/publication_app.py` composes the default itself (parse, container slot,
+  contribution) to mirror `_build_vm_services`; the composition-root unit tests cover the
+  production path. Replace any setting under `admissibility` at its root in tests:
+  Dynaconf's dotted `unset` leaves the nested table behind.
+- The fresh-context check's findings were all fixed (non-table values refused, import
+  order, the template's wording about widening, two overstated notes, the missing
+  composition-root test) except the absence of a startup-step name, kept as above. It
+  was not run again: the fixes were local and each is covered by a test or this note.
+- `DEPLOYMENT_AND_CONFIG.md` still describes no `[admissibility]` table; 7.10 owes it.
 
 ## 6. End-to-end scenario
 

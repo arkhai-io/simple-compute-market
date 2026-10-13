@@ -832,6 +832,7 @@ dependencies = [
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capacity-publication" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange" },

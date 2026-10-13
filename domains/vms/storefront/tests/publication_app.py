@@ -54,6 +54,9 @@ from market_storefront.middleware import admin_identity
 # tests rely on; importing a controller first leaves it partially initialized.
 import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront.server import build_pool_override_service
+from market_storefront.services.publication_terms import (
+    parse_configured_admissibility_default,
+)
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.contact_exchange import build_vm_contact_exchange
 from market_storefront.controllers.admin_controller import router as admin_router
@@ -448,6 +451,7 @@ async def publication_app(
     registries: bool = False,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
+    admissibility_default: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -463,6 +467,9 @@ async def publication_app(
     it: the real registry builds its options and acceptance, a real settlement
     runtime over the app's database drives its obligation, and the introduction
     routes are mounted. Implies ``negotiation``.
+    ``admissibility_default`` is configured as ``[admissibility.defaults.vm]``
+    and parsed as the lifespan parses it, so publication, reconciliation, and the
+    override write check all judge against it.
     """
     negotiation = negotiation or contacts is not None
     pools: list[dict[str, Any]] = []
@@ -525,6 +532,13 @@ async def publication_app(
         stack.enter_context(
             _replaced_setting("pricing.settlements", [settlement_clause()])
         )
+        if admissibility_default is not None:
+            # Replaced at its root: unsetting a dotted key leaves the table behind.
+            stack.enter_context(
+                _replaced_setting(
+                    "admissibility", {"defaults": {"vm": admissibility_default}}
+                )
+            )
         stack.enter_context(patch.dict(storefront_config.CHAINS, chains, clear=True))
         stack.enter_context(patch.object(negotiation_runtime, "CHAINS", chains))
         if recording is not None:
@@ -603,6 +617,7 @@ async def publication_app(
                 "resolved_marketplace_signer",
                 "resolved_system_service",
                 "resolved_pool_override_service",
+                "resolved_admissibility_default",
                 "resolved_contact_exchange",
             )
         }
@@ -614,8 +629,13 @@ async def publication_app(
         container.resolved_system_service = SystemService(
             sqlite_client=db, marketplace_signer=TEST_MARKETPLACE_SIGNER
         )
+        container.resolved_admissibility_default = (
+            parse_configured_admissibility_default()
+        )
         container.resolved_pool_override_service = build_pool_override_service(
-            sqlite_client=db, capacity_runtime=capacity
+            sqlite_client=db,
+            capacity_runtime=capacity,
+            admissibility_default=container.resolved_admissibility_default,
         )
         routers: tuple[Any, ...] = ()
         if negotiation:

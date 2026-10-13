@@ -1084,7 +1084,7 @@ class AdminController:
             site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
             backed_only=True,
             shape_feasible=vm_shape_feasibility(),
-            admissibility_default=None,
+            admissibility_default=_container.resolved_admissibility_default,
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(
@@ -1116,7 +1116,7 @@ class AdminController:
             site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
             shape_feasible=vm_shape_feasibility(),
             configured_sites=self._runtime().site_ids,
-            admissibility_default=None,
+            admissibility_default=_container.resolved_admissibility_default,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(
