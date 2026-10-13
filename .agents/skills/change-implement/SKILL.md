@@ -109,7 +109,10 @@ Run each of these, and fix what it reports:
   dependency, or a lock reaches projects no focused suite covers, and the full
   suite is cheap beside a review round spent finding that;
 - `make check-comment-hygiene`;
-- `make check-doc-citations CHANGE=<change>`;
+- `make check-doc-citations CHANGE=<change>`. Before closeout it may report only
+  the permanent documents the change's tasks create at closeout — the promotion
+  destinations its plan names; list those in the report and fix anything else.
+  At closeout the check passes with nothing reported;
 - `make check-agent-skills` if the section touched `.agents/`, `.claude/`, or
   `.codex/`.
 

@@ -50,15 +50,18 @@ the status.
 ### Requirement: Review records
 
 Each review of a change MUST be written as one Markdown file in that change's
-`reviews/` directory, numbered in the order reviews are produced, and that file
-MUST be the only record of its findings. Each finding MUST state its lens, its
+`reviews/` directory, numbered in the order reviews are produced, and that file MUST
+be the only record of its findings. The order of the records MUST be establishable —
+by number, or, where two records of different kinds share a number, by their file
+times — and a record MUST NOT be overwritten. Each finding MUST state its lens, its
 basis, its severity, and the evidence it cites. A later review MUST obtain earlier
-findings and their dispositions from these files rather than from session memory;
-a review of the same kind as an earlier one MAY continue the reviewer session that
+findings and their dispositions from these files rather than from session memory; a
+review of the same kind as an earlier one MAY continue the reviewer session that
 wrote it, so the reviewer keeps the context behind its findings, but MUST still read
-the triage and dispositions from the records. The `reviews/` directory MUST NOT be tracked by version control and
-MUST NOT be cited by permanent documentation; anything durable in it MUST reach
-permanent documentation through the ordinary promotion path before archival.
+the triage and dispositions from the records. The `reviews/` directory MUST NOT be
+tracked by version control and MUST NOT be cited by permanent documentation;
+anything durable in it MUST reach permanent documentation through the ordinary
+promotion path before archival.
 
 #### Scenario: A pre-closeout review asks whether feedback was addressed
 
@@ -169,7 +172,7 @@ partial work.
 - **WHEN** an implementation session completes a section's tasks
 - **THEN** it records any handoff in the section's task notes, a fresh-context
   check of the section's diff passes, and the section is committed; the next
-  section starts in a new session
+  section starts in a new session unless the owner directs this one to continue
 
 #### Scenario: The plan's premise fails mid-section
 
@@ -180,8 +183,10 @@ partial work.
 
 Validation before an implementation review MUST describe one commit and MUST NOT
 modify the checkout: it MUST fail if the worktree is not clean when it starts or
-when it finishes, MUST NOT itself regenerate lockfiles or any other tracked file,
-and MUST fail when a step it runs changes one. It MUST build the internal packages
+after any step, or if `HEAD` is no longer the validated commit after any step, and
+MUST then collect no further evidence, though it MAY still stop what it started,
+such as port-forwards; it MUST NOT itself regenerate lockfiles or any other
+tracked file. It MUST build the internal packages
 it tests from the commit under validation, never from wheels another branch left in
 the shared wheelhouse. A
 condition validation could repair, such as a stale lock, MUST fail validation and
@@ -247,22 +252,34 @@ MUST NOT repair it.
 
 The implementation review, the validation of the same commit, and the owner's own
 notes on it MUST be triaged together, in a session that is not the implementing
-session. Each validation failure caused by the commit, or of unknown cause, MUST be
-presented as a finding, with its diagnosis checked against the logs; an
-`inconclusive` part MUST be read as missing evidence, never as a finding. The owner's notes MUST be saved verbatim as a review
-record and triaged like any review: the triaging agent MUST state its own position
-on each point rather than carry it out as an instruction, and each disposition
-MUST be logged to the intervention ledger. Accepted fixes MUST pass the checks a
-section passes before they are committed, and the commit MUST be validated again.
-A pre-closeout review MUST NOT run, and its gate MUST NOT pass, unless the latest
-validation names `HEAD` and its result is `passed`, except where the owner
-overrides it.
+session. A review published by the review tooling MUST name the commit it reviewed,
+so the commits can be compared mechanically; for a pasted review, triage MUST record
+the commit the owner says its reviewer saw. A review and a validation of different
+commits MAY be triaged as one round only when the owner waives the rule, judging the
+changes between them; the waiver MUST be recorded in the intervention ledger. Each
+validation failure caused by the commit, or of unknown cause, MUST be presented as a
+finding, with its diagnosis checked against the logs; an `inconclusive` part MUST be
+read as missing evidence, never as a finding. The owner's notes MUST be saved
+verbatim as a review record and triaged like any review: the triaging agent MUST
+state its own position on each point rather than carry it out as an instruction, and
+each disposition MUST be logged to the intervention ledger. Accepted fixes MUST pass
+the checks a section passes before they are committed, and the commit MUST be
+validated again. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
+unless the latest validation names `HEAD` and its result is `passed`, except where
+the owner overrides it.
 
 #### Scenario: The owner's note is contradicted by the files
 
 - **WHEN** a point in the owner's notes rests on a claim the files contradict
 - **THEN** triage says so, with the evidence, and nothing changes until the owner
   has recorded a disposition
+
+#### Scenario: A review and a validation describe different commits
+
+- **WHEN** a round's review names a different commit from its validation record
+- **THEN** triage names both commits and what changed between them, and treats
+  them as one round only on the owner's recorded waiver; otherwise the reviewed
+  commit is validated or the validated commit reviewed first
 
 #### Scenario: Validation fails beside an implementation review
 

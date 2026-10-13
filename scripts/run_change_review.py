@@ -10,9 +10,15 @@ non-authoritative transcript that no review or triage step reads, kept for expor
 A run whose output is not a review publishes nothing; its output is kept beside the
 transcript as `NN-<kind>.rejected.md`.
 
-A review takes its number when it is published, not when its run starts: a
-validation started beside it writes its own record meanwhile, and the two must
-never share a number. Until then its transcript has a provisional name.
+A review takes its number when it is published, not when its run starts, so a
+validation written beside it meanwhile is numbered first; until then its transcript
+has a provisional name. The record's name is claimed with an exclusive create, so
+this runner never overwrites a record. Records of different kinds written at the same
+moment may still share a number; their file times order them.
+
+Each published review names the commit it reviewed, `HEAD` when its run started,
+in a comment at its end, so triage can compare it with the commit a validation
+describes.
 
 A pre-closeout review asks whether the change is ready for closeout, which a failing
 pipeline answers, so it refuses to start unless the change's latest validation
@@ -55,6 +61,7 @@ _FINDING = re.compile(r"^### F\d+\b", re.M)
 _FIELD = re.compile(r"^- \*\*(\w+):\*\*\s*(.*?)\s*$", re.M)
 _SESSION_LINE = re.compile(r"^session id: (\S+)\s*$", re.M)
 _SESSION_MARKER = re.compile(r"<!-- reviewer-session: (\S+) -->")
+REVIEWED_COMMIT = "<!-- reviewed-commit: {} -->"
 _VALIDATION_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{7,40})\b", re.M)
 _VALIDATION_RESULT = re.compile(r"^- \*\*Result:\*\*\s*(\w+)", re.M)
 
@@ -75,6 +82,23 @@ def next_review_path(reviews: Path, kind: str) -> Path:
                for entry in directory.iterdir()]
     numbers = [int(match.group(1)) for entry in entries if (match := _NUMBERED.match(entry.name))]
     return reviews / f"{max(numbers, default=0) + 1:02d}-{kind}.md"
+
+
+def claim_record(reviews: Path, kind: str,
+                 propose: Callable[[Path, str], Path] | None = None) -> Path:
+    """Create the next numbered record of `kind`, empty, and return it.
+
+    The create is exclusive: if another writer took the proposed name in the
+    meantime, the next number is tried, so no record is overwritten.
+    """
+    propose = propose or next_review_path
+    while True:
+        path = propose(reviews, kind)
+        try:
+            path.open("x", encoding="utf-8").close()
+            return path
+        except FileExistsError:
+            continue
 
 
 def validation_problem(reviews: Path, head: str) -> str | None:
@@ -101,7 +125,7 @@ def _git_head(root: Path) -> str:
         return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                               text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise ReviewError(f"could not read HEAD to check the validation record: {exc}") from exc
+        raise ReviewError(f"could not read HEAD, the commit under review: {exc}") from exc
 
 
 def review_problems(text: str, kind: str, change: str) -> list[str]:
@@ -267,8 +291,9 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     if change in ("", "archive") or "/" in change or not change_dir.is_dir():
         raise ReviewError(f"no active change {change!r} under {CHANGES}")
     reviews = change_dir / "reviews"
+    reviewed = head(root)
     if kind == "pre-closeout" and not unvalidated:
-        if problem := validation_problem(reviews, head(root)):
+        if problem := validation_problem(reviews, reviewed):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or set UNVALIDATED=1 to override")
     transcripts = reviews / TRANSCRIPTS
@@ -283,26 +308,33 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                                  draft, model, effort)
     else:
         command = codex_command(review_prompt(kind, change, base), draft, root, model, effort)
+    status: int | None = None
     try:
         status = runner(command, log)
     finally:
         # Numbered now, after every record written while the reviewer ran; an
-        # interrupted run keeps its number too.
-        output = next_review_path(reviews, kind)
+        # interrupted run keeps its number too, through its transcript, and
+        # leaves no empty record behind.
+        output = claim_record(reviews, kind)
         if log.is_file():
             log = log.rename(transcripts / output.with_suffix(".log").name)
         if draft.is_file():
             draft = draft.rename(transcripts / output.with_suffix(".rejected.md").name)
+        if status is None:
+            output.unlink()
     text = draft.read_text("utf-8") if draft.is_file() else ""
     problems = [f"the reviewer exited {status}"] if status != 0 else review_problems(text, kind, change)
     if problems:
+        output.unlink()
         if not text.strip():
             draft.unlink(missing_ok=True)
         raise ReviewError("the reviewer produced no review: " + "; ".join(problems)
                           + f"; see {log.relative_to(root)}")
     session = _SESSION_LINE.search(log.read_text("utf-8")) if log.is_file() else None
+    text = text.rstrip("\n") + "\n"
     if session:
-        text = text.rstrip("\n") + f"\n\n<!-- reviewer-session: {session.group(1)} -->\n"
+        text += f"\n<!-- reviewer-session: {session.group(1)} -->\n"
+    text += REVIEWED_COMMIT.format(reviewed) + "\n"
     output.write_text(text, "utf-8")
     draft.unlink()
     return output

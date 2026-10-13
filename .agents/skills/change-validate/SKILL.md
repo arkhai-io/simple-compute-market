@@ -77,8 +77,9 @@ from this commit rather than left in `.dist` by another branch.
    forwarded services, and unforward.
 
 Run the Helm part even when the local part failed, so one triage sees every
-failure — unless the local part failed because the worktree was not clean, which
-means the tree is no longer the commit; then stop.
+failure — unless the local part failed because the worktree was not clean or
+`HEAD` moved, which the scripts check after every step and report as "the worktree
+changed" or "HEAD is now …": the tree is no longer the commit, so stop.
 
 Each attempt of a part writes its summary and every step's log under
 `.snapshot/validation/<short commit>/<part>/<attempt>/`, and prints that path. The
@@ -136,7 +137,8 @@ that a green pipeline is not evidence for this change.
 
 Write `openspec/changes/<change>/reviews/NN-validation.md`, numbered after every
 file in `reviews/` and `reviews/transcripts/` at the moment you write it — a review
-started beside this validation may have taken a number since you began.
+started beside this validation may have taken a number since you began. Never
+overwrite a record: if the name exists, take the next number.
 
 The result, overall and per part, is one of:
 

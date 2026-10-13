@@ -250,9 +250,7 @@ to repair by hand.
 Validation observes one commit and edits nothing (`design.md`, "Validation observes
 a committed slice and never alters it"). Every script below is tested in
 `scripts/tests/` with an injected command runner, at unit level, except where a
-real repository is the lowest level that proves the behaviour, and except
-`fetch-e2e-logs.py`, whose existing tests patch `subprocess.run` and were extended
-in that form rather than converted. No end-to-end scenario covers this section: it
+real repository is the lowest level that proves the behaviour. No end-to-end scenario covers this section: it
 is the tooling that runs them, proven by its own suites and by 8.6.
 
 - [x] 8.1 Add `make validate-local` (`scripts/validate_slice.py`, tests in
@@ -561,9 +559,10 @@ session").
       evidence; observations about other changes or the tooling are presented, not
       triaged against the change. After the fresh-context check, it also states:
       how a round is recognized, the branch and worktree check and the base the
-      fixes are diffed against, superseded validation records, a validation naming
-      another commit than the reviews (ask the owner), a lone re-validation, and
-      owner-note labels `O<n>`. Skill text; proven by 9.5.
+      fixes are diffed against, a lone re-validation, and owner-note labels `O<n>`.
+      Superseded records and differing commits were later reworked by
+      implementation review 1 (F2, F1; see the notes after 9.5). Skill text;
+      proven by 9.5.
 - [x] 9.2 Add `make triage CHANGE=`, opening a Claude Code session with
       `/change-triage <change>`.
       Done. Its help names the round's inputs.
@@ -572,7 +571,11 @@ session").
       and make `KIND=pre-closeout` refuse unless the latest validation record names
       `HEAD` and its result is `passed`, overridden by `UNVALIDATED=1`. Tests in
       `scripts/tests/test_run_change_review.py`.
-      Done. Unit (`test_run_change_review.py`, the runner and `HEAD` injected): a
+      Done. Corrected by implementation review 1 (external) F3: the note's earlier
+      claim that parallel records "never share" a number was wrong; the
+      requirement is now an establishable order and no overwrite, which the
+      exclusive claim below provides.
+      Unit (`test_run_change_review.py`, the runner and `HEAD` injected): a
       record written while the reviewer runs makes the review take the next
       number, and its transcript is renamed from its provisional name, also when
       the run is interrupted; a
@@ -582,8 +585,8 @@ session").
       `UNVALIDATED=1`; an implementation review never checks; a short commit
       prefix is accepted and a decorated `Commit:` or `Result:` line fails closed,
       which `change-validate`'s template now warns about. `make -n review …
-      UNVALIDATED=1` emits `--unvalidated`. The existing test of the reviewer's
-      command now passes the override, since it runs with no repository.
+      UNVALIDATED=1` emits `--unvalidated`. The test of the reviewer's command
+      passes the override, since it is about the command, not the gate.
 - [x] 9.4 Amend `change-implement`'s closing report (review and validation in
       parallel, the owner's notes, then `make triage`; the first three were done
       in 8.12, `make triage` remains) and `change-review`'s inputs
@@ -603,6 +606,36 @@ session").
       `dev`). `07` reviewed sections 1–4 against base `22115762`, so the triage
       should say how far the validated commit has moved past what the reviews
       read. Record here what the skill could not handle unaided.
+
+Implementation review 1 (external, `reviews/01-implementation-external.md`)
+triaged. Script fixes are proven at unit level; skill and spec fixes are text,
+proven only when a session follows them:
+
+- F1 — `make review` appends `<!-- reviewed-commit: <HEAD> -->` to each published
+  review (one test asserts it, `HEAD` injected); `change-triage` names every
+  record's commit, compares them, and treats a mismatch as one round only on the
+  owner's waiver, logged; a pasted review's commit is the owner's word, recorded;
+  spec delta and design amended.
+- F2 — `change-triage` presents earlier untriaged validation failures, merged
+  with later evidence; only a record with no `V<n>` is marked superseded.
+- F3 — the record order must be establishable (number, or file time) and nothing
+  overwritten: `claim_record` creates the name exclusively and takes the next
+  number if it exists (tested both with a record written before the proposal and
+  with a proposal that collides); an interrupted run leaves no empty record. An
+  agent writing a record checks the name is free and takes the next number — a
+  check, not an exclusive claim.
+- F4 (section 8) — `Validation.step()` checks after every command that `HEAD` is
+  the recorded commit and the tree is clean, failing the step otherwise; every
+  caller stops on a step that did not pass, though `unforward` still runs as
+  cleanup. Tests cover a dirtied tree in the local part and `HEAD` moving in the
+  Helm part; the other stop points are by reading the code.
+- F5 — before closeout, `make check-doc-citations` may report only the documents
+  the change creates at closeout (`change-implement`, `change-triage`).
+- S1, S2 — owner notes saved exactly as pasted with `O<n>` labels only in triage;
+  validation and owner-note triage files are "not a gate".
+- S3 — the spec scenario lets the owner continue a session into the next section.
+- S4 (section 8) — `fetch-e2e-logs.py` takes its command runner as a parameter;
+  its tests pass a fake instead of patching `subprocess.run`.
 
 ## 10. Closeout and archival
 

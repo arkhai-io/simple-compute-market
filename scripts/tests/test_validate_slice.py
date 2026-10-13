@@ -32,10 +32,13 @@ class Fake:
                  docker_up: bool = True, volumes: Sequence[list[str]] = (),
                  installed: Sequence[tuple[str, str]] = (("arkhai-node-operator-registry-data",
                                                           ""),),
-                 release_delay: int = 0) -> None:
+                 release_delay: int = 0, head_after: str | None = None) -> None:
         self.fail = set(fail)
         self.output = output or {}
         self.dirty_after = dirty_after
+        # The step after which HEAD moves, as a commit or branch switch would.
+        self.head_after = head_after
+        self.head = COMMIT
         self.context = context
         self.markers = markers or {"E2E_MODULE": VM_MARKERS,
                                    "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS}
@@ -64,6 +67,8 @@ class Fake:
         log.write_text(self.output.get(name, f"{name} output\n"), "utf-8")
         if name == self.dirty_after:
             self.dirty = [" M e2e-tests/uv.lock"]
+        if name == self.head_after:
+            self.head = "f" * 40
         if name in self.fail:
             return 2
         if name == "forward":
@@ -90,7 +95,7 @@ class Fake:
     def read(self, command: Sequence[str]) -> str:
         command = list(command)
         if command == ["git", "rev-parse", "HEAD"]:
-            return COMMIT + "\n"
+            return self.head + "\n"
         if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
             return "\n".join(self.dirty)
         if command == ["kubectl", "config", "current-context"]:
@@ -179,13 +184,26 @@ def test_a_dirty_worktree_before_validation_runs_nothing(tmp_path: Path) -> None
     assert "?? scratch.txt" in summary.steps[0].detail
 
 
-def test_a_step_that_rewrites_a_tracked_file_fails_validation(tmp_path: Path) -> None:
-    fake = Fake(dirty_after="test")
+def test_a_step_that_rewrites_a_tracked_file_fails_and_stops_the_part(tmp_path: Path) -> None:
+    fake = Fake(dirty_after="check-packaging")
     summary = validator.validate_local(_validation(tmp_path, fake, "local"))
 
     assert not summary.passed
-    assert _results(summary)["test"] == "passed"
-    assert _results(summary)["clean after"] == "failed"
+    failed = next(s for s in summary.steps if s.name == "check-packaging")
+    assert failed.result == "failed" and "e2e-tests/uv.lock" in failed.detail
+    assert "make test" not in fake.ran()
+
+
+def test_a_commit_or_branch_switch_mid_part_stops_it(tmp_path: Path) -> None:
+    _storefront_env(tmp_path)
+    fake = Fake(head_after="build-dev")
+    summary = _helm(tmp_path, fake)
+
+    assert not summary.passed
+    build = next(s for s in summary.steps if s.name == "build-dev")
+    assert build.result == "failed" and "HEAD is now ffffffffffff" in build.detail
+    assert "make -C helm test-render" not in fake.ran()
+    assert "make -C helm deploy-local" not in fake.ran()
 
 
 # --- Helm part ----------------------------------------------------------------

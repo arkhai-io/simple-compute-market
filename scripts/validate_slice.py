@@ -4,9 +4,12 @@
 Validation describes one commit, so it must leave the worktree exactly as it found
 it: a step that rewrote a tracked file would validate a tree that is not the
 commit. Each part asserts a clean worktree, untracked files included, before it
-starts and after it finishes, and fails rather than repairs. The check afterwards
-is not redundant: `make test` and the end-to-end image build both sync project
-environments, which may rewrite a lock.
+starts, and after every step checks that `HEAD` is still the commit it recorded and
+the worktree is still clean; on any change it stops, because every later step
+would describe a different tree. It fails rather than repairs. A step can change
+the tree — `make test` and the end-to-end image build both sync project
+environments, which may rewrite a lock — and so can something outside it, such as a
+commit or a branch switch in the same checkout.
 
 Both parts start with `make dist-clean`. The wheelhouse in `.dist` is shared by
 every branch built in the checkout, and environments sync internal packages with an
@@ -245,8 +248,28 @@ class Validation:
             step.detail = f"{' '.join(command)} exited {status}"
             step.tail = _tail(log)
             self.summary.passed = False
+        if changed := self.commit_changed():
+            # Whatever the command reported, the evidence after it no longer
+            # describes the commit; the caller stops at a step that did not pass.
+            step.result = "failed"
+            step.detail = "\n".join(filter(None, [step.detail, changed]))
+            self.summary.passed = False
         self.summary.steps.append(step)
         return step
+
+    def commit_changed(self) -> str | None:
+        """How the checkout no longer is the recorded commit, clean; None while it is."""
+        try:
+            head = self.read(["git", "rev-parse", "HEAD"]).strip()
+            dirty = dirty_paths(self.read)
+        except ValidationError as exc:
+            return f"could not check the checkout: {exc}"
+        if head != self.summary.commit:
+            return (f"HEAD is now {head[:12]}, not the validated commit "
+                    f"{self.summary.commit[:12]}: a commit or branch switch happened")
+        if dirty:
+            return "the worktree changed:\n" + "\n".join(dirty)
+        return None
 
     def finish(self) -> Summary:
         self.log_dir.mkdir(parents=True, exist_ok=True)

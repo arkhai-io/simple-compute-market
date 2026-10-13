@@ -37,7 +37,8 @@ reviewer sessions, not records.
 
 When the owner pastes a review from elsewhere, save it verbatim as the change's
 next numbered record, `NN-<kind>-external.md`, numbered after every file in
-`reviews/` and `reviews/transcripts/`, so later reviews read it as history. Its
+`reviews/` and `reviews/transcripts/`, so later reviews read it as history. Never
+overwrite a record: if the name exists when you write, take the next number. Its
 findings may carry no lens, basis, or severity; you assign them in step 2 and say
 that you did.
 
@@ -55,21 +56,31 @@ For an implementation round, also take:
   `inconclusive` part are missing evidence, never findings: say what evidence is
   missing and whether the round can be judged without it. Observations it records
   about other changes or about the validation tooling are presented, not triaged as
-  findings against this change. Earlier untriaged validation records are
-  superseded by the latest: write each a triage file saying so, so no later round
-  picks it up again.
-  If the validation names a commit other than the one the reviews describe, or
-  there is none, say so before anything else: name both commits and summarize what
-  changed between them (`git log --oneline <reviewed>..<validated>`), and ask the
-  owner whether to triage on that evidence or validate the reviewed commit first.
-  Proceed only on the owner's word.
+  findings against this change. Read every untriaged validation record, not only
+  the latest: an earlier record's `V<n>` failures are presented too, merged with
+  any later evidence about them — a later record can show a failure fixed or
+  environmental, but its disposition is still the owner's. Only an earlier record
+  with no `V<n>` is marked superseded without presenting anything: write it a
+  triage file saying so, so no later round picks it up again.
+- **The commits.** A review published by `make review` ends with
+  `<!-- reviewed-commit: <commit> -->`; a validation record names its `Commit:`.
+  For a pasted external review, ask the owner which commit the reviewer saw. Name
+  every record's commit at the top of its triage file, then compare them before
+  anything else. When they differ, the records are a round
+  only if the owner waives the rule, judging the changes between the commits: name
+  both, summarize what changed (`git log --oneline <reviewed>..<validated>`), and
+  ask. Record a waiver in the triage file of each record involved and as one
+  ledger line (`"finding": "commit"`, under the review's record name, the owner's
+  reason as the disposition). Without a waiver, stop: the reviewed commit is
+  validated, or the validated commit reviewed, before the round is triaged.
   A validation record alone — the re-validation of an earlier round's fix commit —
   is a round of its own: a `passed` record with no `V<n>` needs only its triage
   file saying it confirms that commit; any `V<n>` is triaged like any finding, with
   the owner's notes asked for as usual.
 - **The owner's notes.** Ask for them if the owner has not pasted them. Save them
-  verbatim as the next numbered record, `NN-implementation-owner.md`, label its
-  points `O1`, `O2`, … in the order they appear, and triage each point like any
+  exactly as pasted as the next numbered record, `NN-implementation-owner.md`.
+  Label the points `O1`, `O2`, … in the order they appear — in the triage file and
+  the ledger only, never in the saved notes — and triage each point like any
   finding: assign its lens, basis, and severity, and take your
   own position. A point the owner raised is advice, like any other; where the
   files contradict it, say so with the evidence. Note each point no review raised
@@ -178,6 +189,10 @@ record and the owner's notes included — in this form:
 <Whether the owner passed the review's gate, in their words, and any condition.>
 ```
 
+Only reviews are gates. The triage file of a validation record or of the owner's
+notes ends instead with `## Gate` reading "Not a gate: evidence for the round
+triaged in `<NN-review>.triage.md`."
+
 Append one line per disposition to the change's tracked `interventions.jsonl`, in
 the shape `design.md` and the `change-workflow` delta define:
 
@@ -215,7 +230,9 @@ the owner cannot otherwise see that it was written.
   under the last implemented section. Then run `change-implement`'s checks before
   committing (its step 5): `make lock` and `make check-packaging` when a
   dependency changed, the focused suites, `make test`, `make check-comment-hygiene`,
-  `make check-doc-citations CHANGE=<change>`, `make check-agent-skills` when the
+  `make check-doc-citations CHANGE=<change>` (before closeout it may report only
+  files the change's tasks create at closeout; name them, and fix anything else),
+  `make check-agent-skills` when the
   diff touches `.agents/`, `.claude/`, or `.codex/`, and a fresh-context compliance
   check of the diff against the `HEAD` recorded at the start. Commit, as one commit
   naming the change and the round: the fixes, the change documents the dispositions

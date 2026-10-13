@@ -32,6 +32,11 @@ LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs")
 COMPOSE_LOG = "compose-logs.txt"
 
 
+# Runs a command as subprocess.run does, given `text=True` and `check=True`; the
+# GitHub and Git command line is this script's only boundary.
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
 class FetchError(RuntimeError):
     """The requested run or one of its diagnostic logs could not be obtained."""
 
@@ -39,11 +44,12 @@ class FetchError(RuntimeError):
 def _run(
     command: Sequence[str],
     *,
+    runner: Runner,
     capture_output: bool = False,
     stdout: IO[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(
+        return runner(
             list(command),
             capture_output=capture_output,
             stdout=stdout,
@@ -60,17 +66,18 @@ def _run(
         ) from exc
 
 
-def _json_output(command: Sequence[str]) -> Any:
-    result = _run(command, capture_output=True)
+def _json_output(command: Sequence[str], runner: Runner) -> Any:
+    result = _run(command, runner=runner, capture_output=True)
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise FetchError(f"{' '.join(command)} returned invalid JSON") from exc
 
 
-def _current_branch() -> str:
+def _current_branch(runner: Runner) -> str:
     branch = _run(
         ["git", "branch", "--show-current"],
+        runner=runner,
         capture_output=True,
     ).stdout.strip()
     if not branch:
@@ -78,15 +85,17 @@ def _current_branch() -> str:
     return branch
 
 
-def _full_commit(revision: str) -> str:
+def _full_commit(revision: str, runner: Runner) -> str:
     # Runs report full commit IDs, so a short ID or a ref is resolved first.
     return _run(
-        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"], capture_output=True
+        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        runner=runner,
+        capture_output=True,
     ).stdout.strip()
 
 
 def _matching_run_id(
-    workflow: str, branch: str, commit: str, after_run: int | None = None
+    workflow: str, branch: str, commit: str, after_run: int | None, runner: Runner
 ) -> str | None:
     payload = _json_output(
         [
@@ -99,7 +108,8 @@ def _matching_run_id(
             str(RUN_LIST_LIMIT),
             "--json",
             "databaseId,headBranch,headSha",
-        ]
+        ],
+        runner,
     )
     if not isinstance(payload, list):
         raise FetchError("gh run list returned a value other than a run list")
@@ -126,13 +136,14 @@ def _run_id_for_commit(
     commit: str,
     *,
     wait_seconds: float,
+    runner: Runner,
     after_run: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str:
     deadline = clock() + wait_seconds
     while True:
-        run_id = _matching_run_id(workflow, branch, commit, after_run)
+        run_id = _matching_run_id(workflow, branch, commit, after_run, runner)
         if run_id is not None:
             return run_id
         if clock() >= deadline:
@@ -148,9 +159,11 @@ def _run_id_for_commit(
         sleep(POLL_SECONDS)
 
 
-def _conclusion(run_id: str) -> str:
+def _conclusion(run_id: str, runner: Runner) -> str:
     try:
-        payload = _json_output(["gh", "run", "view", run_id, "--json", "conclusion"])
+        payload = _json_output(
+            ["gh", "run", "view", run_id, "--json", "conclusion"], runner
+        )
     except FetchError as exc:
         print(
             f"WARNING: could not read run {run_id} conclusion: {exc}", file=sys.stderr
@@ -164,11 +177,11 @@ def _conclusion(run_id: str) -> str:
     return "unknown"
 
 
-def _fetch_actions_log(run_id: str, output_dir: Path) -> bool:
+def _fetch_actions_log(run_id: str, output_dir: Path, runner: Runner) -> bool:
     target = output_dir / "actions.log"
     try:
         with target.open("w", encoding="utf-8") as stream:
-            _run(["gh", "run", "view", run_id, "--log"], stdout=stream)
+            _run(["gh", "run", "view", run_id, "--log"], runner=runner, stdout=stream)
     except (FetchError, OSError) as exc:
         try:
             target.unlink(missing_ok=True)
@@ -182,7 +195,9 @@ def _fetch_actions_log(run_id: str, output_dir: Path) -> bool:
     return True
 
 
-def _fetch_compose_log(run_id: str, output_dir: Path, artifact: str) -> bool:
+def _fetch_compose_log(
+    run_id: str, output_dir: Path, artifact: str, runner: Runner
+) -> bool:
     # Each lane uploads the same filename, so preserve its artifact namespace.
     output_dir = output_dir / artifact
     target = output_dir / COMPOSE_LOG
@@ -200,7 +215,8 @@ def _fetch_compose_log(run_id: str, output_dir: Path, artifact: str) -> bool:
                 artifact,
                 "--dir",
                 str(output_dir),
-            ]
+            ],
+            runner=runner,
         )
     except FetchError as exc:
         print(
@@ -228,12 +244,14 @@ def fetch_logs(
     after_run: int | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    runner: Runner = subprocess.run,
 ) -> Path:
     selected_run = run_id or _run_id_for_commit(
         workflow,
-        _current_branch(),
-        _full_commit(commit or "HEAD"),
+        _current_branch(runner),
+        _full_commit(commit or "HEAD", runner),
         wait_seconds=wait_seconds,
+        runner=runner,
         after_run=after_run,
         sleep=sleep,
         clock=clock,
@@ -247,12 +265,12 @@ def fetch_logs(
         ) from exc
 
     print(f"Waiting for E2E workflow run {selected_run} to complete...", flush=True)
-    _run(["gh", "run", "watch", selected_run])
-    conclusion = _conclusion(selected_run)
+    _run(["gh", "run", "watch", selected_run], runner=runner)
+    conclusion = _conclusion(selected_run, runner)
 
-    actions_log = _fetch_actions_log(selected_run, output_dir)
+    actions_log = _fetch_actions_log(selected_run, output_dir, runner)
     compose_logs = [
-        _fetch_compose_log(selected_run, output_dir, artifact)
+        _fetch_compose_log(selected_run, output_dir, artifact, runner)
         for artifact in LOG_ARTIFACTS
     ]
     if not actions_log and not any(compose_logs):
@@ -271,7 +289,7 @@ def fetch_logs(
     return output_dir
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, runner: Runner = subprocess.run) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workflow", default=DEFAULT_WORKFLOW)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -303,6 +321,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             commit=args.commit.strip() if args.commit else None,
             wait_seconds=args.wait_seconds,
             after_run=args.after_run,
+            runner=runner,
         )
     except FetchError as exc:
         print(f"fetch-e2e-logs: {exc}", file=sys.stderr)

@@ -17,6 +17,8 @@ reviewer = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(reviewer)
 
 CHANGE = "shape-bounds"
+# The commit each review is told it reviews; HEAD is injected, never read from Git.
+HEAD = "0123456789abcdef0123456789abcdef01234567"
 FINDING = """### F1 — The override has no carrier
 
 - **Lens:** architecture
@@ -64,10 +66,11 @@ def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> 
     root = _repository(tmp_path)
     kind = "design"
 
-    path = reviewer.run_review(CHANGE, kind, root=root, runner=_writing(_review()))
+    path = reviewer.run_review(CHANGE, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
 
     assert path == _reviews(root) / f"01-{kind}.md"
-    assert path.read_text("utf-8") == _review().rstrip("\n") + "\n\n<!-- reviewer-session: s-1 -->\n"
+    assert path.read_text("utf-8") == (_review().rstrip("\n") + "\n\n<!-- reviewer-session: s-1 -->\n"
+                                       f"<!-- reviewed-commit: {HEAD} -->\n")
     assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
     assert sorted(p.name for p in _reviews(root).iterdir()) == [path.name, "transcripts"]
 
@@ -76,7 +79,7 @@ def test_numbering_follows_records_and_transcripts(tmp_path: Path) -> None:
     root = _repository(tmp_path, "01-design.log", "02-validation.log", "transcripts/03-implementation.log")
 
     path = reviewer.run_review(CHANGE, "implementation", root=root,
-                               runner=_writing(_review("implementation")))
+                               runner=_writing(_review("implementation")), head=lambda _: HEAD)
 
     assert path.name == "04-implementation.md"
 
@@ -86,7 +89,7 @@ def test_reviewer_runs_read_only_with_the_skill(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     reviewer.run_review(CHANGE, "pre-closeout", base="main", model="m1", effort="high", root=root,
-                        unvalidated=True, runner=_writing(_review("pre-closeout"), calls=calls))
+                        unvalidated=True, runner=_writing(_review("pre-closeout"), calls=calls), head=lambda _: HEAD)
 
     command = calls[0]
     assert command[command.index("--sandbox") + 1] == "read-only"
@@ -100,7 +103,7 @@ def test_design_review_names_no_base(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     calls: list[list[str]] = []
 
-    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls))
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls), head=lambda _: HEAD)
 
     assert "Base:" not in calls[0][-1]
     assert "--model" not in calls[0]
@@ -111,7 +114,7 @@ def test_a_review_with_no_findings_is_accepted(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 
     path = reviewer.run_review(CHANGE, "design", root=root,
-                               runner=_writing(_review(findings="None: the change needs none.\n")))
+                               runner=_writing(_review(findings="None: the change needs none.\n")), head=lambda _: HEAD)
 
     assert path.is_file()
 
@@ -131,7 +134,7 @@ def test_output_that_is_not_a_review_publishes_nothing(
     root = _repository(tmp_path)
 
     with pytest.raises(reviewer.ReviewError, match=reason):
-        reviewer.run_review(CHANGE, "design", root=root, runner=_writing(text, status))
+        reviewer.run_review(CHANGE, "design", root=root, runner=_writing(text, status), head=lambda _: HEAD)
 
     assert [p.name for p in _reviews(root).iterdir()] == ["transcripts"]
     assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
@@ -141,7 +144,7 @@ def test_rejected_output_is_kept_with_its_transcript(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 
     with pytest.raises(reviewer.ReviewError):
-        reviewer.run_review(CHANGE, "design", root=root, runner=_writing("ERROR: refused\n"))
+        reviewer.run_review(CHANGE, "design", root=root, runner=_writing("ERROR: refused\n"), head=lambda _: HEAD)
 
     rejected = _reviews(root) / "transcripts" / "01-design.rejected.md"
     assert rejected.read_text("utf-8") == "ERROR: refused\n"
@@ -153,43 +156,43 @@ def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: st
     root = _repository(tmp_path)
 
     with pytest.raises(reviewer.ReviewError):
-        reviewer.run_review(change, kind, root=root, runner=_writing(_review()))
+        reviewer.run_review(change, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
 
 
 def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
     root = _repository(tmp_path)
-    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
     calls: list[list[str]] = []
 
     path = reviewer.run_review(CHANGE, "design", root=root,
-                               runner=_writing(_review(), calls=calls, session="first"))
+                               runner=_writing(_review(), calls=calls, session="first"), head=lambda _: HEAD)
 
     command = calls[0]
     assert command[:4] == ["codex", "exec", "resume", "first"]
     assert command[command.index("--config") + 1] == 'sandbox_mode="read-only"'
     assert "01-design" in command[-1] and "triage records" in command[-1]
     assert path.stem == "02-design"
-    assert path.read_text("utf-8").endswith("<!-- reviewer-session: first -->\n")
+    assert path.read_text("utf-8").count("<!-- reviewer-session: first -->\n") == 1
 
 
 def test_fresh_starts_a_new_reviewer(tmp_path: Path) -> None:
     root = _repository(tmp_path)
-    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
     calls: list[list[str]] = []
 
     reviewer.run_review(CHANGE, "design", fresh=True, root=root,
-                        runner=_writing(_review(), calls=calls, session="second"))
+                        runner=_writing(_review(), calls=calls, session="second"), head=lambda _: HEAD)
 
     assert calls[0][:3] == ["codex", "exec", "--sandbox"]
 
 
 def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
     root = _repository(tmp_path)
-    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"))
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
     calls: list[list[str]] = []
 
     reviewer.run_review(CHANGE, "implementation", root=root,
-                        runner=_writing(_review("implementation"), calls=calls))
+                        runner=_writing(_review("implementation"), calls=calls), head=lambda _: HEAD)
 
     assert "resume" not in calls[0]
 
@@ -199,7 +202,7 @@ def test_an_external_review_is_never_continued(tmp_path: Path) -> None:
     (_reviews(root) / "01-design-external.md").write_text(_review(), "utf-8")
     calls: list[list[str]] = []
 
-    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls))
+    reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls), head=lambda _: HEAD)
 
     assert "resume" not in calls[0]
 
@@ -277,14 +280,12 @@ def test_a_record_written_during_the_run_takes_the_earlier_number(tmp_path: Path
         (_reviews(root) / "02-validation.md").write_text("x", "utf-8")
         return inner(command, log)
 
-    path = reviewer.run_review(CHANGE, "implementation", root=root, runner=runner)
+    path = reviewer.run_review(CHANGE, "implementation", root=root, runner=runner, head=lambda _: HEAD)
 
     assert path.name == "03-implementation.md"
     assert (_reviews(root) / "transcripts" / "03-implementation.log").is_file()
     assert not list((_reviews(root) / "transcripts").glob("pending-*"))
 
-
-HEAD = "0123456789abcdef0123456789abcdef01234567"
 
 
 def _validation(commit: str, result: str) -> str:
@@ -360,7 +361,7 @@ def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        reviewer.run_review(CHANGE, "design", root=root, runner=runner)
+        reviewer.run_review(CHANGE, "design", root=root, runner=runner, head=lambda _: HEAD)
 
     transcripts = _reviews(root) / "transcripts"
     assert [p.name for p in transcripts.iterdir()] == ["01-design.log"]
@@ -378,3 +379,37 @@ def test_the_validation_record_lines_are_read_exactly(
     (reviews / "02-validation.md").write_text(record, "utf-8")
 
     assert (reviewer.validation_problem(reviews, HEAD) is None) is admitted
+
+
+def test_a_claimed_name_is_never_overwritten(tmp_path: Path) -> None:
+    reviews = _reviews(_repository(tmp_path))
+    taken = reviews / "03-validation.md"
+    taken.write_text("another writer's record", "utf-8")
+    proposals = iter([taken, reviews / "04-validation.md"])
+
+    claimed = reviewer.claim_record(reviews, "validation", propose=lambda *_: next(proposals))
+
+    assert claimed.name == "04-validation.md"
+    assert taken.read_text("utf-8") == "another writer's record"
+
+
+def test_an_interrupted_run_leaves_no_empty_record(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        reviewer.run_review(CHANGE, "design", root=root, runner=runner, head=lambda _: HEAD)
+
+    assert sorted(p.name for p in _reviews(root).iterdir()) == ["transcripts"]
+
+
+def test_the_proposed_number_advances_past_a_record_written_meanwhile(tmp_path: Path) -> None:
+    reviews = _reviews(_repository(tmp_path, "01-design.log"))
+    (reviews / "02-validation.md").write_text("another writer's record", "utf-8")
+
+    claimed = reviewer.claim_record(reviews, "validation")
+
+    assert claimed.name == "03-validation.md"
+    assert (reviews / "02-validation.md").read_text("utf-8") == "another writer's record"

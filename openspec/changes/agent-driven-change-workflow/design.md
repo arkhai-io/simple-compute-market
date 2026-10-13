@@ -351,10 +351,13 @@ findings land as later commits. Validation therefore describes one commit, and
 must leave the checkout exactly as it found it: a step that rewrites a tracked file
 would validate a tree that is not the commit, and then push and run end-to-end
 against the commit that was never checked. Validation asserts a clean worktree,
-untracked files included, before it starts and after each of its parts, and fails
-rather than repairs. The check after each part is not redundant: `make test`'s
-registry suite and the end-to-end image build both run `scripts/uv_project.py
-reinit`, which may rewrite a lock.
+untracked files included, before it starts, and after every step checks that `HEAD`
+is still the commit it recorded and the worktree is still clean; on any change it
+stops the part, because every later step would describe another tree. It fails
+rather than repairs. A step can change the tree — `make test`'s registry suite and
+the end-to-end image build both run `scripts/uv_project.py reinit`, which may
+rewrite a lock — and so can something outside it: a commit or a branch switch in
+the same checkout, which has happened while this change was worked.
 
 Relocking is the clearest case. `make lock` rewrites lockfiles; run during
 validation it would silently repair a stale lock that `make check-packaging`'s lock
@@ -574,8 +577,25 @@ latest validation record names `HEAD` and its result is `passed`, unless the own
 (`UNVALIDATED=1`), and triage does not pass the pre-closeout gate without one.
 
 Records produced in parallel take their numbers when they are written, not when
-their run starts, so a review and a validation started together never claim the
-same number.
+their run starts, so a validation that finishes during a review is numbered first.
+`make review` claims a record's name with an exclusive create; an agent writing a
+validation record, a pasted review, or the owner's notes checks that the name is
+free and takes the next number if not. Either way no record is overwritten.
+Two records of different kinds written at the same moment can still share a
+number; their file times order them. Mutual exclusion across the writers — a
+script and agents writing records directly — would cost a shared allocator every
+writer must call, for a clash that loses nothing.
+
+Each review names the commit it reviewed, `HEAD` when its run started, in a
+comment the runner appends, and a validation record names its commit; triage
+compares them. A round whose review and validation describe different commits is
+triaged together only when the owner waives the rule, judging the changes between
+them, and the waiver is logged to the ledger as a line under the review's record
+with `"finding": "commit"`. A pasted external review has no runner to record its
+commit; triage asks the owner which commit its reviewer saw and records it. A hard boundary would force a
+re-review or re-validation whenever the commits drift, even when the owner can see
+the drift does not touch what was reviewed; the waiver keeps that judgement with
+the owner and on the record, as the waiver of a design re-review does.
 
 ### The index states each change's phase and whether it can proceed
 
