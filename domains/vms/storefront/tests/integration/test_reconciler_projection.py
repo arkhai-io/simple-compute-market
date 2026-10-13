@@ -1,8 +1,8 @@
 """Which source derivation reads, what it holds, and what it prices.
 
 These cases call production derivation directly against a real SQLite
-database: an empty projection is not the local tables, an unknown configured
-site is held rather than read as empty, another market's stored overrides do not
+database: an empty projection derives nothing, an unknown configured site is
+held rather than read as empty, another market's stored overrides do not
 reach VM derivation, and asking rates resolve, hold, and refresh as the
 precedence rules say. No application runs, so under docs/development/TESTING.md
 they are focused evidence for derivation's own rules rather than integration
@@ -37,7 +37,6 @@ from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
     _available_vm_slices,
     _member,
     _seed_listing,
-    _seed_pool,
     _shape_slices,
     _shaped_pool,
     db_path,
@@ -45,22 +44,12 @@ from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
 )
 
 
-def test_none_projection_selects_the_local_tables(db_path):
-    """Only an omitted or ``None`` projection selects the local tables."""
-    _seed_pool(db_path, gpu_count=2)
-    without_arg = _available_vm_slices(db_path, home_site="site-a")
-    with_none = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=None)
-    assert without_arg == with_none
-    assert without_arg
-
-
 def test_an_empty_projection_derives_nothing_and_holds_every_configured_site(db_path):
-    """No site's projection is known: nothing is read from the local tables,
-    which only configuration selects, and every configured site is held."""
-    _seed_pool(db_path, gpu_count=2)  # local data exists
+    """No site's projection is known: nothing derives, and every configured
+    site is held."""
     holds: set = set()
     slices = _available_vm_slices(
-        db_path, home_site="site-a", site_pool_projection={},
+        db_path, site_pool_projection={},
         configured_sites=("site-a", "site-b"), holds=holds,
     )
     assert slices == []
@@ -71,11 +60,11 @@ def test_an_unknown_sites_listing_is_held_while_an_empty_known_sites_is_stale(db
     _seed_listing(db_path, listing_id="at-b", pool_id="gpu-pool", site_id="site-b")
 
     unknown = stale_open_listing_ids(
-        db_path, home_site="site-a", configured_sites=("site-a", "site-b"),
+        db_path, configured_sites=("site-a", "site-b"),
         site_pool_projection={"site-a": []}, backed_only=False,
     )
     known_empty = stale_open_listing_ids(
-        db_path, home_site="site-a", configured_sites=("site-a", "site-b"),
+        db_path, configured_sites=("site-a", "site-b"),
         site_pool_projection={"site-a": [], "site-b": []}, backed_only=False,
     )
 
@@ -194,7 +183,6 @@ def test_a_storefront_with_pricing_defaults_and_no_declaration_publishes_no_rate
     """No configuration default supplies a rate, whatever pricing is configured."""
     slices = available_compute_slices(
         db_path,
-        home_site="site-a",
         site_pool_projection={
             "site-a": [_shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])]
         },
@@ -228,7 +216,6 @@ def test_an_override_at_a_non_first_site_replaces_that_sites_declared_rates(db_p
 
     slices = available_compute_slices(
         db_path,
-        home_site="site-a",
         site_pool_projection={"site-a": [pool], "site-b": [pool]},
         configured_sites=("site-a", "site-b"),
     )
@@ -339,3 +326,22 @@ def test_a_rate_change_or_removal_refreshes_in_place(db_path):
             stored_resource=stored, fresh_resource=fresh, binding_backing="backed"
         )
         assert refreshed.get("asking_rate") == fresh.get("asking_rate")
+
+
+def _regionless_pool() -> dict:
+    pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+    del pool["pool_metadata"]["policy_tags"]["region"]
+    return pool
+
+
+def test_a_pool_stating_no_region_is_reported_and_still_derived(db_path):
+    """Publication holds the pool; derivation still yields its rows, because
+    availability reconciliation keys on them and region does not bear on
+    capacity."""
+    holds: set = set()
+
+    slices = _shape_slices(db_path, [_regionless_pool()], holds=holds)
+
+    assert slices and all(row["region"] is None for row in slices)
+    assert holds == set()
+    assert derivation_reports()["site-a"]["regionless_pools"] == ["gpu"]

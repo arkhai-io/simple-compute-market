@@ -18,8 +18,8 @@ from market_settlement_runtime import FailurePolicy
 import market_storefront.container as _container
 
 from market_storefront.services.capacity_client import (
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
@@ -323,22 +323,17 @@ async def _release_capacity(
         result.state = "released"
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
-        home_site = next(iter(remote_site_clients(runtime.client())), None)
         reopened: list[str] = []
-        if home_site is not None:
+        if remote_site_clients(runtime.client()):
             # The same source publication derives from, refreshed for the site
             # this release just changed, so a reopen here agrees with what
             # publication would keep open and reports this release's own effect.
             await refresh_site_projections(binding.site_id)
-            projection = listing_source_projection()
             reopened = closed_available_listing_ids(
                 db.db_path,
-                home_site=home_site,
                 member_availability=await capacity_availability(runtime.client()),
-                site_pool_projection=projection,
-                site_capacity_buckets=(
-                    site_capacity_buckets() if projection is not None else None
-                ),
+                site_pool_projection=site_pool_projection(),
+                site_capacity_buckets=site_capacity_buckets(),
                 shape_feasible=vm_shape_feasibility(),
                 configured_sites=runtime.site_ids,
             )

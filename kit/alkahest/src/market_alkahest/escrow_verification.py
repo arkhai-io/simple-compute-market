@@ -151,6 +151,15 @@ _INT_LIST_FIELDS = {
 }
 
 
+# A key present on only one side is a mismatch even when the other side's value
+# is None; a diff that read both through ``dict.get`` would report nothing.
+_ABSENT = object()
+
+
+def _shown(value: Any) -> str:
+    return "<absent>" if value is _ABSENT else repr(value)
+
+
 def _normalize_obligation_value(key: str, val: Any) -> Any:
     if isinstance(val, dict):
         return _normalize_obligation_data(val)
@@ -477,9 +486,12 @@ async def verify_escrow_for_settlement(
         expected, expected_expiration = expected_candidates[0]
         diffs = []
         for key in sorted(set(actual) | set(expected)):
-            if actual.get(key) != expected.get(key):
+            chain_value = actual.get(key, _ABSENT)
+            expected_value = expected.get(key, _ABSENT)
+            if chain_value != expected_value:
                 diffs.append(
-                    f"{key}: chain={actual.get(key)!r} expected={expected.get(key)!r}"
+                    f"{key}: chain={_shown(chain_value)} "
+                    f"expected={_shown(expected_value)}"
                 )
         if (
             expected_expiration is not None

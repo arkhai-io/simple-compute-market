@@ -549,13 +549,22 @@ def capacity_runtime_over_sites(
 
 
 def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
-    """Project each fake resource as its exact one-member VM pool."""
+    """Project each fake resource as its exact one-member VM pool.
+
+    A pool states the region its member declares, as an operator states it on
+    both: a VM pool without a region is held rather than published.
+    """
     return [
         {
             "pool_id": resource_id,
             "pool_metadata": {
                 "policy_tags": {
                     "deliverable_modes": sorted(fake.deliverable_modes),
+                    **(
+                        {"region": row["attributes"]["region"]}
+                        if row["attributes"].get("region")
+                        else {}
+                    ),
                 },
             },
             "resources": [
@@ -572,22 +581,42 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     ]
 
 
+class _FakePoolProjectionClient:
+    """The fake authority's pool projection, as its site would serve it.
+
+    Each refresh re-reads the fake's live availability, so an operation that
+    refreshes the site after changing its capacity sees its own change.
+    """
+
+    def __init__(self, fake: FakeSite, *, site_name: str) -> None:
+        self._fake = fake
+        self._site_name = site_name
+
+    def identity(self):
+        from core_storefront.site_projections import ProjectionIdentity
+
+        return ProjectionIdentity(
+            revision=1,
+            digest=f"fake:{self._site_name}:{','.join(sorted(self._fake.resources))}",
+        )
+
+    async def version(self):
+        return self.identity()
+
+    async def snapshot(self):
+        return self.identity(), _pool_projection_rows(self._fake)
+
+
 def _pool_projection_caches(fake: FakeSite, *, site_name: str):
     """Loaded pool metadata for the fake authority's exact VM capabilities."""
-    from core_storefront.site_projections import (
-        ProjectionCache,
-        ProjectionIdentity,
-        ProjectionState,
-    )
+    from core_storefront.site_projections import ProjectionCache, ProjectionState
     from market_storefront.services.site_projection_cache import SiteProjectionCaches
 
-    resource_pools = ProjectionCache(client=None)
+    client = _FakePoolProjectionClient(fake, site_name=site_name)
+    resource_pools = ProjectionCache(client=client)
     resource_pools._value = _pool_projection_rows(fake)
     resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(
-        revision=1,
-        digest=f"fake:{site_name}:{','.join(sorted(fake.resources))}",
-    )
+    resource_pools._identity = client.identity()
     return SiteProjectionCaches(
         resource_pools=resource_pools,
         capacity_buckets=ProjectionCache(client=None),

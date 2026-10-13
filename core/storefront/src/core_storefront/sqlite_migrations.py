@@ -5,9 +5,8 @@ alter existing tables to match new model columns. Keep additive compatibility
 changes here so persisted storefront DBs can upgrade across image versions.
 
 This module owns the migration engine plus the domain-neutral migrations
-(negotiation/escrow/listing tables). Domain composition roots keep their
-own inventory migrations and pass them through
-``SQLiteClient._domain_migrations``.
+(negotiation/escrow/listing tables). Each domain's composition root passes
+its own migrations through ``SQLiteClient._domain_migrations``.
 """
 
 from __future__ import annotations
@@ -501,23 +500,29 @@ def _migrate_escrows_and_listings(
 
 
 def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
-    for table_name in ("listings", "resources"):
-        _add_column_if_missing(conn, table_name, "created_at", "TEXT")
-        _add_column_if_missing(conn, table_name, "updated_at", "TEXT")
-        if _table_exists(conn, table_name):
-            conn.execute(
-                f"""
-                UPDATE {table_name}
-                SET created_at = COALESCE(
-                      created_at,
-                      STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                    ),
-                    updated_at = COALESCE(
-                      updated_at,
-                      STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                    )
-                """
-            )
+    """Give every listing creation and update timestamps.
+
+    Only ``listings``. A storefront database may also hold a retired domain
+    inventory table, which is frozen retained data: neither its schema nor its
+    rows change, and an ``UPDATE`` there would fire its own timestamp trigger.
+    See docs/development/DEPLOYMENT_AND_CONFIG.md, "Migrations at startup".
+    """
+    _add_column_if_missing(conn, "listings", "created_at", "TEXT")
+    _add_column_if_missing(conn, "listings", "updated_at", "TEXT")
+    if _table_exists(conn, "listings"):
+        conn.execute(
+            """
+            UPDATE listings
+            SET created_at = COALESCE(
+                  created_at,
+                  STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                ),
+                updated_at = COALESCE(
+                  updated_at,
+                  STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                )
+            """
+        )
 
 
 def _migrate_capacity_holds_reservation_id(conn: sqlite3.Connection) -> None:

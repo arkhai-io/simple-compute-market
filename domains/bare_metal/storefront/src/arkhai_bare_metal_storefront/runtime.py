@@ -576,10 +576,8 @@ class BareMetalStorefrontRuntime:
         }
         try:
             await asyncio.to_thread(_check_database)
-            resource_count = await self.db.count_open_bare_metal_resources()
         except Exception:
             checks["database"] = "error"
-            resource_count = None
         return {
             # A mechanism deliberately left unconfigured is reported, not a
             # degradation, as the other storefronts report theirs.
@@ -592,7 +590,6 @@ class BareMetalStorefrontRuntime:
             "paused": self.trading_pause.paused,
             "principal": self.seller_principal.model_dump(mode="json"),
             "sites": [binding.diagnostic() for binding in self.site_bindings],
-            "resource_count": resource_count,
             "site_projections": await self._site_projections(),
             "disclosures": self._disclosures(),
         }

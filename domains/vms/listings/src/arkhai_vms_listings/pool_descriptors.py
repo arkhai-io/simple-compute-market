@@ -2,8 +2,7 @@
 
 `kit/resource-pools.hints` owns the key names and generic reads; this
 module owns how the VM domain resolves them against the storefront's own
-own override tier (the site-scoped override store, else the legacy
-home-site `compute_capacity_pools` row -- see `resolve_sla` below).
+override tier, the site-scoped override store (see `resolve_sla` below).
 
 Region and SLA are treated differently on purpose. Region is a plain fact
 about where hardware sits -- no storefront override makes sense, since a
@@ -20,15 +19,14 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> str | None:
-    """The pool's region: its declared hint if present, else ``fallback``
-    (the legacy home-site `compute_capacity_pools.region` value; region is a
-    physical fact, so no site-scoped override states one).
+def resolve_region(policy_tags: Mapping[str, Any]) -> str | None:
+    """The pool's region: its declared hint, or ``None``.
 
-    A non-string or empty hint is treated the same as an absent one --
-    region is meant to be human-readable descriptive text, not a value a
-    consumer needs to further interpret, so anything that isn't usable
-    text falls back rather than propagating a malformed value.
+    Region is a physical fact, so no storefront override states one and
+    nothing stands in for an absent hint. A non-string or empty hint is
+    treated the same as an absent one -- region is meant to be
+    human-readable descriptive text, not a value a consumer needs to
+    further interpret, so a malformed value is not propagated.
     """
     # Local import -- see resolve_vm_listing_cardinality_mode's own comment
     # in arkhai_vms_listings.listing_cardinality_mode for the reason (kept
@@ -39,7 +37,7 @@ def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> s
     hint = raw_region(policy_tags)
     if isinstance(hint, str) and hint:
         return hint
-    return fallback
+    return None
 
 
 def resolve_sla(
@@ -55,8 +53,8 @@ def resolve_sla(
     true), and the storefront's own configured default (lowest).
 
     ``storefront_override`` is the storefront operator's explicit
-    per-pool value (the site-scoped override's, else the legacy row's) if one
-    is set, else ``None`` -- callers must pass ``None``, not ``0``, to mean "not
+    per-pool value (the site-scoped override's) if one is set, else
+    ``None`` -- callers must pass ``None``, not ``0``, to mean "not
     set," since 0 is itself a meaningful (if extreme) SLA value.
 
     ``accept_pool_declared_sla`` gates the *entire* middle tier, not just

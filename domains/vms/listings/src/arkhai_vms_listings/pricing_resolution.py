@@ -23,9 +23,8 @@ overridden values. Two kinds of term resolve here:
 
 Three tiers, highest to lowest precedence:
 
-1. The storefront's own per-pool override: the site-scoped override store
-   (and, for per-model listing terms only, the legacy home-site
-   `compute_capacity_pools` row), merged before this resolver sees it.
+1. The storefront's own per-pool override, the site-scoped override store,
+   merged before this resolver sees it.
 2. A resource-pool-declared pricing hint.
 3. The storefront's own `[pricing]` configuration default.
 

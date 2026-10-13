@@ -55,22 +55,6 @@ def client(tmp_path):
     )
 
 
-async def _seed_compute_pool(client: SQLiteClient) -> None:
-    await client.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=1,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
-
-
 async def _seed_bound_listing(
     client: SQLiteClient,
     *,
@@ -163,7 +147,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
             return None
 
 
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         site_id="default",
@@ -251,20 +234,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
             return None
 
 
-    await _seed_compute_pool(client)
-    await client.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=4,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         listing_id="listing-2x",
@@ -395,7 +364,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     inspection -- that credentials produced by the new fulfillment path
     reach the storefront's existing credential store correctly."""
 
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-e2e-1",
@@ -535,7 +503,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     calling code doesn't do anything that would defeat that (e.g. calling
     schedule/begin a second time)."""
 
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-dup-1",

@@ -11,9 +11,9 @@ per-pool commercial values keyed by a projected pool identity.
 
 Fresh storefront databases MUST NOT create the retired local inventory or
 physical-allocation tables, columns, triggers, or indexes. An upgraded database
-MAY retain pre-existing schema and rows as inert historical data for code
-rollback or operator-directed provisioning seeding. The retirement MUST NOT
-drop that schema or delete or rewrite its retained rows. Current storefront
+MAY retain pre-existing schema and rows as inert historical data an operator
+can extract into provisioning. The retirement MUST NOT drop that schema or
+delete or rewrite its retained rows. Current storefront
 code MUST NOT read or write the retired data, including during startup,
 publication, negotiation, diagnostics, or reservation cleanup.
 
@@ -47,7 +47,7 @@ a storefront inventory read path or overwrite live site state automatically.
 - **WHEN** provisioning's physical state changes while historical storefront
   rows remain in the database
 - **THEN** the historical rows remain unchanged and cannot be used as evidence
-  of current availability for rollback or provisioning seeding
+  of current availability when seeding provisioning
 
 #### Scenario: Provisioning reports a physical lifecycle transition
 
@@ -65,13 +65,9 @@ a storefront inventory read path or overwrite live site state automatically.
 
 ### Requirement: Operator-visible acceptance state
 
-**Reason**: Its inventory scenario requires a storefront-local resource-row
-count, which retires with local inventory and CSV import.
+**Reason**: Its inventory scenario requires a `resource_count` of storefront-local resource rows, which retire with local inventory and CSV import. The count no longer tracked whether a storefront can sell once listings derived from site projections, and its only readers were tests and operator documents.
 
-**Migration**: Replaced by "Operator-visible acceptance and projection state"
-below. Global negotiation-pause behavior is preserved. Operator checks use
-counts under each site's projection-family status instead of the removed
-top-level `resource_count`; provisioning owns inventory-import diagnostics.
+**Migration**: Replaced by "Operator-visible acceptance and projection state" below. Global negotiation-pause behavior is preserved. Status reports no resource count: inventory readiness is read from per-site projection-family state, sellable supply from listings and publication diagnostics, and inventory-import outcomes from provisioning.
 
 ### Requirement: Storefronts cache independent site projections
 
@@ -84,34 +80,17 @@ top-level `resource_count`; provisioning owns inventory-import diagnostics.
 ### Requirement: Operator-visible acceptance and projection state
 
 The storefront MUST expose enough operator state to distinguish global
-negotiation pause from listing state, and a known-empty site projection from
-one whose generation is not held.
+negotiation pause from listing state, and a site projection the storefront holds
+from one it does not hold, per site and projection family as "Per-site projection
+load-state visibility" in the site-capacity specification requires.
 
-System status MUST report `resource_count` separately under each site's
-projection-family status, alongside that family's load state, revision,
-digest, last error, and confirmation timestamp. The count MUST describe the
-same cached generation as that state and identity. Status MUST NOT obtain a
-separate generation just to compute a count, consult storefront-local physical
-inventory, or replace per-site counts with a storefront-wide total. The
-top-level storefront-local `resource_count` field MUST be removed.
-
-For `resource_pool`, the count MUST be the number of projected members across
-pools, including disabled declarations. For `capacity_bucket`, it MUST be the
-sum of the projected groups' `resource_count` values, counting enabled
-declarations including exhausted ones. These are declaration counts, not
-counts of distinct physical machines, groups, dimension quantities, feasible
-listing shapes, or published listings. Both counts MUST NOT be filtered
-further by pool enablement or offering-mode authorization.
-
-A held empty generation MUST report zero. A family with no generation held
-MUST report null, not zero. A retained stale generation MUST retain its count
-and be reported as stale. Each site and projection family MUST be reported
-independently; a loaded family MUST NOT supply a count for an unknown one.
-
-Inventory counts MUST NOT assert publication readiness or diagnose an import
-failure from emptiness alone. Publication diagnostics and catalogue state
-describe sellable listings; provisioning owns its inventory-import outcomes.
-Liveness health MUST remain independent of these operator inventory counts.
+System status MUST NOT report a storefront-wide count, such as `resource_count`,
+in place of per-site projection state or publication outcome. Whether a site
+declares inventory is observed through that site's projection and provisioning's
+inventory administration; whether that inventory became sellable is observed
+through the storefront's listings and publication diagnostics; an
+inventory-import failure is reported by provisioning, which owns the import.
+Liveness health MUST remain independent of per-site projection state.
 
 #### Scenario: Storefront is globally paused
 
@@ -119,46 +98,18 @@ Liveness health MUST remain independent of these operator inventory counts.
 - **THEN** the storefront rejects it with HTTP 503 and a global-pause reason
   until an authenticated operator resumes the process
 
-#### Scenario: A site has a known-empty projection
+#### Scenario: A site's projection has not loaded
 
-- **WHEN** a cached site projection family holds an empty generation
-- **THEN** system status reports zero resources for that site and family,
-  with the held generation's identity and state
+- **WHEN** a configured site's projection family holds no generation, even if
+  another family or site has loaded
+- **THEN** system status reports that family's own load state for that site,
+  without treating the site as empty
 
-#### Scenario: A projection family has not loaded
+#### Scenario: An operator checks inventory readiness
 
-- **WHEN** a site projection family has no generation held, even if another
-  family or site has loaded
-- **THEN** its count is null and its own load state is reported, without
-  borrowing another family's count or treating the site as empty
-
-#### Scenario: Refresh fails after inventory has loaded
-
-- **WHEN** refreshing a family fails after a complete generation was held
-- **THEN** its count and identity describe that retained generation and its
-  state is stale
-
-#### Scenario: Grouped capacity carries resource multiplicity
-
-- **WHEN** a site's capacity projection contains two groups with resource
-  counts of three and two
-- **THEN** its capacity-family status reports five resources, regardless of
-  the groups' available dimension quantities
-
-#### Scenario: Inventory includes disabled and exhausted declarations
-
-- **WHEN** a site's resource-pool projection contains three declarations,
-  one disabled and two enabled, one of which is exhausted, and its capacity
-  projection contains those two enabled declarations
-- **THEN** status reports three resource-pool members and two capacity-family
-  resources, without asserting that either count proves sellable listings
-
-#### Scenario: Sites have different inventory counts
-
-- **WHEN** two sites hold resource-pool generations containing two and five
-  members respectively
-- **THEN** system status preserves the two site-scoped counts alongside their
-  respective generation identities rather than replacing them with seven
+- **WHEN** an operator reads a storefront's system status
+- **THEN** it reports each configured site's projection-family state and
+  carries no `resource_count` field
 
 ### Requirement: Projection-backed listing candidate derivation
 
@@ -166,7 +117,7 @@ Individual-resource publication consumes `site_resource_pools`, which carries th
 
 A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
 
-Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation. Reverting to a local-inventory path is a code change rather than a configuration change.
+Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation.
 
 #### Scenario: One projection refresh fails
 - **WHEN** a storefront cannot refresh one site projection after previously loading a complete generation
@@ -176,9 +127,9 @@ Projection-backed candidate derivation SHALL be a storefront's only listing-cand
 - **WHEN** a storefront derives publishable listing candidates
 - **THEN** they come from the site projections, with no local-table path available and no configuration option to select one
 
-#### Scenario: Operator seeks to revert to local inventory
+#### Scenario: Operator seeks to derive from local inventory
 - **WHEN** an operator wants a storefront to derive candidates from local inventory
-- **THEN** no configuration value produces that behavior and reverting requires deploying an earlier version
+- **THEN** no configuration value produces that behavior
 
 #### Scenario: Grouped capacity is used for publication
 - **WHEN** a storefront publishes from the capacity-bucket projection
@@ -273,3 +224,126 @@ override MUST apply again.
   version that held a pool-keyed legacy override record for it
 - **THEN** each commercial field resolves from the pool's hint and then the configured
   default, no legacy value is applied, and system status reports no legacy value in effect
+
+## MODIFIED Requirements
+
+### Requirement: A site whose projection is not held holds its listings
+
+A storefront MUST treat a configured site whose resource-pool projection holds no value as
+unknown, not empty: every listing derived from that site MUST be held, neither closed nor
+refreshed, until the site's projection holds a value. A site whose projection is not held
+MUST NOT yield listings from any other source in its place.
+
+#### Scenario: The storefront starts while a site is unreachable
+
+- **WHEN** a storefront with open listings from a site restarts while that site cannot be
+  reached, and a publication cycle runs
+- **THEN** those listings stay open, and none is closed as having lost its source
+
+#### Scenario: No site's projection is held
+
+- **WHEN** no configured site's projection holds a value and a publication cycle runs
+- **THEN** no listing is derived and no listing is closed
+
+#### Scenario: The site returns
+
+- **WHEN** the unknown site's projection loads
+- **THEN** its listings are reconciled against it as usual
+
+#### Scenario: A bare-metal site is unreachable during a publication run
+
+- **GIVEN** open bare-metal listings derived from a site
+- **WHEN** the operator runs bare-metal publication while that site's projection cannot be
+  fetched
+- **THEN** those listings stay open and unchanged, and the run reports the site as unknown
+- **AND** every other configured site is reconciled as usual
+
+### Requirement: Publication pricing migration is preview-first and atomic
+
+Storefront publication migration MUST support TOML configuration input through
+explicit check and write modes. Check mode MUST produce a deterministic preview
+without changing the source or creating a backup. Write mode MUST require a
+backup, preserve an exact pre-migration copy, validate the complete proposed
+document through the current structured clause model and every selected
+mechanism's typed publication-input validator, and replace the source
+atomically with restrictive permissions. A failed validation or write MUST
+leave the source unchanged. Rechecking an already migrated input MUST be
+idempotent.
+
+Automatic conversion MUST occur only when one enabled mechanism, its asset
+scale, and every legacy pricing input have one complete interpretation.
+Dual-mechanism pricing, hidden reserves, per-model legacy pricing, a missing
+asset scale, malformed legacy values, and any other ambiguous population MUST
+be reported as conflicts without mutation. Migration MUST NOT guess units,
+synthesize partial clauses, or reinterpret `min_price` or
+`default_token_address` as a settlement rate or asset.
+
+#### Scenario: Operator previews publication migration
+
+- **WHEN** the operator runs check mode against a storefront TOML file
+- **THEN** the tool reports the deterministic proposed changes and conflicts while the input bytes and backup set remain unchanged
+
+#### Scenario: Unambiguous publication input is written
+
+- **WHEN** one enabled mechanism and authoritative asset scale make every legacy price unambiguous and the operator requests write with backup
+- **THEN** the tool fully validates the typed result, saves the exact original bytes, and atomically installs the restrictive-permission replacement
+
+#### Scenario: Legacy pricing has competing interpretations
+
+- **WHEN** dual mechanisms, hidden reserve pricing, per-model legacy pricing, or a missing scale could produce different clauses
+- **THEN** check and write modes report the conflict and neither the source nor any existing backup is changed
+
+#### Scenario: Generated clause fails typed mechanism validation
+
+- **WHEN** a proposed migration contains an unknown field, invalid rate, unsupported asset, or invalid mechanism-owned input
+- **THEN** migration fails before backup or mutation rather than persisting a partially validated document
+
+## REMOVED Requirements
+
+### Requirement: Per-resource settlement input uses the common clause contract
+
+**Reason**: It lists imported resource records among settlement inputs, and its only scenario has one imported resource record replace the configured defaults. Resource import retires with this change, and a modified requirement cannot drop its scenario, so it is replaced.
+
+**Migration**: Replaced by "Settlement input uses the common clause contract" below, which carries the parsing and failure rule forward for configured defaults, pool-declared hints, storefront pool overrides, and reconciliation inputs. Per-pool settlement clauses formerly supplied by a CSV row are entered as a storefront pool override.
+
+## ADDED Requirements
+
+### Requirement: Settlement input uses the common clause contract
+
+Configured defaults, pool-declared hints, storefront pool overrides, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
+
+#### Scenario: A pool override's clauses replace settlement defaults
+
+- **WHEN** a storefront pool override for one site's pool supplies complete settlement clauses
+- **THEN** those clauses replace the configured defaults for that pool's listings and are validated through the same grammar and registrations
+
+## ADDED Requirements
+
+### Requirement: A VM pool that states no region holds its listings
+
+Every VM listing MUST publish `region` from its pool's `region` hint, which is the only
+source: no storefront override states it and nothing stands in for an absent hint. A
+pool whose `region` hint is absent or is not a non-empty string MUST be held by
+publication: it yields no new listing, publication neither refreshes nor closes its
+existing listings, and both the publication run and system status report the pool. A
+missing region is a declaration to repair, not a withdrawn source. Region does not bear
+on capacity, so availability reconciliation MUST continue to close such a pool's
+capacity-backed listing when its slice is no longer available.
+
+#### Scenario: A pool states no region
+
+- **WHEN** a pool advertising the VM mode carries no region hint
+- **THEN** no VM listing is derived from it, and the publication run and system status name
+  the pool
+
+#### Scenario: A pool with published listings loses its region
+
+- **GIVEN** an open VM listing derived from a pool
+- **WHEN** a later projection generation carries no region hint for that pool
+- **THEN** publication neither closes nor refreshes the listing until the pool states a region
+
+#### Scenario: A regionless pool's capacity is taken
+
+- **GIVEN** an open capacity-backed VM listing whose pool carries no region hint
+- **WHEN** its slice is no longer available
+- **THEN** availability reconciliation closes the listing

@@ -60,12 +60,6 @@ agents:
       createSecret: false
       secretName: arkhai-bob-runtime
       configKey: storefront.secrets.toml
-      # Compute resource inventory as raw CSV content. Injected at startup
-      # when the resources table is empty (idempotent — skipped on restart
-      # if resources are already present). Use make deploy with
-      # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
-      # Leave empty to start with no inventory (seed via the import API later).
-      resourcesCsvInline: ""
       # Write-scoped API key for the listing registry, rendered into the
       # secrets TOML as [registry.auth] keyed by the first registry URL.
       # Required when the registry sets requireWriteApiKey. Never commit a
@@ -74,7 +68,6 @@ agents:
     config:
       agent_id: bob
       log_file_path: ./logs/bob.log
-      resources_csv_path: /app/src/market_storefront/data/kvm1-machine.csv
       storefront_domains:
         - contribution: vms
           offering_mode: vm

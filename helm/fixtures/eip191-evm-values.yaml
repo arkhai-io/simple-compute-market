@@ -77,7 +77,6 @@ storefront:
       config:
         agent_id: evm_bob
         log_file_path: ./logs/evm-bob.log
-        resources_csv_path: /app/src/market_storefront/data/kvm1-machine.csv
         storefront_domains:
           - contribution: vms
             offering_mode: vm

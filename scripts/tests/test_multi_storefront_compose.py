@@ -49,7 +49,7 @@ def test_storefront_authorities_are_isolated(tmp_path):
         assert peer["site_id"] == env["PROVISIONING_STOREFRONT_SITE_ID"]
         assert profile["capacity"]["sites"]["default"] == f"http://{authority}:8081"
         assert profile["provisioning"]["service_url"] == f"http://{authority}:8081"
-        assert profile["capacity"].get("use_site_projection_for_listings", True)
+        assert "use_site_projection_for_listings" not in profile["capacity"]
         assert authority in services[f"{seller}-storefront"]["depends_on"]
         # Database paths are container-local; a shared mount would defeat that.
         assert all(v["target"] != "/app/data" for v in service.get("volumes", []))

@@ -14,19 +14,11 @@ init:
 ## Secret values are provisioned out of band. The chart accepts only names of
 ## existing Kubernetes Secrets and never reads credential files into values.
 
-## RESOURCES_CSV_FILE: path to the compute resource inventory CSV to seed
-## into the storefront agent on first deploy. Left empty by default — the
-## storefront starts with no inventory and the operator seeds via the API.
-## Example:
-##   make deploy RESOURCES_CSV_FILE=./domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
-RESOURCES_CSV_FILE ?=../domains/vms/storefront/src/market_storefront/data/kvm1-machine.csv
-
 ## Render the full parent chart (and all enabled subcharts) to stdout.
 template:
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
-		--values $(VALUES) \
-		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),)
+		--values $(VALUES)
 
 ## Verify structural invariants of the rendered chart without needing
 ## a real cluster. Runs `helm template` against the umbrella chart and
@@ -55,7 +47,6 @@ deploy: init
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
-		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
 		--wait
 
 ## Run helm tests against the deployed release
