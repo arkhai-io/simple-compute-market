@@ -202,12 +202,15 @@ def _recipient_demands(seller_wallet: str) -> list[dict[str, Any]]:
     }]
 
 
-def _proposal(case: SettlementCase, amount: int) -> dict[str, Any]:
+def _proposal(case: SettlementCase, amount: int, seller_wallet: str) -> dict[str, Any]:
+    # A proposal against a listed escrow names the demand it selects from the
+    # listing's; the seller refuses one that names none.
     return {
         "chain_name": _CHAIN_NAME,
         "escrow_address": case.escrow_address,
         "fields": {"amount": amount},
         "literal_fields": dict(case.literal_fields),
+        "demand": _recipient_demands(seller_wallet)[0],
         "expiration_unix": 2_000_000_000,
     }
 
@@ -219,6 +222,7 @@ def _create_on_chain_escrow(
     buyer_address: str,
     seller_wallet_address: str,
     rpc_url: str,
+    expiration_unix: int,
 ) -> str:
     rpc_url = ensure_ws_rpc_url(rpc_url)
     prewarm_alkahest_address_config_cache(_ALKAHEST_ADDRESSES_PATH)
@@ -237,7 +241,7 @@ def _create_on_chain_escrow(
         ),
         "demand": encode_recipient_demand(seller_wallet_address),
     }
-    expiration = int(time.time()) + 3600
+    expiration = expiration_unix
 
     async def _do_it() -> str:
         if case.token_id is None:
@@ -297,6 +301,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     provisioning_client,
     provisioning_test_client,
     site_capacity_admin_client,
+    registry_client,
     buyer_config,
     seller_wallet,
 ):
@@ -341,7 +346,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     eval_result = storefront_admin_client.evaluate_negotiate(
         listing_id,
-        proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
+        proposal=_proposal(case, _BUYER_INITIAL_AMOUNT, seller_wallet),
         provision_terms={
             "kind": "compute.v1",
             "version": 1,
@@ -361,9 +366,27 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     assert eval_result.decision == "counter"
 
+    # Pin the escrow deadline once: the negotiated terms and the escrow
+    # created on chain must state the same one, and settlement refuses an
+    # escrow whose deadline differs.
+    expiration_unix = int(time.time()) + 3600
+    # The VM seller infers nothing from an escrow's shape, so the opening names
+    # the listing's Alkahest option explicitly, as the published copy lists it.
+    (alkahest_option,) = [
+        dict(option)
+        for option in registry_client.get_listing(listing_id).settlement_options
+        if dict(option)["mechanism"] == "alkahest.v1"
+    ]
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
         initial_amount=_BUYER_INITIAL_AMOUNT,
+        settlement_selection={
+            "mechanism": "alkahest.v1",
+            "option_id": alkahest_option["option_id"],
+            "expiration_unix": expiration_unix,
+        },
+        escrow_expiration_unix=expiration_unix,
+        demands=_recipient_demands(seller_wallet),
         provision_terms={
             "kind": "compute.v1",
             "version": 1,
@@ -398,8 +421,10 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     escrow_uid = _create_on_chain_escrow(
         case=case,
         buyer_private_key=buyer_config["private_key"],
+        buyer_address=buyer_config["wallet_address"],
         seller_wallet_address=seller_wallet,
         rpc_url=buyer_config["rpc_url"],
+        expiration_unix=expiration_unix,
     )
     log.info("[%s] Created on-chain escrow %s", case.name, escrow_uid)
 
