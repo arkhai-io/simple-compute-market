@@ -196,7 +196,7 @@ findings can cite the baseline.
       suite passes after the release guide's internal-dependency column was
       regenerated for the eight changed projects. The suites of the seven
       relocked projects pass. The VM buyer's and VM storefront's locks are
-      stale until `download.pytorch.org` is reachable; see 5.8.
+      stale until `download.pytorch.org` is reachable; see 6.8.
 
 ## 3. Retire the per-package boundary tests
 
@@ -286,47 +286,112 @@ This runs after code review, to reduce churn.
       validated by `make check-architecture`, and a per-package architecture test
       is written only for what it cannot express.
 
-## 5. Closeout
+## 5. Review revisions
+
+From the implementation review; the decisions are in `design.md`, "Review
+revisions".
+
+- [x] 5.1 Move each package's own constraints into a `[tool.arkhai.architecture]`
+      table in its `pyproject.toml`:
+      - each external budget becomes `allowed-dependencies`, a list of
+        distribution names, in the eleven budgeted projects;
+      - each declarations row becomes a `runtime-dependencies` entry, mapping
+        the dependency to its reason, in `domains/bare_metal/buyer` and
+        `domains/vms/storefront`.
+
+      Remove `[external_budgets]` and `[[declarations]]` from
+      `docs/development/ARCHITECTURE.toml`. Point `core/pyproject.toml`'s
+      comment at its own table. Confirm that no lock changes.
+- [x] 5.2 `scripts/architecture.py`:
+      - read the package table and reject any key other than
+        `allowed-dependencies`, `import-roots`, and `runtime-dependencies`;
+      - check every declared dependency, internal or third-party, against
+        `allowed-dependencies`;
+      - map a third-party import root to the distribution of the same
+        normalized name, or through `import-roots`;
+      - take `unused_declaration` and `declaration_expiry` from
+        `runtime-dependencies`;
+      - report a non-virtual project whose wheel target is not exactly one
+        package as `unclassified` rather than skipping it.
+- [x] 5.3 Add a `configuration` rule, run by `check_architecture_layers.py`. It
+      fails on:
+      - duplicate exception, override, or plugin-group rows;
+      - a family's vocabulary, a domain's family, a mechanism's kit, a
+        plugin-group owner, an override's scope element, or a kind-budget
+        distribution that names nothing;
+      - an exception or override owner that is not an unarchived directory
+        under `openspec/changes/`.
+- [x] 5.4 Tests in `scripts/tests/test_architecture.py` and
+      `test_check_architecture.py`, each with a passing and a failing case:
+      - a declared third-party dependency outside its budget;
+      - an aliased import root;
+      - an unknown package-table key;
+      - a malformed project failing closed;
+      - every `configuration` failure.
+
+      The synthetic trees create the change directories their rows name.
+- [x] 5.5 Documentation, bringing the promoted text in line with 5.1–5.3:
+      - `docs/development/ARCHITECTURE.md`'s "Kind" places budgets and runtime
+        reasons in a package's `pyproject.toml`;
+      - its "Where the current tree diverges" names overrides beside exceptions
+        as recorded divergences;
+      - `docs/development/BUILD_AND_PACKAGING.md`'s check rows;
+      - `AGENTS.md`;
+      - `openspec/specs/market-composition/spec.md`'s evidence lines that cite
+        the rules file's external budgets;
+      - `baseline.md`'s declarations section.
+- [x] 5.6 Run `make check-architecture`, `make test-release-tooling`, comment
+      hygiene, scoped citations, and strict validation.
+      *Done.* All pass.
+      - The tooling suite has 457 tests, including 68 in the two architecture
+        modules.
+      - No lock changed: a `[tool.*]` table is not wheel metadata.
+      - The declaration side of the budgets added `keyring` to the identity
+        kit's list and `pydantic` to the provisioning client's.
+      - No project fails closed today; the only one without a single wheel
+        package is the virtual IaC project, which is skipped as before.
+
+## 6. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`, then read the
+- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`, then read the
       docstrings of the new scripts directly for the provenance narration the
       target cannot catch. Exception rows are exempt only because they live under
       `docs/`.
-- [ ] 5.2 **Import placement.** Every import in the new scripts and tests is at
+- [ ] 6.2 **Import placement.** Every import in the new scripts and tests is at
       module level; confirm against the suites. The scripts import only the
       standard library and `scripts/architecture.py`.
-- [ ] 5.3 **Documentation compliance.** Re-check the accepted decisions against
+- [ ] 6.3 **Documentation compliance.** Re-check the accepted decisions against
       `openspec/README.md`'s placement rules:
       - normative behavior in the three specs;
       - the conventions and scope bounds in `ARCHITECTURE.md`;
       - check inventory in `BUILD_AND_PACKAGING.md`;
       - and nothing durable left only in `design.md` or `baseline.md`.
-- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final
+- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final
       behavior, material evidence, deferred work (the 3.3 hand-offs), and
       destinations, moving rationale into `design.md` first.
-- [ ] 5.5 **Roadmap currency.** This change sits under the lesser goal "Package
+- [ ] 6.5 **Roadmap currency.** This change sits under the lesser goal "Package
       and release readiness" and changes no goal's current state, so it most
       likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record
       the no-impact disposition explicitly.
-- [ ] 5.6 **Campaign index currency.** Update this change's row and the
+- [ ] 6.6 **Campaign index currency.** Update this change's row and the
       campaign's dependency graph in `openspec/changes/README.md`, including the
       unowned defects 1.7 recorded and the edges to every change that owns an
       exception row.
-- [ ] 5.7 **Documentation citations.** Run
+- [ ] 6.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=enforce-package-layers` and resolve every
       match, including any citation of `docs/development/ARCHITECTURE.toml`.
-- [ ] 5.8 **Packaging.** Run `make check-packaging`, which now includes
+- [ ] 6.8 **Packaging.** Run `make check-packaging`, which now includes
       `check-architecture`, and resolve every failure. Run
       `make check-architecture-change CHANGE=enforce-package-layers` and confirm
       this change owns no exception row.
-- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+- [ ] 6.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the run and its result. This change alters no runtime path, so
       the evidence is that the pipeline is unaffected; the retired tests'
       packages also pass their own suites. If the pipeline cannot run for a
       reason unrelated to this change, record the blocker and its owning change,
       and treat the validations it gates as unrun.
-- [ ] 5.10 **Promotion.** Add the design-promotion record to `design.md`, mapping
+- [ ] 6.10 **Promotion.** Add the design-promotion record to `design.md`, mapping
       every accepted decision to its permanent heading, and confirm no
       production source or script cites `openspec/changes/enforce-package-layers`.

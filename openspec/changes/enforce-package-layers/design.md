@@ -410,6 +410,67 @@ in "Rules are independent and each names a file and line" and are what
 - **A core package's kind is library.** The reading table's `carrier` names the
   layer's content, not a fifth kind.
 
+## Review revisions
+
+Taken after the implementation review, with the maintainer. They correct the
+ownership of the rules file's contents and close enforcement gaps; the layer and
+scope model, the import scan, and the audit-before-gate order stand.
+
+- **A package's own constraints live in its own `pyproject.toml`.** The rules
+  file centralized two kinds of fact a package owns: its external budget, and
+  the reason it declares a dependency it never imports. Kept centrally, each
+  edit to a package's dependencies was an edit in two places, and the list grew
+  with every package. Both move to a `[tool.arkhai.architecture]` table in the
+  package's `pyproject.toml`, beside the dependencies they constrain:
+  `allowed-dependencies` and `runtime-dependencies`. What stays central is what
+  no one package owns: the layer order and scope bounds; the families, domains,
+  and mechanisms with their identity literals; the plugin groups; the kind
+  budgets; and the overrides and exceptions. Overrides and exceptions are
+  migration debt owned by a change, and they must stay under `docs/` anyway,
+  because comment hygiene rejects a change name in any other `.toml`. The
+  package table may only narrow or annotate a package. The checker rejects any
+  other key, so no layer, kind, or scope can be declared there, and a label in
+  `pyproject.toml` still cannot widen what the path grants. This supersedes "One
+  rules file", the external-budget table, and the declarations table where those
+  decisions placed the facts centrally.
+- **A budget constrains declarations as well as imports.** A light package could
+  declare a heavy third-party dependency without importing it, and the
+  import-root budget never saw it. `allowed-dependencies` is one list of
+  distribution names, internal and third-party:
+  - every declared dependency must be on it;
+  - an internal import maps to its distribution through the tree;
+  - a third-party import root matches the distribution of the same normalized
+    name, `eth_account` matching `eth-account`, with an `import-roots` table for
+    the rare root whose distribution is named differently.
+
+  One list rather than separate import and declaration lists, because the two
+  would repeat nearly every entry. On the current tree the declaration side
+  adds two entries: the identity kit's `keyring`, which it loads through
+  `importlib` where the scan cannot see it, and the provisioning client's
+  `pydantic`, which it declares for its contracts' models.
+- **Discovery fails closed.** A non-virtual project outside the tooling paths
+  whose wheel target is not exactly one package is reported as `unclassified`
+  rather than skipped, so the check covers every project whether or not
+  `make check-project-layout` ran first. No project is affected today; the only
+  project without one wheel package is the virtual IaC project. Sharing one
+  discovery implementation with `check_project_layout.py` was considered and
+  deferred: it refactors a working check for no current finding.
+- **The configuration is validated.** A `configuration` rule fails on:
+  - a duplicate exception, override, or plugin-group row;
+  - a family, domain, or mechanism, or a kind-budget distribution, that names
+    nothing in the tree or the rules file;
+  - an unknown key in a package's table;
+  - an exception or override owner that is not an unarchived change directory
+    under `openspec/changes/`.
+
+  The orphaned per-package budget the review raised cannot occur: a budget
+  lives in the package it constrains.
+- **No per-package conformance test.** A test asserting each package's budget
+  would restate the configuration a second time. Discovery failing closed
+  covers "every project is checked", the configuration rule covers "every entry
+  resolves", and removing a budget is a visible edit to that package's
+  `pyproject.toml`.
+
 ## Open questions
 
 None.

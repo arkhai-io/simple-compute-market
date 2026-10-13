@@ -120,10 +120,11 @@ package's place (`design.md`, "Audit before gate").
 | `arkhai-compute-provisioning` | drops `arkhai-kit-identity` | unused declaration | never imported; its contracts declare it |
 | `arkhai-vms-buyer` | drops `arkhai-vms-settlement` | unused declaration | never imported or named; only the VM storefront uses it |
 
-Two unimported declarations have a runtime reason and carry a declarations row
-(above). Three more install plugins — `arkhai-kit-delivery-apprise` on both compute
-storefronts and `arkhai-bare-metal-storefront` on the VM storefront — and need no
-row. The audit found twelve declared-but-unimported internal dependencies across
+Two unimported declarations have a runtime reason (above), which each declaring
+package now gives in its own `pyproject.toml` under
+`[tool.arkhai.architecture.runtime-dependencies]`. Three more install plugins —
+`arkhai-kit-delivery-apprise` on both compute storefronts and
+`arkhai-bare-metal-storefront` on the VM storefront — and need no reason. The audit found twelve declared-but-unimported internal dependencies across
 seven projects, not the thirteen first counted.
 
 `core/storefront`'s other undeclared imports, `web3` and `fastapi`, are third-party
