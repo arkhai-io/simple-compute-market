@@ -130,18 +130,38 @@ opening the review, the design, or the code. A one-line claim and a pointer-lade
 position are not enough: the owner needs the design's current state and the
 consequence, not only the reviewer's objection.
 
-For each finding, write five parts:
+Each finding covers five things:
 
-- **What the change says now.** The decision, requirement, or text the finding
-  concerns, and the reasoning the change records for it, in plain words.
-- **What the reviewer says.** Their reasoning and suggested fix, including any
-  example they gave.
-- **Why it matters.** A concrete consequence if nothing changes — a scenario, or,
-  when the finding is about a representation, an example document.
-- **Your position.** `agree`, `disagree`, or `partly`, argued in prose. File and
-  line references go on an evidence line beneath it; they support the argument
-  and never replace it.
-- **If accepted.** The outcome, as classified in step 2.
+- **what the change says now** — the decision, requirement, or text the finding
+  concerns, and the reasoning the change records for it, in plain words;
+- **what the reviewer says** — their reasoning and suggested fix, including any
+  example they gave;
+- **why it matters** — a concrete consequence if nothing changes: a scenario, or,
+  when the finding is about a representation, an example document;
+- **your position** — `agree`, `disagree`, or `partly`, argued;
+- **the outcome if accepted**, as classified in step 2.
+
+Write them as short prose, not as labelled fields: the owner reads every finding,
+and a column of labels on each makes a long triage hard to read. Lay each finding
+out as:
+
+```markdown
+### 🔴✅ F2 — Earlier validation failures can be discarded unseen
+*consistency · specification · blocking*
+
+<a few sentences: what the change says now and why; the reviewer's point; the
+consequence; your position and its reason>
+
+Evidence: `path:line`, `path:line`
+
+→ **fix:** <what you will do>
+```
+
+The heading starts with the severity (🔴 blocking, 🟠 should, 🟡 minor) and your
+position (✅ agree, ◐ partly, ❌ disagree). File and line references go on the
+evidence line; they support the argument and never replace it. A finding that is
+an obvious agreed edit gets one paragraph. End every finding with a single `→`
+outcome line.
 
 Present in two passes.
 
@@ -234,7 +254,12 @@ the owner cannot otherwise see that it was written.
   files the change's tasks create at closeout; name them, and fix anything else),
   `make check-agent-skills` when the
   diff touches `.agents/`, `.claude/`, or `.codex/`, and a fresh-context compliance
-  check of the diff against the `HEAD` recorded at the start. Commit, as one commit
+  check of the diff against the `HEAD` recorded at the start. In the fix's task
+  note, record each check as `change-implement` records a section's evidence: each
+  suite with its level as `TESTING.md` defines them and its result, `make test`'s
+  result, and what the fresh-context check found and what was fixed or declined —
+  so the next review and validation can see what the fix was proven by.
+  Commit, as one commit
   naming the change and the round: the fixes, the change documents the dispositions
   edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
   The triage records stay in `reviews/`, which is untracked. Do not push: the fix commit is

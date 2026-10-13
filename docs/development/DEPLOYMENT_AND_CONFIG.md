@@ -304,6 +304,15 @@ deployment of other code migrated. A PVC whose release was last installed or
 upgraded without the overlay still carries the annotation, and survives an
 uninstall until it is deleted by hand.
 
+Deploy to a local development cluster with `make -C helm deploy-local`, never with
+`make -C helm deploy` or the root `make deploy`, whether a person or an agent is
+deploying. A local cluster is redeployed with whatever code is checked out, and a
+retained volume keeps the state that code wrote — a database another branch
+migrated — for the next deployment to start from. Pre-review validation refuses
+to deploy over a release volume that carries the annotation and stops to ask, so a
+local deploy without the overlay costs the next validation a decision.
+`make -C helm deploy` is for a deployment whose state must survive reinstalling.
+
 ### Combined compute-family storefront
 
 The storefront image installs the shared `arkhai-core-storefront` shell plus

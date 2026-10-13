@@ -121,7 +121,10 @@ checks your understanding here before reading anything that rests on it. Then:
    needs a live multi-service environment — using `TESTING.md`'s level definitions
    and coverage jurisdiction. Does each integration test exercise the real typed
    client, or build requests by hand in a way that could silently diverge from what
-   the client sends? What does the validation report show?
+   the client sends? What does the validation report show? A coverage gap you
+   notice while answering — a behaviour the change claims that no test proves at
+   the level it claims — is a finding, not only a remark in this answer: a gap
+   stated only in prose is never triaged.
 3. **`documentation`** — Does the code and documentation comply with `AGENTS.md`,
    `ARCHITECTURE.md`, and `openspec/README.md`: comments describing the current system,
    permanent documents describing current state, promotion where the change says it

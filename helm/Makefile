@@ -58,6 +58,9 @@ endif
 		--namespace $(NAMESPACE) \
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
+## Deploy keeping the release's volumes when it is uninstalled. For a local
+## development cluster use deploy-local instead (docs/development/DEPLOYMENT_AND_CONFIG.md,
+## "Stateful service persistence").
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \

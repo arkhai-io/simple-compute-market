@@ -483,7 +483,9 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values.
+# credential files and inventory content never pass through Helm values. It keeps
+# the release's volumes on uninstall; a local development cluster is deployed with
+# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 
 deploy-helm:

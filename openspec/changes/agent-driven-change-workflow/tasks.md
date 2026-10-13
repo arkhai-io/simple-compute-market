@@ -242,8 +242,11 @@ to repair by hand.
       never a digest — with the branch and the changes in progress. Tests in
       `scripts/tests/test_post_compaction_context.py`; the hook's firing is
       proven on the first compaction in a new session.
-- [ ] 7.3 Pilot: implement the first section of `capacity-shape-envelope` in its
+- [x] 7.3 Pilot: implement the first section of `capacity-shape-envelope` in its
       own session, recording what the fresh-context check caught.
+      Done as sections 1–4 of `capacity-shape-envelope` (7.1's notes): the check
+      caught a blocking constraint-loss bug in section 1, and compliance findings
+      fell per section across the multi-section run.
 
 ## 8. Pre-review validation
 
@@ -606,6 +609,29 @@ session").
       `dev`). `07` reviewed sections 1–4 against base `22115762`, so the triage
       should say how far the validated commit has moved past what the reviews
       read. Record here what the skill could not handle unaided.
+      Round 1 (`07`, `08`, `09`, `10`) was triaged by the owner under the skill as
+      first built (`93d5733a`). Round 2 ran the amended workflow end to end:
+      `make validate` (`11-validation.md`, `e4bf7a81`, passed; the retained-volume
+      preflight stopped Helm attempt 1 on volumes an agent's plain `make deploy`
+      had left, remedied on the owner's word) and `make review` resuming `07`'s
+      reviewer (`12-implementation.md`, same commit), then `make triage`. Unaided:
+      the triage compared the two records' commits first and found them equal,
+      wrote no notes record since the owner had none, marked the validation's
+      triage file "not a gate", fixed 12 F1 more broadly than the review asked (all
+      rationals, with a test that fails without the fix), logged both findings,
+      and recorded the gate; the resumed reviewer accounted for every earlier
+      finding from `03` to `10` in one table. Gaps, amended in the skills: the fix
+      note did not record the checks it ran (`change-triage` now records them as
+      `change-implement` does); the session presented findings in the labelled
+      layout the owner had replaced in an earlier session, since that layout lived
+      only in session memory (`change-triage` now prescribes the agreed layout).
+      Comparing round 1's reviews: the harness (`07`) found both code defects,
+      which the browser (`08`) missed; the browser's accepted `should` (the
+      publication loop proven only at derivation level) appears in `07`'s testing
+      answer but was never raised as a finding (`change-review` now makes such a
+      gap a finding). An agent's plain `make deploy` caused the retained volumes:
+      `DEPLOYMENT_AND_CONFIG.md`, both Makefiles, and the e2e-tests quick start now
+      say a local cluster is deployed with `make -C helm deploy-local`, and why.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
