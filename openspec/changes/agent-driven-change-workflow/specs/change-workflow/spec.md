@@ -277,8 +277,10 @@ commit the previous round ended on to the round's commit, without any commit bei
 changed to show it; while the branch is moved to show it, review, validation,
 triage, and implementation MUST NOT start, and ending the reading MUST return the branch
 to the round's commit. A pre-closeout review MUST NOT run, and its gate MUST NOT pass,
-unless the latest validation names `HEAD` and its result is `passed`, except where
-the owner overrides it.
+unless the latest validation's result is `passed` and it names `HEAD`, or a commit
+from which `HEAD` descends and differs only in changes' intervention ledgers and review
+records, except
+where the owner overrides it.
 
 #### Scenario: The owner's note is contradicted by the files
 
@@ -292,6 +294,12 @@ the owner overrides it.
 - **THEN** triage names both commits and what changed between them, and treats
   them as one round only on the owner's recorded waiver; otherwise the reviewed
   commit is validated or the validated commit reviewed first
+
+#### Scenario: A ledger line is committed after the validation
+
+- **WHEN** the latest validation passed for a commit, and the only commit since adds
+  a line to a change's intervention ledger
+- **THEN** a pre-closeout review may run without the commit being validated again
 
 #### Scenario: The owner reads a round committed section by section
 

@@ -611,7 +611,13 @@ An implementation review does not wait for validation, since the two run side by
 side. A pre-closeout review does: it asks whether the change is ready for closeout,
 which a failing pipeline answers. `make review KIND=pre-closeout` refuses unless the
 latest validation record names `HEAD` and its result is `passed`, unless the owner overrides it
-(`UNVALIDATED=1`), and triage does not pass the pre-closeout gate without one.
+(`UNVALIDATED=1`), and triage does not pass the pre-closeout gate without one. A
+validation of an ancestor of `HEAD` counts when the two commits differ only in
+changes' ledgers and reviews, renames counted as a deletion and an addition. Triage writes a ledger line for the validation it
+triages, and committing that line would otherwise need the commit validated again,
+though no check or pipeline reads a ledger or a review. Any change's records count,
+not only this change's, because changes worked on one branch commit their ledgers
+on it.
 
 Records produced in parallel take their numbers when they are written, not when
 their run starts, so a validation that finishes during a review is numbered first.

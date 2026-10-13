@@ -22,7 +22,9 @@ describes.
 
 A pre-closeout review asks whether the change is ready for closeout, which a failing
 pipeline answers, so it refuses to start unless the change's latest validation
-record names `HEAD` and its result is `passed`; the owner may override that.
+record names `HEAD`, or an ancestor from which `HEAD` changes only changes' records —
+their ledgers and reviews, which no check or pipeline reads — and its result is
+`passed`; the owner may override that.
 
 A later review of the same kind continues the reviewer session that wrote the
 latest one, so the reviewer weighs a revision with the context that led to its
@@ -101,8 +103,33 @@ def claim_record(reviews: Path, kind: str,
             continue
 
 
-def validation_problem(reviews: Path, head: str) -> str | None:
-    """Why the latest validation record does not clear `head` for closeout, if it does not."""
+# The paths a commit changes since an earlier one, or None when that commit is not
+# an ancestor of it.
+ChangedSince = Callable[[Path, str, str], list[str] | None]
+
+
+def _changed_since(root: Path, commit: str, head: str) -> list[str] | None:
+    if subprocess.run(["git", "merge-base", "--is-ancestor", commit, head], cwd=root,
+                      capture_output=True).returncode != 0:
+        return None
+    # Without --no-renames a file moved under a change's records would be listed
+    # only at its new path, hiding the code it removed.
+    diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", commit, head],
+                          cwd=root, capture_output=True, text=True)
+    return [path for path in diff.stdout.split("\0") if path] if diff.returncode == 0 else None
+
+
+_RECORD = re.compile(
+    rf"^{re.escape(str(CHANGES))}/(?!archive/)[^/]+/(interventions\.jsonl$|reviews/)")
+
+
+def validation_problem(reviews: Path, head: str, root: Path | None = None,
+                       changed_since: ChangedSince = _changed_since) -> str | None:
+    """Why the latest validation record does not clear `head` for closeout, if it does not.
+
+    A validation of an ancestor clears `head` when the two commits differ only in
+    changes' records; without `root` to compare them in, only `head` itself does.
+    """
     records = [(int(match.group(1)), entry) for entry in
                (reviews.glob("[0-9]*-validation.md") if reviews.is_dir() else [])
                if (match := _NUMBERED.match(entry.name))]
@@ -112,9 +139,16 @@ def validation_problem(reviews: Path, head: str) -> str | None:
     text = record.read_text("utf-8")
     commit = _VALIDATION_COMMIT.search(text)
     result = _VALIDATION_RESULT.search(text)
-    if not commit or not head.startswith(commit.group(1)):
-        named = commit.group(1)[:12] if commit else "no commit"
-        return f"{record.name} validates {named}, not HEAD {head[:12]}"
+    if not commit:
+        return f"{record.name} validates no commit, not HEAD {head[:12]}"
+    validated = commit.group(1)
+    if not head.startswith(validated):
+        changed = changed_since(root, validated, head) if root else None
+        if changed is None:
+            return f"{record.name} validates {validated[:12]}, not HEAD {head[:12]}"
+        if others := [path for path in changed if not _RECORD.match(path)]:
+            return (f"{record.name} validates {validated[:12]}, and HEAD {head[:12]} also "
+                    f"changes {', '.join(others[:3])}" + (" …" if len(others) > 3 else ""))
     if not result or result.group(1).lower() != "passed":
         return f"{record.name}'s result is {result.group(1) if result else 'missing'}, not passed"
     return None
@@ -284,7 +318,8 @@ def _run_codex(command: Sequence[str], log: Path) -> int:
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path = ROOT,
                runner: Runner = _run_codex, unvalidated: bool = False,
-               head: Callable[[Path], str] = _git_head) -> Path:
+               head: Callable[[Path], str] = _git_head,
+               changed_since: ChangedSince = _changed_since) -> Path:
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     change_dir = root / CHANGES / change
@@ -293,7 +328,7 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     reviews = change_dir / "reviews"
     reviewed = head(root)
     if kind == "pre-closeout" and not unvalidated:
-        if problem := validation_problem(reviews, reviewed):
+        if problem := validation_problem(reviews, reviewed, root, changed_since):
             raise ReviewError(f"a pre-closeout review needs a passing validation of HEAD: "
                               f"{problem}; validate first, or set UNVALIDATED=1 to override")
     transcripts = reviews / TRANSCRIPTS

@@ -293,7 +293,7 @@ its status misleads every agent that reads the index:
 |---|---|
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
-| `pre-closeout` | `ready for closeout` — only once the latest validation names `HEAD` and is `passed`, unless the owner overrides it |
+| `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
 | `closeout` | `ready for archival` |
 
 When the gate does not pass, leave the status, and say what must happen before the

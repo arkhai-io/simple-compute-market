@@ -44,7 +44,8 @@ Read all of this before forming a view:
   of the commit you review, `reviews/NN-validation.md`, if one exists. Never wait
   for one: validation runs beside an implementation review, and its results are
   triaged with yours. A pre-closeout review starts only once a passing validation
-  of `HEAD` exists, unless the owner overrides it; when none exists, say so in
+  of `HEAD` exists — or of an ancestor `HEAD` differs from only in changes' ledgers
+  and reviews — unless the owner overrides it; when none exists, say so in
   your readiness section rather than as a finding.
 
 Check claims against the files, never against the prose describing them. A checked

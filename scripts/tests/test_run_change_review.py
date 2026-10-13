@@ -325,6 +325,81 @@ def test_a_passing_validation_of_head_admits_a_pre_closeout_review(tmp_path: Pat
     assert path.name == "04-pre-closeout.md"
 
 
+VALIDATED = "f" * 40
+RECORDS = f"openspec/changes/{CHANGE}"
+
+
+@pytest.mark.parametrize("changed, reason", [
+    ([f"{RECORDS}/interventions.jsonl", f"{RECORDS}/reviews/05-validation.triage.md"], None),
+    ([], None),
+    ([f"{RECORDS}/interventions.jsonl", f"{RECORDS}/notes.txt"], f"also changes {RECORDS}/notes.txt"),
+    (["openspec/changes/other/interventions.jsonl", "openspec/changes/other/reviews/01-review.txt"],
+     None),
+    (["openspec/changes/other/notes.jsonl"], "also changes openspec/changes/other/notes.jsonl"),
+    (["openspec/changes/interventions.jsonl"], "also changes openspec/changes/interventions.jsonl"),
+    (["openspec/changes/archive/interventions.jsonl"], "also changes openspec/changes/archive/"),
+    (None, "not HEAD"),
+])
+def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(
+    tmp_path: Path, changed: list[str] | None, reason: str | None
+) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(VALIDATED, "passed"), "utf-8")
+    compared: list[tuple[str, str]] = []
+
+    def changed_since(_: Path, commit: str, head: str) -> list[str] | None:
+        compared.append((commit, head))
+        return changed
+
+    problem = reviewer.validation_problem(_reviews(root), HEAD, root, changed_since)
+
+    assert compared == [(VALIDATED, HEAD)]
+    if reason is None:
+        assert problem is None
+    else:
+        assert problem is not None and reason in problem
+
+
+def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(VALIDATED, "passed"), "utf-8")
+
+    path = reviewer.run_review(
+        CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        changed_since=lambda *_: [f"{RECORDS}/interventions.jsonl"],
+        runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "04-pre-closeout.md"
+
+
+def test_the_paths_changed_since_are_read_from_git(tmp_path: Path) -> None:
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (tmp_path / "ledger.jsonl").write_text("1\n", "utf-8")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    (tmp_path / "ledger.jsonl").write_text("1\n2\n", "utf-8")
+    (tmp_path / "név.md").write_text("x", "utf-8")
+    git("add", ".")
+    git("commit", "-qm", "records")
+    head = git("rev-parse", "HEAD")
+
+    assert sorted(reviewer._changed_since(tmp_path, base, head)) == ["ledger.jsonl", "név.md"]
+    git("mv", "ledger.jsonl", "moved.jsonl")
+    git("commit", "-qm", "rename")
+
+    assert sorted(reviewer._changed_since(tmp_path, head, git("rev-parse", "HEAD"))) == [
+        "ledger.jsonl", "moved.jsonl"]
+    assert reviewer._changed_since(tmp_path, head, base) is None
+    assert reviewer._changed_since(tmp_path, "e" * 40, head) is None
+
+
 def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 

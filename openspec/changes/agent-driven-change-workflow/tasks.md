@@ -730,6 +730,26 @@ session").
       requirement "Triage of every finding" and design amended. At the owner's
       direction, after the triage of `capacity-shape-envelope`'s third round.
       Text only, proven when a session follows it.
+- [x] 9.9 Let a validation of an ancestor clear `HEAD` for a pre-closeout review
+      when the two commits differ only in changes' ledgers and reviews
+      (`scripts/run_change_review.py`, `validation_problem` and `_changed_since`);
+      `change-review`, `change-triage`'s gate table, spec requirement and scenario,
+      and design amended. At the owner's direction: `capacity-shape-envelope`'s
+      validation 18 triage left a ledger line that could not be committed before its
+      pre-closeout review without revalidating.
+      Unit, with the comparison injected (`scripts/tests/test_run_change_review.py`,
+      49 passed): records of this change or another admit; an empty diff admits;
+      any other path, a path outside a change directory, or `archive`'s refuses
+      and names the path; a validated commit that is not an ancestor refuses;
+      `run_review` admits a pre-closeout review after a ledger commit. Against the
+      real Git command in a temporary repository: `_changed_since` lists the
+      paths, a non-ASCII one included, lists a rename as both paths, and returns
+      nothing for a non-ancestor or an unknown commit. Not exercised: the check
+      on real Git output end to end, and the `make review` invocation with a real
+      ledger commit. The fresh-context check found that a rename into a change's
+      reviews was listed only at its new path, letting a code deletion through,
+      that the texts did not require ancestry, and that the note overstated its
+      tests; all fixed.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
