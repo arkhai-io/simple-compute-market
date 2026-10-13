@@ -598,7 +598,7 @@ session").
       Done. `change-review` reads the validation of the commit it reviews when one
       exists, never waits, and names the pre-closeout requirement;
       `change-implement` and `change-validate` close with `make triage`.
-- [ ] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
+- [x] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
       `08-implementation-external.md` with 8.6's validation record and the owner's
       notes, through `make triage`; compare the two reviews for the pilot record;
       the change stays `in implementation`.
@@ -632,6 +632,12 @@ session").
       gap a finding). An agent's plain `make deploy` caused the retained volumes:
       `DEPLOYMENT_AND_CONFIG.md`, both Makefiles, and the e2e-tests quick start now
       say a local cluster is deployed with `make -C helm deploy-local`, and why.
+      The fix commit's round closed with a lone re-validation, both steps run as
+      subagents at the owner's direction: `13-validation.md` (`22bc1408`, which
+      contains `6f04fc01`) passed on every part's first attempt, its
+      retained-volume preflight passing; its triage checked the record against
+      the step summaries and the pipeline log and wrote only the confirming
+      triage file, as the skill's lone re-validation rule says.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
