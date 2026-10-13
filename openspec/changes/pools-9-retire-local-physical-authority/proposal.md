@@ -216,7 +216,8 @@ None.
 - Behaviour after upgrade: a home-site pool that took a commercial field from
   the legacy record resolves it from the pool hint, then the configured
   default; `region` has no legacy fallback and must be declared on the pool
-  hint; `accepted_escrows` has no equivalent other than a `settlements` clause
+  hint, and a VM pool without one is held and reported rather than refused on
+  every cycle; `accepted_escrows` has no equivalent other than a `settlements` clause
   list.
 
 ## Permanent documentation impact

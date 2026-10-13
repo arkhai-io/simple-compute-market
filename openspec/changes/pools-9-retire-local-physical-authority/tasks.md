@@ -99,6 +99,14 @@ Tasks 3.1, 3.2, and 3.5–3.12 were delivered by the same change.
       the two `test_alkahest.py` failures need a live chain environment and
       predate this change) pass on the final tree; the VM e2e scenarios pass
       (see 7.9).
+- [x] 4.8 A VM pool that states no region is held and reported rather than
+      refused on every cycle with a validation message
+      (`arkhai_vms_listings/reconciler.py`, `regionless_pools`). Evidence:
+      `test_reconciler_projection.py::test_a_pool_stating_no_region_is_held_and_reported`
+      and `::test_a_regionless_pools_published_listing_stays_open`, both
+      failing before the hold. Promoted: `storefront-publication` spec, "A VM
+      pool that states no region holds its listings"; companion `architecture.md`;
+      `DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`.
 
 ## 5. Retire CSV import and its deployment contract
 
@@ -233,6 +241,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Fresh databases omit retired schema; upgrades retain inert schema, rows, and recorded migration IDs for operator extraction into provisioning, with no current storefront reads or writes, startup migrations included | `openspec/specs/storefront-publication/spec.md` — "Storefront holds no physical-resource authority"; companion `architecture.md` — "Seller-owned market state"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" frozen-table paragraph names the inventory tables beside `compute_allocations` |
 | ~~Rollback requires earlier code~~ — superseded: the upgrade is fail-forward; retained rows are historical extraction input, reconciled against live site state, not current physical truth | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why the retired migrations leave the chain rather than being gated or emptied, why `20260604_003` stays without reading a retired table, and why the core timestamp migration covers `listings` only | This change's `design.md`, "Freeze, do not `DROP`; retained data is extraction input" |
+| A VM pool that states no region is held and reported, not refused on every cycle | `openspec/specs/storefront-publication/spec.md` — "A VM pool that states no region holds its listings"; companion `architecture.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md`; rationale in this change's `design.md`, "A VM pool that states no region is held" |
 | Retired settings are refused at chart render and by `config set`, as retired settlement settings are, and ignored at runtime | `openspec/specs/deployment-state/spec.md` (existing retired-values rule, no text change); `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/seller-quickstart.md` |
 | Why retired settings are not refused at startup | This change's `design.md`, "Retired configuration keys follow the settlement retirement convention" |
 | Code describing the retired inventory, including the `Host` model and `[escrow_templates]` configuration, is deleted rather than left without a caller | This change's `design.md`, "Code describing the retired inventory leaves with it"; nothing permanent to promote once the code is gone |

@@ -160,7 +160,9 @@ A listing's commercial terms come from three places, highest first:
   when `[pricing].accept_pool_declared_sla` is on;
 - the storefront configuration's defaults, such as `[pricing].settlements`.
 
-Region is a physical fact, so only the pool states it; no override does.
+Region is a physical fact, so only the pool states it; no override does. A
+pool that states no region publishes nothing new and holds the listings it
+already published; system status names it under `regionless_pools`.
 `DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
 describes each term. Capacity admission, physical selection, prepared
 execution, and teardown are owned by the selected provisioning site.
@@ -380,7 +382,8 @@ Before upgrading, declare at provisioning everything the CSV described:
    the declaration's `capacity`.
 2. **Pools and their terms.** Put each resource in a pool, and declare the
    pool's `region` in its `policy_tags`, with its `listing_shapes` and
-   `asking_rates` where you state them. Region can only be declared there. A
+   `asking_rates` where you state them. Region can only be declared there, and
+   a pool without it is held until it states one. A
    pool's `sla` hint is read only by a storefront with
    `[pricing].accept_pool_declared_sla` on; otherwise state the SLA as an
    override term.

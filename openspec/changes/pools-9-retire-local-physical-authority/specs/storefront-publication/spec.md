@@ -316,3 +316,25 @@ Configured defaults, pool-declared hints, storefront pool overrides, and reconci
 
 - **WHEN** a storefront pool override for one site's pool supplies complete settlement clauses
 - **THEN** those clauses replace the configured defaults for that pool's listings and are validated through the same grammar and registrations
+
+## ADDED Requirements
+
+### Requirement: A VM pool that states no region holds its listings
+
+Every VM listing MUST publish `region` from its pool's `region` hint, which is the only
+source: no storefront override states it and nothing stands in for an absent hint. A
+pool whose `region` hint is absent or is not a non-empty string MUST be held: it yields
+no new listing, its existing listings are neither closed nor refreshed, and system
+status reports the pool. A missing region is a declaration to repair, not a withdrawn
+source.
+
+#### Scenario: A pool states no region
+
+- **WHEN** a pool advertising the VM mode carries no region hint
+- **THEN** no VM listing is derived from it and system status names the pool
+
+#### Scenario: A pool with published listings loses its region
+
+- **GIVEN** an open VM listing derived from a pool
+- **WHEN** a later projection generation carries no region hint for that pool
+- **THEN** the listing is neither closed nor refreshed until the pool states a region

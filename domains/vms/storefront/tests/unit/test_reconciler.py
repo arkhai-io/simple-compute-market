@@ -22,6 +22,7 @@ from arkhai_vms_listings.reconciler import (
 from tests._reconciler_cases import (
     _BIG,
     _SMALL_SHAPE,
+    _SiteDerivationReport,
     _TOKEN,
     _TWO_GPU_SHAPE,
     _digests,
@@ -316,7 +317,6 @@ class TestProjectedPoolRows:
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
         assert _term(rows[0], "max_duration_seconds") is None
-        assert rows[0]["region"] is None
         assert rows[0]["sla"] == 0.0
 
     def test_a_pool_without_an_override_publishes_from_config_default(self):
@@ -484,16 +484,22 @@ class TestProjectedPoolRows:
         member_availability=None, capacity_buckets=None,)
         assert rows[0]["region"] == "Nevada, US"
 
-    def test_region_is_none_without_a_hint(self):
-        rows = _project_vm_pool_rows({
+    def test_a_pool_without_a_region_hint_is_held(self):
+        holds: set = set()
+        report = _SiteDerivationReport()
+        rows = _projected_pool_rows({
             "pool_id": "gpu-pool",
+            "pool_metadata": {"policy_tags": {"deliverable_modes": ["vm"]}},
             "resources": [
-                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
+                 "attributes": {"gpu_model": "H100", "region": "us-east"}, "enabled": True},
             ],
         },
-        site_id="site-a",
+        site_id="site-a", holds=holds, report=report,
         member_availability=None, capacity_buckets=None,)
-        assert rows[0]["region"] is None
+        assert rows == []
+        assert holds == {("pool", "site-a", "gpu-pool")}
+        assert report.as_dict()["regionless_pools"] == ["gpu-pool"]
 
     def test_sla_storefront_override_wins_over_pool_hint_by_default(self):
         """No hint_resolution passed -- the default settings apply, and

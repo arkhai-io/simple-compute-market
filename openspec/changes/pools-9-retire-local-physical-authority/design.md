@@ -650,6 +650,37 @@ negotiation-pause behavior are unchanged. The permanent home is
 `openspec/specs/storefront-publication/spec.md`'s replacement for
 "Operator-visible acceptance state".
 
+### A VM pool that states no region is held
+
+Retiring the legacy tier removed the only fallback for a pool's region. A VM
+pool with no `region` hint then produced a candidate whose listing failed
+`ComputeResource` validation on every publication cycle, reported as a
+`refuse` carrying the validation message and named nowhere in system status.
+The listing it had already published stayed open only because the failure
+happened before reconciliation reached it. Any pool without a hint behaved
+this way; this change adds every home-site pool whose region came from the
+CSV.
+
+The pool is now held, as bare metal holds a pool without a region: no new
+listing, existing listings neither closed nor refreshed, and the pool named
+in the site's derivation report (`regionless_pools`) and logged once per
+report change. A missing region is a declaration to repair, not a withdrawn
+source, so closing the listings would discard seller state for an operator
+error the operator can fix.
+
+Alternatives:
+
+- *Publish without a region.* Rejected: every compute registry filters on it,
+  and the listing schema requires it.
+- *A storefront default region.* Rejected: region is a physical fact the
+  storefront cannot know (`storefront-publication`, "Storefront pool
+  overrides are the only override tier").
+- *Refuse at the site.* Rejected for this change: `region` is optional in the
+  domain-neutral hint vocabulary, and other markets need not state one.
+
+Permanent home: `storefront-publication` spec, "A VM pool that states no
+region holds its listings".
+
 ## Risks / Trade-offs
 
 - **An operator upgrades with legacy values still in effect** → a silent

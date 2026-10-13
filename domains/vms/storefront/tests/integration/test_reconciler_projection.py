@@ -326,3 +326,36 @@ def test_a_rate_change_or_removal_refreshes_in_place(db_path):
             stored_resource=stored, fresh_resource=fresh, binding_backing="backed"
         )
         assert refreshed.get("asking_rate") == fresh.get("asking_rate")
+
+
+def _regionless_pool() -> dict:
+    pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+    del pool["pool_metadata"]["policy_tags"]["region"]
+    return pool
+
+
+def test_a_pool_stating_no_region_is_held_and_reported(db_path):
+    holds: set = set()
+
+    slices = _shape_slices(db_path, [_regionless_pool()], holds=holds)
+
+    assert slices == []
+    assert ("pool", "site-a", "gpu") in holds
+    assert derivation_reports()["site-a"]["regionless_pools"] == ["gpu"]
+
+
+def test_a_regionless_pools_published_listing_stays_open(db_path):
+    """A missing region is a declaration to repair, not a withdrawn source."""
+    _seed_listing(db_path, listing_id="from-gpu", pool_id="gpu", site_id="site-a")
+
+    held = stale_open_listing_ids(
+        db_path, configured_sites=("site-a",),
+        site_pool_projection={"site-a": [_regionless_pool()]}, backed_only=False,
+    )
+    withdrawn = stale_open_listing_ids(
+        db_path, configured_sites=("site-a",),
+        site_pool_projection={"site-a": []}, backed_only=False,
+    )
+
+    assert held == []
+    assert withdrawn == ["from-gpu"]

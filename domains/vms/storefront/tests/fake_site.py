@@ -549,13 +549,22 @@ def capacity_runtime_over_sites(
 
 
 def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
-    """Project each fake resource as its exact one-member VM pool."""
+    """Project each fake resource as its exact one-member VM pool.
+
+    A pool states the region its member declares, as an operator states it on
+    both: a VM pool without a region is held rather than published.
+    """
     return [
         {
             "pool_id": resource_id,
             "pool_metadata": {
                 "policy_tags": {
                     "deliverable_modes": sorted(fake.deliverable_modes),
+                    **(
+                        {"region": row["attributes"]["region"]}
+                        if row["attributes"].get("region")
+                        else {}
+                    ),
                 },
             },
             "resources": [

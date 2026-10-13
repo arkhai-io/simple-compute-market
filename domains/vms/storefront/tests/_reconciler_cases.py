@@ -100,14 +100,27 @@ _VM_BINDING = _VM_REGISTRATION.binding
 assert _VM_REGISTRY.resolve(_VM_BINDING) is _VM_DOMAIN
 
 
+_REGION = "us-east"
+
+
 def _vm_pool(pool: dict) -> dict:
-    """Return a projection row with the exact VM deliverable declaration."""
+    """Return a projection row with the exact VM deliverable declaration.
+
+    A pool that states no region is given ``_REGION``, on the pool and on each
+    member that declares none, as an operator states it on both: a VM pool
+    without a region is held. A test of that hold builds its pool without this.
+    """
     projected = dict(pool)
     metadata = dict(projected.get("pool_metadata") or {})
     policy_tags = dict(metadata.get("policy_tags") or {})
     policy_tags["deliverable_modes"] = ["vm"]
+    region = policy_tags.setdefault("region", _REGION)
     metadata["policy_tags"] = policy_tags
     projected["pool_metadata"] = metadata
+    projected["resources"] = [
+        {**member, "attributes": {"region": region, **(member.get("attributes") or {})}}
+        for member in projected.get("resources") or []
+    ]
     return projected
 
 

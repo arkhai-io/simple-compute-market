@@ -119,6 +119,7 @@ class TestAvailableComputeSlices:
                     "pool_metadata": {
                         "policy_tags": {
                             "pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}},
+                            "region": "pool-region",
                         },
                     },
                     "resources": [
@@ -140,7 +141,7 @@ class TestAvailableComputeSlices:
         assert slices
         assert all(row["max_duration_seconds"] == 1800 for row in slices)  # the hint
         assert all(row["sla"] == 12.5 for row in slices)  # the configured default
-        assert all(row["region"] is None for row in slices)  # no hint, no fallback
+        assert all(row["region"] == "pool-region" for row in slices)  # the hint, never the row
         assert all("min_price" not in row and "token" not in row for row in slices)
         assert "legacy_overrides_in_effect" not in _site_report()
 

@@ -939,7 +939,7 @@ class TestRealOrchestrationCacheToReconciliation:
         resource_pools_cache._value = [{
             "pool_id": "pool-h200-1",
             "pool_metadata": {
-                "policy_tags": {"deliverable_modes": ["vm"]},
+                "policy_tags": {"deliverable_modes": ["vm"], "region": "California, US"},
             },
             "resources": [{
                 "physical_resource_id": "pool-h200-1", "resource_type": "compute.gpu",
