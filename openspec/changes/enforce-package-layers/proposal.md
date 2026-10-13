@@ -36,8 +36,8 @@ In two phases. The first is a report; nothing gates until the second.
   the prose it encodes: the layer order and each layer's permitted scope elements;
   the families, domains, and mechanisms with their directories, owning kits, and
   identifying literals; the path conventions that yield layer, scope, and kind; the
-  plugin entry-point groups and their owners; the kind table with its dependency
-  budgets; a **declarations** table recording the runtime reason for each internal
+  plugin entry-point groups and their owners; the kind table with its kind
+  allowlists; a **declarations** table recording the runtime reason for each internal
   dependency declared without an import; and an **overrides** table for projects
   whose path does not yet say what they are.
 - One stdlib library module, `architecture.py` under `scripts`, that classifies
@@ -46,7 +46,7 @@ In two phases. The first is a report; nothing gates until the second.
   distributions each project declares, and exposes one `problems()` per rule:
   layer direction, same-layer cycles, scope subset, layer/scope bounds,
   undeclared imports, declarations without an import or a recorded reason, kind
-  budgets, plugin in-degree, scope-vocabulary literals, and the two table-expiry
+  and package allowlists, plugin in-degree, scope-vocabulary literals, and the two table-expiry
   rules.
 - A report script that runs every rule over the whole tree and writes a classified
   baseline, to a path it is given: each finding marked defect (owned by a named change), accepted (with
@@ -67,7 +67,7 @@ In two phases. The first is a report; nothing gates until the second.
   `make check-architecture-change CHANGE=<name>` lists the exception rows one
   change owns and fails while any remains, which gates its archive. The
   declared-but-unimported rule warns; the vocabulary-literal rule fails in core and
-  kit and warns elsewhere; the kind budgets fail only for kinds the audit showed
+  kit and warns elsewhere; the kind allowlists fail only for kinds the audit showed
   clean or seeded.
 - Tests in `scripts/tests/` with a passing and a failing synthetic tree per rule.
 - The per-package boundary tests — twenty modules and one function today — are
@@ -122,7 +122,7 @@ None.
   beside `docs/development/ARCHITECTURE.md`.
 - Affected documentation: `docs/development/ARCHITECTURE.md` (the "Where the current
   tree diverges" paragraph becomes a pointer to the exceptions table, and the kind
-  conventions and budgets this change owns are promoted once they hold),
+  conventions and allowlists this change owns are promoted once they hold),
   `docs/development/BUILD_AND_PACKAGING.md` (names the check), `AGENTS.md` (the
   interim "enforced by the per-package boundary tests and by review" sentence
   names the check, the tests it keeps, and review for what neither expresses).
@@ -146,7 +146,7 @@ None.
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — the divergence paragraph points at the
-      exceptions table; the kind conventions and budgets move from this change into
+      exceptions table; the kind conventions and allowlists move from this change into
       the "Kind" section when the gate lands.
 - [x] Existing subsystem specification — `market-composition`,
       `planning-governance`, `deployment-state` as above.
@@ -156,7 +156,7 @@ None.
 ### Knowledge to promote
 
 - The conventions by which a package's path and name state its layer, scope, and
-  kind, and the budgets the light kinds are held to —
+  kind, and the allowlists the light kinds are held to —
   `docs/development/ARCHITECTURE.md#package-and-dependency-layers`.
 - The repository-wide check is the evidence for the from-below rule, and an
   exception is owned, dated, and expires with its change —

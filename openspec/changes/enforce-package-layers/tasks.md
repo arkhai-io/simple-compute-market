@@ -49,8 +49,8 @@ findings can cite the baseline.
         the rule, project, target, file, line, context, and message: `layer`,
         `cycle` (strongly connected components within one layer), `scope`,
         `layer_scope`, `undeclared_import` (internal only), `unused_declaration`,
-        `kind_budget`, `external_budget` (import roots against
-        `sys.stdlib_module_names` and the budget row), `plugin_in_degree`,
+        `kind_allowlist`, `package_allowlist` (import roots against
+        `sys.stdlib_module_names` and the allowlist row), `plugin_in_degree`,
         `vocabulary` (string literals against `tokens` outside the project's
         scope), `exception_expiry` (a row excusing no current finding), and
         `override_expiry` (path conforms, or a granted scope element no edge
@@ -114,7 +114,7 @@ findings can cite the baseline.
       every finding as one of:
       - a **defect**, naming its owning change;
       - **accepted**, with its reason: a `[[declarations]]` row for an
-        unimported declaration, or an external-budget entry;
+        unimported declaration, or an package-allowlist entry;
       - a **rule error**: revise the rule in `design.md` and in 1.2–1.3, then
         rerun.
 
@@ -162,7 +162,7 @@ findings can cite the baseline.
       - `scripts/check_architecture_scope.py`: `scope` and `vocabulary`.
       - `scripts/check_architecture_dependencies.py`: `undeclared_import` and
         `unused_declaration`. The latter warns.
-      - `scripts/check_architecture_kinds.py`: `kind_budget`, `external_budget`,
+      - `scripts/check_architecture_kinds.py`: `kind_allowlist`, `package_allowlist`,
         and `plugin_in_degree`.
 
       Each script also evaluates `exception_expiry` for the rows that name its
@@ -171,7 +171,7 @@ findings can cite the baseline.
 - [x] 2.3 Set the failure modes the design fixes:
       - `unused_declaration` warns.
       - `vocabulary` warns everywhere and fails in the `core` and `kit` layers.
-      - `kind_budget` fails only for a kind the baseline showed clean or
+      - `kind_allowlist` fails only for a kind the baseline showed clean or
         seeded; any other kind warns until it is.
 
       Record the kinds in each mode in the script's docstring.
@@ -214,26 +214,26 @@ assertions stay, and a test that asserts what the check cannot express is kept.
 
       | Test | Subsumed by | Kept |
       |---|---|---|
-      | `kit/identity/tests/unit/test_package_boundary.py` | `external_budget` | — |
-      | `kit/settlement-runtime/tests/unit/test_import_boundaries.py` | `external_budget`, `scope`, `vocabulary` | — |
-      | `kit/capability-shape/tests/unit/test_import_boundary.py` | `external_budget` | — |
-      | `kit/capability-pricing/tests/unit/test_import_boundary.py` | `external_budget`, `layer` | — |
-      | `kit/resource-pools-contracts/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
-      | `kit/resource-pools-client/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
+      | `kit/identity/tests/unit/test_package_boundary.py` | `package_allowlist` | — |
+      | `kit/settlement-runtime/tests/unit/test_import_boundaries.py` | `package_allowlist`, `scope`, `vocabulary` | — |
+      | `kit/capability-shape/tests/unit/test_import_boundary.py` | `package_allowlist` | — |
+      | `kit/capability-pricing/tests/unit/test_import_boundary.py` | `package_allowlist`, `layer` | — |
+      | `kit/resource-pools-contracts/tests/unit/test_import_boundaries.py` | `kind_allowlist`, `package_allowlist` | — |
+      | `kit/resource-pools-client/tests/unit/test_import_boundaries.py` | `kind_allowlist`, `package_allowlist` | — |
       | `kit/fulfillment/tests/unit/test_import_boundaries.py` | the denylist: `layer`, `scope` | the per-module carrier allowlist |
-      | `kit/contact-exchange/tests/unit/test_package_boundary.py` | `external_budget`, `scope` | — |
+      | `kit/contact-exchange/tests/unit/test_package_boundary.py` | `package_allowlist`, `scope` | — |
       | `kit/site/tests/unit/test_import_boundaries.py` | the denylist: `layer`, `scope` | any `market_resource_pools` assertion `inject-site-pool-authority` adds |
-      | `kit/config/tests/unit/test_resolution.py::test_common_config_has_no_concrete_mechanism_imports` | `market_alkahest`: `scope` | all, as found: it also forbids `stripe` and `web3`, and `kit/config` has no external budget |
-      | `core/tests/unit/test_carrier_purity.py` | `layer`, `external_budget` | — |
+      | `kit/config/tests/unit/test_resolution.py::test_common_config_has_no_concrete_mechanism_imports` | `market_alkahest`: `scope` | all, as found: it also forbids `stripe` and `web3`, and `kit/config` has no package allowlist |
+      | `core/tests/unit/test_carrier_purity.py` | `layer`, `package_allowlist` | — |
       | `core/tests/unit/test_domain_boundaries.py` | imports: `layer`, `scope` | identity branching, as found: it scans the roles too, where `vocabulary` only warns |
       | `core/buyer/tests/unit/test_delivery_boundary.py` | — | all, as found: a composition composes mechanisms by rule, so the buyer role staying mechanism-neutral is not a graph rule |
       | `domains/vms/storefront/tests/unit/test_architecture_imports.py` | the kit scan and core storefront's domain-free scan: `layer`, `scope` | the concept-module scan, which forbids even `market_core`; the construction-site and `pyproject.toml` checks; and the no-bare-metal import test, blocked by `kit-owned-storefront-shell`'s rows |
-      | `domains/compute/tests/test_import_boundary.py` | `scope`, `external_budget` | — |
+      | `domains/compute/tests/test_import_boundary.py` | `scope`, `package_allowlist` | — |
       | `domains/bare_metal/tests/test_import_boundary.py` | `scope` | — |
       | `domains/bare_metal/storefront/tests/test_import_boundaries.py` | `layer`, `scope` | the runtime import smoke test |
       | `provisioning/compute/service/tests/unit/test_import_boundaries.py` | adapter isolation and the operator-client rule: `layer`, `scope` | the adapter-entrypoint allowlist, the Ansible module separation, the deployment-config regex, and the Ansible distribution's runtime check |
-      | `provisioning/compute/client/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
-      | `provisioning/compute/contracts/tests/unit/test_import_boundaries.py` | `kind_budget`, `external_budget` | — |
+      | `provisioning/compute/client/tests/unit/test_import_boundaries.py` | `kind_allowlist`, `package_allowlist` | — |
+      | `provisioning/compute/contracts/tests/unit/test_import_boundaries.py` | `kind_allowlist`, `package_allowlist` | — |
       | `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` | — | all: it asserts what importing a module loads at runtime |
 
 - [x] 3.2 Retire every unblocked test from 3.1, one package per commit. Before
@@ -249,7 +249,7 @@ assertions stay, and a test that asserts what the check cannot express is kept.
         from five others.
       - `inject-site-pool-authority`'s design now adds, rather than keeps,
         `kit/site`'s planned test.
-      - The external budgets list internal roots as well as third-party ones,
+      - The package allowlists list internal roots as well as third-party ones,
         which is what let the allowlist tests retire (design, "Rule errors the
         audit found").
 
@@ -262,7 +262,7 @@ This runs after code review, to reduce churn.
         `ARCHITECTURE.toml` as the authoritative list. It keeps prose only for
         what the check cannot see, the kit-area order.
       - "Kind" states the path-and-name conventions the check reads, the plugin
-        groups, and the `contracts` and `client` budgets, replacing the sentence
+        groups, and the `contracts` and `client` kind allowlists, replacing the sentence
         that defers them to this change.
       - "Repository layers" gains the per-layer scope bounds table.
 - [x] 4.2 `openspec/specs/market-composition/spec.md`: sync the "From-below kit
@@ -293,8 +293,8 @@ revisions".
 
 - [x] 5.1 Move each package's own constraints into a `[tool.arkhai.architecture]`
       table in its `pyproject.toml`:
-      - each external budget becomes `allowed-dependencies`, a list of
-        distribution names, in the eleven budgeted projects;
+      - each package allowlist becomes `allowed-dependencies`, a list of
+        distribution names, in the eleven projects with a package allowlist;
       - each declarations row becomes a `runtime-dependencies` entry, mapping
         the dependency to its reason, in `domains/bare_metal/buyer` and
         `domains/vms/storefront`.
@@ -317,13 +317,13 @@ revisions".
       fails on:
       - duplicate exception, override, or plugin-group rows;
       - a family's vocabulary, a domain's family, a mechanism's kit, a
-        plugin-group owner, an override's scope element, or a kind-budget
+        plugin-group owner, an override's scope element, or a kind-allowlist
         distribution that names nothing;
       - an exception or override owner that is not an unarchived directory
         under `openspec/changes/`.
 - [x] 5.4 Tests in `scripts/tests/test_architecture.py` and
       `test_check_architecture.py`, each with a passing and a failing case:
-      - a declared third-party dependency outside its budget;
+      - a declared third-party dependency outside its allowlist;
       - an aliased import root;
       - an unknown package-table key;
       - a malformed project failing closed;
@@ -331,25 +331,58 @@ revisions".
 
       The synthetic trees create the change directories their rows name.
 - [x] 5.5 Documentation, bringing the promoted text in line with 5.1–5.3:
-      - `docs/development/ARCHITECTURE.md`'s "Kind" places budgets and runtime
+      - `docs/development/ARCHITECTURE.md`'s "Kind" places package allowlists and runtime
         reasons in a package's `pyproject.toml`;
       - its "Where the current tree diverges" names overrides beside exceptions
         as recorded divergences;
       - `docs/development/BUILD_AND_PACKAGING.md`'s check rows;
       - `AGENTS.md`;
       - `openspec/specs/market-composition/spec.md`'s evidence lines that cite
-        the rules file's external budgets;
+        the rules file's package allowlists;
       - `baseline.md`'s declarations section.
 - [x] 5.6 Run `make check-architecture`, `make test-release-tooling`, comment
       hygiene, scoped citations, and strict validation.
       *Done.* All pass.
       - The tooling suite has 457 tests, including 68 in the two architecture
         modules.
-      - No lock changed: a `[tool.*]` table is not wheel metadata.
-      - The declaration side of the budgets added `keyring` to the identity
+      - Moving the tables changed no lock, because a `[tool.*]` table is not
+        wheel metadata. The VM buyer's lock changed later, for the test
+        dependency in 5.7.
+      - The declaration side of the allowlists added `keyring` to the identity
         kit's list and `pydantic` to the provisioning client's.
       - No project fails closed today; the only one without a single wheel
         package is the virtual IaC project, which is skipped as before.
+
+- [x] 5.7 Declare `arkhai-vms-settlement` in `domains/vms/buyer`'s `dev`
+      dependency group. The audit had removed it as a runtime declaration with
+      no import, and the CI suite then failed to collect a test that imports it;
+      design, "A declaration can serve a project's tests".
+- [x] 5.8 Build the wheelhouse for every CI job with an internal dependency:
+      `predist: true` on `kit-resource-pools`, which has failed on `dev` since it
+      first depended on the shape kit, and on `apicredits-sample-app`, which
+      resolved a stale middleware release from the public index instead of this
+      repository's code.
+- [x] 5.9 Share the wheel-path rule: `scripts/check_project_layout.py` exposes
+      `wheel_package`, and `scripts/architecture.py` discovers projects through
+      it, so a wheel naming a missing package fails closed. Configuration
+      validation refuses an owner that is not a single unarchived change name,
+      finds duplicates under the normalized key, and refuses an exception for an
+      unknown rule.
+- [x] 5.10 A package with an allowlist must declare every third-party
+      distribution it imports; the limits are stated in `ARCHITECTURE.md`'s
+      "Kind".
+- [x] 5.11 Rename budgets to allowlists:
+      - the rules `kind_allowlist` and `package_allowlist`;
+      - `[kind_allowlists]` in the rules file;
+      - the library, scripts, tests, and the eleven package comments;
+      - `ARCHITECTURE.md`, with both terms in its Terms table;
+      - `BUILD_AND_PACKAGING.md`;
+      - the `market-composition` scenario, in the delta and the synced spec;
+      - the change documents.
+- [x] 5.12 Validate. Passed:
+      - `make check-architecture`, `make check-project-layout`, and the
+        architecture and project-layout tests (82);
+      - comment hygiene, scoped citations, and strict validation.
 
 ## 6. Closeout
 

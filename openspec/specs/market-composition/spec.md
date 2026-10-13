@@ -49,8 +49,8 @@ Every package MUST depend only on packages in its own layer or a lower one, with
 - **WHEN** any package imports a package that registers into a plugin entry-point group
 - **THEN** the architecture check fails, while a declaration that installs the plugin passes
 
-#### Scenario: A light kind outgrows its budget
-- **WHEN** a contracts or client package depends on a distribution outside its kind's budget
+#### Scenario: A light kind depends outside its kind allowlist
+- **WHEN** a contracts or client package depends on a distribution its kind allowlist does not name
 - **THEN** the architecture check fails and names the dependency
 
 #### Scenario: An exception outlives its cause

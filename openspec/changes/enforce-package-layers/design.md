@@ -5,7 +5,7 @@
 See `proposal.md` for why eighteen per-package tests are not enforcement and why
 an audit precedes a gate. This document records the model the check encodes, the
 decisions taken about how a script reads it from the tree, the conventions and
-budgets this change owns until they are shown to hold, and the questions planning
+allowlists this change owns until they are shown to hold, and the questions planning
 must settle. The principles — four layers, scope as a set of permitted knowledge,
 the subset rule, any import counting — are permanent and already in
 `docs/development/ARCHITECTURE.md`.
@@ -156,17 +156,17 @@ seven projects with no import; the audit classifies each as a row or a removal.
 | layer/scope | a scope violates its layer's bounds, or a kit holds `{m}` without being `m`'s kit | fail |
 | undeclared import | an imported internal distribution is not declared | fail |
 | unused declaration | a declared internal distribution has neither an import nor a declarations-table row | warn |
-| kind budget | a `contracts` or `client` package exceeds its budget (below) | fail once the audit shows the kind clean |
+| kind allowlist | a `contracts` or `client` package depends outside its kind allowlist (below) | fail once the audit shows the kind clean |
 | plugin in-degree | any package imports a plugin; declaring one is permitted | fail |
 | vocabulary | a package's string literals contain a scope element's token outside its scope | warn; fail at core and kit once the gate lands (see "Planning decisions") |
 | exception expiry | an `[[exceptions]]` row excuses no current finding: its edge or token is gone, or the edge no longer breaks the rule the row names | fail |
 | override expiry | an `[overrides]` row names a path that now classifies without it, or grants a scope element that none of the project's edges uses | fail |
 
-Kind budgets: `contracts` may depend on core, foundation kits, and its own
+Kind allowlists: `contracts` may depend on core, foundation kits, and its own
 family's vocabulary; `client` on its contracts, core, the identity kit, and an
 HTTP library. These are the reviewed refinement of the first draft, which
 allowed a client no core carriers and a family contract no family vocabulary;
-both were wrong for packages that exist today. A plugin has no budget beyond its
+both were wrong for packages that exist today. A plugin has no allowlist beyond its
 layer and scope; its constraint is the in-degree rule.
 
 ### Audit before gate
@@ -243,7 +243,7 @@ repository rules express directly (`kit/fulfillment` forbids
 VM package: a scope rule). `core/tests/unit/test_domain_boundaries.py` already
 scans for `CONCRETE_IDENTITIES` literals and becomes the three domains' `tokens`.
 `kit/settlement-runtime`'s test forbids external packages (`fastapi`, `httpx`,
-`eth_account`), which becomes an `external_budget` on its row.
+`eth_account`), which becomes an `package_allowlist` on its row.
 
 A test is kept, not retired, when it asserts something the repository check
 cannot express. Two are known: the provisioning service's test, which allowlists
@@ -316,7 +316,7 @@ the review's, by design.
   vocabulary projects, and `domains/apicredits/middleware/python` as libraries in
   the right scope. Where they live is `align-package-paths-with-layers`'s
   navigability decision, not the check's.
-- **External dependency budgets.** An optional table, filled only for the packages
+- **Package allowlists.** An optional table, filled only for the packages
   whose per-package tests assert one today — `settlement-runtime`,
   `capability-shape`, `capability-pricing`, `identity`, and the contracts
   packages — so those tests can retire against it.
@@ -348,7 +348,7 @@ Taken while writing `tasks.md`; each is a default the maintainer may revise.
     override changes classification;
   - `scope`: scope subset and vocabulary;
   - `dependencies`: undeclared import and unused declaration;
-  - `kinds`: kind budgets, external budgets, and plugin in-degree.
+  - `kinds`: kind allowlists, package allowlists, and plugin in-degree.
 
   Exception expiry runs in whichever script owns the rule a row names. Each is
   also its own Make target, as each packaging check is.
@@ -396,16 +396,16 @@ in "Rules are independent and each names a file and line" and are what
 - **A declarations row expires.** `declaration_expiry` fails a row whose
   dependency is no longer declared or is now imported, for the same reason
   exception and override rows expire.
-- **An external budget lists internal roots too.** The per-package allowlist
+- **An package allowlist lists internal roots too.** The per-package allowlist
   tests it replaces say what a package may import at all — the shape kit "only
-  the standard library", the pool client "only the contracts" — and a budget of
+  the standard library", the pool client "only the contracts" — and an allowlist of
   third-party roots alone would let a light kit grow an internal dependency the
-  layer rule allows. A budget is therefore every import root outside the
+  layer rule allows. A package allowlist is therefore every import root outside the
   standard library and the package itself, internal or third-party.
 - **Two planned retirements were not graph rules.** The core buyer's "imports no
   settlement mechanism" test holds the buyer role mechanism-neutral, but a
   composition composes mechanisms by rule; and `kit/config`'s mechanism denylist
-  also forbids `stripe` and `web3`, for which `kit/config` has no budget. Both
+  also forbids `stripe` and `web3`, for which `kit/config` has no package allowlist. Both
   tests stay.
 - **A declaration can serve a project's tests.** The audit removed a
   declaration when the package source never imported it, but a project's
@@ -425,7 +425,7 @@ ownership of the rules file's contents and close enforcement gaps; the layer and
 scope model, the import scan, and the audit-before-gate order stand.
 
 - **A package's own constraints live in its own `pyproject.toml`.** The rules
-  file centralized two kinds of fact a package owns: its external budget, and
+  file centralized two kinds of fact a package owns: its package allowlist, and
   the reason it declares a dependency it never imports. Kept centrally, each
   edit to a package's dependencies was an edit in two places, and the list grew
   with every package. Both move to a `[tool.arkhai.architecture]` table in the
@@ -433,7 +433,7 @@ scope model, the import scan, and the audit-before-gate order stand.
   `allowed-dependencies` and `runtime-dependencies`. What stays central is what
   no one package owns: the layer order and scope bounds; the families, domains,
   and mechanisms with their identity literals; the plugin groups; the kind
-  budgets; and the overrides and exceptions. Overrides and exceptions are
+  allowlists; and the overrides and exceptions. Overrides and exceptions are
   migration debt owned by a change, and they must stay under `docs/` anyway,
   because comment hygiene rejects a change name in any other `.toml`. The
   package table may only narrow or annotate a package. The checker rejects any
@@ -441,9 +441,9 @@ scope model, the import scan, and the audit-before-gate order stand.
   `pyproject.toml` still cannot widen what the path grants. This supersedes "One
   rules file", the external-budget table, and the declarations table where those
   decisions placed the facts centrally.
-- **A budget constrains declarations as well as imports.** A light package could
+- **A package allowlist constrains declarations as well as imports.** A light package could
   declare a heavy third-party dependency without importing it, and the
-  import-root budget never saw it. `allowed-dependencies` is one list of
+  import-root allowlist never saw it. `allowed-dependencies` is one list of
   distribution names, internal and third-party:
   - every declared dependency must be on it;
   - an internal import maps to its distribution through the tree;
@@ -465,19 +465,56 @@ scope model, the import scan, and the audit-before-gate order stand.
   deferred: it refactors a working check for no current finding.
 - **The configuration is validated.** A `configuration` rule fails on:
   - a duplicate exception, override, or plugin-group row;
-  - a family, domain, or mechanism, or a kind-budget distribution, that names
+  - a family, domain, or mechanism, or a kind-allowlist distribution, that names
     nothing in the tree or the rules file;
   - an unknown key in a package's table;
   - an exception or override owner that is not an unarchived change directory
     under `openspec/changes/`.
 
-  The orphaned per-package budget the review raised cannot occur: a budget
+  The orphaned per-package allowlist the review raised cannot occur: an allowlist
   lives in the package it constrains.
-- **No per-package conformance test.** A test asserting each package's budget
+- **No per-package conformance test.** A test asserting each package's allowlist
   would restate the configuration a second time. Discovery failing closed
   covers "every project is checked", the configuration rule covers "every entry
-  resolves", and removing a budget is a visible edit to that package's
+  resolves", and removing an allowlist is a visible edit to that package's
   `pyproject.toml`.
+
+## Pre-closeout revisions
+
+From the pre-closeout review, with the maintainer.
+
+- **Allowlist, not budget.** The two dependency constraints were named budgets,
+  which suggests something spent; nothing is. They are allowlists, named by
+  their owner: a **kind allowlist** for each light kind in the rules file, and a
+  **package allowlist** in one package's own `pyproject.toml`. "External" was
+  dropped as well as "budget", because a package allowlist names internal
+  distributions too. The rules are `kind_allowlist` and `package_allowlist`;
+  the rules-file table is `[kind_allowlists]`; the package key stays
+  `allowed-dependencies`, which already reads as one. Both terms are in
+  `ARCHITECTURE.md`'s Terms table. No other dependency allowlist exists in the
+  model: layer order is an ordering, scope bounds limit knowledge, and plugin
+  groups and runtime reasons are registries. A module allowlist — the kept
+  `kit/fulfillment` test's per-module rule — would be the third if the check
+  ever reads below the package. Completed tasks keep the table names that
+  existed when they ran, `[budgets]` and `[external_budgets]`.
+- **The wheel-path rule is shared.** Discovery failed closed only when a wheel
+  named other than one package, so a single entry naming a missing package was
+  classified and scanned as empty. `check_project_layout.py` now exposes
+  `wheel_package`, the one rule both checks read a project's package through:
+  exactly `src/<package>`, and that directory a package.
+- **Configuration validation is exact.** An owner is a single path segment
+  naming an unarchived change directory, so `archive/<dated-change>` is refused.
+  Duplicate exceptions are found under the same normalized key that applies
+  them. An exception naming a rule that does not exist, which no script would
+  ever evaluate, is refused.
+- **A package with an allowlist declares what it imports.** Its import mapping
+  is complete by construction, so a mapped third-party distribution must also be
+  declared. Elsewhere the mapping would be a guess; completeness there rests on
+  each project's environment and tests, an `import-roots` alias is trusted as
+  stated, and removing a package allowlist removes its constraint. Those limits
+  are stated in `ARCHITECTURE.md`'s "Kind". An accurate check from installed
+  metadata would run inside each built environment rather than in this
+  standard-library check, and is not built here.
 
 ## Open questions
 
