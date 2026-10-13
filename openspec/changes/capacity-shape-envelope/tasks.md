@@ -371,6 +371,20 @@ Handoff from section 4:
   integration cases re-asserting unit-level problem codes (trimmed to one representative
   detail per report field).
 
+Pre-closeout round fix (19 F1): an unreadable pool-hint shape list reached the derivation
+report and the publication warning without its tier, because the reconciler prefixed
+`<source>: ` only for storefront overrides. Every unreadable stated-list problem now
+carries its source. The non-mapping `listing_shapes` hint problem also names the tag, so
+it states a path as well. `test_a_constraint_removing_a_required_field_holds_the_pool`
+asserts the `pool_hint: ` prefix through the site derivation report.
+Evidence: VM storefront unit suite (unit) 1116 passed, 1 skipped; integration suite
+(application integration) 407 passed, after `make dist-domains`. Repository `make test`
+exit 0; `make check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+CHANGE=capacity-shape-envelope`, and `openspec validate --strict` OK. The fresh-context
+check found nothing blocking. It raised two low points, both fixed: the hint problem
+for a non-mapping tag named no path, and a comment called two read-back tests "above"
+when only one is.
+
 ## 5. VM storefront composition: the configured default and the override write check
 
 Delivers `[admissibility.defaults.vm]` and the override contribution's write check.
@@ -573,7 +587,7 @@ Not fixed, recorded at the owner's request: 07a has the same unrecorded dependen
 the cycle closes the override's listing and 07a's same-listing assertion fails. It
 predates this change.
 Evidence: `make -C e2e-tests test-unit` 22 passed (unit); the scenario collects 17
-cases. Stage 07c has not run against a stack: the fix commit's validation runs it.
+cases. Validation 18 ran stage 07c at `443f9505`; it passed.
 Repository `make test` exit 0; `make check-comment-hygiene`, `make check-doc-citations
 CHANGE=capacity-shape-envelope`, and `openspec validate --strict` OK. The fresh-context
 check found nothing blocking; its low point on this note's wording (which 07a assertion
@@ -635,6 +649,18 @@ alternatives are recorded in `design.md`, "Pilot merge reconciliation".
       This closeout remains open for end-to-end/remote pipeline evidence; root
       aggregate tests and typing were not rerun for this fix. Relevant suites
       are recorded above.
+      Pre-closeout round fix (20 F1): the fixture section header in
+      `provisioning/compute/service/tests/integration/conftest.py` said in-memory
+      SQLite after this section made it file-backed; corrected. At the owner's
+      request the round also rewrote pre-existing comments that told a bug's history
+      as current invariants: the `attach_executor_job` tests and the writer-slot
+      section in `kit/fulfillment/tests/unit/test_fulfillment_persistence.py`, and
+      `_validate_access_path` in `vm_fulfillment_plan.py`. Not fixed, and owned by no
+      change: the `SqlAlchemyFulfillmentUnitOfWork.transaction()` docstring claims
+      every caller runs `tx.accept()` first, but the acknowledgement and teardown
+      paths do not. Its correct wording depends on what holds SQLite's writer slot on
+      those paths. Evidence: repository `make test` exit 0 (comments only, no
+      behaviour change).
 
 ## 7. Closeout
 

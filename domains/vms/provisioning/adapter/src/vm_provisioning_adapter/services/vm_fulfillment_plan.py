@@ -68,14 +68,14 @@ class VmFulfillmentPlan:
         """Decide which access path this pool selects, refusing to select none.
 
         Exactly one of two paths must apply: direct NAT for a pool with no
-        relay, or a relay tunnel for a pool with one. The failure this replaces
-        was a configuration satisfying neither, which produced a VM with no
-        external route and reported success.
+        relay, or a relay tunnel for a pool with one. A configuration
+        satisfying neither would produce a VM with no external route while
+        reporting success, so it is refused here.
 
         Every check here is answerable from configuration before any host is
         touched, and each names what is missing. A rejection reading only
-        "misconfigured" would reproduce the diagnostic problem this change
-        exists to remove — a relay refusing a proxy asynchronously in a log.
+        "misconfigured" would leave the operator to find the cause later, as
+        a relay refusing a proxy asynchronously in a log.
         """
         if not config.relay_id:
             return False

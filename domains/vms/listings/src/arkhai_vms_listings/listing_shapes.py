@@ -221,7 +221,10 @@ def resolve_vm_listing_shapes(
     if declared is not None and not isinstance(declared, Mapping):
         return ShapeResolution(
             SHAPE_SOURCE_HINT,
-            problems=("must be a mapping of offering mode to a list of shapes",),
+            problems=(
+                f"{LISTING_SHAPES_POLICY_TAG} must be a mapping of offering mode "
+                "to a list of shapes",
+            ),
         )
     stated = raw_listing_shapes(policy_tags, VM_OFFERING_MODE)
     if stated is not None:

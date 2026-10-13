@@ -1073,10 +1073,7 @@ def _projected_pool_rows(
     )
     if resolution.unreadable:
         report.unreadable_shapes[pool_id] = [
-            f"{resolution.source}: {problem}"
-            if resolution.source == SHAPE_SOURCE_OVERRIDE
-            else problem
-            for problem in resolution.problems
+            f"{resolution.source}: {problem}" for problem in resolution.problems
         ]
         holds.add(("pool", site_id, pool_id))
         return []

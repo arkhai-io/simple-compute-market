@@ -1097,6 +1097,7 @@ class TestShapeAdmissibility:
         assert _admitted_slices(db_path, [self._pool(_A100_PLAIN, shape)], holds=holds) == []
         assert ("pool", "site-a", "gpu") in holds
         (problem,) = _site_report()["unreadable_shapes"]["gpu"]
+        assert problem.startswith("pool_hint: ")
         assert path in problem
 
     def test_an_override_shape_does_not_inherit_the_hints_constraints(self, db_path):

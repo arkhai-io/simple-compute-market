@@ -426,7 +426,7 @@ ok: [kvm1] => {
 
 
 # ---------------------------------------------------------------------------
-# Database fixture — fresh in-memory SQLite per test
+# Database fixture — fresh file-backed SQLite per test
 # ---------------------------------------------------------------------------
 
 

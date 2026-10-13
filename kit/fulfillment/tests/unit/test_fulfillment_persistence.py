@@ -258,13 +258,13 @@ def _reserved(ledger):
 
 
 def test_attach_executor_job_lands_on_the_reservation(ledger_services):
-    """The assertion the fake transaction could not make.
+    """The job handle is readable from the ledger after the caller commits.
 
-    Reads the value back off the ledger rather than trusting the call, because
-    the defect this covers was a wrong method name on a duck-typed
-    collaborator -- invisible to any test that only checks the call happened.
+    Reads the value back off the ledger rather than trusting the call: the
+    ledger is a duck-typed collaborator, so a test that only checks a call
+    happened cannot tell that the method called is one the ledger has.
 
-    The session is real because the write now goes through it. A ``MagicMock``
+    The session is real because the write goes through it. A ``MagicMock``
     here would absorb the write silently and this assertion would fail, which
     is the correct signal: with the write inside the caller's transaction,
     there is no such thing as exercising it without a session.
@@ -302,9 +302,10 @@ def test_attach_executor_job_is_a_no_op_without_a_ledger(ledger_services):
 def test_attach_executor_job_swallows_a_ledger_failure(ledger_services):
     """Best-effort, and asserted to stay that way.
 
-    Deliberate: the fulfillment is already acknowledged by the time this runs.
-    It is also what hid the wrong method name from the e2e run for a cycle, so
-    the warning it logs is the only signal -- worth knowing that is the trade.
+    The fulfillment is already acknowledged by the time this runs, so a ledger
+    failure must not undo it. The cost is that a failing attachment surfaces
+    only as the warning this logs; the read-back tests in this file are what
+    prove the attachment lands.
     """
     ledger, _ = ledger_services
     broken = MagicMock()
@@ -329,8 +330,7 @@ def test_attach_executor_job_swallows_a_ledger_failure(ledger_services):
 # to commit cannot then acquire that slot: it waits out the busy timeout and
 # raises `database is locked`, the failure is swallowed by design, and the
 # only visible symptom is that `/fulfillment/begin` returns one busy timeout
-# later than it should. In the e2e that pushed `provision`/`job_submitted`
-# 30s past settlement and timed out stage 08b.
+# later than it should, delaying everything a buyer waits on after settlement.
 #
 # The fixtures above cannot show this: a `MagicMock()` session holds no slot,
 # and a `StaticPool` in-memory engine shares one connection across every
