@@ -25,6 +25,11 @@ a time; nothing else should be building in the checkout while you run.
 
 ## 1. Check that this commit may be validated
 
+`make validate` refuses while the owner's round view is open (`make round-view`):
+the branch then points at the round's base, not its commit. If you were started
+some other way, `python3 scripts/round_view.py check` says the same; stop and ask
+the owner to run `make round-done`.
+
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
   branch belongs to another change, stop and ask the owner.
@@ -46,7 +51,10 @@ The pipeline is by far the slowest part, so it runs while everything else does:
    refuses, stop and report its reasons.
 3. Record the newest end-to-end run ID before dispatching —
    `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
-   — then `make run-e2e`, which dispatches the workflow on the branch.
+   — then `make run-e2e`, which dispatches the workflow on the branch. Unless
+   `make round-e2e-baseline` prints a run ID: `make round-view` already pushed
+   `HEAD` and dispatched the pipeline while the owner read the round, and that ID
+   is the one recorded before its dispatch. Use it, and dispatch nothing.
 4. `make fetch-e2e-logs E2E_AFTER_RUN=<that ID>`, in the background. It waits for
    a run of `HEAD` newer than that ID to be listed — so a commit validated before
    never fetches its earlier run — then for it to finish, and downloads its logs
@@ -222,7 +230,6 @@ conclusion, the coverage of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and
 anything under "About the validation". Then say what comes next: the
 implementation round — this record, the implementation review of the same commit,
-and the owner's own notes, read with `make round-diff CHANGE=<change>` — is triaged
-together in a fresh session,
+and the owner's own notes — is triaged together in a fresh session,
 `make triage CHANGE=<change>`, which fixes what the owner accepts; the fix commit
 is then validated again.

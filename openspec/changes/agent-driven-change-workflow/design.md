@@ -533,10 +533,11 @@ together, so the push command is never composed by hand.
 ### An implementation round is triaged in a fresh session
 
 After one or more sections are committed, an implementation round makes three
-observations of the same commit in parallel, none of which edits anything: the
-implementation review (`make review`), validation (`make validate`), and the
-owner's own reading of the diff while the pipeline runs. A fresh session opened by
-`make triage` then triages all three together with `change-triage`.
+observations of the same commit, none of which edits anything: the owner's own
+reading of the diff, first, while the pipeline runs; then the implementation
+review (`make review`) and validation (`make validate`), side by side. A fresh
+session opened by `make triage` then triages all three together with
+`change-triage`.
 
 This keeps the owner's established practice — the review, the test and pipeline
 results, and the owner's own notes handed to one agent, with the instruction that
@@ -558,19 +559,30 @@ context the workflow has stopped trusting.
   takes a position on each point as on any finding, disagreeing where the files say
   otherwise. Each point is logged to the ledger: one the owner raised and no
   reviewer did is the clearest sign of a check missing from the guidance.
-- **The owner reads the round as uncommitted changes.** Implementation commits
-  each section, so by the time the owner reads a round its diff is spread across
-  commits and the editor's source-control view, where the owner used to read
-  uncommitted work, is empty. `make round-diff CHANGE=` checks out the round's
-  base — the commit named by the latest triaged validation record, where the
-  previous round ended, or `BASE=` — in a disposable worktree beside the checkout,
-  and overlays `HEAD`'s files on it, leaving other changes' directories at the
-  base. The worktree's status and diff are then exactly the round, and nothing
-  about how commits are made changes, so review, validation, and triage still
-  describe one commit. A diff file was simpler but reads as a patch. Leaving
-  sections uncommitted until the owner has read them would restore the old view
-  directly, but validation and review would wait on the owner and describe no
-  commit; it stays the fallback if the worktree's experience does not serve.
+- **The owner reads the round as uncommitted changes, in the checkout.**
+  Implementation commits each section, so by the time the owner reads a round its
+  diff is spread across commits and the editor's source-control view, where the
+  owner used to read uncommitted work and run tests inline, is empty.
+  `make round-view CHANGE=` mixed-resets the branch to the round's base — the
+  commit named by the latest triaged validation record, where the previous round
+  ended, or `BASE=` — so the files stay exactly `HEAD`'s and the round shows as
+  uncommitted changes; `make round-done` resets the branch to the recorded
+  commit, the files again untouched, so an edit the owner made while reading is
+  left uncommitted on top of it. The commits themselves never change. While the
+  view is open the branch names no round commit, so review, validation, triage,
+  and implementation refuse to start; the owner reads first, and validation and
+  review then run side by side. To keep the pipeline's hour overlapping the
+  reading, `round-view` first pushes `HEAD` and dispatches the pipeline, and
+  records the run before it, which validation then fetches instead of
+  dispatching again.
+  Two alternatives were tried or weighed. A worktree beside the checkout with
+  `HEAD` overlaid on the base was built and tried first: it left the commits and
+  validation untouched, but the editor needed a second project each round and the
+  owner's test setup did not reach it. An editor comparison against a named base
+  ref keeps validation parallel too, but reads as a comparison rather than as the
+  changes the owner works in. Leaving sections uncommitted until the owner has
+  read them remains the fallback; validation and review would then wait on the
+  owner's commit.
 - **Triage fixes what the owner accepts, in the same session.** The fixes are
   checked as a section is — `change-implement`'s checks, the fresh-context
   compliance check among them — and committed as one commit, which is then

@@ -640,7 +640,7 @@ session").
       triage file, as the skill's lone re-validation rule says.
 
 - [x] 9.6 Give the owner the round to read as uncommitted changes:
-      `make round-diff CHANGE= [BASE=]` (`scripts/round_worktree.py`) checks out
+      `make round-diff CHANGE= [BASE=]` (a worktree script, removed by 9.7) checks out
       the round's base in a worktree beside the checkout and overlays `HEAD`'s
       files, other changes' directories excepted; `change-implement`,
       `change-validate`, and `change-triage` point the owner's notes at it. A
@@ -652,7 +652,7 @@ session").
       were committed before the owner could read them; leaving sections
       uncommitted is the recorded fallback if the worktree does not serve.
       Integration against real temporary Git repositories
-      (`scripts/tests/test_round_worktree.py`, 11 passed): the worktree's status is
+      (its tests, 11 passed): the worktree's status is
       the round — modified, deleted, and new files, the change's own documents and
       `openspec/changes/README.md` included, another change's directory at its
       base; new files Git would quote and new tracked files `.gitignore` matches
@@ -661,8 +661,37 @@ session").
       second run replaces the worktree, also after its directory was deleted by
       hand; a path that is not a worktree is never removed; an empty change name
       and `archive` are refused; the checkout's `HEAD` and status are untouched.
-      `main()`'s output and the Make target are untested. Run once by hand on
+      `main()`'s output and the Make target are untested.
+      Corrected by 9.7: the owner tried the worktree and found a second editor
+      project each round, without the owner's inline test setup, worse than reading
+      in the checkout; `round-diff`, its script, and its tests were removed. Run once by hand on
       `capacity-shape-envelope`: base `22bc1408` from `13-validation`, 21 files.
+
+- [x] 9.7 Show the round in the owner's own checkout instead:
+      `make round-view CHANGE= [BASE=] [NO_E2E=1]` (`scripts/round_view.py`)
+      pushes `HEAD`, dispatches the pipeline, and records the run before it, then
+      mixed-resets the branch to the round's base, so the round shows as
+      uncommitted changes with the files unchanged; `make round-done` resets the
+      branch to the recorded commit, leaving the owner's edits uncommitted. While
+      a view is open, `make review`, `implement`, `triage`, and `validate`
+      refuse, through their shared prerequisite `round-view-closed`. `change-validate` fetches the run `round-view` dispatched
+      (`make round-e2e-baseline`) rather than dispatching again;
+      `change-implement` and `change-triage` put the owner's reading before
+      validation and review. Spec scenario and design amended.
+      Done at the owner's direction, choosing this over an editor comparison
+      against a named base and over leaving sections uncommitted (the fallback).
+      Integration against real temporary Git repositories, with the push and the
+      dispatch through an injected runner (`scripts/tests/test_round_view.py`,
+      15 passed): the round shows as modified, deleted, and intent-to-add new
+      files with the branch at the base and the files unchanged; `done` restores
+      the commit and keeps an edit, or leaves a clean tree; the base is the latest
+      triaged validation, or must be given; `check` and a second `start` refuse
+      while a view is open; `done` refuses, keeping the view, when something
+      committed meanwhile; a dirty or untracked tree, a non-ancestor base, and an
+      unknown change or `archive` are refused with nothing moved; `start` pushes,
+      reads the baseline, then dispatches, and records the baseline for `HEAD`
+      only; a refused push dispatches nothing and opens no view. The Make
+      targets, the guard lines, and the real `gh` and push are not exercised.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,

@@ -80,8 +80,8 @@ For an implementation round, also take:
   file saying it confirms that commit; any `V<n>` is triaged like any finding, with
   the owner's notes asked for as usual.
 - **The owner's notes.** Ask for them if the owner has not pasted them; the owner
-  reads the round with `make round-diff CHANGE=<change>`, which shows it as
-  uncommitted changes in a worktree beside the checkout. Save them
+  reads the round with `make round-view CHANGE=<change>`, which shows it as
+  uncommitted changes in the checkout until `make round-done`. Save them
   exactly as pasted as the next numbered record, `NN-implementation-owner.md`.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and triage each point like any

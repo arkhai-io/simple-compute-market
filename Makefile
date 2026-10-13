@@ -12,13 +12,10 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
-.PHONY: check-agent-skills review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage round-diff
-.PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
-.PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront
-.PHONY: dist-bare-metal-buyer
-.PHONY: run-e2e fetch-e2e-logs
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock check-agent-skills build-bare-metal-storefront
+.PHONY: dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean dist-arkhai-core-registry dist-bare-metal-buyer
+.PHONY: test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
+.PHONY: review-wheelhouse review-wheelhouse-scope review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage round-view round-done round-e2e-baseline round-view-closed run-e2e fetch-e2e-logs review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -819,7 +816,7 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 REVIEW_BASE ?= dev
 REVIEW_MODEL ?= gpt-6-sol
 REVIEW_EFFORT ?= high
-review: ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1] [UNVALIDATED=1])
+review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1] [UNVALIDATED=1])
 	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change>)
@@ -827,20 +824,27 @@ design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<cha
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-design $(CHANGE)"
 
-implement: ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))"
 
-triage: ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)
+triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-triage $(CHANGE)"
 
-round-diff: ## Show an implementation round as uncommitted changes in a worktree beside the checkout, for the owner's notes (CHANGE=<change> [BASE=<commit>])
-	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
-		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
-	@python3 scripts/round_worktree.py "$(CHANGE)" $(if $(BASE),--base "$(BASE)")
+round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
+	@python3 scripts/round_view.py check
+
+round-view: ## Show an implementation round as uncommitted changes in this checkout for the owner's reading, after pushing HEAD and dispatching the E2E pipeline (CHANGE=<change> [BASE=<commit>] [NO_E2E=1])
+	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)") $(if $(filter 1,$(NO_E2E)),--no-e2e)
+
+round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
+	@python3 scripts/round_view.py done
+
+round-e2e-baseline: ## Print the run before the E2E run round-view dispatched for HEAD, if it dispatched one
+	@python3 scripts/round_view.py e2e-baseline
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
@@ -859,7 +863,7 @@ check-push-ready: ## Fail unless HEAD is a clean, attached change branch that ma
 push-branch: ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
 	@python3 scripts/check_push_ready.py push
 
-validate: ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
+validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
 	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
 		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
 	@claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)"

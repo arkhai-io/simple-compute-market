@@ -161,10 +161,11 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — validation (`make validate CHANGE=<change>`) and one
-  implementation review (`make review CHANGE=<change> KIND=implementation`) of the
-  commits since the last review, run side by side; the owner's own notes on the
-  diff meanwhile, read as one set of changes with `make round-diff CHANGE=<change>`;
-  then the round triaged in a fresh session
+- what comes next — the owner reads the commits since the last round as
+  uncommitted changes (`make round-view CHANGE=<change>`, which first pushes them
+  and starts the end-to-end pipeline) and closes the view (`make round-done`);
+  then validation (`make validate CHANGE=<change>`) and one implementation review
+  (`make review CHANGE=<change> KIND=implementation`), run side by side; then the
+  round triaged in a fresh session
   (`make triage CHANGE=<change>`), which fixes what the owner accepts; then the
   next section.

@@ -287,7 +287,10 @@ the owner overrides it.
 
 - **WHEN** the owner reads a round whose sections were each committed
 - **THEN** the round is shown as uncommitted changes over the commit the previous
-  round ended on, and the branch's commits are left as they are
+  round ended on, in the owner's own checkout, and when the reading ends the
+  branch is back at the round's commit with the commits unchanged
+- **AND** no review, validation, triage, or implementation starts while the
+  branch does not point at the round's commit
 
 #### Scenario: Validation fails beside an implementation review
 
