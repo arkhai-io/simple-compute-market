@@ -89,6 +89,22 @@ for the rest. The review found pieces outside publication that neither change ow
 the opening source check, the capacity-effect guards, and the listing payload's
 readers — which are open below.
 
+### This change removes bare metal's temporary refusal of unbacked pools
+
+`encapsulate-capacity-backing` moves every backing decision into the backing delegate
+except one: bare-metal publication's refusal of an unbacked pool. It keeps that refusal
+deliberately, as an explicit and tested comparison of the pool's backing label in
+bare-metal publication's pool reading, because it adds no unbacked bare-metal supply
+and the delegate cannot express the refusal — bare metal composes contact exchange, so
+the delegate's settlement admissibility would otherwise publish a contact-only
+unbacked listing. It is the only comparison of the label that change leaves in the
+tree.
+
+This change deletes that check and its `pool_unbacked` report, after which bare metal
+derives listings from every enabled pool advertising `bare_metal` whatever its
+backing, like every other domain, and nothing outside the delegate compares the label.
+No other mechanism replaces it.
+
 ## Open questions
 
 From the 2026-10-14 review. Each is to be decided with the maintainer, after the

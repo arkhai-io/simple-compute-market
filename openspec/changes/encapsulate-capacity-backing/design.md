@@ -217,25 +217,54 @@ downward edge between kits that `make check-architecture` permits. Capacity
 publication and resource pools belong together: every market that publishes capacity
 does so from capacity declared in pools, as API credits does with its system pool.
 
+### Divergence: admitting unbacked supply (task 1.3)
+
+Today VM derives a listing from every enabled pool advertising its mode, whatever its
+backing; bare metal refuses an unbacked pool by name; API credits reads no pool
+declaration at all — its service projects none, and its storefront locates a listing's
+quota resource through the capacity snapshot and assumes backed.
+
+Unified rule: a domain derives listings from every enabled pool that advertises its
+offering mode, whatever its backing, and binds each with the delegate its pool
+declares. Everything that differs between backed and unbacked supply follows from the
+delegate, including that an unbacked candidate left with no admissible settlement
+option yields no listing.
+
+- VM already follows it.
+- API credits: the credits service passes its pool directory to the site's capacity
+  router, as the compute provisioning service does, so its resource-pool projection
+  carries the declarations of the system pool it already seeds and migrates. At
+  listing creation the storefront resolves the quota resource's pool through
+  `read_site_declarations`, binds with that pool's delegate, and publishes the
+  `capacity_backing` label, which also brings API-credit listings within the
+  registry's backing filter. An unbacked credits pool would yield no listing, because
+  every credits mechanism issues against quota — the delegate's settlement
+  admissibility decides that, not an API-credit branch.
+- Bare metal keeps refusing unbacked pools, because this change adds no unbacked
+  bare-metal supply and the delegate cannot express the refusal: bare metal composes
+  contact exchange, so settlement admissibility alone would publish a contact-only
+  unbacked listing. The refusal stays as an explicit, temporary check in bare-metal
+  publication's pool reading — the one comparison of the label left in the tree, with
+  a test — and `unbacked-bare-metal-listings` removes it. Rejected: a per-domain
+  declaration of the backings each storefront publishes, which would be permanent
+  machinery for a state that lasts only until that change lands, after which every
+  domain would publish every backing.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. admitting unbacked supply — VM derives it, bare metal refuses it, API credits
-      reads no declarations;
-   2. binding construction — three paths;
-   3. the published label — from the binding in VM, fixed to backed in bare metal,
+   1. binding construction — three paths;
+   2. the published label — from the binding in VM, fixed to backed in bare metal,
       absent in API credits;
-   4. a binding whose backing disagrees with its source's on refresh and reopen;
-   5. source-check availability;
-   6. reconciliation scope;
-   7. hold placement;
-   8. capacity-effect guard coverage;
-   9. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   3. a binding whose backing disagrees with its source's on refresh and reopen;
+   4. source-check availability;
+   5. reconciliation scope;
+   6. hold placement;
+   7. capacity-effect guard coverage;
+   8. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
-3. Where bare metal's refusal of unbacked pools is expressed while this change keeps
-   it (task 1.3).

@@ -23,6 +23,10 @@ since 2026-10-14; not yet planned.
       for both backings; an unbacked resource is never judged against availability.
 - [ ] 1.4 **Decision gate.** Decide each open question `design.md` lists from the
       2026-10-14 review, and record each decision there.
+- [x] 1.5 **Decision gate.** Record that this change removes the refusal of unbacked
+      pools `encapsulate-capacity-backing` keeps in bare-metal publication. Decided
+      with the maintainer ("This change removes bare metal's temporary refusal of
+      unbacked pools"); planning names the deletion as a task.
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
