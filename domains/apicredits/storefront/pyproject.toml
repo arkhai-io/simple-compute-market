@@ -21,7 +21,6 @@ dependencies = [
     "arkhai-kit-site-client>=0.9.0",
     # Reading a quota resource's pool declarations from the site's projection.
     "arkhai-kit-resource-pools>=0.7.0",
-    "arkhai-kit-resource-pools-contracts>=0.2.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
