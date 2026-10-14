@@ -646,18 +646,20 @@ system status names the retired keys.
   the default generator and local-table derivation yield only the GPU counts it
   admits. `settings.toml` ships none, and absent and an empty table both mean no
   default. A malformed table — an unknown key, `min` above `max`, an `offer`, or a
-  constraint on an attribute or undefined field — stops the storefront at startup,
-  naming each problem as `admissibility.defaults.vm.<path>`. The default is parsed
+  constraint on a field that is not a quantity or is undefined — stops the
+  storefront at startup, naming each problem as `admissibility.defaults.vm.<path>`. The default is parsed
   once at startup, so a change takes effect on restart.
 
 - **Publication never advertises an offer the policy excludes.** A stated shape
   whose `offer` falls outside its resolved range is not published, and an open
-  listing for it closes. A listing whose policy cannot be computed — a constraint on
-  an attribute, an undefined field, or an unknown key; bounds that merge to an empty
-  range; or one base shape stated twice with different constraints — closes alone,
-  and the pool's other listings publish. A base shape that cannot be read, including
-  one whose required `gpu.count` states no `offer`, still holds the whole pool.
-  System status reports the first two per site in `publication_derivation`, under
+  listing for it closes. Base shapes are read first: a base shape that cannot be
+  read, including one whose required field is given a constraint mapping with no
+  `offer`, holds the whole pool. Once every base shape reads, a listing whose policy
+  cannot be computed — a constraint on a field that is not a quantity, on an
+  undefined field, or with an unknown key; bounds that merge to an empty range; or
+  one base shape stated twice with different constraints — closes alone, and the
+  pool's other listings publish. System status reports the inadmissible offers and
+  the uncomputable policies per site in `publication_derivation`, under
   `inadmissible_listing_shapes` and `unusable_shape_constraints`, naming the tier,
   path, and problem, each tier's conflicting value, or each conflicting entry.
 

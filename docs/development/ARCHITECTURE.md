@@ -448,12 +448,14 @@ policy would sell: keeping the listing open would advertise what that policy may
 exclude, and since a site cannot be refused a projection, closing is the signal that
 reaches the site's administrator.
 
-So an unreadable family rate or asking rate holds the pool, an unreadable listing-shape
-list holds the pool, and a listing whose admissibility policy cannot be computed —
-unreadable constraints, an empty merged range, or one base shape stated twice with
-different constraints — closes, alone, while the pool's other listings publish. A
-storefront's own configuration is its operator's input, so an unreadable configured
-term stops startup instead. Each term's rule is normative in
+So an unreadable family rate or asking rate holds the pool, and so does an unreadable
+listing-shape list. Base shapes are read before constraints, so a constraint mapping
+that states no `offer` for a required field leaves its base shape unreadable and holds
+the pool too. Only when every base shape reads does a listing whose admissibility
+policy cannot be computed — unreadable constraints, an empty merged range, or one base
+shape stated twice with different constraints — close, alone, while the pool's other
+listings publish. A storefront's own configuration is its operator's input, so an
+unreadable configured term stops startup instead. Each term's rule is normative in
 [storefront publication](../../openspec/specs/storefront-publication/spec.md); the
 rationale for admissibility's is in its
 [architecture](../../openspec/specs/storefront-publication/architecture.md#shape-constraints).

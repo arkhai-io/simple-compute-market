@@ -522,6 +522,13 @@ ends with archival (7.11, appended at closeout).
 - [x] 7.11 **Archival.** Archive with `openspec archive capacity-shape-envelope -y`
       (1.14.0), merging the deltas; check each merged `spec.md`; point the index row at
       the archived directory; run `openspec validate --specs --strict`.
+      Closeout review 21 F1: the D8 summaries in `ARCHITECTURE.md` and
+      `DEPLOYMENT_AND_CONFIG.md` now say base shapes are read first, so a constraint
+      mapping with no `offer` on a required field holds the pool, and only a readable
+      base shape's uncomputable policy closes its listing. Worded by field kind and
+      requiredness rather than by naming a field, so it holds if the schema's fields
+      move. Documentation only; the scoped citation check and
+      `openspec validate --specs --strict` pass.
 
 ## Design promotion record
 
