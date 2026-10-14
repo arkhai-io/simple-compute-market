@@ -483,14 +483,20 @@ NOT change any pool's advertising surface or admission behavior.
 ### Requirement: Listing-shape hint validation
 
 A Resource Pool management surface that accepts `listing_shapes` MUST require a mapping from
-offering mode to a non-empty list of structurally well-formed family-grouped capability
-shapes. A well-formed shape is a non-empty mapping of family name to a non-empty mapping of
-field name to a scalar value. The check MUST be the shared structural check the capability
-shape utility provides, and MUST NOT depend on any domain's family or field names. Which
-families and fields are meaningful, and which are required, MUST be validated by the domain
-that reads the hint. Every surface capable of persisting a Resource Pool's `policy_tags` MUST
-apply the same check: the bulk pool-document import path and the individual pool admin API
-(`create`/`replace`/`update`).
+offering mode to a non-empty list of structurally well-formed stated listing shapes. A
+well-formed stated listing shape is a non-empty mapping of family name to a non-empty
+mapping of field name to either a scalar value or a structurally valid constraint mapping.
+The check MUST be the shared structural split the shape admissibility kit provides, which
+applies the capability shape utility's structural check to the base shape, and MUST NOT
+depend on any domain's family or field names. Which families and fields are meaningful,
+which are required, and which may carry constraints MUST be validated by the domain that
+reads the hint. A list whose entries state one base shape with different constraints
+MUST be rejected, because it contradicts itself whichever storefront reads it; the
+shared list-level split detects it without domain vocabulary, and identical entries MUST
+be accepted. A pool's stated shapes MUST NOT be judged against any storefront's
+configured constraints at write. Every surface capable of persisting a Resource Pool's
+`policy_tags` MUST apply the same check: the bulk pool-document import path and the
+individual pool admin API (`create`/`replace`/`update`).
 
 #### Scenario: Operator supplies a malformed shape list
 
@@ -505,6 +511,35 @@ apply the same check: the bulk pool-document import path and the individual pool
   does not define
 - **THEN** Resource Pool validation accepts it, and the VM storefront reports the pool's
   shapes as unreadable when it derives listings
+
+#### Scenario: Operator supplies a malformed constraint
+
+- **WHEN** an operator submits a stated shape whose constraint mapping states a `min`
+  above its `max`, a non-positive value, an `offer` outside its own range, no key, or an
+  unknown key, through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy
+  metadata
+
+#### Scenario: Operator constrains an attribute
+
+- **WHEN** an operator submits a structurally valid constraint mapping on a field the VM
+  domain defines as an attribute
+- **THEN** Resource Pool validation accepts it, and the VM storefront reports that
+  listing's constraints as unusable when it derives listings
+
+#### Scenario: Operator states one base shape with different constraints
+
+- **WHEN** an operator submits a VM list holding `gpu: {model: H100, count: {offer: 1,
+  max: 4}}` and `gpu: {model: H100, count: {offer: 1, max: 8}}`, through any pool-write
+  surface
+- **THEN** Resource Pool validation rejects the update naming both entries, without
+  changing the stored policy metadata
+
+#### Scenario: Operator repeats an identical shape
+
+- **WHEN** an operator submits a VM list holding the same shape twice, with the same
+  constraints
+- **THEN** Resource Pool validation accepts it
 
 ### Requirement: Asking-rate hint validation
 
@@ -572,7 +607,7 @@ projected verbatim. Values of `pricing` other than rate lists are unaffected.
 
 ## Evidence
 
-- Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools/tests/unit/test_hints.py`.
+- Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools-contracts/tests/unit/test_hints.py`.
 - Pool write models requiring `policy_tags` and refusing invalid declarations, including a malformed deliverable set: `kit/resource-pools/tests/unit/test_pool_models.py`.
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, provider replacement, identical declaration validation across individual and bulk administration, backing immutability, path-named import errors, and stored-declaration checks including the startup repair path: `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 - Existing-pool derivation, default-pool inclusion, idempotency, narrowing, drift rejection, and INFO evidence: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
@@ -581,7 +616,7 @@ projected verbatim. Values of `pricing` other than rate lists are unaffected.
 - Typed administrative API, default-pool invariant, canonical round trip, host assignment, an execution-less pool advertising through a configuration-free provider, and server-side refusal of invalid declarations: `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - Both declarations on every projected pool, each resolving through the shared resolver: `provisioning/compute/service/tests/integration/test_capacity_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `provisioning/compute/service/tests/unit/test_database.py`.
-- `listing_shapes` hint structure, validated identically on create, replace, patch, and bulk import: `kit/resource-pools/tests/unit/test_hints.py` and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
+- `listing_shapes` hint structure, including constraint mappings and a base shape stated twice with different constraints, validated identically on create, replace, patch, and bulk import: `kit/resource-pools-contracts/tests/unit/test_hints.py` (`TestListingShapesHint`) and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
 - `asking_rates` structure, including the unit-token period and a stated null, and its validation identically on every pool-write surface: `kit/resource-pools/tests/unit/test_asking_rates.py` and `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 
 ## Scheduling membership and draining

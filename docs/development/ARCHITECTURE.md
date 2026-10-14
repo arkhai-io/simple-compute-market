@@ -124,7 +124,7 @@ In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary an
 
 Repository-wide kit is not a flat peer group. It has an explicit one-way hierarchy:
 
-1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, and `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape.
+1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape, and `kit/capability-admissibility`'s evaluation of which shapes a seller will sell, the only reader of a shape constraint, which imports only the standard library and the shape kit so storefronts, buyers, and pool administration can all evaluate a policy (see the [market composition architecture](../../openspec/specs/market-composition/architecture.md#capability-shape-admissibility)).
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
 4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks, and owns the storefront loop controller every storefront holds its timer loops with, and may depend only on core storefront contracts and foundation capabilities.
@@ -386,7 +386,7 @@ A domain that contributes routes to a service it does not compose declares their
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
-| VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; feasibility is judged against the site's declarations, and admission remains the site's |
+| VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; constraints a stated shape carries, merged with the storefront's configured `[admissibility.defaults.vm]`, decide which shapes it would sell, and a site's constraints are advisory input to that policy; feasibility is judged against the site's declarations, and admission remains the site's |
 | A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
 | Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
@@ -431,8 +431,32 @@ decision, and site admission keeps the last word on whether a deal is scheduled 
 provisioned. Existing terms already behave this way. A dimension a VM shape omits is
 outside the listing's commitment and is supplied by the pool's defaults or downstream
 provisioning; a capacity family with no rate is not charged; a pool that states no
-asking rate publishes none. A term that is present but cannot be read is not an
+asking rate publishes none; an offer stated without a range commits nothing about
+whether another value is negotiable, and a field no constraint bounds is not bounded
+by admissibility. A term that is present but cannot be read is not an
 omission, and asking rates and family rates never treat it as one.
+
+### Holding or closing a listing the storefront cannot fully derive
+
+When a storefront cannot derive every term of a listing, it either holds the listing,
+keeping the last-published offer standing, or closes it. One test decides which. Hold
+when the last-published offer is still one the storefront made and the trouble is that
+a declaration cannot be read: an unreadable declaration is not a withdrawn one, and
+delisting on a parse error would turn every malformed input into a withdrawal. Close
+when every declaration can be read but the storefront can no longer say what its own
+policy would sell: keeping the listing open would advertise what that policy may
+exclude, and since a site cannot be refused a projection, closing is the signal that
+reaches the site's administrator.
+
+So an unreadable family rate or asking rate holds the pool, an unreadable listing-shape
+list holds the pool, and a listing whose admissibility policy cannot be computed —
+unreadable constraints, an empty merged range, or one base shape stated twice with
+different constraints — closes, alone, while the pool's other listings publish. A
+storefront's own configuration is its operator's input, so an unreadable configured
+term stops startup instead. Each term's rule is normative in
+[storefront publication](../../openspec/specs/storefront-publication/spec.md); the
+rationale for admissibility's is in its
+[architecture](../../openspec/specs/storefront-publication/architecture.md#shape-constraints).
 
 ### Storefront capacity boundary
 

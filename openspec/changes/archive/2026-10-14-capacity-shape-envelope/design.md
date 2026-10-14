@@ -502,6 +502,73 @@ removing constraint mappings from pool hints and stored overrides; a constraint 
 place makes the reverted storefront hold the pool, and the reverted provisioning service
 refuse writes that keep it.
 
+## Implementation decisions
+
+Made during implementation and its review rounds, within the decisions above.
+
+- **Kit edges.** Without a schema, an unreadable `offer` (`{offer: 0}`) is a constraint
+  problem; with one it is a base-shape problem. A constraint on an undefined field is a
+  constraint problem only when it states no offer; with one, the base shape names the
+  field. List entries compare by a schema-free signature in which an `offer`-only
+  mapping equals its scalar and an empty mapping differs from stating nothing. Problems
+  also carry `entries` (list positions) and `bounds` (each tier's value for an empty
+  range), which the reports need; `tier` is `None` on a problem with an evaluated shape
+  itself.
+- **Accessor thresholds** (implementation reviews 07 F2, 12 F1). `at_most` and
+  `at_least` accept any finite real and floor or ceil it, so every answer is a member of
+  the set; a rational is used unconverted, since converting `10**1000` to a float
+  overflowed. Booleans, non-numbers, and non-finite values raise.
+- **Opacity by convention** (08 F4, declined by the owner). `Declaration` is a frozen
+  dataclass because its equality is what makes a scalar and its `offer` mapping compare
+  equal; `ResolvedPolicy` has a public constructor. No caller reads either.
+- **The generator** takes the policy as a required argument; with no configured default
+  the caller passes the policy resolved from no tiers. It steps through the answer with
+  `at_least`, so it assumes no interval. Local-table derivation reuses it with one
+  synthetic member carrying the row's model and range.
+- **Key readers take the default.** The readers reconciliation closes and reopens by
+  (`current_available_resource_keys`, `stale_open_listing_ids`,
+  `closed_available_listing_ids`) and the inventory guard take `admissibility_default`
+  as a required keyword: the default decides which listings exist, so a reader without
+  it would never close a listing the default excludes. Agreed with the owner in
+  section 4.
+- **Excluded listings close through a pool hold** (07 F1). An unreadable asking or
+  family rate, checked after admissibility, holds the pool, and stale reconciliation
+  skips held listings, so an excluded listing would stay open. Derivation records each
+  excluded listing as `(site, pool, shape digest)`, and stale reconciliation closes a
+  held listing it names while the pool's other listings stay held.
+- **Report tiers** (19 F1). Every unreadable stated-list problem carries its source tier
+  as a prefix in the derivation report and the publication warning.
+- **An asking rate for an excluded shape** is also reported under
+  `unpublished_asking_rates`, beside the admissibility keys. Kept: the rate reaches no
+  buyer.
+- **The override contribution** calls `split_listing_shapes` and `resolve` itself rather
+  than the listings package's resolver, because only the split carries each listing's
+  list positions, which every refusal names.
+- **Where the default is parsed.** `[admissibility.defaults.vm]` is parsed first in
+  `server._build_vm_services`, before the database, signer, or any client, rather than
+  as a named startup step, because the override contribution is constructed there and
+  needs it. A refused default therefore fails the lifespan with its `RuntimeError`
+  rather than under a step name in the startup log. Values that are not tables are
+  refused as well as malformed tables.
+- **Test location** (08 F3). `arkhai_vms_listings` has no suite of its own; its
+  behaviour tests live in the VM storefront's unit suite, beside seventeen existing
+  modules testing it. The owner deferred a suite of the package's own at closeout
+  (2026-10-14), with no owning change: the tests are at the right level and run in
+  `make test`, and a separate suite earns its packaging change once a second consumer
+  runs the package's derivation code. Listed in the index's unowned work.
+- **Test configuration.** A setting under `admissibility` is replaced at its root in
+  tests: Dynaconf's dotted `unset` leaves the nested table behind, which leaked a
+  default into later tests.
+- **Locking against a shared wheelhouse.** `make lock` resolves against whatever `.dist`
+  holds, which may carry higher-versioned wheels built on other branches; the first
+  relock in section 2 picked them up and was reverted, `.dist` rebuilt from empty, and
+  relocked. Each relock's added lines were checked to name only the change's wheels.
+- **End-to-end staging** (16 F1). Stage 08 requires an independent stage 07c that
+  deletes any override left for the pool and records `override_cleared`, so a pricing
+  stage's failure surfaces as a skip rather than a stage 08 failure. Stage 07a has the
+  same unrecorded dependency on 06c's cleanup; it predates this change and was recorded,
+  not fixed, at the owner's request.
+
 ## Pilot merge reconciliation (2026-10-08)
 
 This pilot owns the provisioning corrections exposed while merging development
