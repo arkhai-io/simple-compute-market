@@ -36,6 +36,16 @@ siteBindingsSecret:
 sitePlacement: fill_first
 
 publicUrl: http://bare-metal-storefront:8000
+# Optional publication registry. URL, authority, and principals are set together.
+registry:
+  url: ""
+  authority: ""
+  principals: []
+  # Existing Secret containing the registry bearer, separate from the signer.
+  # An empty name sends no bearer; the credential never enters Helm values.
+  apiKeySecret:
+    name: ""
+    key: api-key
 # Alkahest inputs: all three are set, or none is. Whether Alkahest is enabled
 # is the settlement Secret's to say; the storefront refuses to start when a
 # configured Alkahest section lacks these, or when they are set with none.

@@ -25,6 +25,15 @@ siteBindingsSecret:
 sitePlacement: round_robin
 
 publicUrl: https://bare-metal.example.com
+registry:
+  url: https://registry.example.com/compute
+  authority: registry.example.com
+  principals:
+    - scheme: ed25519
+      identifier: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+  apiKeySecret:
+    name: bare-metal-storefront-registry
+    key: api-key
 sellerEvmAddress: ""
 chains: {}
 walletKeySecret:

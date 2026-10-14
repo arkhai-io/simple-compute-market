@@ -883,6 +883,8 @@ The bare-metal storefront requires one strict shared settlement JSON root throug
 
 The Compose wrapper forwards `BARE_METAL_STOREFRONT_CHAINS_JSON` as the chains and reads the wallet key from an optional `BARE_METAL_STOREFRONT_WALLET_ENV_FILE`, separate from the identity credential file (Compose 2.24 or later supports the optional file). The Helm chart mounts the settlement JSON from an existing Secret. Its `sellerEvmAddress`, `chains`, and `walletKeySecret` are set together or left empty together; rendering fails otherwise. `walletKeySecret` references an existing Secret rather than rendering key material, and `alkahestAddressBook` mounts an existing ConfigMap read-only.
 
+Bare-metal publication reads `BARE_METAL_STOREFRONT_REGISTRY_URL`, `BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY`, and `BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS` (a JSON array of canonical public principals). The dedicated Helm chart exposes them through `registry.url`, `registry.authority`, and `registry.principals`, set together or left unconfigured. Its optional `registry.apiKeySecret.name` and `.key` reference an existing Secret for `BARE_METAL_STOREFRONT_REGISTRY_API_KEY`; an empty Secret name omits that variable. An unset or empty API key sends no bearer. The bearer is used for publication and the signed registry reachability read, never replaces the marketplace signer or registry trust pin, and is excluded from configuration repr, status, and logs. Do not put its value into Helm values or a ConfigMap.
+
 The selected-site authority owns inventory, executor routing, provisioning credentials, and teardown. The payments authority owns financial state. Buyer, storefront, site, and payment credentials retain their separate authority boundaries.
 
 ## Current limits

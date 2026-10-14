@@ -11,6 +11,7 @@
     "siteBindingsSecret",
     "sitePlacement",
     "publicUrl",
+    "registry",
     "sellerEvmAddress",
     "chains",
     "walletKeySecret",
@@ -56,6 +57,44 @@
     "siteBindingsSecret": {"$ref": "#/definitions/secretReference"},
     "sitePlacement": {"enum": ["fill_first", "round_robin"]},
     "publicUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "authority", "principals", "apiKeySecret"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^(|https?://.+)$"},
+        "authority": {"type": "string"},
+        "principals": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/publicIdentity"}
+        },
+        "apiKeySecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "key"],
+          "properties": {
+            "name": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "if": {"properties": {"url": {"const": ""}}},
+      "then": {
+        "properties": {
+          "authority": {"const": ""},
+          "principals": {"maxItems": 0},
+          "apiKeySecret": {"properties": {"name": {"const": ""}}}
+        }
+      },
+      "else": {
+        "properties": {
+          "authority": {"type": "string", "pattern": "\\S"},
+          "principals": {"minItems": 1}
+        }
+      }
+    },
     "sellerEvmAddress": {
       "type": "string",
       "pattern": "^(|0x[0-9a-fA-F]{40})$"

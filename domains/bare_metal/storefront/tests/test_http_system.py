@@ -607,11 +607,14 @@ def test_each_status_check_is_judged_by_its_own_rule() -> None:
     assert not _status_check_healthy("alkahest", "error: no client")
 
 
-def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable() -> None:
+@pytest.mark.parametrize("api_key", [None, "development-registry-api-key"])
+def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable(api_key) -> None:
     """The registry client verifies every reply, so an unsigned one reads as
     the client's own 502 rather than as whatever status it carried."""
     configuration = BareMetalRegistryConfiguration(
         url="http://registry",
+        # Deterministic development bearer; never use it on a public network.
+        api_key=api_key,
         trust=RegistryAuthorityTrust(
             authority="registry",
             principals=TrustedIdentitySet(
@@ -619,7 +622,14 @@ def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable() -> None:
             ),
         ),
     )
-    transport = httpx.MockTransport(lambda _request: httpx.Response(503, text="down"))
+
+    def read_health(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("Authorization") == (
+            f"Bearer {api_key}" if api_key else None
+        )
+        return httpx.Response(503, text="down")
+
+    transport = httpx.MockTransport(read_health)
 
     result = asyncio.run(configuration.reachability(SELLER_SIGNER, transport=transport))
 
