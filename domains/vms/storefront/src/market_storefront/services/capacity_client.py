@@ -52,6 +52,7 @@ from market_core import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
+from market_storefront import container
 from market_storefront.utils.config import get_provisioning_authorities
 
 logger = logging.getLogger(__name__)
@@ -227,8 +228,6 @@ def build_capacity_runtime(
 ) -> CapacityRuntime:
     """Return the root-composed runtime for legacy non-root VM call sites."""
 
-    from market_storefront import container
-
     return build_capacity_runtime_for(
         sqlite_client_factory,
         signer=container.resolved_marketplace_signer,
@@ -247,9 +246,8 @@ async def capacity_binding_for_listing(
 ) -> PublicationBinding:
     """Resolve the VM listing's exact durable site, mode, source, and backing.
 
-    The result is a ``CapacityBinding`` only when the durable binding records
-    the listing as capacity-backed; callers that reserve, commit, or release
-    require that class and refuse an ``UnbackedBinding``.
+    Every capacity effect takes this binding, and the capacity runtime's guard
+    refuses one whose backing admits no effect before any site call.
     """
     from arkhai_vms_listings.models import Listing
 
@@ -468,8 +466,6 @@ def build_fulfillment_client(
     aggregator is immediately visible to the other.
     """
     sites, _ = _capacity_settings()
-    from market_storefront import container
-
     signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")

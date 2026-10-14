@@ -20,9 +20,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
+from market_resource_pools_contracts.backing import legacy_producer_backing
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     declared_deliverable_modes,
 )
@@ -2530,7 +2530,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             except ValueError as exc:
                 raise SchemaDriftError(f"{label}: {exc}") from exc
             policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
-            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = legacy_producer_backing().label
             connection.execute(
                 text(
                     "UPDATE resource_pools SET policy_tags=:policy_tags "
@@ -2546,7 +2546,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
                 "advertisable=%s backing=%s",
                 pool["id"],
                 ", ".join(sorted(deliverable)) or "none",
-                CAPACITY_BACKED,
+                legacy_producer_backing().label,
             )
 
 

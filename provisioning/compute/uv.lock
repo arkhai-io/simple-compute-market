@@ -149,7 +149,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
@@ -159,19 +159,19 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

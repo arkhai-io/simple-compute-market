@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import enum
 import sqlite3
 from dataclasses import dataclass, field
 from collections.abc import Collection
@@ -14,6 +15,12 @@ from arkhai_vms import (
     listing_pool_key,
     listing_resource_key,
     listing_shape_key,
+)
+
+from market_resource_pools_contracts.backing import (
+    CapacityBacking,
+    capacity_backing,
+    labels_reconciled_by_availability,
 )
 
 from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
@@ -843,14 +850,13 @@ def _projected_pool_rows(
         "sla": sla,
         "listing_cardinality_mode": mode,
         "offering_mode": "vm",
-        "capacity_backing": declaration.capacity_backing,
+        "capacity_backing": declaration.backing.label,
         "listing_cardinality_mode_explanation": cardinality.fallback_explanation,
         "listing_cardinality_mode_deprecated_key_notice": (
             cardinality.deprecated_key_notice
         ),
     }
 
-    backed = declaration.capacity_backing == "backed" and not declared_only
     pool_buckets = (
         None
         if capacity_buckets is None
@@ -864,47 +870,56 @@ def _projected_pool_rows(
     def _judge_members(shape: ResolvedShape, members: list[Mapping[str, Any]]) -> str | None:
         """None when feasible, else what the shape is not feasible against."""
         listing_resource = _shape_listing_resource(
-            shape, pool_id=pool_id, region=region, capacity_backing=declaration.capacity_backing,
+            shape, pool_id=pool_id, region=region, capacity_backing=declaration.backing.label,
             resource_id=(
                 str(members[0].get("physical_resource_id"))
                 if mode == "specific_resource" and members
                 else None
             ),
         )
-        if not any(
-            shape_feasible.member_feasible(
-                listing_resource, pool_id=pool_id, member=member, use_available=False
-            )
-            for member in members
-        ):
-            return "declared"
-        if not backed:
-            return None
-        readable_buckets = (
-            [bucket for bucket in pool_buckets if bucket.get("available")]
-            if pool_buckets is not None
-            else None
-        )
-        if mode != "specific_resource" and pool_buckets is not None and (
-            readable_buckets or not pool_buckets
-        ):
-            # A loaded bucket family is authoritative for fungible availability,
-            # and a loaded family naming no entry for the pool means none is
-            # available. Entries that predate per-resource availability are
-            # unreadable, and only when every entry is does the pool fall back
-            # to its members.
-            feasible = any(
-                shape_feasible.bucket_feasible(listing_resource, bucket=bucket)
-                for bucket in readable_buckets or []
-            )
-        else:
+
+        def declared() -> str | None:
             feasible = any(
                 shape_feasible.member_feasible(
-                    listing_resource, pool_id=pool_id, member=member, use_available=True
+                    listing_resource, pool_id=pool_id, member=member, use_available=False
                 )
                 for member in members
             )
-        return None if feasible else "available"
+            return None if feasible else "declared"
+
+        def available() -> str | None:
+            readable_buckets = (
+                [bucket for bucket in pool_buckets if bucket.get("available")]
+                if pool_buckets is not None
+                else None
+            )
+            if mode != "specific_resource" and pool_buckets is not None and (
+                readable_buckets or not pool_buckets
+            ):
+                # A loaded bucket family is authoritative for fungible
+                # availability, and a loaded family naming no entry for the pool
+                # means none is available. Entries that predate per-resource
+                # availability are unreadable, and only when every entry is does
+                # the pool fall back to its members.
+                feasible = any(
+                    shape_feasible.bucket_feasible(listing_resource, bucket=bucket)
+                    for bucket in readable_buckets or []
+                )
+            else:
+                feasible = any(
+                    shape_feasible.member_feasible(
+                        listing_resource, pool_id=pool_id, member=member, use_available=True
+                    )
+                    for member in members
+                )
+            return None if feasible else "available"
+
+        # A declared-only derivation judges declared capacity for every
+        # backing; otherwise the pool's backing decides whether availability
+        # bounds the shape.
+        if declared_only:
+            return declared()
+        return declaration.backing.judge(declared, available)
 
     # Terms resolve per GPU model because the hint and configured tiers are
     # keyed by model; a listing takes its shape's model's terms.
@@ -1631,6 +1646,19 @@ def _is_held(
     )
 
 
+class ReconciliationScope(enum.Enum):
+    """Which reconciliation reads the bound listings.
+
+    Source reconciliation (the publication loop) acts on every listing whose
+    source changed. Availability reconciliation (capacity events, a release, a
+    failed deal, an administrator's reservation) acts only on listings whose
+    backing availability bounds, which the backing registry names.
+    """
+
+    SOURCE = "source"
+    AVAILABILITY = "availability"
+
+
 @dataclass(frozen=True, slots=True)
 class BoundVmListing:
     """One bound VM listing as reconciliation reads it."""
@@ -1638,7 +1666,7 @@ class BoundVmListing:
     listing_id: str
     listing_resource: dict[str, Any]
     site_id: str
-    capacity_backing: str
+    backing: CapacityBacking
     source_envelope: Mapping[str, Any] | None = None
 
     @property
@@ -1650,14 +1678,13 @@ def _bound_vm_listings(
     db_path: str,
     *,
     open_listings: bool,
-    backed_only: bool,
+    scope: ReconciliationScope,
 ) -> list[BoundVmListing]:
     """Bound VM listings with their binding's site and backing.
 
     Closed listings exclude those their seller closed: no reconciliation path
-    reopens a listing its seller withdrew. ``backed_only`` restricts the read to
-    listings bound as capacity-backed, which is all availability reconciliation
-    may act on.
+    reopens a listing its seller withdrew. The availability scope reads only
+    listings whose bound backing availability reconciliation may touch.
     """
     clauses = [
         "l.status = 'open'"
@@ -1665,8 +1692,13 @@ def _bound_vm_listings(
         else "l.status != 'open' AND l.closed_by IS NOT 'seller'",
         "b.offering_mode = 'vm'",
     ]
-    if backed_only:
-        clauses.append("b.capacity_backing = 'backed'")
+    params: list[str] = []
+    if scope is ReconciliationScope.AVAILABILITY:
+        labels = sorted(labels_reconciled_by_availability())
+        if not labels:
+            return []
+        clauses.append(f"b.capacity_backing IN ({', '.join('?' for _ in labels)})")
+        params.extend(labels)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
@@ -1676,12 +1708,13 @@ def _bound_vm_listings(
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE {' AND '.join(clauses)}
-            """
+            """,
+            params,
         ).fetchall()
     finally:
         conn.close()
     out: list[BoundVmListing] = []
-    for listing_id, raw, site_id, capacity_backing, envelope in rows:
+    for listing_id, raw, site_id, capacity_backing_label, envelope in rows:
         if not raw or not site_id:
             continue
         try:
@@ -1694,7 +1727,7 @@ def _bound_vm_listings(
                     str(listing_id),
                     parsed,
                     str(site_id),
-                    str(capacity_backing),
+                    capacity_backing(capacity_backing_label),
                     _source_envelope(envelope),
                 )
             )
@@ -1705,7 +1738,9 @@ def open_listing_resource_keys(db_path: str) -> set[str]:
     """Return exact site-scoped keys covered by bound open VM listings."""
 
     covered: set[str] = set()
-    for listing in _bound_vm_listings(db_path, open_listings=True, backed_only=False):
+    for listing in _bound_vm_listings(
+        db_path, open_listings=True, scope=ReconciliationScope.SOURCE
+    ):
         key = listing.key
         if key is not None:
             covered.add(key)
@@ -1719,7 +1754,7 @@ def stale_open_listing_ids(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]],
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
-    backed_only: bool,
+    scope: ReconciliationScope,
     shape_feasible: ShapeFeasibility,
     admissibility_default: Declaration | None,
 ) -> list[str]:
@@ -1729,13 +1764,11 @@ def stale_open_listing_ids(
     is every listing of a configured site whose projection is unknown. A
     listing whose admissibility policy cannot be computed or excludes its offer
     is stale even when a later check holds the rest of its pool.
-    ``backed_only`` has no default because the two reconciliations differ:
-    source reconciliation (the publication loop) closes any listing whose
-    source is gone, while availability reconciliation (capacity events, a
-    release, a failed deal) acts only on capacity-backed listings, since no
-    availability figure describes an unbacked one. ``admissibility_default``
-    is the storefront's configured default, which publication applies, so a
-    listing whose offer it excludes is stale here too.
+    ``scope`` has no default because the two reconciliations differ: source
+    reconciliation closes any listing whose source is gone, while availability
+    reconciliation acts only on listings availability bounds.
+    ``admissibility_default`` is the storefront's configured default, which
+    publication applies, so a listing whose offer it excludes is stale here too.
     """
 
     holds: set[tuple[str, str, str]] = set()
@@ -1753,7 +1786,7 @@ def stale_open_listing_ids(
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(
-        db_path, open_listings=True, backed_only=backed_only
+        db_path, open_listings=True, scope=scope
     ):
         # Admissibility excluded the listing before a later rate check held
         # its pool, so it closes even though the rest of its pool is held.
@@ -1779,12 +1812,12 @@ def closed_available_listing_ids(
     configured_sites: Collection[str] = (),
     admissibility_default: Declaration | None,
 ) -> list[str]:
-    """Return closed capacity-backed VM listings that may reopen now.
+    """Return closed VM listings that availability may reopen now.
 
     This is availability reconciliation: its callers are capacity events, a
-    released reservation, and a failed deal, so it reads only listings bound as
-    capacity-backed. An unbacked listing is reopened by the publication loop,
-    which refreshes its terms from its source as it does.
+    released reservation, and a failed deal, so it reads only listings whose
+    backing availability bounds. Any other listing is reopened by the
+    publication loop, which refreshes its terms from its source as it does.
 
     A listing may reopen when its exact slice is available again, its seller did
     not close it, its source is not held, and its published identity and its
@@ -1810,7 +1843,9 @@ def closed_available_listing_ids(
     if not slices:
         return []
     available: list[tuple[int, str]] = []
-    for listing in _bound_vm_listings(db_path, open_listings=False, backed_only=True):
+    for listing in _bound_vm_listings(
+        db_path, open_listings=False, scope=ReconciliationScope.AVAILABILITY
+    ):
         listing_id = listing.listing_id
         listing_resource = listing.listing_resource
         site_id = listing.site_id
@@ -1825,8 +1860,8 @@ def closed_available_listing_ids(
             stored_terms={},
             fresh_resource=slice_identity(fresh),
             fresh_terms={},
-            binding_backing=listing.capacity_backing,
-            source_backing=str(fresh.get("capacity_backing")),
+            binding_backing=listing.backing,
+            source_backing=capacity_backing(fresh.get("capacity_backing")),
         )
         if comparison.outcome in REFUSE:
             logger.warning(

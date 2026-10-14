@@ -59,6 +59,23 @@ class SQLiteClient(CoreSQLiteClient):
             actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
             if not columns <= actual:
                 raise RuntimeError("incompatible API-credit settlement schema; explicitly reset the database")
+        # Every capacity effect, reconciliation, and recheck reads a listing's
+        # durable binding, and a listing created before bindings were recorded
+        # has none to read. There is no record to derive one from, so such a
+        # database is refused rather than adopted.
+        unbound = cur.execute(
+            """
+            SELECT l.listing_id FROM listings l
+            LEFT JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
+            WHERE b.listing_id IS NULL
+            ORDER BY l.listing_id LIMIT 1
+            """
+        ).fetchone()
+        if unbound is not None:
+            raise RuntimeError(
+                f"API-credit listing {unbound[0]!r} has no durable listing binding; "
+                "this storefront requires a fresh database"
+            )
 
     async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
         return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)

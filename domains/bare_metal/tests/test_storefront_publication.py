@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 
 from arkhai_bare_metal import (
     CANDIDATE,
     HELD,
+    BACKING_CHANGED,
     IDENTITY_CHANGED,
     POOL_ADMITTED,
     POOL_HELD,
@@ -31,6 +33,16 @@ from market_capability_shape import shape_digest
 
 SHAPE = {"gpu": {"count": 8, "model": "H200"}, "memory": {"gib": 2048}}
 
+
+
+class _EveryPoolBacked(dict):
+    """Every pool these cases name declares capacity backing."""
+
+    def get(self, key, default=None):
+        return BACKED
+
+
+_BACKED = _EveryPoolBacked()
 
 def _resource(
     resource_id,
@@ -94,6 +106,7 @@ def test_each_resource_falls_into_exactly_one_class():
 
     classification = classify_bare_metal_resources(
         generation,
+        pool_backings=_BACKED,
         pool_admission={
             "pool-1": POOL_ADMITTED,
             "pool-unresolved": POOL_HELD,
@@ -115,12 +128,26 @@ def test_each_resource_falls_into_exactly_one_class():
     assert [c["physical_resource_id"] for c in classification.candidates] == ["free"]
 
 
+def test_availability_bounds_only_backed_supply():
+    classification = classify_bare_metal_resources(
+        _generation(_resource("leased", available=False)),
+        pool_backings={"pool-1": UNBACKED},
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    assert _classes(classification) == {"leased": CANDIDATE}
+    (candidate,) = classification.candidates
+    assert candidate["listing_resource"]["capacity_backing"] == "unbacked"
+
+
 def test_a_held_pool_holds_even_a_disabled_or_busy_resource():
     classification = classify_bare_metal_resources(
         _generation(
             _resource("a", pool_id="p", enabled=False),
             _resource("b", pool_id="p", available=False),
         ),
+        pool_backings=_BACKED,
         pool_admission={"p": POOL_HELD},
         pool_regions=_regions("p"),
     )
@@ -131,6 +158,7 @@ def test_a_held_pool_holds_even_a_disabled_or_busy_resource():
 def test_a_candidate_carries_its_source_and_listing():
     classification = classify_bare_metal_resources(
         _generation(_resource("r1")),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
@@ -170,6 +198,7 @@ def test_a_candidate_carries_its_source_and_listing():
 def test_two_identical_declarations_publish_two_listings_with_one_shape():
     classification = classify_bare_metal_resources(
         _generation(_resource("r1"), _resource("r2")),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
@@ -182,6 +211,7 @@ def test_two_identical_declarations_publish_two_listings_with_one_shape():
 def test_a_pool_without_a_region_holds_its_resources():
     classification = classify_bare_metal_resources(
         _generation(_resource("r1"), _resource("r2", available=False)),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions={"pool-1": None},
     )
@@ -206,6 +236,7 @@ def test_a_pool_without_a_region_holds_its_resources():
 def test_an_unreadable_declaration_holds_only_its_own_resource(capacity, attributes, problem):
     classification = classify_bare_metal_resources(
         _generation(_resource("bad", capacity=capacity, attributes=attributes), _resource("good")),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
@@ -224,6 +255,7 @@ def test_accounting_attributes_are_not_shape_input():
                 attributes={"gpu_model": "H200", "physical_host_id": "p", "rack": "7"},
             )
         ),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
@@ -235,6 +267,7 @@ def test_accounting_attributes_are_not_shape_input():
 def test_publication_only_capabilities_are_flagged_as_ignored():
     classification = classify_bare_metal_resources(
         _generation(_resource("r1", capabilities={"gpu_model": "B200"})),
+        pool_backings=_BACKED,
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
@@ -289,9 +322,10 @@ def _stored():
     return resource, terms
 
 
-def _compare(fresh_resource, fresh_terms):
+def _compare(fresh_resource, fresh_terms, *, backing_changed=False):
     resource, terms = _stored()
     return compare_bare_metal_listing(
+        backing_changed=backing_changed,
         stored_resource=resource,
         stored_terms=terms,
         fresh_resource=fresh_resource,
@@ -348,11 +382,30 @@ def test_a_field_the_stored_listing_never_published_is_no_commitment():
     del stored["gpu_model"]
 
     comparison = compare_bare_metal_listing(
+        backing_changed=False,
         stored_resource=stored,
         stored_terms=terms,
         fresh_resource=resource,
         fresh_terms=terms,
     )
+
+    assert comparison.outcome == UNCHANGED
+
+
+def test_a_changed_backing_is_decided_before_any_other_field():
+    resource, terms = _stored()
+
+    comparison = _compare(
+        {**resource, "host_id": "machine-2"}, terms, backing_changed=True
+    )
+
+    assert comparison.outcome == BACKING_CHANGED
+
+
+def test_backing_is_not_a_term_refreshed_in_place():
+    resource, terms = _stored()
+
+    comparison = _compare({**resource, "capacity_backing": "unbacked"}, terms)
 
     assert comparison.outcome == UNCHANGED
 

@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from market_capability_shape import FieldKind, shape_digest, unflatten_shape
+from market_resource_pools_contracts.backing import CapacityBackingLabel
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
@@ -79,10 +80,10 @@ class BareMetalListing(BaseModel):
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     offering_mode: Literal["bare_metal"] = "bare_metal"
-    # Every bare-metal listing is backed by one selected-site Physical Resource.
+    # The label of the backing its pool declares, which its binding records.
     # Required with no default so a listing that does not disclose it is
     # refused rather than classified.
-    capacity_backing: Literal["backed"] = Field(
+    capacity_backing: CapacityBackingLabel = Field(
         description="Whether an admission authority stands behind the listing.",
     )
     host_id: str = Field(

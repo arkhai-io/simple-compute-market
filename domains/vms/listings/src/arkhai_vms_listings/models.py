@@ -1,6 +1,6 @@
 from enum import Enum
 import re
-from typing import Any, Literal, Union
+from typing import Any, Union
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -15,6 +15,7 @@ from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
 from market_identity import Identity
+from market_resource_pools_contracts.backing import CapacityBackingLabel
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -319,7 +320,7 @@ class ComputeResource(ComputeDomainResource):
         description="How this slice is exposed: bare_metal | vm | container",
     )
 
-    capacity_backing: Literal["backed", "unbacked"] | None = Field(
+    capacity_backing: CapacityBackingLabel | None = Field(
         default=None,
         description=(
             "Whether an admission authority stands behind this listing. "

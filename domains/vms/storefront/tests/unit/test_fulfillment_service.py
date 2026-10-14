@@ -205,7 +205,7 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
         negotiation_id=lifecycle.evidence.negotiation_id
     )
     with pytest.raises(RuntimeError, match="contract reverted"):
-        await VmAlkahestSellerStage(None).continue_delivery(
+        await VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery(
             evidence=lifecycle.evidence,
             db=client,
             delivery=delivery,

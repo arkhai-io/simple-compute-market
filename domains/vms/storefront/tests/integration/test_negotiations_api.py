@@ -20,7 +20,8 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import PublicationBinding, CapacityRuntime, CapacitySite
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
 import market_storefront.container as _container
@@ -241,10 +242,11 @@ async def api(db, monkeypatch) -> AsyncIterator[tuple[FastAPI, SQLiteClient]]:
         assert _repository is db
         listing_binding = await db.load_listing_binding(listing_id=listing_id)
         assert listing_binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             listing_binding.site_id,
             listing_binding.binding.offering_mode,
             str(listing_binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(

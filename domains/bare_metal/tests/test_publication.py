@@ -7,6 +7,8 @@ validates what it serves against.
 
 from __future__ import annotations
 
+from market_resource_pools_contracts.backing import BACKED
+
 import pytest
 from pydantic import ValidationError
 
@@ -58,7 +60,7 @@ def test_interpreter_preserves_distinct_identities_and_listing_semantics():
     generation = _parse(_projection(_pool()))
 
     (resource,) = generation.resources
-    listings = available_bare_metal_listings([resource], region="us-west")
+    listings = available_bare_metal_listings([resource], backing=BACKED, region="us-west")
 
     assert (generation.site_id, generation.revision, generation.digest) == (
         "site-a",
@@ -90,7 +92,9 @@ def test_publication_only_capabilities_are_accepted_but_never_published():
     )
     generation = _parse(_projection(_pool("pool-1", _resource(view))))
 
-    (listing,) = available_bare_metal_listings(generation.resources, region="us-west")
+    (listing,) = available_bare_metal_listings(
+        generation.resources, backing=BACKED, region="us-west"
+    )
     assert (listing.gpu_model, listing.ram_gb) == ("H200", 512)
 
 
@@ -106,7 +110,9 @@ def test_unavailable_resource_is_not_listed():
     view = build_bare_metal_publication_view(available=False)
     generation = _parse(_projection(_pool("pool-1", _resource(view))))
 
-    assert available_bare_metal_listings(generation.resources, region="us-west") == []
+    assert available_bare_metal_listings(
+        generation.resources, backing=BACKED, region="us-west"
+    ) == []
 
 
 def test_a_disabled_resource_keeps_its_enablement_beside_its_view():

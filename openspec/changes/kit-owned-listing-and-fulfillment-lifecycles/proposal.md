@@ -45,9 +45,10 @@ VM's registers a plan rebuilt from current configuration; and VM publishes and s
 buyer access material the other domains do not. `design.md`, "Input from
 `bare-metal-mock-provisioned-deal` (2026-10-07)", records the audit.
 
-The VM storefront also keeps `site_projection_cache` (270 lines) as its own view of
-per-site projection state, while bare metal reaches the same state through the
-capacity/publication kit's declaration reader and per-site hold.
+*Rescoped 2026-10-14:* replacing VM's `site_projection_cache` with kit-owned per-site
+projection state, once part of this change, moved to `share-site-projection-state`,
+the prerequisite of `unbacked-bare-metal-listings`, because it needs neither the shell
+nor the lifecycles below.
 
 The Arkhai payments cutover removes the hosted lifecycle and evidence publisher
 from the current tree. Their descriptions above retain the audit's historical
@@ -73,8 +74,6 @@ than register payments on the obligation worker.
   registering the committed plan; one access rule, with VM's stored access material
   retired; recovery resources required while a mechanism is configured, and startup
   refused while a mechanism with no configured section has unfinished obligations.
-- Replace the VM storefront's `site_projection_cache` with the capacity/publication
-  kit's per-site projection state.
 - Compose all three domains and remove every domain-local copy in this change.
 - Record, per concern, where the copies diverged and which behavior was chosen.
 
@@ -104,7 +103,7 @@ None.
 ## Impact
 
 - Code: VM `services/listing_service.py`, `listing_identity_carryover.py`,
-  `fulfillment_service.py`, `fulfillment_resume_runtime.py`, `site_projection_cache.py`;
+  `fulfillment_service.py`, `fulfillment_resume_runtime.py`;
   API-credit `listing_service.py`, `fulfillment_service.py`; bare-metal
   `fulfillment_service.py`, `hosted_lifecycle.py`, and the listing handlers in `api.py`.
   `kit/capacity-publication` and a fulfillment convergence kit gain the mechanisms.

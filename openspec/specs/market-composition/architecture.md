@@ -62,6 +62,15 @@ Dependency direction protects substitutability and testability:
 
 Type-only imports still couple packages and therefore obey the same direction.
 
+Capacity backing shows the direction at work. Its delegate lives in
+`kit/resource-pools-contracts`, a contracts package that may import no binding,
+client, or effect, so every operation takes the caller's work as an argument.
+`kit/capacity-publication` depends downward on it for the binding's delegate,
+and so does `core/storefront`, whose durable listing binding validates its
+label through the delegate's registry rather than a copy of the vocabulary; its
+SQL check on the column stays as a backstop, held equal to the registry's labels
+by a test.
+
 The direction and knowledge rules are held mechanically: `make check-architecture` classifies every project by layer, kind, and scope from its path and name, treats every import and every declared internal dependency as an edge, and fails on any the rules forbid that no owned exception row excuses (`docs/development/ARCHITECTURE.md`, "Package and dependency layers"). Ownership — whether a package holds the right responsibilities when every edge points a permitted way — remains review's.
 
 ## The compute family vocabulary
@@ -113,6 +122,14 @@ the table even when publication is disabled. VM and API-credit tables bind
 Alkahest and payments; bare-metal purchase binds payments while its seller also
 binds Alkahest and fused contact exchange. Delivery consumes validated source
 and domain facts, not the mechanism ID or an escrow-shaped progress row.
+
+Every domain's seller stage-table entry declares `fulfils_through_capacity`:
+whether settling through that mechanism delivers through capacity. It is one
+name each domain's own settlement-admissibility callback reads from the entry a
+clause's mechanism selects, not a kit protocol, because core's stage table is
+opaque by design. A stage that does not declare it cannot be constructed, so no
+mechanism is classified lazily or by a separate map that could drift from the
+table.
 
 Compatible kits may opt into a stage convention, but no shared convention or
 adapter is required or implemented. Its package is chosen when concrete reuse
@@ -173,10 +190,21 @@ Multi-site capacity publication follows the same inversion. The capacity kit
 owns exact site projection, event reconciliation, registry fan-out, durable
 publication results, and close-before-reopen ordering. A domain contributes
 schema-opaque candidates, codecs, and durable binding hooks. Each candidate
-carries one exact `CapacityBinding(site_id, offering_mode, source_id)` whose
-mode is declared by the selected Resource Pool and matches the public offer.
-Commit, release, fulfillment, and restart use the recorded site and never
-default a mode or fan out to another authority.
+carries one exact `PublicationBinding(site_id, offering_mode, source_id,
+backing)` whose mode is declared by the selected Resource Pool and matches the
+public offer, and whose `backing` is the delegate its pool's declared label
+selects. Commit, release, fulfillment, and restart use the recorded site and
+never default a mode or fan out to another authority.
+
+Every capacity effect — reserve, commit, release, lease truncation — passes
+one guarded boundary, `CapacityEffects`, composed over any aggregate capacity
+client and acting only at the sites that aggregate names. It asks the binding's
+delegate to admit the effect before checking the site, so an unbacked listing
+is refused before any site call, and a refusal is a conflict rather than an
+unknown site. `CapacityRuntime` composes one over its own aggregate; a
+storefront with its own aggregate, as bare metal's is, builds one over that,
+so whatever the aggregate records per reservation is still recorded. Nothing
+reserves, commits, releases, or truncates through an aggregate directly.
 Seller-authenticated creation carries the capacity source separately from the
 public resource. The storefront checks that source against the configured site
 topology and the parsed offer, then writes the listing projection and immutable

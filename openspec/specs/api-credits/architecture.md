@@ -117,6 +117,58 @@ Every API-credit package resolves its internal dependencies from built
 wheels, not repository-relative editable paths or `pythonpath`
 fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
 
+### Listing bindings and the bound pool
+
+An operator creates each API-credit listing over a quota resource, and several
+may sell one resource, so nothing derives a credit listing from its source. Its
+durable listing binding is written with the listing, through the same core write
+the compute storefronts use, and records the site, the `api_credits` mode, the
+quota resource as source, the pool holding it, the domain identity and version,
+and the backing label that pool declares. The derivation identity is the listing
+itself: keying it on the quota resource would refuse a second listing over one
+resource, turning a storage constraint into a product rule nobody decided. Every
+capacity effect, reconciliation, and recheck builds the listing's capacity
+binding from this record, never from the published `listing_resource`.
+
+The pool is read from the credits service's resource-pool projection, which
+carries each pool's declarations because the service hands its pool directory
+to the site's capacity router, through `read_site_declarations`. Both credit
+seller stages declare `fulfils_through_capacity`, since each issues against
+quota, so a pool declaring itself unbacked leaves no option to publish and yields
+no listing through the delegate rather than an API-credit branch. No listing
+publishes its backing label: the API-credit registry schema carries none, every
+published credit listing is backed, and adding the field would change the schema
+identity buyers match on.
+
+The recorded pool is the listing's provenance, which this domain checks; the
+binding's backing delegate decides only whether capacity is admitted and whether
+availability is asked. The listing-source check before every seller decision and
+acceptance, the reopen path, and reconciliation's source pass all read the quota
+resource from the bound pool alone. A resource now in another pool is not the
+source the listing was bound to, even when that pool declares the same backing
+and advertises API credits; a disabled, unresolvable, or no-longer-advertising
+pool, or one now declaring another backing, fails the same way.
+
+API credits has no publication loop: its listings are reconciled when the
+capacity runtime reconciles, on each capacity event and on the full reconcile a
+poller runs when it starts or finds a gap in its feed. Every such pass first
+closes each open listing its bound pool no longer supports, then runs the
+availability close and reopen. The source pass cannot live inside the
+availability close, because a resource moved between pools with its capacity
+unchanged is fed as a release, which only the reopen sees. A site whose pools
+cannot be read closes nothing, so an unreachable authority is never read as a
+withdrawn source. A pool's declarations edited in place emit no capacity event,
+so its listings close on the next pass rather than at once; the listing-source
+check refuses them meanwhile, and closing them sooner would need a periodic loop
+this domain otherwise has no use for.
+
+Negotiation's quota snapshot is read from the bound site alone, through the
+aggregate's `site(site_id)`, because the quota guard matches rows by resource and
+another site may name its resource the same way. The snapshot is captured only
+through the binding's delegate, so for a listing availability does not bound the
+guard reports itself not applicable. A hold at acceptance is placed through the
+delegate's `place_hold`.
+
 ## Current limits
 
 Current metering charges one fixed configured amount per admitted request; route-specific or variable-cost metering is not established. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.
@@ -176,6 +228,10 @@ bootstrap current migrations, republish and renegotiate. Do not adopt historical
 payment escrow rows or grant aliases. Startup rejects missing/current-marker
 schema drift and old grant shapes instead of copying/translating them. Rebuild
 `.dist` and reinit both producer and authority consumers together.
+The storefront also refuses to start against a database holding a listing with
+no durable listing binding, naming the listing and that a fresh database is
+required. There is no backfill, because a listing written without a binding
+records no pool to bind it to.
 `docs/attachments/apicredits-dispatch/first_use.py` creates and cleans fresh
 file-backed databases with controlled payment I/O and real typed credits HTTP;
 it does not qualify a live payment ledger.

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
@@ -131,7 +132,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
-        source_backing_resolver=lambda **_source: "backed",
+        source_backing_resolver=lambda **_source: BACKED,
     )
     monkeypatch.setattr(
         service,

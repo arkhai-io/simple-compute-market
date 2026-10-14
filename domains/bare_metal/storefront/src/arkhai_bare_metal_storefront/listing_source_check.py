@@ -5,7 +5,7 @@ The check itself is the domain's (``recheck_bare_metal_listing_source``). This
 module supplies what the domain function leaves to its caller: the listing's
 binding and published shape, the bound site's live projection fetched through
 that site's own trusted client, and each pool's admission and region read
-exactly as publication reads them. It answers with the policy kit's
+exactly as publication reads them, with each pool's backing delegate. It answers with the policy kit's
 ``ListingSourceVerdict``, which the runtime enforces.
 """
 
@@ -20,8 +20,10 @@ from arkhai_bare_metal import (
     recheck_bare_metal_listing_source,
     trusted_bare_metal_projection,
 )
+from market_capacity_publication import backing_changed
 from market_policy.listing_source import ListingSourceVerdict
 
+from .listing_binding import bare_metal_listing_binding
 from .site_reading import read_site_pools
 from .sqlite_client import SQLiteClient
 
@@ -65,9 +67,25 @@ def build_listing_source_check(
                 f"site {binding.site_id!r} could not confirm the listing's source: {exc}",
             )
         reading = read_site_pools(response["resource_pools"])
+        # A listing's backing is fixed for the life of its binding, so a pool
+        # that now declares another backing is a declared mismatch, decided
+        # before anything else is compared.
+        source_backing = reading.backings.get(binding.pool_id)
+        bound = await bare_metal_listing_binding(db, listing_id)
+        if (
+            bound is not None
+            and source_backing is not None
+            and backing_changed(bound, source_backing)
+        ):
+            return ListingSourceVerdict(
+                "declared_mismatch",
+                "the pool's backing differs from the listing's",
+                ("capacity_backing",),
+            )
         result = recheck_bare_metal_listing_source(
             generation,
             pool_admission=reading.admission,
+            pool_backings=reading.backings,
             pool_regions=reading.regions,
             pool_id=binding.pool_id,
             physical_resource_id=binding.physical_resource_id,

@@ -27,6 +27,7 @@ from market_site_client import (
 from arkhai_bare_metal.fixtures.publication_view import (
     validate_bare_metal_publication_view,
 )
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_resource_pools_contracts import PoolCreate
 from market_resource_pools import read_site_declarations
 from market_resource_pools_contracts import resolve_pool_declarations
@@ -606,7 +607,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     }
     assert set(resolved) == {"default", "bare-metal-west"}
     assert resolved["bare-metal-west"].advertisable_modes == frozenset({"bare_metal"})
-    assert all(declarations.backed for declarations in resolved.values())
+    assert all(declarations.backing is BACKED for declarations in resolved.values())
 
 
 @pytest.mark.asyncio
@@ -665,8 +666,8 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     reading = read_site_declarations(projection["resource_pools"])
     assert reading.compatibility_rule is False
     assert dict(reading.unresolvable) == {}
-    assert reading.resolved["vm-backed"].backed
-    assert not reading.resolved["broker-unbacked"].backed
+    assert reading.resolved["vm-backed"].backing is BACKED
+    assert reading.resolved["broker-unbacked"].backing is UNBACKED
     assert reading.resolved["broker-unbacked"].advertises("vm")
     assert reading.resolved["broker-unbacked"].enabled
 

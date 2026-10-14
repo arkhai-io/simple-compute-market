@@ -23,6 +23,7 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _migrate_pool_advertisement_and_backing,
 )
+from market_resource_pools_contracts.backing import BACKED
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools_contracts import (
     declared_deliverable_modes,
@@ -110,7 +111,7 @@ def test_previous_version_pools_advertise_what_they_delivered_and_stay_backed(ca
         # The advertising surface under the previous contract was the
         # deliverable set; admission read nothing else.
         assert resolved.advertisable_modes == declared_deliverable_modes(old)
-        assert resolved.backed
+        assert resolved.backing is BACKED
         assert declared_deliverable_modes(new) == declared_deliverable_modes(old)
         for mode in ("vm", "bare_metal", "api_credits"):
             assert pool_delivers_offering_mode(new, mode) == pool_delivers_offering_mode(

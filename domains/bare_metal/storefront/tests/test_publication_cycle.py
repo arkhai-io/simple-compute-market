@@ -30,8 +30,9 @@ from arkhai_bare_metal.fixtures.publication_view import (
     build_bare_metal_publication_view,
 )
 from core_storefront.publication_runner import PublicationPayload
-from market_capacity_publication import BoundListing, CapacityBinding
+from market_capacity_publication import BoundListing, PublicationBinding
 from market_identity import create_signer
+from market_resource_pools_contracts.backing import BACKED
 from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
@@ -40,6 +41,7 @@ from market_site_client.fixtures.resource_pools import (
 )
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
 from arkhai_bare_metal_storefront.pool_overrides import accepted_site_projection
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_service import build_publication_runtime
@@ -578,7 +580,7 @@ async def test_a_sellers_close_is_left_closed(db):
         storefront_url=STOREFRONT_URL,
     )
     await seller_close.close(
-        BoundListing(listing_id, CapacityBinding("site-a", "bare_metal", "r1")),
+        BoundListing(listing_id, PublicationBinding("site-a", "bare_metal", "r1", BACKED)),
         closed_by="seller",
     )
 
@@ -630,6 +632,59 @@ async def test_a_changed_identity_closes_and_is_not_reopened(db):
     assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
     assert storefront.registries.sent == []
     assert {"action": "refuse", "listing_id": listing_id, "reason": "identity_changed", "fields": ["host_id"]} in report["actions"]
+
+
+async def test_a_pool_recreated_with_the_opposite_backing_closes_and_is_not_reopened(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    # The listing was bound when its pool declared the opposite backing. Pool
+    # reading refuses an unbacked bare-metal pool, so the durable record is
+    # written directly, past the immutability trigger that forbids changing it.
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
+        conn.execute(
+            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
+            "WHERE listing_id=?",
+            (listing_id,),
+        )
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[1:] == ("closed", "reconciliation")
+    assert closes(report) == {listing_id: "backing_changed"}
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
+    assert {
+        "action": "refuse",
+        "listing_id": listing_id,
+        "reason": "backing_changed",
+        "fields": ["capacity_backing"],
+    } in report["actions"]
+
+
+async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    check = build_listing_source_check(db, lambda _site_id: site)
+    assert (await check(listing_id)).outcome == "matches"
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
+        conn.execute(
+            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
+            "WHERE listing_id=?",
+            (listing_id,),
+        )
+
+    verdict = await check(listing_id)
+
+    assert verdict.outcome == "declared_mismatch"
+    assert verdict.differing_fields == ("capacity_backing",)
 
 
 # -- shapes ----------------------------------------------------------------

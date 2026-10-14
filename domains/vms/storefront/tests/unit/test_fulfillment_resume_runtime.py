@@ -115,6 +115,8 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     db = lifecycle.reopen()
     order: list[str] = []
     capacity = SimpleNamespace(
+        site_names=["site-1"],
+        commit=AsyncMock(side_effect=lambda **_: order.append("commit") or _RECORDED),
         reserve=AsyncMock(
             return_value={
                 "capacity_reservation_id": "reservation-1",
@@ -122,7 +124,6 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
                 "site": "site-1",
             }
         ),
-        commit=AsyncMock(side_effect=lambda **_: order.append("commit") or _RECORDED),
     )
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(
@@ -153,6 +154,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     capacity.reserve.assert_awaited_once_with(
         claim={"gpu_count": 1, "offering_mode": "vm"},
         deal_ref={"listing_id": "listing-1", "negotiation_id": "neg-1"},
+        ttl_seconds=None,
         lease_start_utc="2026-01-01T00:00:00+00:00",
         lease_duration_seconds=7200,
         site="site-1",
@@ -228,7 +230,7 @@ async def test_post_physical_convergence_records_ready_and_claim():
             connection_details={"host": "203.0.113.1", "port": 2222, "user": "tenant"},
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
             continuation=partial(
-                VmAlkahestSellerStage(None).continue_delivery,
+                VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
                 submit=submit,
@@ -281,7 +283,7 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             connection_details={},
             authentication=None,
             continuation=partial(
-                VmAlkahestSellerStage(None).continue_delivery,
+                VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
                 submit=submit,

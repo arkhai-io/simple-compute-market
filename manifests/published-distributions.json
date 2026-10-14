@@ -57,21 +57,6 @@
       "dist": "arkhai-core-buyer"
     },
     {
-      "key": "core-storefront",
-      "path": "core/storefront",
-      "dist": "arkhai-core-storefront"
-    },
-    {
-      "key": "core-storefront-client",
-      "path": "core/storefront-client",
-      "dist": "arkhai-core-storefront-client"
-    },
-    {
-      "key": "core-registry",
-      "path": "core/registry",
-      "dist": "arkhai-core-registry"
-    },
-    {
       "key": "kit-capability-shape",
       "path": "kit/capability-shape",
       "dist": "arkhai-kit-capability-shape"
@@ -85,6 +70,21 @@
       "key": "kit-resource-pools-contracts",
       "path": "kit/resource-pools-contracts",
       "dist": "arkhai-kit-resource-pools-contracts"
+    },
+    {
+      "key": "core-storefront",
+      "path": "core/storefront",
+      "dist": "arkhai-core-storefront"
+    },
+    {
+      "key": "core-storefront-client",
+      "path": "core/storefront-client",
+      "dist": "arkhai-core-storefront-client"
+    },
+    {
+      "key": "core-registry",
+      "path": "core/registry",
+      "dist": "arkhai-core-registry"
     },
     {
       "key": "kit-resource-pools",

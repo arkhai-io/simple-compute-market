@@ -28,6 +28,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from market_resource_pools_contracts.backing import CapacityBacking
+
 from arkhai_vms import DIMENSION_KEYS
 
 # What the resource is, where it is, and how much of it one listing offers. Every
@@ -94,11 +96,18 @@ def compare_listing(
     stored_terms: Mapping[str, Any],
     fresh_resource: Mapping[str, Any],
     fresh_terms: Mapping[str, Any],
-    binding_backing: str,
-    source_backing: str,
+    binding_backing: CapacityBacking,
+    source_backing: CapacityBacking,
 ) -> ListingComparison:
-    """Classify how a stored listing differs from what its source now derives."""
-    if source_backing != binding_backing:
+    """Classify how a stored listing differs from what its source now derives.
+
+    Backing is compared first and is neither identity nor a term: a listing's
+    backing is fixed for the life of its binding, so a source whose backing
+    differs closes the listing however else it compares. The delegates compare
+    by identity, as the capacity kit's ``backing_changed`` does; this package
+    does not depend on that kit because the VM buyer imports it.
+    """
+    if source_backing is not binding_backing:
         return ListingComparison(BACKING_DISAGREES, (BACKING_FIELD,))
     identity = tuple(
         name
@@ -120,7 +129,7 @@ def compare_listing(
     )
     if terms:
         return ListingComparison(TERMS_DIFFER, terms)
-    if stored_resource.get(BACKING_FIELD) != binding_backing:
+    if stored_resource.get(BACKING_FIELD) != binding_backing.label:
         return ListingComparison(BACKING_UNDISCLOSED, (BACKING_FIELD,))
     return ListingComparison(UNCHANGED)
 
@@ -129,7 +138,7 @@ def refreshed_listing_resource(
     *,
     stored_resource: Mapping[str, Any],
     fresh_resource: Mapping[str, Any],
-    binding_backing: str,
+    binding_backing: CapacityBacking,
 ) -> dict[str, Any]:
     """The listing shape a refresh publishes: stored identity, fresh terms.
 
@@ -145,7 +154,7 @@ def refreshed_listing_resource(
     for name in TERM_RESOURCE_FIELDS:
         if name in fresh_resource:
             refreshed[name] = fresh_resource[name]
-    refreshed[BACKING_FIELD] = binding_backing
+    refreshed[BACKING_FIELD] = binding_backing.label
     return refreshed
 
 

@@ -10,11 +10,13 @@ configuration, replaced for one site's pool by the storefront's stored override.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
+from market_resource_pools_contracts.backing import capacity_backing
 from market_settlement_runtime import SettlementPublicationClause
 
 from .pool_overrides import (
@@ -26,6 +28,8 @@ from .publication import BareMetalPublicationCycle
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
 from .storefront_registry import build_bare_metal_storefront_registry
+
+logger = logging.getLogger(__name__)
 
 
 def _json_env(environ: Mapping[str, str], name: str) -> Any:
@@ -58,17 +62,42 @@ def publication_payload_builder(
     if max_duration is None:
         raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
 
+    def fulfils_through_capacity(mechanism: str) -> bool:
+        return composition.seller_stages[mechanism].fulfils_through_capacity
+
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
         # A pool's storefront override replaces the configured clauses and
         # bound for that pool's listings only.
         override_clauses = candidate.get("override_clauses")
+        configured = (
+            compile_publication_clauses(override_clauses)
+            if override_clauses is not None
+            else clauses
+        )
+        # The candidate's backing decides which clauses it may publish: a
+        # mechanism that delivers through capacity reaches a reservation only
+        # an admission authority can make.
+        backing = capacity_backing(candidate["listing_resource"]["capacity_backing"])
+        admissible, dropped = backing.admissible_settlement(
+            configured,
+            mechanism=lambda clause: clause.mechanism,
+            fulfils_through_capacity=fulfils_through_capacity,
+        )
+        if dropped:
+            logger.warning(
+                "bare-metal pool %s: dropped settlement mechanisms %s, which bare "
+                "metal fulfils through capacity",
+                candidate.get("pool_id"),
+                list(dropped),
+            )
+            if not admissible:
+                raise ValueError(
+                    f"pool {candidate.get('pool_id')!r} has no settlement option its "
+                    f"{backing.label} listings may publish"
+                )
         return await composition.publication_payload(
             candidate=candidate,
-            clauses=(
-                compile_publication_clauses(override_clauses)
-                if override_clauses is not None
-                else clauses
-            ),
+            clauses=admissible,
             demands=demands,
             max_duration_seconds=candidate.get(
                 "override_max_duration_seconds", max_duration

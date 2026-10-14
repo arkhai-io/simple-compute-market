@@ -96,73 +96,6 @@ storefront composes fulfillment at all.
 
 ## MODIFIED Requirements
 
-### Requirement: The seller's inventory guard checks a listing against its own source
-
-Before every seller decision in a negotiation round, and before a buyer's or an
-administrator's acceptance, the storefront MUST recheck every published field of the
-listing that is sourced from its declaration or pool against that source: the listing's
-own site and pool or Physical Resource, never a resource elsewhere. A categorical field
-MUST equal its source and a quantity MUST fit the declared capacity. Fields whose
-authority is the storefront are not rechecked. A buyer's exit MUST NOT be rechecked.
-
-The storefront MUST additionally check that the listing's published quantity is
-available only for a capacity-backed listing. For an unbacked listing it MUST NOT
-consult availability. It MAY read the declarations it compares against from the
-listing's origin site, which is the authority for the listing's declaration though not
-an admission authority.
-
-A declared-match failure MUST be reported with a reason distinct from an availability
-failure, so a buyer and an operator can tell a shape the seller no longer declares
-from capacity that is temporarily taken. A source the storefront cannot confirm MUST be
-refused as retryable, distinct from both, for a seller decision that would counter or
-accept and for any acceptance; a seller decision that independently rejects or exits
-keeps its own reason.
-
-#### Scenario: An unbacked listing matches its declaration
-
-- **WHEN** a buyer negotiates against an unbacked listing whose published fields match its enabled source declaration
-- **THEN** the declared match passes without any availability read
-
-#### Scenario: A declaration no longer supports its listing
-
-- **WHEN** a buyer negotiates against a listing whose source declaration has shrunk below, or been disabled beneath, its published shape
-- **THEN** seller policy rejects with a declared-match reason rather than an availability reason
-
-#### Scenario: Matching capacity exists only elsewhere
-
-- **WHEN** a listing's own source no longer supports it but another pool or site holds matching available capacity
-- **THEN** seller policy rejects the listing
-
-#### Scenario: A backed listing matches but capacity is taken
-
-- **WHEN** a capacity-backed listing matches its declaration but its published quantity is not available
-- **THEN** seller policy rejects with the availability reason
-
-#### Scenario: A fungible listing matches one member
-
-- **WHEN** a buyer negotiates against a listing derived from a fungible pool whose enabled members declare different counts
-- **THEN** the declared match passes only if some single enabled member has equal categorical attributes and declares at least the published quantity
-
-#### Scenario: A dry-run evaluation applies the same checks
-
-- **WHEN** a seller evaluates a proposal against a listing without opening a negotiation
-- **THEN** the evaluation applies the same declared match and, for a capacity-backed listing only, the same availability check as a negotiation round
-
-#### Scenario: An acceptance follows a change at the source
-
-- **WHEN** a buyer accepts a seller's counter, or an administrator force-accepts, after the listing's source stopped supporting it or its capacity was taken
-- **THEN** the acceptance is refused with the declared-match or availability reason and nothing is recorded
-
-#### Scenario: The source cannot be confirmed
-
-- **WHEN** the listing's site cannot be reached, does not verify, or has not supplied the projection the storefront reads
-- **THEN** an opening or round the seller would counter or accept, and any acceptance, is refused as retryable and nothing is recorded
-
-#### Scenario: A buyer exits while the source cannot be confirmed
-
-- **WHEN** a buyer exits a negotiation whose listing's site cannot be reached
-- **THEN** the exit is recorded without a site call
-
 ### Requirement: A bare-metal listing sells one whole unit
 
 A capacity-backed bare-metal listing MUST be held by exclusive allocation of one unit
@@ -189,9 +122,10 @@ listing, never from buyer input.
 ### Requirement: Bare-metal opening rechecks its listing against its source
 
 Whenever a bare-metal storefront rechecks a listing against its source, it MUST
-re-derive the listing's shape and region from its own site's live resource-pool
-projection, at its bound pool and Physical Resource. It MUST refuse with a declared-match
-reason when any of these hold:
+re-derive the listing's shape and region from the resource-pool projection it holds for
+the listing's own site, at its bound pool and Physical Resource, and MUST NOT fetch that
+projection from the site to do so. It MUST refuse with a declared-match reason when any
+of these hold:
 
 - the shape digest differs from the binding's;
 - the region differs from the published region;
@@ -200,7 +134,7 @@ reason when any of these hold:
 For a capacity-backed listing it MUST refuse with the availability reason when the
 site's capacity snapshot shows the Physical Resource taken; an unbacked listing is
 never refused for availability. It MUST refuse as retryable, for either backing, when
-the site cannot be reached or does not verify, or no site authority is configured.
+the projection it holds for the site has no value, or no site authority is configured.
 
 #### Scenario: A declaration shrinks beneath its listing
 
@@ -214,11 +148,17 @@ the site cannot be reached or does not verify, or no site authority is configure
   Physical Resource is reserved by another deal
 - **THEN** the opening is refused with the availability reason
 
-#### Scenario: An unbacked listing's origin site is unreachable
+#### Scenario: The site's projection is not held
 
-- **WHEN** a buyer opens a negotiation on an unbacked bare-metal listing whose origin
-  site cannot be reached
-- **THEN** the opening is refused as retryable
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose site's projection the
+  storefront does not hold
+- **THEN** the opening is refused as retryable, and the site is not called
+
+#### Scenario: An unbacked listing's resource moves to another pool
+
+- **WHEN** a buyer opens a negotiation on an unbacked bare-metal listing whose Physical
+  Resource the held projection now places in a pool other than its bound pool
+- **THEN** the opening is refused with a declared-match reason
 
 ## REMOVED Requirements
 

@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from market_capacity_publication import CapacityBinding
 from market_core import SettlementEvidence
 
 from market_storefront.services.capacity_client import capacity_binding_for_listing
@@ -358,14 +357,10 @@ async def fulfill_vm_obligation(
             raise RuntimeError("immutable delivery context could not be persisted")
         if not listing_id:
             raise RuntimeError("VM fulfillment requires a durably bound listing")
+        # A listing no admission authority stands behind is refused by the
+        # capacity runtime's guard before any reservation; publication gives
+        # such a listing no settlement option that reaches this path.
         binding = await capacity_binding_for_listing(get_sqlite_client(), listing_id)
-        if not isinstance(binding, CapacityBinding):
-            # Publication gives an unbacked listing no settlement option that
-            # reaches this path; refuse before any reservation if one does.
-            raise RuntimeError(
-                "VM fulfillment requires a capacity-backed listing; "
-                f"listing {listing_id!r} has no admission authority"
-            )
         if site_id is not None and site_id != binding.site_id:
             raise RuntimeError(
                 "requested fulfillment site differs from listing binding"

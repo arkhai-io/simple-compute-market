@@ -3,12 +3,11 @@ from __future__ import annotations
 import pytest
 
 import market_resource_pools_contracts
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_EXCEEDS_DELIVERABLE,
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
-    CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
     DEPRECATED_LISTING_MODE_POLICY_TAG,
     INVALID_ADVERTISABLE_MODES,
@@ -320,7 +319,7 @@ def _tags(**overrides):
     tags = {
         DELIVERABLE_MODES_POLICY_TAG: ["vm"],
         ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
-        CAPACITY_BACKING_POLICY_TAG: CAPACITY_BACKED,
+        CAPACITY_BACKING_POLICY_TAG: BACKED.label,
     }
     for key, value in overrides.items():
         if value is _ABSENT:
@@ -386,10 +385,10 @@ class TestAdvertisableModes:
 
 
 class TestCapacityBacking:
-    @pytest.mark.parametrize("value", [CAPACITY_BACKED, CAPACITY_UNBACKED])
+    @pytest.mark.parametrize("value", [BACKED.label, UNBACKED.label])
     def test_recognized_values_are_valid(self, value):
         tags = _tags(**{CAPACITY_BACKING_POLICY_TAG: value})
-        if value == CAPACITY_UNBACKED:
+        if value == UNBACKED.label:
             tags[DELIVERABLE_MODES_POLICY_TAG] = []
 
         assert pool_declaration_problems(tags) == ()
@@ -461,19 +460,19 @@ class TestCrossTagRules:
     def test_unbacked_pool_advertises_without_any_delivery_proof(self):
         tags = {
             ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"],
-            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+            CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
         }
 
         assert pool_declaration_problems(tags) == ()
         assert resolve_pool_declarations(tags) == PoolDeclarations(
-            frozenset({"vm", "bare_metal"}), CAPACITY_UNBACKED,
+            frozenset({"vm", "bare_metal"}), UNBACKED,
         )
 
     def test_unbacked_pool_that_delivers_is_refused(self):
         tags = {
             DELIVERABLE_MODES_POLICY_TAG: ["vm"],
             ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
-            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+            CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
         }
 
         assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, UNBACKED_POOL_DELIVERS)}
@@ -500,8 +499,8 @@ class TestResolvePoolDeclarations:
     def test_valid_declarations_resolve(self):
         resolved = resolve_pool_declarations(_tags())
 
-        assert resolved == PoolDeclarations(frozenset({"vm"}), CAPACITY_BACKED)
-        assert resolved.backed is True
+        assert resolved == PoolDeclarations(frozenset({"vm"}), BACKED)
+        assert resolved.backing is BACKED
 
     def test_absence_is_reported_distinctly_and_never_defaulted(self):
         with pytest.raises(MissingPoolDeclarationError) as exc_info:
@@ -521,7 +520,7 @@ class TestResolvePoolDeclarations:
             {ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"]},
             {DELIVERABLE_MODES_POLICY_TAG: "vm"},
             {
-                CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+                CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
                 DELIVERABLE_MODES_POLICY_TAG: ["vm"],
             },
         ],

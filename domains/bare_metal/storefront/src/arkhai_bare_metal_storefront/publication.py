@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
+    BACKING_CHANGED,
     BARE_METAL_OFFERING_MODE,
     CANDIDATE,
     HELD,
@@ -61,10 +62,13 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    backing_changed,
     converge_registries,
 )
 from market_identity import Identity
+from market_resource_pools_contracts.backing import capacity_backing
 
+from .listing_binding import bare_metal_listing_binding
 from .publication_service import (
     BareMetalPublicationHooks,
     RegistryClientFactory,
@@ -288,6 +292,7 @@ class BareMetalPublicationCycle:
         classification = classify_bare_metal_resources(
             generation,
             pool_admission=reading.admission,
+            pool_backings=reading.backings,
             pool_regions=reading.regions,
             pool_asking_rates=reading.published_asking_rates(),
         )
@@ -678,14 +683,20 @@ class BareMetalPublicationCycle:
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
         }
+        binding = await bare_metal_listing_binding(self._db, listing_id)
+        if binding is None:
+            raise RuntimeError(f"listing {listing_id!r} has no complete binding")
         comparison = compare_bare_metal_listing(
+            backing_changed=backing_changed(
+                binding, capacity_backing(listing_resource["capacity_backing"])
+            ),
             stored_resource=_stored_resource(stored),
             stored_terms=listing_terms(stored),
             fresh_resource=fresh_resource,
             fresh_terms=fresh_terms,
         )
         is_open = stored.get("status") == "open"
-        if comparison.outcome == IDENTITY_CHANGED:
+        if comparison.outcome in (IDENTITY_CHANGED, BACKING_CHANGED):
             logger.warning(
                 "bare-metal listing %s no longer matches its Physical Resource in %s; %s",
                 listing_id,
@@ -696,7 +707,7 @@ class BareMetalPublicationCycle:
                 self.report.record(
                     "close",
                     listing_id=listing_id,
-                    reason=IDENTITY_CHANGED,
+                    reason=comparison.outcome,
                     fields=list(comparison.differing_fields),
                 )
             elif is_open:
@@ -705,7 +716,7 @@ class BareMetalPublicationCycle:
                     self.report.record(
                         "close",
                         listing_id=listing_id,
-                        reason=IDENTITY_CHANGED,
+                        reason=comparison.outcome,
                         fields=list(comparison.differing_fields),
                     )
                 else:
@@ -716,7 +727,7 @@ class BareMetalPublicationCycle:
                 self.report.record(
                     "refuse",
                     listing_id=listing_id,
-                    reason=IDENTITY_CHANGED,
+                    reason=comparison.outcome,
                     fields=list(comparison.differing_fields),
                 )
             return {"status": REOPEN_UNCHANGED}

@@ -8,6 +8,7 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.reconciler import (
+    ReconciliationScope,
     closed_available_listing_ids,
     stale_open_listing_ids,
 )
@@ -96,7 +97,7 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # The published backing is always the binding's, on every path that
     # publishes, so a listing never discloses a category its binding does not
     # record and no stored payload can be republished without one.
-    listing.listing_resource.capacity_backing = binding.capacity_backing
+    listing.listing_resource.capacity_backing = binding.backing.label
     return PublicationCandidate(listing.listing_id, binding, listing)
 
 
@@ -151,7 +152,8 @@ async def close_stale_compute_listings_after_capacity_change(
 ) -> list[str]:
     """Let VM semantics choose stale candidates; kit executes each close.
 
-    Availability reconciliation: only capacity-backed listings are considered.
+    Availability reconciliation: only listings whose backing availability
+    bounds are considered.
     """
     ids = stale_open_listing_ids(
         db_path,
@@ -159,7 +161,7 @@ async def close_stale_compute_listings_after_capacity_change(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
-        backed_only=True,
+        scope=ReconciliationScope.AVAILABILITY,
         shape_feasible=vm_shape_feasibility(),
         admissibility_default=container.resolved_admissibility_default,
     )

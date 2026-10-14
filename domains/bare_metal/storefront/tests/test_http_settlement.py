@@ -542,6 +542,7 @@ class _FulfillmentSite:
 class _CapacityClient:
     def __init__(self) -> None:
         self.site_client = _FulfillmentSite()
+        self.site_names = ["site-a"]
         self.reservation_sites = {}
         self.reserve_calls = []
         self.commit_calls = []

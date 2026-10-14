@@ -542,7 +542,7 @@ def build_bare_metal_negotiation_runtime(
             )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
-        provisions = seller_stages[selection.mechanism].physical
+        provisions = seller_stages[selection.mechanism].fulfils_through_capacity
         terms: BareMetalTerms | None = None
         if provisions:
             trusted_listing = await request.repository.load_bare_metal_listing_payload(

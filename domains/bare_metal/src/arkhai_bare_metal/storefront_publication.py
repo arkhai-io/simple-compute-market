@@ -3,11 +3,12 @@
 Every Physical Resource carrying a bare-metal view falls into exactly one
 class, and a storefront builds its reconciliation from those disjoint classes:
 
-- **candidate** — its pool admits bare metal, its declaration is enabled, and
-  its view says the whole machine is available: published, refreshed, or
-  reopened;
-- **unavailable** — as a candidate, but the machine is not wholly available
-  (leased, say): its listing closes for availability and reopens when free;
+- **candidate** — its pool admits bare metal, its declaration is enabled, and,
+  where its pool's backing says availability bounds it, its view says the
+  whole machine is available: published, refreshed, or reopened;
+- **unavailable** — as a candidate, but availability bounds it and the machine
+  is not wholly available (leased, say): its listing closes for availability
+  and reopens when free;
 - **held** — its pool's declarations do not resolve, its pool states no
   region, or its own declaration does not read as a shape: its listing is
   neither closed nor refreshed, since an unknown declaration is not a
@@ -32,6 +33,7 @@ from typing import Any
 
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from market_capability_shape import FieldKind, shape_digest
+from market_resource_pools_contracts.backing import CapacityBacking
 
 from .projections import TrustedBareMetalProjection, TrustedBareMetalResource
 from .publication import available_bare_metal_listings
@@ -103,21 +105,38 @@ def bare_metal_source_identity(
 
 
 def _classify(
-    resource: TrustedBareMetalResource, admission: str, shaped: bool
+    resource: TrustedBareMetalResource,
+    admission: str,
+    shaped: bool,
+    backing: CapacityBacking | None,
 ) -> str:
-    if admission == POOL_HELD:
-        return HELD
-    if admission != POOL_ADMITTED or not resource.enabled:
-        return WITHDRAWN
-    if not shaped:
-        return HELD
-    return CANDIDATE if resource.view.available else UNAVAILABLE
+    """The resource's class: its declaration first, then, where its pool's
+    backing says availability bounds it, the machine's availability."""
+
+    def declared() -> str | None:
+        if admission == POOL_HELD:
+            return HELD
+        if admission != POOL_ADMITTED or not resource.enabled:
+            return WITHDRAWN
+        if not shaped:
+            return HELD
+        return None
+
+    def available() -> str | None:
+        return None if resource.view.available else UNAVAILABLE
+
+    if backing is None:
+        # Only an admitted pool reaches availability, and an admitted pool's
+        # declarations resolved, so its backing is known.
+        return declared() or HELD
+    return backing.judge(declared, available) or CANDIDATE
 
 
 def classify_bare_metal_resources(
     generation: TrustedBareMetalProjection,
     *,
     pool_admission: Mapping[str, str],
+    pool_backings: Mapping[str, CapacityBacking],
     pool_regions: Mapping[str, str | None],
     pool_asking_rates: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
 ) -> BareMetalSiteClassification:
@@ -125,7 +144,9 @@ def classify_bare_metal_resources(
 
     ``pool_admission`` maps each pool to :data:`POOL_ADMITTED`,
     :data:`POOL_HELD`, or :data:`POOL_NOT_ADMITTED`, as the caller read the
-    pool's declarations; a pool it does not name admits nothing. A pool
+    pool's declarations; a pool it does not name admits nothing.
+    ``pool_backings`` maps each pool whose declarations resolved to its backing
+    delegate, which decides whether availability bounds its resources. A pool
     ``pool_regions`` gives no region is held: the compute schema requires a
     region and there is no other source for one. ``pool_asking_rates`` maps a
     pool to its published rates by shape digest; a candidate takes its own
@@ -146,7 +167,8 @@ def classify_bare_metal_resources(
             shape, problems = None, exc.problems
         else:
             problems = ()
-        classification = _classify(resource, admission, shape is not None)
+        backing = pool_backings.get(resource.pool_id)
+        classification = _classify(resource, admission, shape is not None, backing)
         digest = shape_digest(shape) if shape is not None else None
         classified.append(
             ClassifiedBareMetalResource(
@@ -161,8 +183,12 @@ def classify_bare_metal_resources(
         )
         if classification != CANDIDATE:
             continue
-        assert region is not None and digest is not None  # guaranteed by _classify
-        (listing,) = available_bare_metal_listings([resource], region=region)
+        # Guaranteed by _classify: a candidate's pool is admitted, so it has a
+        # region and a backing, and its declaration read as a shape.
+        assert region is not None and digest is not None and backing is not None
+        (listing,) = available_bare_metal_listings(
+            [resource], backing=backing, region=region
+        )
         rate = ((pool_asking_rates or {}).get(resource.pool_id) or {}).get(digest)
         if rate is not None:
             listing = listing.model_copy(update={"asking_rate": BareMetalAskingRate(**rate)})
@@ -198,11 +224,12 @@ IDENTITY_FIELDS = (
     *COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY),
     *COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE),
 )
+# Backing is neither: a listing's backing is fixed for the life of its binding,
+# so a changed backing closes the listing rather than refreshing it.
 TERM_RESOURCE_FIELDS = (
     "access_methods",
     "min_duration_seconds",
     "max_duration_seconds",
-    "capacity_backing",
     # A price change refreshes the listing in place; the rate is outside the
     # shape digest, so it can never change a listing's identity.
     "asking_rate",
@@ -217,6 +244,7 @@ TERM_LISTING_FIELDS = (
 UNCHANGED = "unchanged"
 REFRESH = "refresh"
 IDENTITY_CHANGED = "identity_changed"
+BACKING_CHANGED = "backing_changed"
 
 
 @dataclass(frozen=True)
@@ -227,6 +255,7 @@ class BareMetalListingComparison:
 
 def compare_bare_metal_listing(
     *,
+    backing_changed: bool,
     stored_resource: Mapping[str, Any],
     stored_terms: Mapping[str, Any],
     fresh_resource: Mapping[str, Any],
@@ -234,11 +263,17 @@ def compare_bare_metal_listing(
 ) -> BareMetalListingComparison:
     """Compare a stored listing with a fresh candidate bound under the same key.
 
+    ``backing_changed`` is whether the candidate's pool now declares a backing
+    other than the listing's binding records, which the caller asks the
+    binding; it is decided first, because a pool re-created under the same
+    identifier with the opposite backing yields a candidate under the same key.
     A changed identity field is refused rather than refreshed: the listing
     would silently start offering a different machine under an identity a
     buyer already saw. A field the stored listing does not publish is no
     commitment, so its first appearance is not an identity change.
     """
+    if backing_changed:
+        return BareMetalListingComparison(BACKING_CHANGED, ("capacity_backing",))
     diverged = tuple(
         name
         for name in IDENTITY_FIELDS

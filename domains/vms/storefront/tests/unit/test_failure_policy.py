@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 
 from market_storefront.failure_actions import (
@@ -29,7 +30,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
     )
-    binding = CapacityBinding("site-test", "vm", "pool-test")
+    binding = PublicationBinding("site-test", "vm", "pool-test", BACKED)
     capacity = capacity_runtime_over(fake, site_name=binding.site_id)
 
     async def resolve_capacity_binding(repository, listing_id):

@@ -56,6 +56,7 @@ class Capacity:
     """The selected site: it answers the listing source check and reservations."""
 
     def __init__(self) -> None:
+        self.site_names = [SITE]
         self.reservation_sites: dict[str, str] = {}
 
     def site(self, site_id):

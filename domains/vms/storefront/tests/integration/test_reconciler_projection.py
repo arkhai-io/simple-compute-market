@@ -13,6 +13,9 @@ fixture and seeding helpers are the reconciler unit module's.
 
 from __future__ import annotations
 
+from arkhai_vms_listings.reconciler import ReconciliationScope
+
+from market_resource_pools_contracts.backing import BACKED
 import asyncio
 import sqlite3
 
@@ -66,11 +69,11 @@ def test_an_unknown_sites_listing_is_held_while_an_empty_known_sites_is_stale(db
 
     unknown = stale_open_listing_ids(
         db_path, configured_sites=("site-a", "site-b"),
-        site_pool_projection={"site-a": []}, backed_only=False,
+        site_pool_projection={"site-a": []}, scope=ReconciliationScope.SOURCE,
     )
     known_empty = stale_open_listing_ids(
         db_path, configured_sites=("site-a", "site-b"),
-        site_pool_projection={"site-a": [], "site-b": []}, backed_only=False,
+        site_pool_projection={"site-a": [], "site-b": []}, scope=ReconciliationScope.SOURCE,
     )
 
     assert unknown == []
@@ -321,14 +324,14 @@ def test_a_rate_change_or_removal_refreshes_in_place(db_path):
             stored_terms={},
             fresh_resource=fresh,
             fresh_terms={},
-            binding_backing="backed",
-            source_backing="backed",
+            binding_backing=BACKED,
+            source_backing=BACKED,
         )
         assert comparison.outcome == TERMS_DIFFER
         assert comparison.differing_fields == ("asking_rate",)
 
         refreshed = refreshed_listing_resource(
-            stored_resource=stored, fresh_resource=fresh, binding_backing="backed"
+            stored_resource=stored, fresh_resource=fresh, binding_backing=BACKED
         )
         assert refreshed.get("asking_rate") == fresh.get("asking_rate")
 

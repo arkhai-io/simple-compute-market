@@ -39,6 +39,7 @@ from apicredits_storefront.services.payment_settlement_service import (
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from tests._settings_overrides import settings_overrides
+from tests.listing_bindings import upsert_bound_listing
 
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
@@ -106,7 +107,8 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
     )
     raw = agreement.model_dump_json(exclude_none=True).encode()
     data = stage.settlement_data(json.loads(raw))
-    await db.upsert_listing(
+    await upsert_bound_listing(
+        db,
         listing_id=LISTING,
         status="open",
         created_at=now,

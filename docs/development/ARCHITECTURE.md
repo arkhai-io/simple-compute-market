@@ -217,7 +217,9 @@ Dependencies never point upward. Kit packages never import deployed services or 
 
 `kit/pool-overrides` is a storefront-side kit beside `kit/capacity-publication`: the durable, site-scoped storefront pool override store and its reader, the write checked against a site's live projection, override status, the signed-resource contract, a typed client extension, and a framework-free route service each storefront binds with its own router and administrator authentication. It depends only on the identity kit, the site client, and pydantic. Each market contributes its vocabulary per offering mode — the VM and bare-metal storefronts both do — and its typed client wraps any transport exposing the core client's generic `authenticated_request`, so the core storefront client carries no market's vocabulary. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#storefront-pool-overrides).
 
-`kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, the declaration hints and their shared resolver, and the pool route declarations as plain data, and it depends only on pydantic and the admissibility kit, which splits a pool's stated shapes from their constraints and brings the shape kit with it. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
+`kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, the declaration hints and their shared resolver, the capacity backing delegate, and the pool route declarations as plain data, and it depends only on pydantic and the admissibility kit, which splits a pool's stated shapes from their constraints and brings the shape kit with it. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
+
+The backing delegate, `CapacityBacking`, makes every decision that differs between backed and unbacked supply, for every market whose listings are admitted against capacity an authority holds — VM and bare metal against physical capacity, API credits against quota — so it is a repository-wide kit rather than core or a family's. It sits beside the `capacity_backing` label it interprets because both sides of the provisioning boundary consult it, and storefront-side packages depend downward on it: `kit/capacity-publication` for its bindings, `core/storefront` to validate a durable binding's label, and the VM and bare-metal domain packages for their listing models. See the [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#advertisement-delivery-and-backing).
 
 What stays in a core package is universal to every market. `market_core.identifier_encoding` is: it encodes operator-chosen identifiers unambiguously for any market that joins them into a key. So is `market_core.VersionedEnvelope`, the carrier for every provider-specific payload that crosses a domain or persistence boundary (see "Fulfillment" below). `arkhai-core` ships it with only pydantic, so the fulfillment kit, the compute contracts, and the domains all take it from there.
 
@@ -314,8 +316,12 @@ composes them onto that driver; VM publication reads the kit's site projections
 and capacity events, while bare-metal publication fetches each site's
 resource-pool projection itself on every run.
 
-Every capacity-backed candidate carries
-`CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
+Every candidate carries one
+`PublicationBinding(site_id, offering_mode, source_id, backing)`, which every
+domain builds from its durable listing binding through `publication_binding`
+and never from a published payload. `backing` is the delegate the pool's
+declared label selects, so one binding class serves every backing and no
+binding names a category. The site ID comes from
 trusted local composition, the offering mode must be declared by the selected
 Resource Pool and must equal the public offer's mode, and the opaque source ID
 identifies the pool, quota resource, or Physical Resource. The offering mode
@@ -331,6 +337,16 @@ into this same runtime, so each publishes, reconciles, and converges its
 registries through one implementation. A bare-metal binding's source is the
 Physical Resource the listing sells. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
+
+Every storefront capacity effect — reserve, commit, release, lease truncation —
+passes one guarded boundary, the kit's `CapacityEffects`, composed over any
+aggregate capacity client and acting only at the sites that aggregate names.
+Its guard is the binding's backing delegate, which refuses an effect for a
+listing with no admission authority behind it before any site call; a refused
+admission is a conflict, distinct from an unknown site or a changed binding.
+`CapacityRuntime` composes one over its own aggregate, and a storefront that
+owns its aggregate, as bare metal does for its durable reservation-to-site map,
+builds one over that. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#storefront-composition-kit).
 
 The storefront role is one domain-neutral compute-family shell. At startup it
 discovers installed `market.storefront.contributions`, applies the operator's
@@ -572,7 +588,7 @@ Specific-resource listings are a valid opt-in: the seller exposes a concrete res
 
 Storefront capacity pools and provisioning resource pools are separate concepts. Mapping is explicit configuration or attributes, never a cross-service foreign key.
 
-A listing's capacity backing is declared by the pool it derives from and read from that declaration; it is never inferred from absent capacity data, an empty projection, or a stale generation. It is fixed on the listing's binding when the listing is created, and it is independent of how a pool's listings are enumerated and of which settlement mechanisms a listing offers. A capacity-backed listing is admitted at its site; an unbacked listing has no admission authority behind it, so it never reaches reservation and publishes only settlement options its domain does not fulfil through capacity. A listing's origin site is where it was declared, not an authority that admits it.
+A listing's capacity backing is declared by the pool it derives from and read from that declaration; it is never inferred from absent capacity data, an empty projection, or a stale generation. It is fixed on the listing's binding when the listing is created, and it is independent of how a pool's listings are enumerated and of which settlement mechanisms a listing offers. A capacity-backed listing is admitted at its site; an unbacked listing has no admission authority behind it, so it never reaches reservation and publishes only settlement options its domain does not fulfil through capacity. A listing's origin site is where it was declared, not an authority that admits it. Every decision that differs between the two — admitting an effect, placing a hold, judging availability, the scope of availability reconciliation, settlement admissibility — is asked of the backing delegate the listing's binding carries; no storefront compares the label. A listing's backing is compared with its source's before anything else on every refresh, reopen, and source check, and a mismatch closes the listing for good.
 
 Every VM listing is a listing shape, and a published dimension is a commitment: the claim a VM listing produces reserves every quantity it publishes, so it publishes exactly the quantities its shape declares. A dimension its shape omits is outside the commitment; fulfillment may supply it from the pool's configured VM defaults or leave it to downstream provisioning, and the operator keeps capacity sufficient for it. A VM shape comes from the storefront's own override for that site and pool, else the pool's `listing_shapes` hint, else the VM domain's default generator, and it is published only where a source member is feasible for it.
 
