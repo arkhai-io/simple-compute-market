@@ -731,9 +731,10 @@ repository documents, the roadmap, and the index — then runs `openspec archive
 which merges the change's spec deltas into `openspec/specs/` and moves the change
 under `openspec/changes/archive/`, and commits. The closeout review and its triage
 then read the archived change. The gate passing is followed, in the same
-session, by archive cleanup (`change-archive-cleanup`): the export the open
-question below settles, `reviews/` deleted, dependents released, the row set to
-`archived`, and the commit message and pull request description drafted. Archive
+session, by archive cleanup (`change-archive-cleanup`): dependents released, the
+row set to `archived`, and the commit message and pull request description drafted.
+Archive cleanup leaves `reviews/` in place (see the decision on exporting session
+transcripts below). Archive
 cleanup needs no review of its own, so it is not a phase. It is not named for
 archiving, since `openspec archive` has already run at closeout and the stock
 OpenSpec archive skill answers to that name.
@@ -850,7 +851,18 @@ outside this change. No skill names `docs/prompts/`.
 
 ## Open Questions
 
-- **Exporting session transcripts and review logs. Resolve at closeout.** Today the
+- **Exporting session transcripts and review logs. Decided: archive cleanup keeps
+  `reviews/` for now.** Archive cleanup does not delete `reviews/`. It is untracked,
+  so keeping it costs disk on the owner's machine and nothing in the repository,
+  and deleting it before an exporter exists would lose the only copy of the review
+  logs and transcripts. When the export flow is settled, archive cleanup runs the
+  export, and only then may delete what it exported. Permanent documentation says
+  nothing about export until then. Rejected: asking the owner to confirm an export
+  before deleting, and checking for a marker file an external exporter writes — the
+  first gates an irreversible step on memory, the second ties a public skill to an
+  outside tool's convention. The question as first recorded follows.
+
+  Today the
   owner shares design and implementation history by posting chat share links, and
   a team Q&A bot answers questions about a change from them. Local harness
   sessions produce no share link. The intended remedy is a session exporter that

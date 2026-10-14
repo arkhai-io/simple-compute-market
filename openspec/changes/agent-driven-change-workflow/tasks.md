@@ -985,7 +985,7 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       test checks it calls the plain lookup and the skill).
 - [ ] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
       notes above), run when the closeout gate is passed:
-      the export 12.10 settles, `reviews/` deleted with the ledger kept,
+      `reviews/` kept in place as 12.10 decided,
       dependents released as `openspec/README.md` part 6 states, and the
       commit message and pull request description drafted from the proposal, the
       promotion record, and the validation evidence; it sets the index row to
@@ -1019,9 +1019,13 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
 - [ ] 12.8 Packaging: `make check-packaging`.
 - [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
-- [ ] 12.10 Resolve the open question on exporting session transcripts and review
+- [x] 12.10 Resolve the open question on exporting session transcripts and review
       logs: how `change-archive-cleanup` confirms the export ran before `reviews/` is deleted,
       and whether permanent documentation states that they are exported.
+      Decided by the owner, ahead of closeout because 10.6 waited on it: archive
+      cleanup does not delete `reviews/` until an export flow exists, and then
+      exports as part of archive cleanup; permanent documentation states nothing
+      about export meanwhile. Recorded in `design.md`'s open question.
 - [ ] 12.11 Promotion: complete the design-promotion record against the proposal's
       knowledge-to-promote list — `change-workflow` spec and architecture
       companion, the five `planning-governance` requirements (three added, two

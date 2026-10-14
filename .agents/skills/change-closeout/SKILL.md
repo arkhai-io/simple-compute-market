@@ -12,8 +12,8 @@ this change as its last `tasks.md` section — and ends by archiving the change:
 `openspec archive` merges the change's spec deltas into `openspec/specs/` and moves
 the change under `openspec/changes/archive/`. Archival is the last step, so the
 closeout review that follows reads the change, and the specifications, as they will
-land. Archive cleanup (`change-archive-cleanup`) — releasing dependents, deleting
-`reviews/`, and drafting the pull request — follows that review's gate and is not
+land. Archive cleanup (`change-archive-cleanup`) — releasing dependents and
+drafting the pull request — follows that review's gate and is not
 closeout's.
 
 Closeout is one session, and it changes documentation only: the change's own
