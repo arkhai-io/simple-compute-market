@@ -411,15 +411,35 @@ backing: the requirement constrains which listings each reconciliation may touch
 how many passes a domain runs. Unifying that structure belongs to the shared
 publication pipeline this change leaves out, recorded as unowned in the change index.
 
+### Divergence: hold placement (task 1.3)
+
+Today VM's acceptance skips a hold for an unbacked binding, recording
+`capacity_hold_not_applicable`, and otherwise reserves one; API credits always
+reserves; bare metal places no hold at acceptance and reserves when settlement starts
+fulfillment, as its lifecycle requires.
+
+Unified rule: backing decides only whether a hold can stand behind a listing, and every
+domain that places one does so through `binding.backing.place_hold(place)`. Whether a
+domain holds at acceptance at all, and for how long, is hold policy, owned by
+`default-no-pre-settlement-capacity-hold` and `negotiation-time-capacity-hold`, not by
+this change.
+
+- VM's class test becomes `place_hold`; a hold not placed records the same
+  `capacity_hold_not_applicable` event.
+- API credits places its hold through `place_hold`, so an unbacked binding would never
+  reserve; no API-credit listing is unbacked, so behaviour is unchanged.
+- Bare metal places none — a policy difference, not a backing one. Its reservation at
+  settlement is a capacity effect, guarded under "Divergence: capacity-effect guard
+  coverage".
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. hold placement;
-   2. capacity-effect guard coverage;
-   3. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. capacity-effect guard coverage;
+   2. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
