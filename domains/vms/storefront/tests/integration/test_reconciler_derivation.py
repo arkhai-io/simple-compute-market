@@ -1086,7 +1086,7 @@ class TestShapeAdmissibility:
         )
 
         assert stale_open_listing_ids(
-            db_path, configured_sites=("site-a",), backed_only=False,
+            db_path, configured_sites=("site-a",), scope=ReconciliationScope.SOURCE,
             site_pool_projection={"site-a": [pool]},
         ) == []
 
@@ -1096,7 +1096,7 @@ class TestShapeAdmissibility:
         _seed_listing(db_path, listing_id="shaped", pool_id="gpu", gpu_count=2, site_id="site-a")
         pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": 2}}])
         reconcile = dict(
-            configured_sites=("site-a",), backed_only=False,
+            configured_sites=("site-a",), scope=ReconciliationScope.SOURCE,
             site_pool_projection={"site-a": [pool]},
         )
 
@@ -1122,7 +1122,7 @@ class TestShapeAdmissibility:
         pool["pool_metadata"]["policy_tags"][tag] = unreadable
 
         assert stale_open_listing_ids(
-            db_path, configured_sites=("site-a",), backed_only=False,
+            db_path, configured_sites=("site-a",), scope=ReconciliationScope.SOURCE,
             site_pool_projection={"site-a": [pool]},
             admissibility_default=_admissibility_default({"gpu": {"count": {"max": 1}}}),
         ) == ["excluded"]
