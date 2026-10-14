@@ -95,3 +95,18 @@ def test_active_only_refuses_an_archived_change(
     assert finder.main(["--active", "shape-bounds"], root) == 0
     assert finder.main(["--active", "other"], root) == 1
     assert "is archived" in capsys.readouterr().err
+
+
+def test_archived_only_refuses_an_active_change(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, "shape-bounds", "archive/2026-10-14-other")
+
+    assert finder.main(["--archived", "other"], root) == 0
+    assert finder.main(["--archived", "shape-bounds"], root) == 1
+    assert "is not archived" in capsys.readouterr().err
+
+
+def test_the_two_restrictions_cannot_be_combined(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "shape-bounds")
+
+    assert finder.main(["--active", "--archived", "shape-bounds"], root) == 2

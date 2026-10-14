@@ -80,8 +80,9 @@ the status.
 #### Scenario: A closeout gate is passed
 
 - **WHEN** the owner passes the gate of a change's closeout review
-- **THEN** its archive is cleaned up in the same session and its index row is set to
-  `archived`
+- **THEN** triage leaves its index row `in closeout` and stops
+- **AND** archive cleanup, run next in its own session, releases its dependents and
+  sets its index row to `archived`
 
 #### Scenario: A pre-closeout gate is passed
 

@@ -125,11 +125,12 @@ closeout rather than omitting the step.
   closed gap from the mapping, and records the roadmap update in its
   design-promotion record
 
-#### Scenario: The closeout review reads the roadmap
+#### Scenario: Change is complete but not yet archived
 
-- **WHEN** a change's closeout review runs
-- **THEN** the roadmap already reflects the resulting current state, written before
-  the change was archived
+- **WHEN** a change's implementation is complete while its change directory remains
+  active
+- **THEN** its closeout updates the roadmap before archiving it, so the closeout
+  review reads the roadmap as the change leaves it
 
 #### Scenario: Change has no roadmap impact
 

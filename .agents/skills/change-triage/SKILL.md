@@ -319,7 +319,12 @@ its status misleads every agent that reads the index:
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
-| `closeout` | `archived` — written by `change-archive-cleanup`, run in the same session once the gate passes |
+| `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
+
+A closeout gate passing ends triage. Do not release dependents, set the row to
+`archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
+session. Tell the owner the next step is `make archive-cleanup CHANGE=<change>`,
+and stop.
 
 When the gate does not pass, leave the status, and say what must happen before the
 next review.

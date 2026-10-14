@@ -460,6 +460,16 @@ def test_make_closeout_opens_the_closeout_skill() -> None:
     assert f"\"/change-closeout {CHANGE}\"" in command
 
 
+def test_make_archive_cleanup_takes_only_an_archived_change() -> None:
+    command = subprocess.run(
+        ["make", "-n", "--no-print-directory", "archive-cleanup", f"CHANGE={CHANGE}"],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
+    ).stdout
+
+    assert "scripts/find_change.py --archived" in command
+    assert f"\"/change-archive-cleanup {CHANGE}\"" in command
+
+
 def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 

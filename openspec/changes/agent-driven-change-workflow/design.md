@@ -730,9 +730,14 @@ not synchronize — architecture companions, `ARCHITECTURE.md`, the other
 repository documents, the roadmap, and the index — then runs `openspec archive`,
 which merges the change's spec deltas into `openspec/specs/` and moves the change
 under `openspec/changes/archive/`, and commits. The closeout review and its triage
-then read the archived change. The gate passing is followed, in the same
-session, by archive cleanup (`change-archive-cleanup`): dependents released, the
-row set to `archived`, and the commit message and pull request description drafted.
+then read the archived change. The gate passing ends triage, and archive cleanup
+(`change-archive-cleanup`, opened by `make archive-cleanup`) follows in a fresh
+session: dependents released, the row set to `archived`, the index committed, and
+the merge commit message and pull request description drafted. Triage stops at the
+gate rather than running it, because a triage session that went on to it unasked
+did the cleanup from memory, before the skill existed; a separate step with its own
+entry checks — archived, `in closeout`, every closeout review triaged and its gate
+passed — keeps that work where it is checked.
 Archive cleanup leaves `reviews/` in place (see the decision on exporting session
 transcripts below). Archive
 cleanup needs no review of its own, so it is not a phase. It is not named for

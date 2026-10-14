@@ -174,4 +174,4 @@ Tell the owner:
 - what comes next: the closeout review (`make review CHANGE=<change>
   KIND=closeout`), which reads the archived change, then its triage in a fresh
   session (`make triage CHANGE=<change>`); the gate passing is followed by archive
-  cleanup (`change-archive-cleanup`).
+  cleanup in another (`make archive-cleanup CHANGE=<change>`).

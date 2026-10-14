@@ -990,6 +990,22 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       commit message and pull request description drafted from the proposal, the
       promotion record, and the validation evidence; it sets the index row to
       `archived`. Pilot it on `capacity-shape-envelope`.
+      Written: `.agents/skills/change-archive-cleanup/SKILL.md`, opened by `make
+      archive-cleanup CHANGE=`, which takes only an archived change
+      (`find_change.py --archived`, unit-tested; a `make -n` test checks the
+      target). It checks the branch, the archive, the `in closeout` row, and every
+      closeout review triaged with the latest gate passed; edits only the index;
+      keeps `reviews/`; commits without pushing; and writes the merge commit
+      message and pull request description to the archived change's
+      `reviews/pull-request.md`. Triage now stops at a passed closeout gate and
+      names `make archive-cleanup` (`change-triage` gate table, the delta's
+      closeout-gate scenario, design), at the owner's direction after the pilot's
+      closeout triage went on to clean up the archive itself before the skill
+      existed; that unpushed commit was dropped so the pilot starts from
+      `in closeout`. Pilot open.
+      `openspec validate --strict` had failed since 10.3d: the MODIFIED roadmap
+      currency requirement renamed a scenario, which the validator reads as
+      dropping it; the scenario keeps its name, with the new body.
 
 ## 11. Shared guidance
 
