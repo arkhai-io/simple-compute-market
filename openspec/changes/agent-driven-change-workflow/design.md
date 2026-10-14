@@ -30,7 +30,7 @@ reviewer session:
   the change ready for promotion and closeout.
 - **Closeout review** — read against the archived change and the permanent
   documents it promoted, the specifications the archive synchronized included: does
-  the change comply with the documentation guidance; may it ship.
+  the change comply with the documentation guidance; may it land.
 
 ## Goals / Non-Goals
 
@@ -51,7 +51,7 @@ process yet.
 Each phase gets its own skill, invoked directly by the owner and proven on a real
 change before anything depends on it: `change-design`, `change-plan`,
 `change-review`, `change-triage`, `change-implement`, `change-validate`,
-`change-closeout`, and `change-ship`. An orchestrating skill that infers a change's
+`change-closeout`, and `change-archive-cleanup`. An orchestrating skill that infers a change's
 phase, advances it, and surveys every change to find the next blocking item is the intended end
 state, and is expected to invoke the leaf skills as subagents. Designing it before
 the leaves exist would fix its interfaces against guesses about where the leaves
@@ -196,8 +196,8 @@ openspec/changes/<change>/interventions.jsonl   (tracked)
 
 Files are numbered in the order they were produced, so the directory reads as the
 change's review history. Closeout promotes whatever is durable through the ordinary
-promotion path, and the directory moves with the change into the archive; shipping
-deletes it once the closeout review's gate is passed.
+promotion path, and the directory moves with the change into the archive; archive
+cleanup deletes it once the closeout review's gate is passed.
 
 A review is one Markdown file, and it is the only record of its findings. The owner
 reads review files directly, so they are written to be read; a structured copy
@@ -302,10 +302,14 @@ own discussion, the first message opens with an agenda of labels only, and a
 finding has a disposition only when the owner gives it one. The emoji heading
 already tells the owner which findings to skim.
 
-On each disposition, one line is appended to the change's
-`interventions.jsonl`: the review kind, the `tasks.md` section the finding concerns
-when it concerns one, lens, basis, severity, the agent's position, the owner's
-disposition, and a one-line summary of the finding.
+When the owner corrects course on a finding — decides otherwise than the agent
+proposed, or adds context or a condition that changes the work — one line is
+appended to the change's `interventions.jsonl`: the review kind, the `tasks.md`
+section the finding concerns when it concerns one, lens, basis, severity, the
+agent's position, the owner's disposition, and a one-line summary of the finding. A
+disposition that accepts the agent's proposal adds nothing, as in design and
+planning: most findings resolve that way, and the ledger exists to show where the
+agents' judgement needed correcting. Every disposition is in the triage record.
 
 The ledger also records the owner redirecting a design discussion, because those
 are the interventions the owner's guidance reviews most need to see. Both kinds of
@@ -663,7 +667,7 @@ phases, in order, are `design`, `planning`, `implementation`, and `closeout`:
 
 Two statuses fall outside the grid: `deferred` (no work until a recorded
 activation condition holds, named in `Notes`), and `archived` (closed out, its
-closeout review's gate passed, and shipped).
+closeout review's gate passed, and the archive cleaned up).
 
 A dependency on another change is not written into the status. Each row gets a
 `Depends on` column listing the changes that must reach `archived` first, each with the phase it gates. Most dependencies gate
@@ -681,8 +685,8 @@ and planned meanwhile, but
 the design it reaches rests on a codebase its dependency is about to change. When
 a dependency lands, every dependent's design is reverified before implementation
 begins, however far the dependent had progressed. The landing change does this
-through its own campaign index currency step at closeout: it removes itself from
-each dependent's `Depends on`, and sets each dependent that is `ready for` or `in`
+at archive cleanup, the step that writes `archived`: it removes itself from each
+dependent's `Depends on`, and sets each dependent that is `ready for` or `in`
 planning or implementation, and has not begun implementing, to `ready for design`.
 A dependent that is `blocked in` some phase keeps its status, because the blocker
 is independent of the dependency and overwriting it would lose it; the landing
@@ -690,8 +694,10 @@ change instead records in its `Notes` that design reverification is owed, and
 whoever clears the blocker sets it to `ready for design`. A design review of that
 dependent then checks it against the codebase as the dependency left it, and the
 dependent moves on to planning only once that review is triaged. This keeps the
-reverification tied to a closeout step that already runs, rather than to anyone
-remembering it.
+reverification tied to a step that already runs, rather than to anyone remembering
+it. Closeout itself leaves dependents alone: it runs before the closeout review,
+and a change whose review sends it back would otherwise have released dependents
+without landing.
 
 `blocked in design` means the design cannot proceed without a decision from the
 owner.
@@ -715,7 +721,7 @@ same step:
 | `ready for implementation` | `in implementation` | The first section starts | `change-implement` |
 | `in implementation` | `ready for closeout` | The pre-closeout review is triaged and the owner passes the gate | `change-triage` |
 | `ready for closeout` | `in closeout` | Closeout starts | `change-closeout` |
-| `in closeout` | `archived` | The closeout review is triaged, the owner passes the gate, and the change ships | `change-ship` |
+| `in closeout` | `archived` | The closeout review is triaged, the owner passes the gate, and the archive is cleaned up | `change-archive-cleanup` |
 
 ### Closeout archives the change, and its review reads the archive
 
@@ -724,21 +730,58 @@ not synchronize — architecture companions, `ARCHITECTURE.md`, the other
 repository documents, the roadmap, and the index — then runs `openspec archive`,
 which merges the change's spec deltas into `openspec/specs/` and moves the change
 under `openspec/changes/archive/`, and commits. The closeout review and its triage
-then read the archived change. The gate passing ships the change in the same
-session: the export the open question below settles, `reviews/` deleted, and the
-commit message and pull request description drafted. Shipping needs no review of
-its own, so it is not a phase.
+then read the archived change. The gate passing is followed, in the same
+session, by archive cleanup (`change-archive-cleanup`): the export the open
+question below settles, `reviews/` deleted, dependents released, the row set to
+`archived`, and the commit message and pull request description drafted. Archive
+cleanup needs no review of its own, so it is not a phase. It is not named for
+archiving, since `openspec archive` has already run at closeout and the stock
+OpenSpec archive skill answers to that name.
 
 They were separate phases, each with a review, and both reviews were of
 documentation alone, the implementation having passed its pre-closeout gate. In
 use, agents archived during closeout unasked, three times: OpenSpec merges deltas
 only when it archives, so promoting `spec.md` by hand at closeout meant merging by
 hand what archival merges anyway. Archiving first also gives the review the
-specifications as they will ship, so a merge that went wrong is read, not
-inferred from the delta. The cost is that every target and skill that takes a
-change by name finds an archived one too, under its dated directory. Reviewing
-before archiving needed no such lookup, and was rejected because it reviews the
-delta rather than the specifications.
+specifications as they will land, so a merge that went wrong is read, not
+inferred from the delta. The cost is that the steps after the archive — the
+closeout review, its triage, validation, the round view, the scoped citation check,
+and archive cleanup — find a change by name under its dated directory too.
+Reviewing before archiving needed no such lookup, and was rejected because it
+reviews the delta rather than the specifications. Design, planning, and
+implementation refuse an archived change instead of finding it: none of them has
+anything to do with one, and making them archive-aware only so they could refuse
+would leave them reading a path that is not there first.
+
+The closeout parts are listed, and done, in the order the work needs: the
+judgement parts, packaging, and the pipeline evidence; then promotion, which writes
+the permanent documents; then the citation check, which needs those documents to
+exist; then the archive. Checking citations before promotion failed for every
+change that creates a document at closeout, this one included.
+
+Closeout changes documentation only. Comment hygiene and import placement were
+closeout parts that edited code after the last review of code, and the closeout
+review reads documentation, so a closeout edit went unreviewed as code. The work
+moved to the pre-closeout round — its review asks about comments and imports, and
+its triage fixes them — and closeout only confirms them, returning the change to
+implementation when an edit is needed. Rejected: a closeout review that also
+applies the implementation lenses to closeout's code diff, with a validation of the
+closeout commit required before archive cleanup. It puts code review and the
+pipeline back on the closeout path that combining the phases shortened. As it is,
+closeout runs no test suite and owes no validation.
+
+A closeout review should find nothing in the code, which was reviewed, triaged, and
+validated before closeout began. When one does, its triage does not fix it: it stops
+for the owner, who directs any correction within that session — a short design,
+plan, and implementation, validated before archive cleanup — on the archived change,
+which validation finds by name. Reverting the closeout so the change could return to
+implementation was considered and not chosen: the case is expected to be rare enough
+that the owner handles it directly.
+
+A closeout interrupted after the archive and before its commit resumes from the
+archive: the change resolves under `archive/` while its row says `in closeout`, so
+the next session continues from the steps after the archive rather than archiving
+again.
 
 A change that synchronized its specs by hand before this rule archives with
 `--skip-specs`.
@@ -817,8 +860,8 @@ outside this change. No skill names `docs/prompts/`.
   local paths, environment values, and credentials before anything is exported.
   Review logs stay untracked: the exported page is where they persist. Two
   consequences for this change remain to be settled at closeout:
-  - `change-ship` deletes `reviews/` once the closeout gate is passed, so the
-    export must run before that deletion, and `change-ship` has to know whether
+  - `change-archive-cleanup` deletes `reviews/` once the closeout gate is passed,
+    so the export must run before that deletion, and it has to know whether
     it has.
   - Whether this change's own permanent documentation should say that sessions
     and review logs are exported, without naming where they go.
@@ -832,7 +875,7 @@ workflow uses it and proven on a pilot before the next is written.
 `capacity-shape-envelope` (Goal 2) runs the full sequence: design discussion of
 its open questions, design review, triage, planning against its existing plan of 24
 tasks, an implementation slice, validation, implementation review, triage, then
-pre-closeout review, closeout and archival, closeout review, and shipping.
+pre-closeout review, closeout and archival, closeout review, and archive cleanup.
 `add-full-stack-ci-job` has only a proposal, so it proves design discussion, design
 review, and planning from nothing, which the first pilot cannot.
 

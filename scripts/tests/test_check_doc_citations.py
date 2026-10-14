@@ -59,3 +59,27 @@ def test_an_unknown_change_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="no change 'other'"):
         checker.documents(tmp_path, "other")
+
+
+def test_an_archived_change_citing_its_own_unarchived_path_resolves(tmp_path: Path) -> None:
+    archived = tmp_path / "openspec/changes/archive/2026-10-14-shape-bounds"
+    archived.mkdir(parents=True)
+    (archived / "notes.md").write_text("x", "utf-8")
+    (archived / "why.md").write_text(
+        "see openspec/changes/shape-bounds/notes.md and openspec/changes/shape-bounds/gone.md,"
+        " and docs/missing.md\n",
+        "utf-8")
+
+    problems = checker.unresolvable(tmp_path, "shape-bounds")
+
+    assert sorted(cited for _, cited, _ in problems) == [
+        "docs/missing.md", "openspec/changes/shape-bounds/gone.md"]
+
+
+def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: Path) -> None:
+    change = tmp_path / "openspec/changes/shape-bounds"
+    change.mkdir(parents=True)
+    (change / "why.md").write_text("see openspec/changes/shape-bounds/gone.md\n", "utf-8")
+
+    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
+        "openspec/changes/shape-bounds/gone.md"]

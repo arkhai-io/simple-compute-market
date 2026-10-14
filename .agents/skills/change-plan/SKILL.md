@@ -122,11 +122,13 @@ companion, and `docs/development/ARCHITECTURE.md` where the design says so.
 Provisional destinations the design delegated to planning are settled here; tell
 the owner which you moved and why.
 
-**End with the closeout task**, its ten parts from
-`openspec/README.md#plan-closeout-requirements`, each made specific to this change:
-the roadmap goal and gap row it closes, its index row and any dependents the
-dependency-landing step must update, the end-to-end scenarios that exercise it,
-and the design-promotion record.
+**End with the closeout task**, its eleven parts from
+`openspec/README.md#plan-closeout-requirements` in that order, each made specific
+to this change:
+the roadmap goal and gap row it closes, its index row, the end-to-end scenarios
+that exercise it, the permanent documents it promotes, and the archive's merge or
+`--skip-specs`. Dependents are released at archive cleanup, not by a closeout
+task.
 
 ## 5. Check the plan
 

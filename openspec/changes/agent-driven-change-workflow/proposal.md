@@ -26,7 +26,7 @@ directly in the repository is told to write tombstones instead of deleting files
 - Add harness-neutral **leaf skills**, one per phase, each loadable by both Claude
   Code and Codex from one source: `change-design`, `change-plan`, `change-review`,
   `change-triage`, `change-implement`, `change-validate`, `change-closeout`, and
-  `change-ship`. Each is proven on a real change, in the order the workflow uses
+  `change-archive-cleanup`. Each is proven on a real change, in the order the workflow uses
   them, before the next depends on it.
 - Add `make review`, which runs a change review non-interactively in a second
   agent harness and writes it into the change's untracked `reviews/` directory, so
@@ -56,7 +56,8 @@ directly in the repository is told to write tombstones instead of deleting files
   they proceed.
 - Make closeout and archival one phase: closeout archives the change, which
   merges its spec deltas, and its one review reads the archived change and the
-  specifications as they will ship; the gate passing ships it. Every target and
+  specifications as they will land; the gate passing is followed by archive
+  cleanup. Every target and
   skill that takes a change by name finds an archived one, and every active
   change's closeout task is amended to match.
 - Remove the browser delivery rules from `AGENTS.md` and `openspec/README.md`.

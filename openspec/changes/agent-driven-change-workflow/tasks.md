@@ -892,20 +892,90 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       on an archived change, above. (4) `change-triage`'s closeout row names
       `change-ship`, written by 10.6.
 - [ ] 10.4 Pilot the closeout half: run `change-closeout` on
-      `capacity-shape-envelope`, after amending its section 7 to the new closeout
-      (7.10's `spec.md` entries are the archive's synchronization, and the archive
-      is its last step), then its closeout review and triage.
+      `capacity-shape-envelope`, after amending its section 7 to the new closeout —
+      the eleven parts in order, comment hygiene and import placement as
+      confirmations, 7.10's `spec.md` entries the archive's synchronization, and
+      archival a part of its own — then its closeout review and triage.
       At that closeout, decide where two questions from validating this pilot
       belong: a kube namespace per validation, and the chart's out-of-band
       Secrets made optional with the ordinary values overlays as fallback.
 - [ ] 10.5 Amend every other active change's closeout task the same way,
-      preserving completed tasks: unchecked promotion tasks say the archive
+      preserving completed tasks: its unchecked parts reordered to
+      `openspec/README.md`'s eleven, with archival a part of its own; comment
+      hygiene and import placement made confirmations, any outstanding work on them
+      moved to before the pre-closeout review; unchecked promotion tasks say the archive
       synchronizes the specs and is the last step; a change that already
       synchronized its specs by hand archives with `--skip-specs`, recorded as a
       note on its completed task. List the changes amended and any left as they
       were, with the reason.
-- [ ] 10.6 Write the `change-ship` skill, run when the closeout gate is passed:
-      the export 12.10 settles, `reviews/` deleted with the ledger kept, and the
+- [x] 10.3a From the 10.1–10.3 handoff, at the owner's direction: dependents are
+      released at archive cleanup, after the closeout gate, not at closeout, since a dependency lands
+      at `archived` and closeout runs before its review (`openspec/README.md`
+      part 6, `change-closeout`, the `planning-governance` delta's reverification
+      requirement and a scenario for a closeout review that sends the change
+      back, and design); and the delta modifies "Roadmap currency at change
+      closeout" to drop its contrast between completion and archival, which now
+      happen in one phase. Text only.
+- [x] 10.3b Resolve an archived change's citations of its own unarchived path
+      against its archive directory when `make check-doc-citations CHANGE=` is
+      scoped to it, so a check rerun after the closeout review does not report
+      the archive move; citations of anything else still must resolve. Test it
+      against a temporary tree. Done before 10.4.
+      Done in `scripts/check_doc_citations.py`. Unit, real temporary tree
+      (`scripts/tests/test_check_doc_citations.py`): an archived change citing its
+      own unarchived path resolves while a missing file under that path, and a
+      missing citation elsewhere, are still reported; an active change's own-path citation must resolve as written.
+      Against the repository, `bare-metal-buyer-domain` drops from six misses to
+      the five documents that moved after it was archived.
+- [x] 10.3c `make review KIND=closeout` refuses a change that is not archived,
+      with no override: the closeout review reads the archive, and the remedy is
+      to finish closeout, which archives. A change closed out before this rule,
+      with specs synchronized by hand, archives with `--skip-specs` first. Test it
+      beside the pre-closeout validation guard. Done before 10.4.
+      Done in `run_review`, before any transcript or record is created. Unit, with
+      the reviewer runner injected (`scripts/tests/test_run_change_review.py`): a
+      closeout review of an active change is refused with nothing run or written;
+      the existing case shows an archived change's closeout review recorded in the
+      archive.
+- [x] 10.3d Implementation review 2 (external, `reviews/02-implementation-external.md`),
+      triaged: F2 and F5 are 10.3a and 10.3c.
+      - F1: the `planning-governance` delta modifies "Canonical planning homes" — the
+        `archived` status, not the directory's place, marks a completed change.
+      - F3: `openspec/README.md`'s closeout parts are reordered to the order the
+        work needs — judgement parts, packaging, pipeline evidence, promotion,
+        citations, archival — eleven parts, archival on its own; `change-closeout`
+        checks citations and the change's specs after promotion and before the
+        archive; `AGENTS.md`'s list and `change-plan` follow.
+      - F4: closeout changes documentation only. Comment hygiene and import
+        placement are confirmed at closeout, done before pre-closeout, and asked
+        about by the pre-closeout review (`change-review`); a needed code edit
+        returns the change to implementation. `change-closeout` runs no suites and
+        owes no validation.
+      - F6: `change-triage` validates an archived change with `openspec validate
+        --specs --strict`.
+      - F7: only the steps after the archive find an archived change by name;
+        `make design` and `make implement` refuse one (`scripts/find_change.py
+        --active`; there is no plan target). Unit for the script's flag
+        (`scripts/tests/test_find_change.py`); the two Make targets were run by
+        hand against an archived change, and no test covers their wiring.
+      - F8: `change-closeout` resolves the change through `find_change.py` and
+        resumes after an archive that was not committed.
+      - S1: `scripts/harness-review-context.sh`'s lifecycle sentence.
+      Spec deltas (`change-workflow`, `planning-governance`) and design amended.
+      Skill text is proven when a session follows it; 10.4 is that session.
+      From the fresh-context check: the index legend and `change-plan` no longer
+      have closeout release dependents; `change-implement` places imports at
+      module level as it writes them, since closeout only confirms; closeout's
+      packaging and citation parts name `check-agent-skills` and the change's
+      `openspec validate`; a closeout triage stops for the owner on a finding
+      that needs code, at the owner's direction (`change-triage`, delta scenario,
+      design). The ledger records only course corrections: a disposition that
+      accepts the agent's proposal writes no entry (`change-triage`, the ledger
+      requirement and a scenario, design), at the owner's direction.
+- [ ] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
+      notes above), run when the closeout gate is passed:
+      the export 12.10 settles, `reviews/` deleted with the ledger kept,
+      dependents released as `openspec/README.md` part 6 states, and the
       commit message and pull request description drafted from the proposal, the
       promotion record, and the validation evidence; it sets the index row to
       `archived`. Pilot it on `capacity-shape-envelope`.
@@ -939,11 +1009,12 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
 - [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
 - [ ] 12.10 Resolve the open question on exporting session transcripts and review
-      logs: how `change-ship` confirms the export ran before `reviews/` is deleted,
+      logs: how `change-archive-cleanup` confirms the export ran before `reviews/` is deleted,
       and whether permanent documentation states that they are exported.
 - [ ] 12.11 Promotion: complete the design-promotion record against the proposal's
       knowledge-to-promote list — `change-workflow` spec and architecture
-      companion, the three `planning-governance` requirements, closeout part 6,
+      companion, the five `planning-governance` requirements (three added, two
+      modified), closeout part 6,
       `AGENTS.md`, `docs/agents/change-workflow.md`, the run-selection paragraph of
       `docs/development/TESTING.md`, the PVC-retention paragraph of
       `docs/development/DEPLOYMENT_AND_CONFIG.md` (and whether

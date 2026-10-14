@@ -67,6 +67,11 @@ Work through the section's tasks in order. For each:
 - Comments describe the current system: an invariant, a constraint, a reason a
   simpler implementation is wrong. Never a change name, a task number, a review, or
   what the code used to be (`AGENTS.md`, "Python comments and docstrings").
+- Imports the section adds go at module level, unless one has a reason to stay
+  local that you verified by attempting the move — a circular import that fails, or
+  a deliberate lazy load — and recorded beside it
+  (`openspec/README.md#plan-closeout-requirements`, part 2). Closeout only confirms
+  comments and imports; it never edits code, so this is where they are done.
 - Mark the task `[x]` when its evidence passes, with a short note: each suite, its
   level as `TESTING.md` defines them — unit, library integration (a real component
   against real storage, no application), application integration (the running

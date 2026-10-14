@@ -147,7 +147,15 @@ checks your understanding here before reading anything that rests on it. Then:
 2. **`scope`** — What scope crept in during implementation? Review anything new under
    the implementation review's questions. Changes are rarely split at this stage, so
    say what the new scope needs rather than only that it exists.
-3. **`readiness`** — Is the change ready for promotion and closeout?
+3. **`documentation`** — Are the change's comments and imports as closeout will
+   confirm them? Closeout edits no code, so this is the last review that can ask
+   for a code change. Read the comments the change added for any naming the review,
+   migration, or task that introduced them, or describing history rather than the
+   current system (`AGENTS.md`, "Python comments and docstrings"); and check each
+   import the change added or touched that is local rather than at module level for
+   a recorded reason to stay local
+   (`openspec/README.md#plan-closeout-requirements`, parts 1 and 2).
+4. **`readiness`** — Is the change ready for promotion and closeout?
 
 ### Closeout review
 
@@ -160,7 +168,8 @@ specifications as they now stand, not the deltas.
    files and the closeout task's recorded evidence, and the design-promotion record
    against the permanent documents it names. Did the archive's merge leave each
    permanent `spec.md` saying what the change's deltas meant?
-2. **`readiness`** — May the change ship?
+2. **`readiness`** — May the change land: is anything left before its archive is
+   cleaned up and its dependents released?
 
 ## 3. Answer every question
 

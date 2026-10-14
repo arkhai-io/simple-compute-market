@@ -3,8 +3,10 @@
 
 A change lives at `openspec/changes/<name>/` until closeout archives it, which
 moves it to `openspec/changes/archive/<YYYY-MM-DD>-<name>/`. Closeout archives
-before its review, so the closeout review, its triage, and anything else that
-takes a change by name must find an archived change by the same name. An active
+before its review, so the steps that follow it — the closeout review, its
+triage, validation, the round view, the citation check, archive cleanup — must
+find an archived change by the same name. Design, planning, and implementation
+take only an active change, and refuse an archived one (`--active`). An active
 change is preferred; an archived one is found only when exactly one archive
 directory carries the name, since two would mean the name was reused and either
 could be meant.
@@ -54,16 +56,28 @@ def change_directory(root: Path, name: str) -> Path:
     return archived[0]
 
 
+def is_archived(root: Path, directory: Path) -> bool:
+    return directory.parent == root / ARCHIVE
+
+
 def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
-    if len(args) != 1:
-        print("usage: find_change.py <change>", file=sys.stderr)
+    active_only = "--active" in args
+    names = [arg for arg in args if arg != "--active"]
+    if len(names) != 1:
+        print("usage: find_change.py [--active] <change>", file=sys.stderr)
         return 2
     try:
-        print(change_directory(root, args[0]).relative_to(root).as_posix())
+        directory = change_directory(root, names[0])
     except ChangeNotFound as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    if active_only and is_archived(root, directory):
+        print(f"ERROR: change {names[0]!r} is archived "
+              f"({directory.relative_to(root).as_posix()}); design, planning, and "
+              "implementation take an active change", file=sys.stderr)
+        return 1
+    print(directory.relative_to(root).as_posix())
     return 0
 
 

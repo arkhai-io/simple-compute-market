@@ -9,9 +9,13 @@ ending in a review MUST NOT be treated as finished until that review has been
 triaged and the repository owner has recorded, in triage, that its gate is passed.
 Closeout MUST archive the change, merging its specification deltas into the
 permanent specifications, before its closeout review, and that review MUST read the
-archived change and the permanent documents as archived; the change ships, and is
-`archived`, only once that review's gate is passed. Every step that takes a change
-by name MUST find an archived change by the same name.
+archived change and the permanent documents as archived; the archive is cleaned up,
+and the change is `archived`, only once that review's gate is passed. Closeout MUST
+change documentation only; a closeout part that would need a code change MUST return
+the change to implementation. The steps that follow the archive — the closeout
+review and its triage, validation, the round view, the scoped citation check, and
+archive cleanup — MUST find an archived change by its name; design, planning, and
+implementation MUST refuse a change that is archived.
 Planning MUST NOT begin before the design review's gate is passed. A design
 decision made after that gate, such as one planning exposes, MUST return the change
 to design; the owner MAY waive another design review for it, and a waiver MUST be
@@ -39,6 +43,25 @@ its own or another agent's agreement with a finding as a disposition.
   `openspec/specs/`, and the review and its triage find the change and its records
   by name under the archive
 
+#### Scenario: An archived change is given to implementation
+
+- **WHEN** the owner asks to implement a change whose directory is under the
+  archive
+- **THEN** the request is refused, naming the archived directory
+
+#### Scenario: A closeout review finds a code defect
+
+- **WHEN** a closeout review's finding can only be fixed by changing code
+- **THEN** the triage makes no code change and stops for the owner, and any
+  correction the owner directs in that session is validated before archive cleanup
+
+#### Scenario: Closeout finds a comment that needs rewriting
+
+- **WHEN** closeout's comment hygiene part finds a comment the change added that
+  describes its history
+- **THEN** closeout stops without editing it and the change returns to
+  implementation for a fix round
+
 #### Scenario: A design review accepts a blocking finding
 
 - **WHEN** the owner accepts a `blocking` finding in a design review
@@ -51,13 +74,13 @@ Each change of a change's phase or state MUST be written to its row in the
 active-change index by the skill that makes it, in the same step: design
 discussion starting, triage passing a phase-closing gate, planning starting and
 the owner accepting the plan, the first implementation section starting, closeout
-starting, and shipping. An implementation review after a section MUST NOT change
+starting, and archive cleanup. An implementation review after a section MUST NOT change
 the status.
 
 #### Scenario: A closeout gate is passed
 
 - **WHEN** the owner passes the gate of a change's closeout review
-- **THEN** the change ships in the same session and its index row is set to
+- **THEN** its archive is cleaned up in the same session and its index row is set to
   `archived`
 
 #### Scenario: A pre-closeout gate is passed
@@ -152,10 +175,13 @@ it.
 
 ### Requirement: Intervention ledger
 
-Each disposition the owner records MUST be appended as one entry to the change's
-`interventions.jsonl`, stating the review, the `tasks.md` section the finding
-concerns when it concerns one, the finding's lens, basis, and severity,
-the implementing agent's position, the owner's disposition, and a one-line summary.
+Each disposition by which the owner corrects course — deciding otherwise than the
+implementing agent proposed, or adding context or a condition that changes the work —
+MUST be appended as one entry to the change's `interventions.jsonl`, stating the
+review, the `tasks.md` section the finding concerns when it concerns one, the
+finding's lens, basis, and severity, the implementing agent's position, the owner's
+disposition, and a one-line summary. A disposition that accepts the agent's proposal
+as it stands MUST NOT be logged; the triage record holds every disposition.
 The ledger MUST be tracked by version control, MUST remain in the change directory,
 and MUST be archived with the change.
 
@@ -164,6 +190,12 @@ discussion, an entry MUST be appended in the same shape, with `review` set to
 `design`, the decision as `finding`, lens `direction`, basis `judgement`, and a null
 severity. A recommendation the owner accepts MUST NOT be logged.
 
+#### Scenario: The owner accepts a finding as proposed
+
+- **WHEN** the owner disposes of a finding by accepting the agent's proposed
+  outcome without adding to it
+- **THEN** the triage record holds the disposition and the ledger gains no entry
+
 #### Scenario: The owner reverses a design recommendation
 
 - **WHEN** the owner chooses a different option than the one the agent recommended
@@ -171,9 +203,10 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 - **THEN** one ledger entry records the decision, the agent's recommendation, and
   what the owner chose and why
 
-#### Scenario: A reviewed change ships
+#### Scenario: A reviewed change's archive is cleaned up
 
-- **WHEN** a change whose findings were dispositioned ships after its closeout gate
+- **WHEN** a change whose findings were dispositioned is cleaned up after its
+  closeout gate
 - **THEN** its `reviews/` directory is gone and its intervention ledger is in the
   archived change directory
 

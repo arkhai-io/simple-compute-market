@@ -820,11 +820,11 @@ review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHAN
 	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change>)
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@claude "/change-design $(CHANGE)"
 
 implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
-	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))"
 
 triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)

@@ -169,6 +169,18 @@ def test_a_closeout_review_of_an_archived_change_is_recorded_in_the_archive(tmp_
     assert path == archived / "reviews" / "01-closeout.md"
 
 
+def test_a_closeout_review_of_an_active_change_is_refused(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    with pytest.raises(reviewer.ReviewError, match="not archived"):
+        reviewer.run_review(CHANGE, "closeout", root=root, head=lambda _: HEAD,
+                            runner=_writing(_review("closeout"), calls=calls))
+
+    assert calls == []
+    assert not (_reviews(root) / "transcripts").exists()
+
+
 def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)

@@ -86,3 +86,12 @@ def test_the_command_names_a_missing_change_and_fails(
 
     assert finder.main(["shape-bounds"], root) == 1
     assert "no change 'shape-bounds'" in capsys.readouterr().err
+
+
+def test_active_only_refuses_an_archived_change(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _tree(tmp_path, "shape-bounds", "archive/2026-10-14-other")
+
+    assert finder.main(["--active", "shape-bounds"], root) == 0
+    assert finder.main(["--active", "other"], root) == 1
+    assert "is archived" in capsys.readouterr().err

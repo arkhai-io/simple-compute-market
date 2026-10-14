@@ -232,7 +232,11 @@ Only reviews are gates. The triage file of a validation record or of the owner's
 notes ends instead with `## Gate` reading "Not a gate: evidence for the round
 triaged in `<NN-review>.triage.md`."
 
-Append one line per disposition to the change's tracked `interventions.jsonl`, in
+Append a line to the change's tracked `interventions.jsonl` only for a disposition
+by which the owner corrects course: deciding otherwise than you proposed — another
+outcome, another alternative, a position reversed — or adding context or a
+condition that changes the work. A disposition that accepts your proposal as it
+stands is not an intervention, and most are not; the triage file records it. Use
 the shape `design.md` and the `change-workflow` delta define:
 
 ```json
@@ -261,6 +265,13 @@ the owner cannot otherwise see that it was written.
   settled, as `change-design` records decisions.
 - **task:** append it to `tasks.md` in the section it concerns, amending rather than
   replacing, with the finding cited in its note.
+- **fix, at a closeout triage:** the change is archived, and its code was reviewed
+  and validated before closeout, so a closeout triage makes documentation fixes
+  only. A finding whose fix needs code is not fixed by the steps below: stop, tell
+  the owner what needs to change and why, and wait. The owner decides whether a
+  correction is needed and directs it in this session — typically a short design,
+  plan, and implementation of it, then `make validate CHANGE=<change>`, which finds
+  the archived change, before the gate is asked about.
 - **fix:** once every finding has a disposition, make the accepted fixes, as
   `change-implement` makes a section's changes: the change and the decision it
   rests on, and no more; at the lowest test level that proves it; comments
@@ -285,7 +296,10 @@ the owner cannot otherwise see that it was written.
   validated next (`make validate CHANGE=<change>`), which pushes it. Say whether
   the fixes also need another review round; the owner decides.
 
-Then run `openspec validate <change> --strict` and report the result.
+Then validate and report the result: `openspec validate <change> --strict` for an
+active change, or, for an archived one — a closeout triage — `openspec validate
+--specs --strict`, since its deltas are merged and the permanent specifications are
+what its fixes touched. `python3 scripts/find_change.py <change>` says which.
 
 ## 6. The gate
 
@@ -305,7 +319,7 @@ its status misleads every agent that reads the index:
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
-| `closeout` | `archived` — written by `change-ship`, which ships the change in the same session once the gate passes |
+| `closeout` | `archived` — written by `change-archive-cleanup`, run in the same session once the gate passes |
 
 When the gate does not pass, leave the status, and say what must happen before the
 next review.

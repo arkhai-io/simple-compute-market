@@ -47,7 +47,7 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory  # noqa: E402
+from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANGES = Path("openspec/changes")
@@ -327,9 +327,15 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
     try:
-        reviews = change_directory(root, change) / "reviews"
+        directory = change_directory(root, change)
     except ChangeNotFound as exc:
         raise ReviewError(str(exc)) from exc
+    # The closeout review reads the specifications as the archive merged them;
+    # before the archive there is only the delta to read.
+    if kind == "closeout" and not is_archived(root, directory):
+        raise ReviewError(f"{change} is not archived; a closeout review reads the archived "
+                          "change, so finish closeout, which archives it, first")
+    reviews = directory / "reviews"
     reviewed = head(root)
     if kind == "pre-closeout" and not unvalidated:
         if problem := validation_problem(reviews, reviewed, root, changed_since):

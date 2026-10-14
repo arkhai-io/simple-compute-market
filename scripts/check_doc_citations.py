@@ -16,8 +16,9 @@ Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
 archived, and their citations are allowed to have moved on. Scoped to one
 change by name, the check finds it active or archived, since closeout archives
-a change before its review; a citation of the change's own unarchived path no
-longer resolves once it is archived. A change's `reviews/` are excluded too:
+a change before its review; once it is archived, a citation of the change's own
+unarchived path resolves against its archive directory, so the archive move
+itself is never reported. A change's `reviews/` are excluded too:
 review records are untracked working notes, never part of the branch, so a
 citation in one is not a citation the branch makes.
 """
@@ -30,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from find_change import ChangeNotFound, change_directory  # noqa: E402
+from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
@@ -92,11 +93,21 @@ def unresolvable(
 ) -> list[tuple[str, str, str]]:
     """Every citation that is absent or points at a tombstone."""
 
+    own: tuple[str, Path] | None = None
+    if change is not None:
+        try:
+            directory = change_directory(root, change)
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
+        if is_archived(root, directory):
+            own = (f"openspec/changes/{change}/", directory)
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
         for cited in sorted(set(CITATION.findall(text))):
             target = root / cited
+            if own and cited.startswith(own[0]):
+                target = own[1] / cited[len(own[0]):]
             if not target.exists():
                 problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
