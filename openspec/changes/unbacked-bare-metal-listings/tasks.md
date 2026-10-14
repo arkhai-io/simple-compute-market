@@ -79,7 +79,13 @@ Depends on `share-site-projection-state` (design phase) and
 
 - [ ] 2.1 The closeout task defined in
       `openspec/README.md#plan-closeout-requirements`, written out in full when this
-      change is planned, including the system evidence that unbacked bare-metal
+      change is planned as its eleven parts in that order: comment hygiene and import
+      placement as confirmations, documentation compliance, narrative compression,
+      roadmap currency, campaign index currency (other rows' `Depends on` are left to
+      archive cleanup), packaging, end-to-end pipeline, promotion (the `spec.md` files
+      the deltas cover are written by the archive), documentation citations with
+      `openspec validate --strict`, and archival last. Its pipeline
+      part includes the system evidence that unbacked bare-metal
       discovery reaches a usable introduction, and that a buyer query bounded by
       asking rate returns backed and unbacked bare-metal listings together
       (transferred from `publish-indicative-listing-rates` 7.13).

@@ -62,6 +62,11 @@
       "dist": "arkhai-kit-capability-shape"
     },
     {
+      "key": "kit-capability-admissibility",
+      "path": "kit/capability-admissibility",
+      "dist": "arkhai-kit-capability-admissibility"
+    },
+    {
       "key": "kit-resource-pools-contracts",
       "path": "kit/resource-pools-contracts",
       "dist": "arkhai-kit-resource-pools-contracts"

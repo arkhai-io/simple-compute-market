@@ -12,6 +12,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-admissibility"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-shape"
 version = "0.2.0"
 source = { registry = "../../.dist" }
@@ -24,7 +35,7 @@ name = "arkhai-kit-resource-pools-contracts"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "pydantic" },
 ]
 
@@ -35,7 +46,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-kit-capability-shape", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 

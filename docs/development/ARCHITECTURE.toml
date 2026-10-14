@@ -80,7 +80,11 @@ owner = "arkhai-kit-delivery"
 # the package's scope. enforce = false reports a breach as a warning.
 [kind_allowlists.contracts]
 layers = ["core"]
-distributions = ["arkhai-kit-identity", "arkhai-kit-capability-shape"]
+distributions = [
+    "arkhai-kit-identity",
+    "arkhai-kit-capability-shape",
+    "arkhai-kit-capability-admissibility",
+]
 family_vocabulary = true
 enforce = true
 

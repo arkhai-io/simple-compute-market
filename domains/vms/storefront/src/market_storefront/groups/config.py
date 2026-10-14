@@ -477,6 +477,15 @@ _INIT_USER_TEMPLATE = """\
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
 # publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
                                                 # publication still requires complete typed clauses.
+
+# [admissibility.defaults.vm.gpu]              # the shapes this storefront will sell: `min` and `max`
+# count = { min = 1, max = 16 }                # per quantity, no `offer`. Fills each bound a listing's
+# [admissibility.defaults.vm.memory]           # own inline constraints leave unstated (a listing may
+# gib = { max = 512 }                          # replace one, even wider); a listing whose offer falls
+                                                # outside its resolved range is not published, and the
+                                                # default generator yields only counts this admits.
+                                                # Unset = no limit; a table the storefront cannot read
+                                                # stops startup.
 """
 
 

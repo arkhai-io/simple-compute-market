@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Wait for a GitHub Actions E2E run, download its logs, and zip the directory."""
+"""Wait for a GitHub Actions E2E run, download its logs, and zip the directory.
+
+Without a run ID, the run is the newest one on the current branch whose head commit
+is the commit asked for, local HEAD by default. Matching the commit, not only the
+branch, is what makes the fetch safe straight after a dispatch: the new run may not
+be listed yet, and the previous, finished run on the branch tested another commit.
+A just-dispatched run is waited for, with a bound. When the commit already has a
+run — validation repeated on one commit — the earlier run matches before the new
+one is listed, so the caller passes the newest run ID it saw before dispatching
+(`--after-run`) and only later runs are considered; run IDs only increase.
+"""
 
 from __future__ import annotations
 
@@ -8,15 +18,23 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import IO, Any, Sequence
+from typing import IO, Any, Callable, Sequence
 
 
 DEFAULT_WORKFLOW = "e2e.yml"
 DEFAULT_OUTPUT_DIR = Path(".snapshot/e2e-logs")
 RUN_LIST_LIMIT = 100
+DEFAULT_WAIT_SECONDS = 180.0
+POLL_SECONDS = 5.0
 LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs", "e2e-apicredits-logs")
 COMPOSE_LOG = "compose-logs.txt"
+
+
+# Runs a command as subprocess.run does, given `text=True` and `check=True`; the
+# GitHub and Git command line is this script's only boundary.
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 class FetchError(RuntimeError):
@@ -26,11 +44,12 @@ class FetchError(RuntimeError):
 def _run(
     command: Sequence[str],
     *,
+    runner: Runner,
     capture_output: bool = False,
     stdout: IO[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(
+        return runner(
             list(command),
             capture_output=capture_output,
             stdout=stdout,
@@ -47,17 +66,18 @@ def _run(
         ) from exc
 
 
-def _json_output(command: Sequence[str]) -> Any:
-    result = _run(command, capture_output=True)
+def _json_output(command: Sequence[str], runner: Runner) -> Any:
+    result = _run(command, runner=runner, capture_output=True)
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise FetchError(f"{' '.join(command)} returned invalid JSON") from exc
 
 
-def _current_branch() -> str:
+def _current_branch(runner: Runner) -> str:
     branch = _run(
         ["git", "branch", "--show-current"],
+        runner=runner,
         capture_output=True,
     ).stdout.strip()
     if not branch:
@@ -65,7 +85,18 @@ def _current_branch() -> str:
     return branch
 
 
-def _latest_run_id(workflow: str, branch: str) -> str:
+def _full_commit(revision: str, runner: Runner) -> str:
+    # Runs report full commit IDs, so a short ID or a ref is resolved first.
+    return _run(
+        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        runner=runner,
+        capture_output=True,
+    ).stdout.strip()
+
+
+def _matching_run_id(
+    workflow: str, branch: str, commit: str, after_run: int | None, runner: Runner
+) -> str | None:
     payload = _json_output(
         [
             "gh",
@@ -76,29 +107,63 @@ def _latest_run_id(workflow: str, branch: str) -> str:
             "--limit",
             str(RUN_LIST_LIMIT),
             "--json",
-            "databaseId,headBranch",
-        ]
+            "databaseId,headBranch,headSha",
+        ],
+        runner,
     )
     if not isinstance(payload, list):
         raise FetchError("gh run list returned a value other than a run list")
 
+    # gh lists runs newest first, so the first match is the newest run of the commit.
     for run in payload:
-        if isinstance(run, dict) and run.get("headBranch") == branch:
+        if (
+            isinstance(run, dict)
+            and run.get("headBranch") == branch
+            and run.get("headSha") == commit
+        ):
             run_id = run.get("databaseId")
             if isinstance(run_id, int) or (
                 isinstance(run_id, str) and run_id.isdigit()
             ):
-                return str(run_id)
-
-    raise FetchError(
-        f"no {workflow} workflow run found for branch {branch} "
-        f"among the latest {RUN_LIST_LIMIT} runs"
-    )
+                if after_run is None or int(run_id) > after_run:
+                    return str(run_id)
+    return None
 
 
-def _conclusion(run_id: str) -> str:
+def _run_id_for_commit(
+    workflow: str,
+    branch: str,
+    commit: str,
+    *,
+    wait_seconds: float,
+    runner: Runner,
+    after_run: int | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    deadline = clock() + wait_seconds
+    while True:
+        run_id = _matching_run_id(workflow, branch, commit, after_run, runner)
+        if run_id is not None:
+            return run_id
+        if clock() >= deadline:
+            raise FetchError(
+                f"no {workflow} workflow run of commit {commit[:12]} on branch {branch} "
+                f"among the latest {RUN_LIST_LIMIT} runs after waiting "
+                f"{wait_seconds:g}s; was the commit pushed and the workflow dispatched?"
+            )
+        print(
+            f"Waiting for a {workflow} run of commit {commit[:12]} to be listed...",
+            flush=True,
+        )
+        sleep(POLL_SECONDS)
+
+
+def _conclusion(run_id: str, runner: Runner) -> str:
     try:
-        payload = _json_output(["gh", "run", "view", run_id, "--json", "conclusion"])
+        payload = _json_output(
+            ["gh", "run", "view", run_id, "--json", "conclusion"], runner
+        )
     except FetchError as exc:
         print(
             f"WARNING: could not read run {run_id} conclusion: {exc}", file=sys.stderr
@@ -112,11 +177,11 @@ def _conclusion(run_id: str) -> str:
     return "unknown"
 
 
-def _fetch_actions_log(run_id: str, output_dir: Path) -> bool:
+def _fetch_actions_log(run_id: str, output_dir: Path, runner: Runner) -> bool:
     target = output_dir / "actions.log"
     try:
         with target.open("w", encoding="utf-8") as stream:
-            _run(["gh", "run", "view", run_id, "--log"], stdout=stream)
+            _run(["gh", "run", "view", run_id, "--log"], runner=runner, stdout=stream)
     except (FetchError, OSError) as exc:
         try:
             target.unlink(missing_ok=True)
@@ -130,7 +195,9 @@ def _fetch_actions_log(run_id: str, output_dir: Path) -> bool:
     return True
 
 
-def _fetch_compose_log(run_id: str, output_dir: Path, artifact: str) -> bool:
+def _fetch_compose_log(
+    run_id: str, output_dir: Path, artifact: str, runner: Runner
+) -> bool:
     # Each lane uploads the same filename, so preserve its artifact namespace.
     output_dir = output_dir / artifact
     target = output_dir / COMPOSE_LOG
@@ -148,7 +215,8 @@ def _fetch_compose_log(run_id: str, output_dir: Path, artifact: str) -> bool:
                 artifact,
                 "--dir",
                 str(output_dir),
-            ]
+            ],
+            runner=runner,
         )
     except FetchError as exc:
         print(
@@ -171,8 +239,23 @@ def fetch_logs(
     workflow: str,
     output_root: Path,
     run_id: str | None,
+    commit: str | None = None,
+    wait_seconds: float = DEFAULT_WAIT_SECONDS,
+    after_run: int | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+    runner: Runner = subprocess.run,
 ) -> Path:
-    selected_run = run_id or _latest_run_id(workflow, _current_branch())
+    selected_run = run_id or _run_id_for_commit(
+        workflow,
+        _current_branch(runner),
+        _full_commit(commit or "HEAD", runner),
+        wait_seconds=wait_seconds,
+        runner=runner,
+        after_run=after_run,
+        sleep=sleep,
+        clock=clock,
+    )
     output_dir = output_root / selected_run
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -182,12 +265,12 @@ def fetch_logs(
         ) from exc
 
     print(f"Waiting for E2E workflow run {selected_run} to complete...", flush=True)
-    _run(["gh", "run", "watch", selected_run])
-    conclusion = _conclusion(selected_run)
+    _run(["gh", "run", "watch", selected_run], runner=runner)
+    conclusion = _conclusion(selected_run, runner)
 
-    actions_log = _fetch_actions_log(selected_run, output_dir)
+    actions_log = _fetch_actions_log(selected_run, output_dir, runner)
     compose_logs = [
-        _fetch_compose_log(selected_run, output_dir, artifact)
+        _fetch_compose_log(selected_run, output_dir, artifact, runner)
         for artifact in LOG_ARTIFACTS
     ]
     if not actions_log and not any(compose_logs):
@@ -206,12 +289,28 @@ def fetch_logs(
     return output_dir
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, runner: Runner = subprocess.run) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workflow", default=DEFAULT_WORKFLOW)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--run-id")
+    parser.add_argument(
+        "--commit", help="the commit whose run to fetch; local HEAD by default"
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=DEFAULT_WAIT_SECONDS,
+        help="how long to wait for the commit's run to be listed",
+    )
+    parser.add_argument(
+        "--after-run",
+        type=int,
+        help="consider only runs with a higher ID: the newest run before dispatching",
+    )
     args = parser.parse_args(argv)
+    if args.run_id and (args.commit or args.after_run is not None):
+        parser.error("--run-id names the run; it cannot be combined with --commit or --after-run")
 
     run_id = args.run_id.strip() if args.run_id else None
     try:
@@ -219,6 +318,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             workflow=args.workflow,
             output_root=args.output_dir,
             run_id=run_id,
+            commit=args.commit.strip() if args.commit else None,
+            wait_seconds=args.wait_seconds,
+            after_run=args.after_run,
+            runner=runner,
         )
     except FetchError as exc:
         print(f"fetch-e2e-logs: {exc}", file=sys.stderr)

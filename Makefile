@@ -19,6 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
+.PHONY: check-agent-skills review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -563,7 +564,9 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values.
+# credential files and inventory content never pass through Helm values. It keeps
+# the release's volumes on uninstall; a local development cluster is deployed with
+# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 
 deploy-helm:
@@ -792,8 +795,8 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # change runs this during its own closeout, while its citations are still
 # expected to hold.
 # ---------------------------------------------------------------------------
-# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
-# is what a closeout gates on: a change owes the citations it wrote, and
+# Pass CHANGE=<name> to scope to one change's own documents, active or archived,
+# which is what a closeout gates on: a change owes the citations it wrote, and
 # gating it on the whole repository's documentation debt would let one stale
 # runbook block everyone else's archival.
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
@@ -822,6 +825,9 @@ check-locks: ## Fail if a lock is not current with its project, the wheels in .d
 
 check-python-version: ## Fail if anything selects a Python version other than .python-version
 	@python3 scripts/check_python_version.py
+
+check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
+	@python3 scripts/check_agent_skills.py
 
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py
@@ -864,11 +870,14 @@ check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exce
 architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
 	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
 
-code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+# `zip -y` stores a symlink as a link. Without it the agent-skill links under
+# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
+# longer shows which skills each harness loads.
+code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
-	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"
 
@@ -879,7 +888,7 @@ code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored art
 # staging their content; the trailing `git reset` unwinds the index back
 # to exactly its pre-run state, so the target's own "without changing git
 # state" guarantee still holds once it completes.
-review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
+review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for review without changing git state.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -888,7 +897,7 @@ review-diff: ## Write a binary-safe HEAD-relative diff for review without changi
 	git reset -q; \
 	echo "Done: $$OUTFILE"
 
-last-diff: ## Write a binary-safe diff for the most recent commit.
+last-diff: round-view-closed ## Write a binary-safe diff for the most recent commit.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -926,7 +935,69 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
-run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
+REVIEW_BASE ?= dev
+REVIEW_MODEL ?= gpt-6-sol
+REVIEW_EFFORT ?= high
+review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1] [UNVALIDATED=1])
+	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
+
+design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change>)
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@claude "/change-design $(CHANGE)"
+
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))"
+
+triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude "/change-triage $(CHANGE)"
+
+closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude "/change-closeout $(CHANGE)"
+
+check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
+	@python3 scripts/check_change_index.py
+
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change>)
+	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
+	@claude "/change-archive-cleanup $(CHANGE)"
+
+round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
+	@python3 scripts/round_view.py check
+
+round-view: ## Show an implementation round as uncommitted changes in this checkout for the owner's reading, after pushing HEAD and dispatching the E2E pipeline (CHANGE=<change> [BASE=<commit>] [NO_E2E=1])
+	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)") $(if $(filter 1,$(NO_E2E)),--no-e2e)
+
+round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
+	@python3 scripts/round_view.py done
+
+round-e2e-baseline: ## Print, and forget, the run before the E2E run round-view dispatched for HEAD, if it dispatched one
+	@python3 scripts/round_view.py e2e-baseline
+
+design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
+	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
+
+HELM_CONTEXT ?= docker-desktop
+
+validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
+	@python3 scripts/validate_slice.py local
+
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+
+check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
+	@python3 scripts/check_push_ready.py check
+
+push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
+	@python3 scripts/check_push_ready.py push
+
+validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)"
+
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \
 	if [ -z "$$branch" ]; then \
 		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
@@ -937,11 +1008,15 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=
+E2E_COMMIT ?=
+E2E_AFTER_RUN ?=
 
 fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
 		--output-dir "$(E2E_LOG_DIR)" \
-		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
+		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
+		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py

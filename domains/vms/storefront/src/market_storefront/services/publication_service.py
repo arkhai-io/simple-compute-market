@@ -22,6 +22,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
+import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
@@ -54,7 +55,6 @@ class VmPublicationHooks:
 
 def _make_registry_client():
     from core_storefront.multi_registry_client import MultiRegistryClient
-    import market_storefront.container as container
     from market_storefront.utils.config import get_registry_authorities
 
     signer = container.resolved_marketplace_signer
@@ -163,6 +163,7 @@ async def close_stale_compute_listings_after_capacity_change(
         site_capacity_buckets=site_capacity_buckets,
         scope=ReconciliationScope.AVAILABILITY,
         shape_feasible=vm_shape_feasibility(),
+        admissibility_default=container.resolved_admissibility_default,
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:
@@ -199,6 +200,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         site_capacity_buckets=site_capacity_buckets,
         shape_feasible=vm_shape_feasibility(),
         configured_sites=configured_sites,
+        admissibility_default=container.resolved_admissibility_default,
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         StorefrontDomainRegistry,
     )
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_capability_admissibility import Declaration
     from market_capacity_publication import CapacityRuntime
     from market_contact_exchange import ContactExchangeComposition
     from market_delivery import SellerIntroductionDelivery
@@ -54,6 +55,11 @@ resolved_settlement_composition: VmSettlementComposition | None = None
 resolved_contact_exchange: ContactExchangeComposition | None = None
 resolved_introduction_delivery: SellerIntroductionDelivery | None = None
 
+# The parsed ``[admissibility.defaults.vm]``, or None when the storefront
+# configures none. Parsed once at composition, so publication, reconciliation,
+# the inventory guard, and the override write check judge against one value.
+resolved_admissibility_default: Declaration | None = None
+
 resolved_storefront_service = None
 
 def resolve_market_domain(binding: StorefrontDomainBinding):
@@ -79,6 +85,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_settlement_composition
     global resolved_contact_exchange
     global resolved_introduction_delivery
+    global resolved_admissibility_default
     global resolved_storefront_service
 
     if (
@@ -102,6 +109,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_settlement_composition = None
     resolved_contact_exchange = None
     resolved_introduction_delivery = None
+    resolved_admissibility_default = None
     resolved_storefront_service = None
 
 

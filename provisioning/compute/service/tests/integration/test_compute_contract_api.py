@@ -222,5 +222,3 @@ async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_40
             await client.begin_fulfillment_teardown(fulfillment_id)
 
     assert exc_info.value.status_code == 409
-
-

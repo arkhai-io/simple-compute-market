@@ -322,6 +322,26 @@ their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
 so SQLite can create its database without a root startup process. Bind mounts
 and existing volumes must already provide write access to the runtime user.
 
+The Helm charts annotate each service's PVC `helm.sh/resource-policy: keep`, so
+`helm uninstall` leaves the volume and a reinstall rebinds it and recovers its
+state. A chart's `persistence.retainOnUninstall`, `true` by default, controls the
+annotation. `helm/local-values.yaml` sets it `false` for every persistent chart,
+and `make -C helm deploy-local` layers that overlay on `values.yaml`: a local
+deployment's volumes are deleted with the release, so uninstalling and deploying
+again starts every service from no state rather than from a database an earlier
+deployment of other code migrated. A PVC whose release was last installed or
+upgraded without the overlay still carries the annotation, and survives an
+uninstall until it is deleted by hand.
+
+Deploy to a local development cluster with `make -C helm deploy-local`, never with
+`make -C helm deploy` or the root `make deploy`, whether a person or an agent is
+deploying. A local cluster is redeployed with whatever code is checked out, and a
+retained volume keeps the state that code wrote — a database another branch
+migrated — for the next deployment to start from. Pre-review validation refuses
+to deploy over a release volume that carries the annotation and stops to ask, so a
+local deploy without the overlay costs the next validation a decision.
+`make -C helm deploy` is for a deployment whose state must survive reinstalling.
+
 ### Combined compute-family storefront
 
 The storefront image installs the shared `arkhai-core-storefront` shell plus
@@ -637,6 +657,73 @@ system status names the retired keys.
   system status, as is a rate for a shape the pool does not publish. A changed or
   withdrawn rate refreshes the listing in place.
 
+- **A stated shape may bound what an agreed shape states.** In a pool's
+  `listing_shapes` or an override's, any quantity field may take a constraint
+  mapping in place of its scalar, holding `offer`, `min`, `max`, or any of them:
+
+  ```yaml
+  listing_shapes:
+    vm:
+      - gpu:    { model: H100, count: { offer: 1, min: 1, max: 4 } }
+        cpu:    { count: 16 }
+        memory: { gib: { max: 512 } }
+  ```
+
+  The listing publishes each field's `offer` (here one GPU, 16 vCPUs, and no
+  memory); `min` and `max` bound only what an agreed shape may state, and are never
+  published. A plain scalar is shorthand for an `offer`, and an `offer` alone says
+  nothing about negotiability: write a fixed value with `min` and `max` equal to it.
+  Each value is a positive integer, `min` is not above `max`, an `offer` lies within
+  its own range, a mapping states at least one key, and any other key is refused.
+  Constraints apply to quantities only; `gpu.count` and `gpu.model` are required, so
+  `gpu.count` always states an `offer`. Changing only a range keeps the listing's
+  identity.
+
+- **The storefront's configured default fills unconstrained bounds.**
+  `[admissibility.defaults.vm]` in the VM storefront's settings uses the same family
+  nesting and field syntax, without `offer`:
+
+  ```toml
+  [admissibility.defaults.vm.gpu]
+  count = { min = 1, max = 16 }
+
+  [admissibility.defaults.vm.memory]
+  gib = { max = 512 }
+  ```
+
+  For each field's `min` and `max`, a stated shape's own bound wins, including a
+  wider one, and a bound it does not state is the default's. An override's shapes
+  replace the hint's whole and do not inherit its constraints. Generated shapes
+  take the default alone, so the default generator yields only the GPU counts it
+  admits. `settings.toml` ships none, and absent and an empty table both mean no
+  default. A malformed table — an unknown key, `min` above `max`, an `offer`, or a
+  constraint on a field that is not a quantity or is undefined — stops the
+  storefront at startup, naming each problem as `admissibility.defaults.vm.<path>`. The default is parsed
+  once at startup, so a change takes effect on restart.
+
+- **Publication never advertises an offer the policy excludes.** A stated shape
+  whose `offer` falls outside its resolved range is not published, and an open
+  listing for it closes. Base shapes are read first: a base shape that cannot be
+  read, including one whose required field is given a constraint mapping with no
+  `offer`, holds the whole pool. Once every base shape reads, a listing whose policy
+  cannot be computed — a constraint on a field that is not a quantity, on an
+  undefined field, or with an unknown key; bounds that merge to an empty range; or
+  one base shape stated twice with different constraints — closes alone, and the
+  pool's other listings publish. System status reports the inadmissible offers and
+  the uncomputable policies per site in `publication_derivation`, under
+  `inadmissible_listing_shapes` and `unusable_shape_constraints`, naming the tier,
+  path, and problem, each tier's conflicting value, or each conflicting entry.
+
+- **Writes refuse what they can check.** The provisioning service refuses a pool
+  write whose constraint mappings are malformed or that states one base shape twice
+  with different constraints, naming each entry; identical entries are accepted, and
+  whether a field may carry a constraint is left to the storefront, which never
+  judges a pool's shapes against its configured default at write. An override write
+  is refused, without a site call and leaving the stored override unchanged, when a
+  shape's base shape or constraints cannot be read, its list states one base shape
+  with different constraints, or a shape resolves to an empty range against the
+  configured default or leaves its `offer` inadmissible.
+
 - **A write needs its site reachable.** It is checked against the site's live
   projection: a pool the site does not project is refused, an unreachable or
   unverifiable site is refused as retryable, and a shape no member is feasible for
@@ -653,6 +740,15 @@ system status names the retired keys.
   unreachable does not delist that site. Listings derive only from site
   projections; nothing local stands in for one. A site decommissioned without
   closing its listings leaves them advertised until an operator closes them.
+
+Constraints are additive: every shape stated without them is valid, and with no
+constraint and no configured default publication is unchanged. Sites and storefronts
+are upgraded together. A constraint written before a storefront can read constraints
+makes that pool's hint unreadable to it, which holds the pool. To roll back to a
+release without constraints, first remove every constraint mapping from pool hints
+and stored overrides: a constraint left
+in place makes the older storefront hold the pool, and the older provisioning service
+refuse any write that keeps it.
 
 Upgrading to listing shapes is fail-forward. Every VM listing's identity now
 includes its shape, so the first publication cycle after upgrade closes each

@@ -906,6 +906,90 @@ async def test_a_stated_shape_negotiates_and_reserves_every_declared_dimension(t
         }
 
 
+# ---------------------------------------------------------------------------
+# Shape admissibility
+# ---------------------------------------------------------------------------
+
+
+def _gpu(count) -> dict:
+    return {**_SHAPE, "gpu": {"count": count, "model": "H100"}}
+
+
+async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
+    """The parsed ``[admissibility.defaults.vm]`` bounds generated shapes, withholds
+    a stated offer it excludes, and withholds a listing whose range it empties, each
+    stated finding reported in system status. That such a listing, once open,
+    closes is the reconciler's derivation-level evidence; the closing of a
+    published listing is the next case's."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"max": 1}}},
+    ) as world:
+        world.pools.append(pool("generated", backing="unbacked", capacity=_BIG))
+        world.pools.append(
+            _shaped(
+                "stated",
+                shapes=(
+                    _SHAPE,
+                    _gpu(2),
+                    {**_SHAPE, "cpu": {"count": 4}, "gpu": {"count": {"offer": 2, "min": 2}, "model": "H100"}},
+                ),
+            )
+        )
+
+        assert (await _cycle(world))["counts"] == {"publish": 2}
+
+        published = {
+            (row["listing_resource"]["pool_id"], row["listing_resource"]["gpu_count"])
+            for row in (await _listings(world)).values()
+        }
+        assert published == {("generated", 1), ("stated", 1)}
+        report = await _report(world)
+        (excluded,) = report["inadmissible_listing_shapes"]["stated"]
+        assert excluded["tier"] == "pool_hint"
+        assert [problem["tier"] for problem in excluded["problems"]] == ["configured_default"]
+        (unusable,) = report["unusable_shape_constraints"]["stated"]
+        assert {bound["tier"] for bound in unusable["bounds"]} == {
+            "pool_hint", "configured_default",
+        }
+        assert "generated" not in report["inadmissible_listing_shapes"]
+
+
+async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_path):
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"max": 1}}},
+    ) as world:
+        # The hint widens the configured default for this listing alone.
+        widened = {**_SHAPE, "gpu": {"count": {"offer": 2, "max": 2}, "model": "H100"}}
+        world.pools.append(_shaped(shapes=(_SHAPE, widened)))
+        await _cycle(world)
+        before = await _listings(world)
+        (two_gpu,) = [
+            listing_id for listing_id, row in before.items()
+            if row["listing_resource"]["gpu_count"] == 2
+        ]
+
+        # A change to the constraints alone keeps the listing's identity.
+        world.pools[0] = _shaped(
+            shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2, "max": 4}, "model": "H100"}})
+        )
+        assert "close" not in (await _cycle(world))["counts"]
+        assert set(await _listings(world)) == set(before)
+
+        # Without its own maximum, the configured default's governs the offer.
+        world.pools[0] = _shaped(
+            shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2}, "model": "H100"}})
+        )
+        assert (await _cycle(world))["counts"] == {"close": 1}
+
+        closed = await _listing(world, two_gpu)
+        assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+        assert set(await _listings(world)) == set(before) - {two_gpu}
+
+
 def _pre_shape_listing(db, listing_id, *, gpu_count, status="open", closed_by=None,
                        paused=False):
     """Direct setup, because no API binds a listing without a shape any more: a

@@ -30,6 +30,7 @@ _BIG = {"gpu_count": 2, "vcpu_count": 16, "ram_gb": 64, "disk_gb": 200}
 HINT_SHAPE = {"gpu": {"count": 1, "model": "H100"}, "cpu": {"count": 8},
               "memory": {"gib": 32}, "storage": {"gib": 100}}
 OVERRIDE_SHAPE = {**HINT_SHAPE, "memory": {"gib": 16}}
+_H100 = {"model": "H100"}
 _PROJECTION_PATH = "/api/v1/capacity/site-resource-pools"
 
 
@@ -127,6 +128,43 @@ async def test_an_override_replacing_hint_shapes_republishes_and_survives_reconc
         # reconciliation derives the same key and leaves the listing open.
         world.site.emit("released")
         await _cycle(world, "capacity-events")
+        assert set(await _open_listings(world)) == {override_id}
+
+
+async def test_a_constrained_override_is_stored_verbatim_and_publishes_its_base_shape(tmp_path):
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"max": 1}}},
+    ) as world:
+        world.pools.append(_shaped())
+        await _cycle(world)
+        ((hinted_id, _),) = (await _open_listings(world)).items()
+
+        # The override's own maximum replaces the configured default's for this field.
+        widened = {**OVERRIDE_SHAPE, "gpu": {"count": {"offer": 2, "max": 2}, **_H100}}
+        written = await _overrides(world).put_pool_override(_record(listing_shapes=[widened]))
+
+        assert [entry.feasible for entry in written.feasibility] == [True]
+        assert (await _overrides(world).get_pool_override(SITE, "gpu", "vm")).listing_shapes == [
+            widened
+        ]
+        assert (await _cycle(world))["counts"] == {"close": 1, "publish": 1}
+        ((override_id, resource),) = (await _open_listings(world)).items()
+        assert override_id != hinted_id
+        assert (resource["gpu_count"], resource["ram_gb"]) == (2, 16)
+        published = json.dumps(resource)
+        assert not [key for key in ('"offer"', '"min"', '"max"') if key in published], resource
+
+        # The listing is identified by its base shape: a change to the
+        # constraints alone republishes nothing.
+        loosened = {**widened, "gpu": {"count": {"offer": 2, "max": 4}, **_H100}}
+        await _overrides(world).put_pool_override(_record(listing_shapes=[loosened]))
+        assert (await _overrides(world).get_pool_override(SITE, "gpu", "vm")).listing_shapes == [
+            loosened
+        ]
+        counts = (await _cycle(world))["counts"]
+        assert "close" not in counts and "publish" not in counts, counts
         assert set(await _open_listings(world)) == {override_id}
 
 
@@ -410,6 +448,53 @@ async def test_a_write_refusable_without_the_site_never_calls_it(world, record):
     assert refusal.status_code == 422
     assert _site_calls(world.site) == []
     assert await _stored(world) == []
+
+
+@pytest.mark.parametrize(
+    "shapes",
+    [
+        pytest.param(
+            [{"gpu": {"count": {"offer": 2, "max": 2}, **_H100}}],
+            id="a range that merges empty against the configured default",
+        ),
+        pytest.param(
+            [{"gpu": {"count": 2, **_H100}}],
+            id="an offer the configured default excludes",
+        ),
+        pytest.param(
+            [{"gpu": {"count": {"offer": 4, "max": 8}, **_H100}},
+             {"gpu": {"count": {"offer": 4, "max": 16}, **_H100}}],
+            id="one base shape stated twice with different constraints",
+        ),
+        pytest.param(
+            [{"gpu": {"count": 4, "model": {"max": 4}}}],
+            id="a constraint on an attribute",
+        ),
+    ],
+)
+async def test_a_write_publication_could_not_resolve_is_refused_before_the_site(
+    tmp_path, shapes
+):
+    # Rejection path: status, site calls, and stored state only.
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"min": 4}}},
+    ) as world:
+        world.pools.append(_shaped())
+        await _overrides(world).put_pool_override(_record(terms={"sla": 99.5}))
+        before = await _stored(world)
+        calls = len(_site_calls(world.site))
+
+        refusal = await _refused(
+            _overrides(world).put_pool_override(
+                _record(listing_shapes=shapes, terms={"sla": 99.5})
+            )
+        )
+
+        assert refusal.status_code == 422
+        assert len(_site_calls(world.site)) == calls
+        assert await _stored(world) == before
 
 
 # -- reads and deletes ---------------------------------------------------------

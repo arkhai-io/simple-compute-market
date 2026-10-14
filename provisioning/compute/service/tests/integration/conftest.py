@@ -2,7 +2,7 @@
 Integration test fixtures.
 
 Starts the full FastAPI application with:
-  - A real in-memory SQLite database (fresh per test)
+  - A real file-backed SQLite database (fresh per test)
   - A real AsyncJobQueue (fresh per test, with on_job_started seam)
   - Signed Ed25519 storefront/admin transports with authority-pinned responses
 
@@ -39,9 +39,7 @@ import pytest_asyncio
 from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -83,7 +81,10 @@ from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bund
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
-from compute_provisioning_service.db.database import create_session_factory
+from compute_provisioning_service.db.database import (
+    create_db_engine,
+    create_session_factory,
+)
 
 from compute_provisioning_service.db.models import Base
 
@@ -455,7 +456,7 @@ ok: [kvm1] => {
 
 
 # ---------------------------------------------------------------------------
-# Database fixture — fresh in-memory SQLite per test
+# Database fixture — fresh file-backed SQLite per test
 # ---------------------------------------------------------------------------
 
 
@@ -497,14 +498,15 @@ def _initialize_test_database(engine):
 
 
 @pytest.fixture
-def db_engine():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    _initialize_test_database(engine)
-    return engine
+def db_engine(tmp_path):
+    # Requests and background jobs need independent transactions. Sharing one
+    # in-memory connection lets one session roll back another session's writes.
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'provisioning.db'}", is_sqlite=True)
+    try:
+        _initialize_test_database(engine)
+        yield engine
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
@@ -635,7 +637,7 @@ async def client_and_queue(
         # a harness that supplies nothing can only exercise the unencrypted
         # paths. Generated per run and never used on a network.
         ssh_decryption_key=Fernet.generate_key().decode(),
-        database_url="sqlite:///:memory:",
+        database_url=str(session_factory.kw["bind"].url),
         lease_watchdog_grace_period_seconds=300,
         lease_watchdog_enabled=False,
         storefront_url="http://test-storefront:8001",

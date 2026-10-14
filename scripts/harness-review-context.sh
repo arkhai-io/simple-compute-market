@@ -177,8 +177,9 @@ NOTE
         printf '| `%s` | %s | %s | %s | %s |\n' "$c" \
             "$(count "$body" '^- \[x\]')" "$(count "$body" '^- \[ \]')" "$mh" "$fd"
     done
-    printf '\nA change with open tasks is unstarted or in flight; one with none is\n'
-    printf 'complete but not archived until `openspec archive` runs.\n'
+    printf '\nA change with open tasks is unstarted or in flight; one with none is in\n'
+    printf 'closeout, which archives it last. An archived change has landed only once\n'
+    printf 'its index status is `archived`.\n'
 
     printf '\n## Unarchived findings documents\n\n'
     found=0

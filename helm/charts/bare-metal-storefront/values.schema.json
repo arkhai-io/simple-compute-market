@@ -99,6 +99,7 @@
       "required": ["enabled", "existingClaim", "storageClass", "size", "accessMode", "mountPath"],
       "properties": {
         "enabled": {"type": "boolean"},
+        "retainOnUninstall": {"type": "boolean"},
         "existingClaim": {"type": "string"},
         "storageClass": {"type": "string"},
         "size": {"type": "string", "minLength": 1},

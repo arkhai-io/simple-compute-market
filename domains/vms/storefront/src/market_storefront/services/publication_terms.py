@@ -13,8 +13,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from arkhai_vms import price_vm_shape, vm_family_rate
+from arkhai_vms import VM_CAPABILITY_SCHEMA, price_vm_shape, vm_family_rate
 from arkhai_vms.storefront_adapter import vm_listing_resource_for_listing
+from arkhai_vms_listings.listing_shapes import CONFIGURED_DEFAULT_TIER
 from arkhai_vms_listings.pricing_resolution import (
     GPU_FAMILY_KEY,
     RETIRED_PRICING_KEYS,
@@ -27,6 +28,7 @@ from market_alkahest.alkahest import (
     get_recipient_arbiter,
     get_trusted_oracle_arbiter,
 )
+from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
@@ -67,7 +69,52 @@ def normalize_max_duration_seconds(value: Any) -> int | None:
     return seconds if seconds > 0 else None
 
 
-def pool_hint_resolution_settings() -> PoolHintResolutionSettings:
+def parse_configured_admissibility_default() -> Declaration | None:
+    """Parse ``[admissibility.defaults.vm]``, or ``None`` when it states nothing.
+
+    Absent and empty both mean no default. The table is the operator's own
+    file, so one the admissibility kit cannot read is a configuration error
+    rather than a listing to close: it raises ``RuntimeError`` naming every
+    problem, and the storefront does not start. Parse it once and hand the
+    result to every consumer, so publication, the default generator, and the
+    override write check judge against one declaration.
+    """
+    def refused(detail: str) -> RuntimeError:
+        return RuntimeError(f"configured admissibility default cannot be read: {detail}")
+
+    admissibility = _plain_pricing(settings.get("admissibility"))
+    if admissibility is None:
+        return None
+    if not isinstance(admissibility, dict):
+        raise refused("admissibility must be a table")
+    defaults = admissibility.get("defaults")
+    if defaults is None:
+        return None
+    if not isinstance(defaults, dict):
+        raise refused("admissibility.defaults must be a table keyed by offering mode")
+    raw = defaults.get("vm")
+    if raw is None or raw == {}:
+        return None
+    if not isinstance(raw, dict):
+        raise refused("admissibility.defaults.vm must be a table")
+    parsed = parse_declaration(
+        raw, tier=CONFIGURED_DEFAULT_TIER, schema=VM_CAPABILITY_SCHEMA
+    )
+    if parsed.declaration is None:
+        raise RuntimeError(
+            "configured admissibility default cannot be read: "
+            + "; ".join(
+                f"admissibility.defaults.vm.{problem}" if problem.paths
+                else f"admissibility.defaults.vm: {problem}"
+                for problem in parsed.problems
+            )
+        )
+    return parsed.declaration
+
+
+def pool_hint_resolution_settings(
+    *, admissibility_default: Declaration | None
+) -> PoolHintResolutionSettings:
     """Pool-hint policy with whole-list settlement precedence.
 
     A pool's own clauses — its storefront override or its declared pricing hint
@@ -75,7 +122,8 @@ def pool_hint_resolution_settings() -> PoolHintResolutionSettings:
     ``[pricing.defaults.gpu.<model>].settlements``, then ``[pricing].settlements``.
     Configured family rates — ``[pricing.defaults.gpu.<model>].rates`` and
     ``[pricing.defaults.<family>].rates`` — are the lowest tier of family-rate
-    resolution.
+    resolution. ``admissibility_default`` is the parsed
+    ``[admissibility.defaults.vm]`` composition holds.
     """
 
     pricing = getattr(settings, "pricing", None)
@@ -111,6 +159,7 @@ def pool_hint_resolution_settings() -> PoolHintResolutionSettings:
         gpu_pricing_defaults_by_model=defaults_by_model,
         gpu_pricing_flat_default=flat_default,
         family_rate_defaults=defaults,
+        admissibility_default=admissibility_default,
     )
 
 

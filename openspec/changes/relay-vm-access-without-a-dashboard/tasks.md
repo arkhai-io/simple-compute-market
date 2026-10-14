@@ -912,6 +912,10 @@ values to confirm the mount renders and the document is not placed in a Secret.
 
 ## 11. Closeout
 
+Per `openspec/README.md#plan-closeout-requirements`.
+
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
 - [x] 11.1 **Comment hygiene.** `make check-comment-hygiene` from the
       repository root, then read the touched files for what the target cannot
       catch. The invariant belongs in the comment — the token never reaches a
@@ -949,8 +953,10 @@ values to confirm the mount renders and the document is not placed in a Secret.
       promoting into, so all four were repointed at their real locations —
       after checking, since a citation that resolves to the wrong file is worse
       than one that fails.
-- [ ] 11.4 **Narrative compression.** Shorten completed-task notes to final
-      behaviour, material evidence, and unresolved work.
+- [ ] 11.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
 - [x] 11.5 **Roadmap currency.** Decided for the campaign: **no separate
       goal.** The product already sells VMs on hosts it reaches by tunnel, so
       this is not capability it lacks — what the work fixes is that the
@@ -965,6 +971,7 @@ values to confirm the mount renders and the document is not placed in a Secret.
       into the goal so a later reader finds the reasoning rather than only its
       absence.
 - [x] 11.6 **Promotion.**
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
 
 | Accepted decision | Permanent location |
 |---|---|
@@ -994,34 +1001,27 @@ values to confirm the mount renders and the document is not placed in a Secret.
 | Relay uniformity per host is a limit of one client per host, not of the model | `openspec/specs/physical-provisioning/architecture.md` |
 | Encrypting a configured secret at rest is part of the configuration pattern | `kit/config` module docstring |
 | One SSH key currently reaches every host in an environment; per-host material is supported and unused | recorded in this change's `design.md`; the fix is owned by `contain-embedded-host-key-material` |
-- [ ] 11.7 **Campaign index currency** (part seven, added when
-      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
-      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
-
-- [ ] 11.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 11.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
+- [ ] 11.7 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 11.8 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=relay-vm-access-without-a-dashboard` and resolve every
+      match, then `openspec validate relay-vm-access-without-a-dashboard --strict`.
+- [ ] 11.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun. The live-hardware verification of sections 6 and 8 needs a
+      rented, initialized host and the deployed relay.
 - [ ] 11.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 11.11 **Archival.** Last, once every other part is checked: `openspec archive
+      relay-vm-access-without-a-dashboard -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without merging the deltas, which 11.6 synchronized
+      by hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.
+
 ## Sequencing against the sibling changes
 
 `never-strand-the-host-on-passthrough` should land first: section 8 needs a

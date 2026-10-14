@@ -56,7 +56,7 @@ class _Plan:
         self.teardown_inputs: dict | None = None
         self.teardown_target: str | None = None
 
-    def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config, allocate):
+    def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config, allocate, db=None):
         if request.payload.get("refuse"):
             raise ProviderConfigInvalidError("refused")
         return PreparedJob(

@@ -23,8 +23,10 @@ metadata:
   labels:
     {{- include "storefront.labels" $ | nindent 4 }}
     app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
+  {{- if ne (toString $.Values.persistence.retainOnUninstall) "false" }}
   annotations:
     helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   accessModes:
     - {{ $.Values.persistence.accessMode | quote }}

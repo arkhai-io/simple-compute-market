@@ -4,8 +4,16 @@ CHART_DIR    := .
 RELEASE      := arkhai-node-operator
 NAMESPACE    := default
 VALUES       := values.yaml
+LOCAL_VALUES := local-values.yaml
+# Secrets the release's workloads read with the default values, which the chart
+# never creates: they are provisioned out of band. Enabling api-credits-registry
+# adds arkhai-api-credits-registry-identity. The e2e-tests chart's `helm test`
+# hook also reads arkhai-e2e-credentials and arkhai-buyer-profile-credential,
+# which a deploy does not need.
+LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
+	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 
-.PHONY: init template deploy test test-render
+.PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -42,12 +50,37 @@ endif
 		--namespace $(NAMESPACE) \
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
+## Deploy keeping the release's volumes when it is uninstalled. For a local
+## development cluster use deploy-local instead (docs/development/DEPLOYMENT_AND_CONFIG.md,
+## "Stateful service persistence").
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
+		$(EXTRA_VALUES) \
 		--wait
+
+## Deploy for local development: as deploy, with local-values.yaml layered on,
+## so the release's volumes are deleted when it is uninstalled.
+deploy-local:
+	@$(MAKE) --no-print-directory deploy EXTRA_VALUES="--values $(LOCAL_VALUES)"
+
+## Uninstall the release, waiting for its resources to go. Succeeds when no
+## release is installed.
+undeploy:
+	helm uninstall $(RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+
+## Fail, naming each one, unless every out-of-band Secret a deploy needs exists.
+check-local-secrets:
+	@missing=""; \
+	for secret in $(LOCAL_SECRETS); do \
+		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing $$secret"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "ERROR: Secrets missing from namespace $(NAMESPACE):$$missing" >&2; exit 1; \
+	fi; \
+	echo "Every out-of-band Secret a deploy needs exists in namespace $(NAMESPACE)."
 
 ## Run helm tests against the deployed release
 test:
@@ -55,8 +88,7 @@ test:
 		--namespace $(NAMESPACE) \
 		--logs
 
-stop:
-	helm uninstall $(RELEASE)
+stop: undeploy
 ## Run helm tests for a single subchart.
 ## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
 ## Valid values: validate-contracts, registry, storefront, provisioning, e2e-tests

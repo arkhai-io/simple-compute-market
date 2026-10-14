@@ -343,9 +343,15 @@ have separate fail-closed behavior.
 
 To run the lanes in GitHub Actions, push the current branch and run
 `make run-e2e` with an authenticated `gh` CLI on PATH. Then run
-`make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
-diagnostics. Omitting the ID selects the current branch's latest run among the
-100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`make fetch-e2e-logs` to wait for the run and download its diagnostics. Without
+`E2E_RUN_ID`, it selects the newest run on the current branch whose head commit is
+local `HEAD` (or `E2E_COMMIT`), among the 100 most recent workflow runs, and waits
+up to three minutes for a just-dispatched run to be listed. Matching the commit is
+what makes it safe straight after `make run-e2e`: the new run may not be listed
+yet, and the branch's previous run tested a different commit. `E2E_COMMIT` may be
+a short ID or a ref. When the commit already has a run, pass the newest run ID seen
+before dispatching as `E2E_AFTER_RUN`, so the earlier run is not taken while the
+new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
 `actions.log`, `e2e-vm-logs/compose-logs.txt`,
 `e2e-bare-metal-logs/compose-logs.txt`, and
 `e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root

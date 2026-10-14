@@ -20,4 +20,9 @@ on 2026-10-14 as the prerequisite of `unbacked-bare-metal-listings`.
 
 - [ ] 2.1 The closeout task defined in
       `openspec/README.md#plan-closeout-requirements`, written out in full when this
-      change is planned.
+      change is planned as its eleven parts in that order: comment hygiene and import
+      placement as confirmations, documentation compliance, narrative compression,
+      roadmap currency, campaign index currency (other rows' `Depends on` are left to
+      archive cleanup), packaging, end-to-end pipeline, promotion (the `spec.md` files
+      the deltas cover are written by the archive), documentation citations with
+      `openspec validate --strict`, and archival last.

@@ -336,6 +336,7 @@ async def _release_capacity(
                 site_capacity_buckets=site_capacity_buckets(),
                 shape_feasible=vm_shape_feasibility(),
                 configured_sites=runtime.site_ids,
+                admissibility_default=_container.resolved_admissibility_default,
             )
         for listing_id in reopened:
             await db.update_listing(

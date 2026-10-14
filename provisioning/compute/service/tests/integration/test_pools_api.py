@@ -309,6 +309,58 @@ class TestListingShapesValidationThroughAdminApi:
         fetched = await client.pools.get_pool("shaped")
         assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
 
+    async def test_create_pool_stating_one_base_shape_with_different_constraints_returns_400(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        conflicting = {"vm": [
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
+        ]}
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.pools.create_pool(
+                PoolCreate(
+                    id="shaped",
+                    label="Shaped",
+                    provider="ansible",
+                    policy_tags={**self._TAGS, "listing_shapes": conflicting},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert exc_info.value.status_code == 400
+        with pytest.raises(ComputeProvisioningError) as get_exc_info:
+            await client.pools.get_pool("shaped")
+        assert get_exc_info.value.status_code == 404
+
+    async def test_replace_pool_with_malformed_constraint_keeps_stored_metadata(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await client.pools.create_pool(
+            PoolCreate(
+                id="shaped",
+                label="Shaped",
+                provider="ansible",
+                policy_tags={**self._TAGS, "listing_shapes": self._SHAPES},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        malformed = {"vm": [{"gpu": {"model": "H100", "count": {"offer": 1, "min": 4, "max": 2}}}]}
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.pools.replace_pool(
+                "shaped",
+                PoolReplace(
+                    label="Shaped",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags={**self._TAGS, "listing_shapes": malformed},
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert exc_info.value.status_code == 400
+        fetched = await client.pools.get_pool("shaped")
+        assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
+
 
 class TestPricingRatesValidationThroughAdminApi:
     """A malformed `pricing` rate list is refused by the server's shared

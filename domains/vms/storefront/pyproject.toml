@@ -29,6 +29,7 @@ dependencies = [
     "arkhai-kit-delivery==0.2.1",
     "arkhai-kit-delivery-apprise==0.1.1",
     "arkhai-kit-site>=0.10.0",
+    "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
     "arkhai-bare-metal-storefront==0.16.0",
     "arkhai-vms>=0.6.0",

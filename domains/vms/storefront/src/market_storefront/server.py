@@ -27,6 +27,7 @@ from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_capacity_publication import CapacityRuntime
 from market_core import MarketDomainContract
+from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
@@ -71,7 +72,10 @@ from market_storefront.services.vm_pool_override_contribution import (
     VmPoolOverrideContribution,
 )
 from market_storefront.services.publication_loop import wake_publication_loop
-from market_storefront.services.publication_terms import compile_publication_clauses
+from market_storefront.services.publication_terms import (
+    compile_publication_clauses,
+    parse_configured_admissibility_default,
+)
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.site_projection_cache import refresh_site_resource_pools
 
@@ -168,10 +172,17 @@ def _build_system_service(**kwargs):
     return SystemService(agent_id=AGENT_ID, **kwargs)
 
 
-def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) -> Any:
+def build_pool_override_service(
+    *,
+    sqlite_client: Any,
+    capacity_runtime: Any,
+    admissibility_default: Declaration | None,
+) -> Any:
     """Compose the pool-override kit's service over this storefront's effects.
 
-    The VM market contributes the ``vm`` offering mode. A write is checked
+    The VM market contributes the ``vm`` offering mode, judging each write's
+    shapes against ``admissibility_default``, the configured default
+    publication also resolves with. A write is checked
     against the named site through the capacity runtime's signed client,
     refreshes only that site's resource-pool cache, and wakes the publication
     loop; status is judged against the source publication derives from. The
@@ -180,6 +191,7 @@ def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) ->
     contribution = VmPoolOverrideContribution(
         db_path=sqlite_client.db_path,
         shape_feasible=vm_shape_feasibility(),
+        admissibility_default=admissibility_default,
     )
     return PoolOverrideService(
         store=SQLitePoolOverrideStore(sqlite_client.db_path),
@@ -226,6 +238,7 @@ class VmStorefrontServices:
     negotiation_service: Any
     system_service: Any
     pool_override_service: Any
+    admissibility_default: Declaration | None
     settlement_composition: Any
     contact_exchange: Any
     introduction_delivery: Any
@@ -242,6 +255,9 @@ def _build_vm_services(
         raise RuntimeError(
             "VM service composition must use the exact registry-owned domain contract"
         )
+    # Before anything is constructed: a configured default the storefront
+    # cannot read stops startup rather than publishing without it.
+    admissibility_default = parse_configured_admissibility_default()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
@@ -289,6 +305,7 @@ def _build_vm_services(
     pool_override_service = build_pool_override_service(
         sqlite_client=sqlite_client,
         capacity_runtime=capacity_runtime,
+        admissibility_default=admissibility_default,
     )
     known_origins = capacity_runtime.site_ids
     introduction_delivery = build_vm_introduction_delivery(
@@ -314,6 +331,7 @@ def _build_vm_services(
         negotiation_service=negotiation_service,
         system_service=system_service,
         pool_override_service=pool_override_service,
+        admissibility_default=admissibility_default,
         settlement_composition=settlement_composition,
         contact_exchange=contact_exchange,
         introduction_delivery=introduction_delivery,
@@ -343,6 +361,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_negotiation_service = services.negotiation_service
         _container.resolved_system_service = services.system_service
         _container.resolved_pool_override_service = services.pool_override_service
+        _container.resolved_admissibility_default = services.admissibility_default
         _container.resolved_settlement_composition = services.settlement_composition
         _container.resolved_contact_exchange = services.contact_exchange
         _container.resolved_introduction_delivery = services.introduction_delivery

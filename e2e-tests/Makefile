@@ -57,10 +57,11 @@ test:
 test-unit: reinit ## Unit tests only; no stack or external services
 	.venv/bin/pytest tests/unit $(PYTEST_ARGS)
 
+# MODULE is a pytest marker expression, so it may be `a or b`.
 test-module:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
-	.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+	.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 test-container-module:
 	docker run --rm -it \
@@ -69,7 +70,7 @@ test-container-module:
 		-e CONFIG_DIRECTORY=/app/config \
 		-v $(CONFIG_DIRECTORY):/app/config:ro \
 		$(IMAGE_NAME):$(IMAGE_TAG) \
-		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+		.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
 # Tests — buyer machine (in-network, realistic two-machine topology)

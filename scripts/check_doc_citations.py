@@ -14,9 +14,13 @@ pass on files the prune then deletes.
 
 Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
-archived, and their citations are allowed to have moved on. A change's own
-closeout runs this before it is archived, which is when its citations are
-still expected to hold.
+archived, and their citations are allowed to have moved on. Scoped to one
+change by name, the check finds it active or archived, since closeout archives
+a change before its review; once it is archived, a citation of the change's own
+unarchived path resolves against its archive directory, so the archive move
+itself is never reported. A change's `reviews/` are excluded too:
+review records are untracked working notes, never part of the branch, so a
+citation in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
@@ -45,14 +50,21 @@ CITATION = re.compile(
 )
 
 
+def _change_documents(directory: Path) -> list[Path]:
+    return sorted(
+        path for path in directory.glob("**/*.md")
+        if "reviews" not in path.relative_to(directory).parts
+    )
+
+
 def documents(root: Path, change: str | None = None) -> list[Path]:
     """Documents to check.
 
-    With ``change``, only that change's own documents. A change's closeout
-    owes the citations it wrote, and gating it on the whole repository's
-    documentation debt would make one team's stale runbook block everyone
-    else's archival -- which turns a useful check into one people route
-    around.
+    With ``change``, only that change's own documents, active or archived. A
+    change's closeout owes the citations it wrote, and gating it on the whole
+    repository's documentation debt would make one team's stale runbook block
+    everyone else's archival -- which turns a useful check into one people
+    route around.
 
     Without ``change``, every permanent document plus every unarchived
     change, which is the repository-wide view.
@@ -60,12 +72,10 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
     changes = root / "openspec" / "changes"
     if change is not None:
-        directory = changes / change
-        if not directory.is_dir():
-            raise SystemExit(
-                "no such unarchived change: %s" % directory.as_posix()
-            )
-        return sorted(directory.glob("**/*.md"))
+        try:
+            return _change_documents(change_directory(root, change))
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):
@@ -74,7 +84,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     for change in sorted(p for p in changes.iterdir() if p.is_dir()):
         if change.name == "archive":
             continue
-        found.extend(sorted(change.glob("**/*.md")))
+        found.extend(_change_documents(change))
     return found
 
 
@@ -83,11 +93,21 @@ def unresolvable(
 ) -> list[tuple[str, str, str]]:
     """Every citation that is absent or points at a tombstone."""
 
+    own: tuple[str, Path] | None = None
+    if change is not None:
+        try:
+            directory = change_directory(root, change)
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
+        if is_archived(root, directory):
+            own = (f"openspec/changes/{change}/", directory)
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
         for cited in sorted(set(CITATION.findall(text))):
             target = root / cited
+            if own and cited.startswith(own[0]):
+                target = own[1] / cited[len(own[0]):]
             if not target.exists():
                 problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
