@@ -140,6 +140,22 @@ only through stages that deliver through capacity, which publication never offer
 unbacked listing, and capacity effects are refused by the delegate's admission guard —
 except the fulfillment routes' context loader (open question 5).
 
+### A candidate with no settlement option yields no listing
+
+The prerequisite's settlement admissibility already drops, from an unbacked candidate,
+every option whose mechanism bare metal fulfils through capacity, with an operator
+notice, and yields no listing for an unbacked candidate left with none. Contact
+exchange publishes no option for an origin site with no configured contact, so an
+unbacked pool at such a site yields no listing.
+
+Bare-metal publication also accepts a payload with no settlement option and no
+accepted escrow today, and publishes a listing nobody can buy, where VM refuses the
+candidate. This change makes bare-metal publication refuse any candidate, backed or
+unbacked, whose payload carries neither, recording a `refuse` entry in the publication
+report that names the candidate and the readiness blockers. Unbacked supply makes the
+case likely — a contact-only candidate whose origin has no contact — and the check sits
+on the payload path this change edits.
+
 ### Negotiation and settlement compose the existing kit runtimes
 
 Negotiation and settlement for an unbacked bare-metal listing sit on the kit
@@ -182,11 +198,8 @@ here as a decision.
    reopen, and source check, and backing is no longer a bare-metal term field
    (`encapsulate-capacity-backing`, "Divergence: backing disagreement on refresh and
    reopen"). Nothing further is owed here.
-3. **Settlement options for unbacked listings.** Bare metal already declares per
-   seller stage whether a mechanism provisions through capacity (`SellerStage.physical`),
-   but publication applies no filter and accepts an empty payload. Decide how the
-   delegate's settlement admissibility applies, the operator notice, and the empty
-   refusal.
+3. **Settlement options for unbacked listings.** Decided: "A candidate with no
+   settlement option yields no listing".
 4. **The opening source check.** It refuses every unbacked bare-metal listing today,
    and `storefront-publication`'s inventory guard forbids contacting a site authority
    for an unbacked listing, while bare metal's recheck reads the site's live

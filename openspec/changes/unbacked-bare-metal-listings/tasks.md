@@ -34,6 +34,11 @@ since 2026-10-14; not yet planned.
       publishes none of them; the `access_methods` default goes ("Delivery terms are
       the delegate's decision"). This change's end-to-end evidence proves the backing
       filter through the buyer CLI.
+- [x] 1.7 **Decision gate.** Decide settlement options for unbacked listings (review
+      question 3). Decided with the maintainer: the prerequisite's admissibility
+      covers unbacked candidates; bare-metal publication also refuses any candidate
+      whose payload has no settlement option and no accepted escrow ("A candidate with
+      no settlement option yields no listing").
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
