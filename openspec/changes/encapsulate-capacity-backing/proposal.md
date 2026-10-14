@@ -100,8 +100,12 @@ None.
   delegate registry.
 - `core/storefront`'s listing binding, which validates its label through the delegate
   rather than its own copy of the vocabulary.
-- No wire, database, or deployment break is intended. Each unified divergence is a
-  behaviour change recorded in its decision.
+- An existing API-credit storefront database is an operational break: one holding a
+  listing with no durable binding is refused at startup, naming that a fresh database
+  is required. The remedy is to start the storefront on a fresh database and recreate
+  its listings through the operator's create path. No other database change, and no
+  wire or deployment break, is intended. Each unified divergence is a behaviour change
+  recorded in its decision.
 
 ## Permanent documentation impact
 
