@@ -168,6 +168,21 @@ remains a separate protected lane.
 - **THEN** both requests return the same lease release operation and the site releases
   the reservation once
 
+#### Scenario: Bare-metal payment purchase is qualified
+
+- **WHEN** the bare-metal payment marker runs with a ready configured payments target
+- **THEN** three ordered calls discover a distinct backed whole-host listing, negotiate
+  and approve one hourly payment option with a wallet-free profiled Ed25519 buyer,
+  and observe receipt-gated durable mock delivery
+- **AND** recovery reads the original run and resolves its retained signer, re-drives
+  the same negotiation through `SyncStorefrontClient.settle_agreement`, and requires
+  the original transaction, fulfillment identity, and durable result
+- **AND** the actual pinned seller refunds the held once parts and the buyer separately
+  requests physical teardown, converging mock reclaim and selected-site capacity release
+- **AND** fixture finalizers remove owned mock rules and resume held loops on failure
+- **AND** an unconfigured payments target is a named blocked prerequisite, never an
+  Alkahest fallback or successful qualification
+
 #### Scenario: Real access is required
 
 - **WHEN** release acceptance requires observing real access and its revocation

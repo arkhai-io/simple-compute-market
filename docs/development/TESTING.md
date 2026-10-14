@@ -306,7 +306,12 @@ project of its own:
   discovery, withdrawal, and reinstatement at the registry. Its mock-provisioned
   deal runs the canonical compute deal for one whole host, stage for stage with
   VM's, then a second deal on the freed host whose buyer teardown, sent twice,
-  returns one operation and releases capacity once.
+  returns one operation and releases capacity once. Its separate
+  `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
+  one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
+  same-fulfillment re-drive through `settle_agreement`, then seller refund and
+  separate physical teardown with restored whole-host capacity. Unconfigured
+  payments remain a named blocked prerequisite; no real SSH claim is made.
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
