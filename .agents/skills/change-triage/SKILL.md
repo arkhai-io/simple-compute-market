@@ -138,38 +138,47 @@ opening the review, the design, or the code. A one-line claim and a pointer-lade
 position are not enough: the owner needs the design's current state and the
 consequence, not only the reviewer's objection.
 
-Each finding covers five things:
+Explain each finding as you would to someone across a table: what the change
+does now and the reasoning it records for it, what the reviewer argues and
+suggests (with any example they gave), what goes wrong if nothing changes — a
+scenario, or an example document when the finding is about a representation —
+and where you stand, `agree`, `disagree`, or `partly`, and why. That is the
+content, not a layout. Write it as a few plain paragraphs that read as one
+argument. Never open a paragraph with a run-in bold label ("**What the reviewer
+says.**", "**Why it matters.**", "**My position:**"), and never give a part its own
+heading or bullet: a reader sees those as a form to fill in, whatever their
+typography.
 
-- **what the change says now** — the decision, requirement, or text the finding
-  concerns, and the reasoning the change records for it, in plain words;
-- **what the reviewer says** — their reasoning and suggested fix, including any
-  example they gave;
-- **why it matters** — a concrete consequence if nothing changes: a scenario, or,
-  when the finding is about a representation, an example document;
-- **your position** — `agree`, `disagree`, or `partly`, argued;
-- **the outcome if accepted**, as classified in step 2.
-
-Write them as short prose, not as labelled fields: the owner reads every finding,
-and a column of labels on each makes a long triage hard to read. Lay each finding
-out as:
+A finding looks like this:
 
 ```markdown
-### 🔴✅ F2 — Earlier validation failures can be discarded unseen
-*consistency · specification · blocking*
+### 🟡✅ 20 F2 — tasks.md still says stage 07c hasn't run against a stack
+*consistency*
 
-<a few sentences: what the change says now and why; the reviewer's point; the
-consequence; your position and its reason>
+The note on the round-3 fix under section 6 ends "Stage 07c has not run against a
+stack: the fix commit's validation runs it." That was true when it was written,
+but validation 18 has since run the whole pipeline at `443f9505`, stage 07c
+included, and passed, and the ledger records it as confirming the fix. The
+reviewer points out that the task notes and the ledger now disagree.
 
-Evidence: `path:line`, `path:line`
+I agree. Someone recording the end-to-end evidence at 7.9 from `tasks.md` alone
+would take 07c for unproven and ask for a pipeline run that has already happened.
+Narrative compression at closeout would catch it, but it is a one-sentence
+correction, and until then the record is wrong.
 
-→ **fix:** <what you will do>
+Evidence: `tasks.md:576`, `reviews/18-validation.md:3`
+
+→ **edit:** replace the sentence with "Validation 18 ran stage 07c at `443f9505`;
+it passed."
 ```
 
 The heading starts with the severity (🔴 blocking, 🟠 should, 🟡 minor) and your
-position (✅ agree, ◐ partly, ❌ disagree). File and line references go on the
-evidence line; they support the argument and never replace it. A finding that is
-an obvious agreed edit gets one paragraph. End every finding with a single `→`
-outcome line.
+position (✅ agree, ◐ partly, ❌ disagree), then the label and the finding in one
+line. The italic line beneath names only the finding's lens, so the owner knows
+what kind of defect it is before reading on; its basis and severity go in the
+triage record. File and line references go on the evidence line; they support the
+argument and never replace it. A finding that is an obvious agreed edit gets one
+paragraph. End every finding with a single `→` outcome line.
 
 Present one finding per message, each discussed in full, and wait for the
 owner's answer before the next. A summary of every finding up front invites a

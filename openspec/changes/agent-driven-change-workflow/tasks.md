@@ -750,6 +750,16 @@ session").
       reviews was listed only at its new path, letting a code deletion through,
       that the texts did not require ancestry, and that the note overstated its
       tests; all fixed.
+- [x] 9.10 Show the triage presentation instead of describing it (`change-triage`
+      step 3): the five parts of a finding are one sentence of guidance rather
+      than a list of bold names, the placeholder template is a complete worked
+      finding written as plain paragraphs, run-in bold labels and per-part
+      headings are named as what not to write, and the italic line under a
+      heading carries only the lens, severity being in the emoji. At the owner's
+      direction, after the pre-closeout triage of `capacity-shape-envelope`
+      presented every finding with the list's names as bold run-in labels, the
+      third time the owner had asked for prose. Text only, proven when a session
+      follows it.
 
 Implementation review 1 (external, `reviews/01-implementation-external.md`)
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
