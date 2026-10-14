@@ -97,7 +97,9 @@ async def test_accept_result_satisfies_the_controllers_response_model(
     controller's `except`, one with no traceback logged anywhere.
 
     Constructing the model is the whole assertion. Nothing about the
-    values is re-checked here; the tests above own those.
+    values is re-checked here; the tests above own those. The accepted
+    response is proven over the wire, through the buyer's own negotiation
+    client against the served routes, in `test_credits_negotiate_cli.py`.
     """
     response = await _start(db, amount=300, quantity=3)
     assert response["action"] == "accept"
