@@ -1,10 +1,10 @@
 # Tasks — unbacked bare-metal listings
 
-Depends on `encapsulate-capacity-backing` (design phase).
+Depends on `encapsulate-capacity-backing` (designed; not yet planned).
 `bare-metal-mock-provisioned-deal`, `bare-metal-listing-shapes`,
 `compose-contact-exchange-across-compute`, and
-`bare-metal-publication-reads-pool-declarations` are archived. Design under review
-since 2026-10-14; not yet planned.
+`bare-metal-publication-reads-pool-declarations` are archived. Design reviewed
+2026-10-14 and every question decided; not yet planned.
 
 ## 1. Design
 
@@ -21,8 +21,9 @@ since 2026-10-14; not yet planned.
       delegate, superseding the original "candidate comes from the capacity
       declaration" decision; the `bare_metal_publication` attribute stays the opt-in
       for both backings; an unbacked resource is never judged against availability.
-- [ ] 1.4 **Decision gate.** Decide each open question `design.md` lists from the
-      2026-10-14 review, and record each decision there.
+- [x] 1.4 **Decision gate.** Decide each open question `design.md` lists from the
+      2026-10-14 review, and record each decision there. All eight decided (1.6–1.11
+      record each); the spec deltas are written to them.
 - [x] 1.5 **Decision gate.** Record that this change removes the refusal of unbacked
       pools `encapsulate-capacity-backing` keeps in bare-metal publication. Decided
       with the maintainer ("This change removes bare metal's temporary refusal of
@@ -56,6 +57,9 @@ since 2026-10-14; not yet planned.
       stages, VM moved onto them, the bare-metal lane's mail sink, bare metal's
       settlement commands namespaced with a core refusal of duplicate root commands,
       and no Helm evidence.
+- [x] 1.11 **Decision gate.** Decide the two-seller topology (review question 8).
+      Decided with the maintainer: withdrawn from this change and recorded as unowned
+      (task 2.2; "Goal 7 closes on single-site evidence").
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
@@ -67,14 +71,10 @@ since 2026-10-14; not yet planned.
       discovery reaches a usable introduction, and that a buyer query bounded by
       asking rate returns backed and unbacked bare-metal listings together
       (transferred from `publish-indicative-listing-rates` 7.13).
-- [ ] 2.2 **System, both domains.** Two seller sites publishing unbacked supply to
-      one storefront keep distinct origin and source identity, each introduction
-      reveals its own seller's contact, and seller-side delivery reaches only that
-      origin's routed instances — on the VM lane and on the bare-metal lane.
-      Transferred from `compose-contact-exchange-across-compute` 6.5 (originally
-      `unbacked-listing-publication` 6.8). Each lane needs a topology with one
-      storefront serving two seller sites, which neither has today; planning decides
-      that topology, from whatever lane baseline then exists, as its own task. The
-      behaviour is already proven at integration level by
+- [x] 2.2 **Withdrawn** 2026-10-14 (`design.md`, "Goal 7 closes on single-site
+      evidence"). Two seller sites behind one storefront, on both lanes, needs one
+      storefront serving several sites, which is not supported today and is not yet a
+      goal of its own. The scenario is recorded as unowned in the change index; its
+      behaviour stays proven at integration level by
       `domains/vms/storefront/tests/integration/test_introduction_origins.py` and the
-      delivery kit's routing tests, so this is the live multi-service evidence.
+      delivery kit's routing tests.

@@ -10,7 +10,7 @@ records unbacked bare metal as a question with no owner; this change is that own
 A design review on 2026-10-14, against the tree after
 `bare-metal-mock-provisioned-deal` (archived 2026-10-09) and
 `pools-9-retire-local-physical-authority` (archived 2026-10-13), revised two of the
-original decisions and opened the questions listed at the end. Its first outcome is a
+original decisions and opened the questions listed at the end, all since decided. Its first outcome is a
 prerequisite change, `encapsulate-capacity-backing`.
 
 ## Decisions
@@ -259,8 +259,10 @@ Decided with the maintainer (review question 6). Spec deltas this change carries
 - `physical-provisioning`: "A bare-metal publication view is built from its capacity
   declaration" carries delivery terms only as the pool's delegate passes them; "Domains
   contribute their inventory views" gives resource views the pool's context.
-- `resource-pool-management`: the delegate requirement the prerequisite adds gains
-  the delivery-term decisions.
+- `resource-pool-management`: a requirement beside the delegate requirement the
+  prerequisite adds, stating that the delegate decides delivery terms. It is added
+  rather than written as a modification because the prerequisite's requirement is not
+  yet in the permanent specification.
 - `registry-discovery`: "Compute listings publish their capacity backing" publishes a
   bare-metal listing's binding backing, backed or unbacked.
 
@@ -270,6 +272,22 @@ its held-projection end state); `ARCHITECTURE.md`'s bare-metal commitment senten
 the bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
 machines; `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` for the evidence and topology;
 the roadmap's Goal 7 and the change index at completion.
+
+### Goal 7 closes on single-site evidence
+
+This change was assigned the live two-seller scenario — two seller sites behind one
+storefront, each revealing its own seller's contact and receiving only its own
+seller-side delivery, on both lanes. The topology that supports it today is one
+registry with several storefronts, each holding its own site, where each storefront
+reveals its own seller's contact by construction. One storefront serving several sites
+is a capability of its own, weeks of work, and not yet a goal; the lesser goal for
+service-to-service trust and event delivery would precede it.
+
+Decided with the maintainer: Goal 7 delivers without the scenario. It is withdrawn
+from this change and recorded as unowned in the change index, for both domains, to be
+taken up by whichever change makes one storefront serve several sites. The per-origin
+contact resolution and delivery routing it would exercise remain proven at
+integration level.
 
 ### Negotiation and settlement compose the existing kit runtimes
 
@@ -282,7 +300,7 @@ origin site and need no change.
 The original decision called this "a publication change" relying on that composition
 for the rest. The review found pieces outside publication that neither change owns —
 the opening source check, the capacity-effect guards, and the listing payload's
-readers — which are open below.
+readers — each decided above.
 
 ### This change removes bare metal's temporary refusal of unbacked pools
 
@@ -302,9 +320,7 @@ No other mechanism replaces it.
 
 ## Open questions
 
-From the 2026-10-14 review. Each is to be decided with the maintainer, after the
-prerequisite's delegate operations are known where it depends on them, and recorded
-here as a decision.
+None open. The 2026-10-14 review's questions, each decided with the maintainer:
 
 1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
    decision".
@@ -322,6 +338,5 @@ here as a decision.
 6. **The permanent documentation delta.** Decided: see "Permanent documentation".
 7. **The bare-metal system evidence.** Decided: "The bare-metal evidence is VM's
    introduction scenario, stage for stage".
-8. **The two-seller topology for both lanes (task 2.2).** Adding a second site to
-   either existing lane breaks single-site assertions and configuration. Decide the
-   topology, and whether it stays in this change.
+8. **The two-seller topology for both lanes.** Decided: "Goal 7 closes on
+   single-site evidence".
