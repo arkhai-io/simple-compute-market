@@ -18,9 +18,9 @@ prerequisite change, `encapsulate-capacity-backing`.
 ### Backing is decided by one delegate both domains share
 
 Unbacked listings already exist for VM through `kit/capacity-publication`
-(`UnbackedBinding`, source reconciliation scoped to every listing, capacity
-reconciliation scoped to backed listings) and `kit/resource-pools`'s declaration
-reader. Introductions settle through the composition
+(a `PublicationBinding` carrying the unbacked delegate, source reconciliation scoped to
+every listing, capacity reconciliation scoped by the delegate) and `kit/resource-pools`'s
+declaration reader. Introductions settle through the composition
 `compose-contact-exchange-across-compute` promoted into the mechanism kit, so the two
 domains share one implementation of accepted-state interpretation and one per-origin
 contact resolution.
@@ -156,32 +156,24 @@ report that names the candidate and the readiness blockers. Unbacked supply make
 case likely — a contact-only candidate whose origin has no contact — and the check sits
 on the payload path this change edits.
 
-### An unbacked listing's recheck reads declarations, never availability
+### An unbacked listing's recheck reads its held projection, never availability
 
 `storefront-publication`'s inventory guard says the storefront must neither consult
-availability nor contact a site authority for an unbacked listing, while bare metal's
-recheck reads its site's live projection. The "no site call" half generalized VM's
-mechanics — VM's guard reads the projection its storefront holds — into a rule; what
-the rule protects is that an unbacked listing's origin site is not an admission
-authority, so nothing about capacity is asked of it. The origin site is still the
-authority for the declaration the listing derives from, and source reconciliation
-already reads it.
+availability nor contact a site authority for an unbacked listing. Bare metal's recheck
+fetched its site's live projection, so this change first decided to scope that rule,
+letting an unbacked recheck read its origin site's declarations and accepting that its
+openings would be refused as retryable while the site was unreachable.
 
-Decided: the guard requirement is scoped to what it protects. For an unbacked
-listing the storefront must not consult availability, and it may read the declarations
-it compares against from the listing's origin site. "Bare-metal opening rechecks its
-listing against its source" applies its availability refusal to capacity-backed
-listings only; an unreachable or unverifiable site remains a retryable refusal for both
-backings. While its origin site is unreachable, an unbacked bare-metal listing's
-openings are therefore refused as retryable, where VM answers from the projection it
-holds.
-
-The preferred end state is a storefront that reads the projections it holds rather
-than calling a site, for every domain. Moving bare metal onto held projections is out
-of scope here; it belongs with the extraction of VM's held per-site projection state
-into the kit (`kit-owned-listing-and-fulfillment-lifecycles`) and the projection item
-in `resolve-compute-family-findings`. The scoped requirement holds unchanged once it
-lands, and the retryable refusal during a site outage goes away.
+Superseded on 2026-10-14, after `encapsulate-capacity-backing` was implemented:
+`share-site-projection-state` gives bare metal the per-site projections VM holds, and
+its opening recheck reads the projection it holds for the listing's site. The inventory
+guard is unchanged, and this change carries no delta for it. The recheck goes through
+the binding's delegate, whose `judge` never asks availability of an unbacked listing, so
+an unbacked listing is refused only by its declaration: its shape, region, or Physical
+Resource, or its resource now in a pool other than its bound one. Provenance is the only
+check an unbacked listing gets, so the bound pool is tested explicitly. A site whose
+projection the storefront does not hold refuses openings as retryable for either
+backing.
 
 ### A deal settled by introduction has no fulfillment
 
@@ -192,6 +184,10 @@ answer a backed listing settled by introduction gets today, wrong in meaning bec
 the introduction is verified and there is simply no fulfillment. On a storefront
 composed for introductions only, building the fulfillment service fails first and the
 routes answer 500.
+
+Since `encapsulate-capacity-backing`, every fulfillment effect passes `CapacityEffects`,
+whose guard refuses an unbacked binding before any site call, so the guard is a
+backstop for this decision rather than its mechanism.
 
 Decided: the fulfillment routes resolve the deal's accepted seller stage first, the
 entry settlement uses, and when it does not fulfil through capacity they answer 404,
@@ -251,18 +247,18 @@ Decided with the maintainer (review question 6). Spec deltas this change carries
   add "Bare-metal publication derives unbacked listings", written to the decisions
   above; scope "A bare-metal listing sells one whole unit" to capacity-backed
   listings; scope the availability refusal in "Bare-metal opening rechecks its listing
-  against its source" to capacity-backed listings; scope the inventory guard's
-  unbacked rule to availability; add requirements that a bare-metal listing carries
+  against its source" to capacity-backed listings, written on the held-projection text
+  `share-site-projection-state` gives it; add requirements that a bare-metal listing carries
   delivery terms only when backed, that a bare-metal candidate with no settlement
   option yields no listing, and that a deal settled by introduction has no
   fulfillment.
 - `physical-provisioning`: "A bare-metal publication view is built from its capacity
   declaration" carries delivery terms only as the pool's delegate passes them; "Domains
   contribute their inventory views" gives resource views the pool's context.
-- `resource-pool-management`: a requirement beside the delegate requirement the
-  prerequisite adds, stating that the delegate decides delivery terms. It is added
-  rather than written as a modification because the prerequisite's requirement is not
-  yet in the permanent specification.
+- `resource-pool-management`: "Capacity backing is interpreted by one delegate",
+  which the prerequisite made permanent, modified to name delivery terms among the
+  delegate's decisions and to state the two delivery-term operations. A separate
+  requirement beside it would leave its list of the delegate's decisions incomplete.
 - `registry-discovery`: "Compute listings publish their capacity backing" publishes a
   bare-metal listing's binding backing, backed or unbacked.
 
@@ -302,6 +298,18 @@ for the rest. The review found pieces outside publication that neither change ow
 the opening source check, the capacity-effect guards, and the listing payload's
 readers — each decided above.
 
+### Bare metal publishes on a loop over held projections first
+
+Decided with the maintainer on 2026-10-14. An unbacked listing is never judged against
+availability, so source reconciliation is the only reconciliation it gets, and
+bare-metal publication ran only when an operator invoked it: an unbacked listing whose
+pool was withdrawn would stay advertised until someone ran it. Bare metal shares VM's
+per-site projection state and publication loop controller instead, through a new
+prerequisite, `share-site-projection-state`, carved out of
+`kit-owned-listing-and-fulfillment-lifecycles`. This change depends on it. Rejected: a
+version watch inside bare metal's publication, which would satisfy the loop's wake but
+keep two projection routes and the live recheck.
+
 ### This change removes bare metal's temporary refusal of unbacked pools
 
 `encapsulate-capacity-backing` moves every backing decision into the backing delegate
@@ -331,8 +339,8 @@ None open. The 2026-10-14 review's questions, each decided with the maintainer:
    reopen"). Nothing further is owed here.
 3. **Settlement options for unbacked listings.** Decided: "A candidate with no
    settlement option yields no listing".
-4. **The opening source check.** Decided: "An unbacked listing's recheck reads
-   declarations, never availability".
+4. **The opening source check.** Decided, then revised by question 9: "An unbacked
+   listing's recheck reads its held projection, never availability".
 5. **The fulfillment routes for an unbacked deal.** Decided: "A deal settled by
    introduction has no fulfillment".
 6. **The permanent documentation delta.** Decided: see "Permanent documentation".
@@ -340,3 +348,8 @@ None open. The 2026-10-14 review's questions, each decided with the maintainer:
    introduction scenario, stage for stage".
 8. **The two-seller topology for both lanes.** Decided: "Goal 7 closes on
    single-site evidence".
+9. **Source reconciliation without an operator.** Raised 2026-10-14 after the
+   prerequisite was implemented. Decided: "Bare metal publishes on a loop over held
+   projections first", which also supersedes the scoped recheck in question 4.
+10. **The resource-pool delta's form.** Raised the same day. Decided: a modification of
+    the now-permanent delegate requirement ("Permanent documentation").

@@ -5,19 +5,19 @@ typically whole machines arranged directly between the parties — can still be
 discovered and introduced. Bare metal is that goal's primary target domain, and
 bare metal cannot publish such a listing.
 
-Every bare-metal listing is backed by construction. `BareMetalListing` declares
-`capacity_backing: Literal["backed"]`, its binding writers record `backed`, and each
-listing requires a `host_id` and `physical_host_id` from a Physical Resource's
-publication view. `bare-metal-publication-reads-pool-declarations` makes that
-explicit rather than lifting it: a pool declaring itself unbacked yields no
-bare-metal listing, and unbacked bare metal is a recorded non-goal there.
+Every bare-metal listing is backed. Bare-metal publication's pool reading refuses a
+pool declaring itself unbacked — the one comparison of the backing label
+`encapsulate-capacity-backing` left in the tree — and each listing requires a `host_id`
+and `physical_host_id` from a Physical Resource's publication view, which the site
+emits only for a declaration naming a host.
 
 The rest of what an unbacked listing needs already exists:
 
-- VM derives unbacked listings from projected pool declarations, binds them with the
-  capacity-publication kit's `UnbackedBinding`, keeps them out of every capacity
-  path, and publishes only settlement options its domain does not fulfil through
-  capacity;
+- every backing decision is the backing delegate's, which VM and bare metal both ask:
+  one `PublicationBinding` carries it, `CapacityEffects` refuses an effect for an
+  unbacked listing, `judge` never asks availability of one, and settlement
+  admissibility keeps only options a domain does not fulfil through capacity;
+- VM derives unbacked listings from projected pool declarations through that delegate;
 - bare metal already composes `contact-exchange.v1`, the introduction mechanism
   unbacked supply settles through.
 
@@ -46,8 +46,9 @@ What is missing is bare metal using that machinery.
 - Refuse any bare-metal candidate, backed or unbacked, whose payload carries no
   settlement option and no accepted escrow, recording the refusal in the publication
   report.
-- Recheck an unbacked bare-metal listing against its origin site's declarations, never
-  its availability; the inventory guard requirement is scoped accordingly.
+- Recheck an unbacked bare-metal listing against the projection the storefront holds
+  for its site, never its availability, through the held projections
+  `share-site-projection-state` gives bare metal.
 - Answer not found from the bare-metal fulfillment routes for a deal whose accepted
   stage does not fulfil through capacity, before building fulfillment.
 - Move bare metal's buyer `settlement` command group under `market bare-metal`, and
@@ -71,9 +72,8 @@ What is missing is bare metal using that machinery.
 
 - `storefront-publication`: bare-metal publication derives unbacked listings; delivery
   terms only on backed listings; no listing without a settlement option; one-unit
-  allocation and the opening availability refusal scoped to backed listings; the
-  inventory guard's unbacked rule scoped to availability; introduction deals have no
-  fulfillment.
+  allocation and the opening availability refusal scoped to backed listings;
+  introduction deals have no fulfillment.
 - `physical-provisioning`: the bare-metal view carries delivery terms as the pool's
   delegate passes them and is emitted for unbacked resources without a host; resource
   views receive their pool's context.
@@ -130,6 +130,12 @@ Also: the bare-metal seller quickstart, `docs/development/TESTING.md`,
   listing is discoverable by the compute schema's dimension filters.
 - **Depends on `compose-contact-exchange-across-compute`** (complete), for the
   promoted introduction composition and the per-origin contact payload.
+- **Depends on `share-site-projection-state`** (design phase), which gives bare metal
+  held per-site projections and runs its publication on the storefront's lifecycle
+  loop controller, as VM's runs. An unbacked listing is never judged against
+  availability, so source reconciliation is the only reconciliation it gets, and it
+  must run without an operator; and the opening recheck then reads a held projection
+  rather than calling the listing's site.
 - **Depends on `encapsulate-capacity-backing`** (archived 2026-10-14), which
   gathers every decision that differs between backed and unbacked supply into one
   backing delegate and moves VM and bare metal onto it. This change resolves bare

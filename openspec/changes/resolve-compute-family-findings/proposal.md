@@ -85,8 +85,8 @@ Placement and test reliability:
 - Bare metal's listing recheck and publication read each site's projection live,
   where VM reads the projections its storefront holds; reading held projections is the
   preferred end state for every storefront. (API credits' move onto the
-  kit's listing-source verdict is `encapsulate-capacity-backing`'s; for unbacked bare
-  metal the live read is decided in `unbacked-bare-metal-listings`.)
+  kit's listing-source verdict was `encapsulate-capacity-backing`'s, archived
+  2026-10-14; bare metal's move onto held projections is `share-site-projection-state`'s.)
 - The provisioning service's `db/database.py` and `db/migrations.py` import
   `vm_provisioning_adapter.db` (`AnsiblePoolConfig`, `Base`) and
   `vm_provisioning_adapter.legacy_backfill`. VM table metadata and the legacy VM

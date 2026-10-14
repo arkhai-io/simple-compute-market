@@ -11,8 +11,8 @@ Design phase; not planned.
 - `kit/settlement-runtime` owns the per-obligation operation journal and servicing
   worker; what each domain reimplements is the step after settlement — resuming an
   accepted obligation across restarts and converging it with the executor's report.
-- `site_projection_cache` (VM) and the capacity/publication kit's per-site projection
-  state (bare metal) hold the same thing by two routes.
+- Per-site projection state is not in scope: `share-site-projection-state` moves VM's
+  `site_projection_cache` into the kit and composes it for bare metal.
 
 ## Questions to settle before planning
 

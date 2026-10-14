@@ -1,6 +1,7 @@
 # Tasks — unbacked bare-metal listings
 
-Depends on `encapsulate-capacity-backing` (archived 2026-10-14).
+Depends on `share-site-projection-state` (design phase) and
+`encapsulate-capacity-backing` (archived 2026-10-14).
 `bare-metal-mock-provisioned-deal`, `bare-metal-listing-shapes`,
 `compose-contact-exchange-across-compute`, and
 `bare-metal-publication-reads-pool-declarations` are archived. Design reviewed
@@ -60,6 +61,17 @@ Depends on `encapsulate-capacity-backing` (archived 2026-10-14).
 - [x] 1.11 **Decision gate.** Decide the two-seller topology (review question 8).
       Decided with the maintainer: withdrawn from this change and recorded as unowned
       (task 2.2; "Goal 7 closes on single-site evidence").
+- [x] 1.12 **Decision gate.** Decide how unbacked listings are source-reconciled without
+      an operator (review question 9). Decided with the maintainer: bare metal shares
+      VM's per-site projection state and publication loop through a new prerequisite,
+      `share-site-projection-state`, carved out of
+      `kit-owned-listing-and-fulfillment-lifecycles`; the opening recheck reads the
+      held projection, superseding 1.8's scoped live read, and the inventory-guard delta
+      is dropped ("Bare metal publishes on a loop over held projections first").
+- [x] 1.13 **Decision gate.** Decide the resource-pool delta's form (review question 10).
+      Decided with the maintainer: a modification of the now-permanent delegate
+      requirement, naming delivery terms among its decisions ("Permanent
+      documentation").
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
