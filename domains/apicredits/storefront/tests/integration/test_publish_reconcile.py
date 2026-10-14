@@ -69,9 +69,16 @@ def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
 class _QuotaRuntime:
     """The credits site: its availability and its pool projection."""
 
-    def __init__(self, values: dict[str, int], *, backing: str = "backed") -> None:
+    def __init__(
+        self,
+        values: dict[str, int],
+        *,
+        backing: str = "backed",
+        pool_id: str = "default",
+    ) -> None:
         self._values = values
         self._backing = backing
+        self._pool_id = pool_id
 
     def site_client(self, site_id: str) -> "_QuotaRuntime":
         assert site_id == "tokens"
@@ -81,7 +88,7 @@ class _QuotaRuntime:
         return {
             "resource_pools": [
                 {
-                    "pool_id": "default",
+                    "pool_id": self._pool_id,
                     "resources": [
                         {"physical_resource_id": resource_id}
                         for resource_id in self._values
@@ -322,6 +329,33 @@ async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
     withdrawn = await db.load_listing(listing_id="L-withdrawn")
     assert (withdrawn["status"], withdrawn["closed_by"]) == ("closed", "seller")
     assert (await db.load_listing(listing_id="L-exhausted"))["status"] == "open"
+
+
+async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
+    db, monkeypatch
+):
+    """Released quota reopens only a listing whose resource is still in the pool
+    it was bound to, even when the new pool declares the same backing."""
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    from apicredits_storefront.services import publication_service as publication_module
+    from apicredits_storefront.services.publication_service import (
+        close_token_listings_after_capacity_change,
+        reopen_token_listings_after_capacity_change,
+    )
+
+    await _insert_listing(db, "L-moved", "svc-a", "open")
+    exhausted = await _QuotaRuntime({"svc-a": 0}).availability()
+    assert await close_token_listings_after_capacity_change(db, exhausted) == ["L-moved"]
+
+    monkeypatch.setattr(
+        publication_module,
+        "build_capacity_runtime",
+        lambda factory: _QuotaRuntime({"svc-a": 5}, pool_id="other"),
+    )
+    released = await _QuotaRuntime({"svc-a": 5}).availability()
+
+    assert await reopen_token_listings_after_capacity_change(db, released) == []
+    assert (await db.load_listing(listing_id="L-moved"))["status"] == "closed"
 
 
 def _quota_service(db, monkeypatch, runtime):

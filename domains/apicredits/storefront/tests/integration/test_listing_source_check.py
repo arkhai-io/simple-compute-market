@@ -14,9 +14,17 @@ from tests.integration.credit_negotiation import FakeCapacity
 
 
 class _Site(FakeCapacity):
-    def __init__(self, *, available=100, backing="backed", advertised=("api_credits",)):
+    def __init__(
+        self,
+        *,
+        available=100,
+        backing="backed",
+        advertised=("api_credits",),
+        pool_id="default",
+    ):
         super().__init__(available)
         self.backing = backing
+        self.pool_id = pool_id
         self.advertised = list(advertised)
         self.reachable = True
 
@@ -24,6 +32,7 @@ class _Site(FakeCapacity):
         if not self.reachable:
             raise ConnectionError("site unreachable")
         projection = await super().resource_pool_projection()
+        projection["resource_pools"][0]["pool_id"] = self.pool_id
         tags = projection["resource_pools"][0]["pool_metadata"]["policy_tags"]
         tags["capacity_backing"] = self.backing
         tags["advertisable_modes"] = self.advertised
@@ -63,6 +72,15 @@ async def test_a_pool_declaring_the_opposite_backing_is_a_declared_mismatch(db):
 
     assert verdict.outcome == "declared_mismatch"
     assert verdict.differing_fields == ("capacity_backing",)
+
+
+async def test_a_resource_moved_to_another_pool_is_a_declared_mismatch(db):
+    """The other pool declares the same backing and advertises API credits; the
+    listing still no longer represents the source it was bound to."""
+    verdict = await _check(db, _Site(pool_id="other"))
+
+    assert verdict.outcome == "declared_mismatch"
+    assert "no longer in its pool 'default'" in verdict.reason
 
 
 @pytest.mark.parametrize("site_id", ["elsewhere"])

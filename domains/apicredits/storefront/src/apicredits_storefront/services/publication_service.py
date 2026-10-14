@@ -21,8 +21,10 @@ from market_resource_pools_contracts.backing import CapacityBacking
 from registry_client import ListingRequest, UpdateListingRequest
 
 from apicredits_storefront.listing_binding import (
+    BoundQuotaSource,
     QuotaPoolUnavailable,
     api_credit_listing_binding,
+    api_credit_listing_source,
     quota_pool,
 )
 from apicredits_storefront.services.capacity_client import build_capacity_runtime
@@ -115,16 +117,17 @@ async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
 
 async def _credit_listing_sources(
     db: Any, rows: list[dict[str, Any]]
-) -> tuple[list[CreditListingSource], dict[str, PublicationBinding]]:
+) -> tuple[list[CreditListingSource], dict[str, BoundQuotaSource]]:
     """Each listing's status and durable binding, read for reconciliation."""
     sources: list[CreditListingSource] = []
-    bindings: dict[str, PublicationBinding] = {}
+    bound: dict[str, BoundQuotaSource] = {}
     for row in rows:
         listing_id = str(row.get("listing_id") or "")
-        binding = await api_credit_listing_binding(db, listing_id)
-        if binding is None:
+        source = await api_credit_listing_source(db, listing_id)
+        if source is None:
             raise CapacityBindingError("API-credit listing has no durable capacity binding")
-        bindings[listing_id] = binding
+        bound[listing_id] = source
+        binding = source.binding
         sources.append(
             CreditListingSource(
                 listing_id=listing_id,
@@ -134,38 +137,42 @@ async def _credit_listing_sources(
                 resource_id=binding.source_id,
             )
         )
-    return sources, bindings
+    return sources, bound
 
 
 async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="open", limit=200)
-    sources, bindings = await _credit_listing_sources(db, rows)
+    sources, bound = await _credit_listing_sources(db, rows)
     ids = stale_open_credit_listing_ids(
         sources,
         availability=availability,
-        judge=lambda source, available: bindings[source.listing_id].backing.judge(
+        judge=lambda source, available: bound[source.listing_id].binding.backing.judge(
             lambda: None, available
         ),
     )
     plan = ReconciliationPlan(
-        close=tuple(BoundListing(listing_id, bindings[listing_id]) for listing_id in ids)
+        close=tuple(
+            BoundListing(listing_id, bound[listing_id].binding) for listing_id in ids
+        )
     )
     result = await build_publication_runtime(db).reconcile(plan)
     return list(result["closed"])
 
 
 async def _source_backings(
-    bindings: dict[str, PublicationBinding], db: Any
+    bound: dict[str, BoundQuotaSource], db: Any
 ) -> dict[str, CapacityBacking | None]:
-    """The backing each listing's pool declares now, or ``None`` if unreadable.
+    """The backing each listing's bound pool declares now, or ``None`` if unknown.
 
-    Read once per site from its resource-pool projection; a site that cannot
-    be read leaves its listings' backing unknown, which reopens nothing.
+    Read once per site from its resource-pool projection. A site that cannot
+    be read, or a resource no longer in the pool its listing was bound to,
+    leaves the listing's backing unknown, which reopens nothing.
     """
     capacity = build_capacity_runtime(lambda: db)
     pools_by_site: dict[str, list[dict[str, Any]] | None] = {}
     backings: dict[str, CapacityBacking | None] = {}
-    for listing_id, binding in bindings.items():
+    for listing_id, source in bound.items():
+        binding = source.binding
         if binding.site_id not in pools_by_site:
             try:
                 projection = await capacity.site_client(
@@ -177,7 +184,9 @@ async def _source_backings(
         pools = pools_by_site[binding.site_id]
         try:
             backings[listing_id] = (
-                quota_pool(pools, resource_id=binding.source_id).declaration.backing
+                quota_pool(
+                    pools, resource_id=binding.source_id, pool_id=source.pool_id
+                ).declaration.backing
                 if pools is not None
                 else None
             )
@@ -188,10 +197,10 @@ async def _source_backings(
 
 async def reopen_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="closed", limit=200)
-    sources, bindings = await _credit_listing_sources(db, rows)
+    sources, bound = await _credit_listing_sources(db, rows)
     if availability is None or not sources:
         return []
-    source_backings = await _source_backings(bindings, db)
+    source_backings = await _source_backings(bound, db)
 
     def declared(listing_id: str) -> str | None:
         # A listing's backing is fixed for the life of its binding: one whose
@@ -199,14 +208,14 @@ async def reopen_token_listings_after_capacity_change(db: Any, availability: dic
         source_backing = source_backings.get(listing_id)
         if source_backing is None:
             return "source_unconfirmed"
-        if backing_changed(bindings[listing_id], source_backing):
+        if backing_changed(bound[listing_id].binding, source_backing):
             return "backing_changed"
         return None
 
     ids = reopenable_credit_listing_ids(
         sources,
         availability=availability,
-        judge=lambda source, available: bindings[source.listing_id].backing.judge(
+        judge=lambda source, available: bound[source.listing_id].binding.backing.judge(
             lambda: declared(source.listing_id), available
         ),
     )

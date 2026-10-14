@@ -666,6 +666,17 @@ Decided or learned while implementing, each within a decision above:
 - **The API-credit reconciliation rules take a judge.** The domain package keeps
   its pure rules and gains no dependency: each rule supplies the availability half,
   and the storefront judges it through the listing's binding.
+- **Provenance is the domain's; admission is the delegate's.** The delegate decides
+  whether a binding admits capacity and whether availability is asked. It does not
+  decide whether a source is still the one a listing was bound to: each domain's
+  declared half checks that against its own durable record. For API credits that
+  record names the pool, so the source check and the reopen path read the quota
+  resource from that pool only. A resource now in another pool is a declared
+  mismatch even if that pool declares the same backing and advertises API credits,
+  and reconciliation does not reopen its listing. Both paths read the record once,
+  through `api_credit_listing_source`, which returns the capacity binding with its
+  bound pool. Creation, which has no record yet, still takes whichever projected
+  pool holds the resource.
 
 ## Open questions
 

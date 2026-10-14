@@ -1,12 +1,13 @@
 """Rechecking an API-credit listing against its source, for the seller's inventory guard.
 
 The negotiation runtime asks before every seller decision and every acceptance.
-The declared half confirms that the listing's quota resource is still in its
-bound pool, that the pool is enabled and advertises API credits, and that the
-pool still declares the backing the listing was bound with. The available half
-requires at least one available unit, the condition listing creation requires;
-the binding's backing delegate decides whether it is asked. A source the
-storefront cannot read is unverifiable, which the runtime refuses as
+The declared half confirms that the listing's quota resource is still in the
+pool its durable binding records, that the pool is enabled and advertises API
+credits, and that the pool still declares the backing the listing was bound
+with. Provenance is this domain's to check; the binding's backing delegate
+decides only whether availability is asked. The available half requires at
+least one available unit, the condition listing creation requires. A source
+the storefront cannot read is unverifiable, which the runtime refuses as
 retryable. See openspec/specs/api-credits/spec.md, "An API-credit listing is
 rechecked against its source".
 """
@@ -21,7 +22,7 @@ from market_policy.listing_source import ListingSourceVerdict
 
 from apicredits_storefront.listing_binding import (
     QuotaPoolUnavailable,
-    api_credit_listing_binding,
+    api_credit_listing_source,
     quota_pool,
 )
 
@@ -39,11 +40,12 @@ def build_listing_source_check(
     """
 
     async def check(repository: Any, listing_id: str) -> ListingSourceVerdict:
-        binding = await api_credit_listing_binding(repository, listing_id)
-        if binding is None:
+        source = await api_credit_listing_source(repository, listing_id)
+        if source is None:
             return ListingSourceVerdict(
                 "declared_mismatch", "the listing has no trusted source binding"
             )
+        binding = source.binding
         try:
             site = capacity(repository).site(binding.site_id)
         except KeyError:
@@ -61,7 +63,9 @@ def build_listing_source_check(
                 )
             try:
                 pool = quota_pool(
-                    projection["resource_pools"], resource_id=binding.source_id
+                    projection["resource_pools"],
+                    resource_id=binding.source_id,
+                    pool_id=source.pool_id,
                 )
             except QuotaPoolUnavailable as exc:
                 return ListingSourceVerdict("declared_mismatch", str(exc))

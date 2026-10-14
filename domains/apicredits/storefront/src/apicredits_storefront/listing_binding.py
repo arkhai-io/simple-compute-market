@@ -41,29 +41,40 @@ class QuotaPool:
 
 
 def quota_pool(
-    resource_pools: Sequence[Mapping[str, Any]], *, resource_id: str
+    resource_pools: Sequence[Mapping[str, Any]],
+    *,
+    resource_id: str,
+    pool_id: str | None = None,
 ) -> QuotaPool:
     """The enabled pool advertising API credits that holds ``resource_id``.
 
-    Read from the site's resource-pool projection, through the one reader of
-    pool declarations, so a pool whose declarations do not resolve is refused
-    rather than read as either backing.
+    ``pool_id`` is the pool a bound listing recorded: the resource must still
+    be in that pool, because a listing represents its source as bound, and a
+    resource now in another pool is not that source whatever that pool
+    declares. Without it, as at listing creation, any projected pool holding
+    the resource is the one. Read from the site's resource-pool projection,
+    through the one reader of pool declarations, so a pool whose declarations
+    do not resolve is refused rather than read as either backing.
     """
-    pool_id = next(
+    holding = next(
         (
             str(pool.get("pool_id"))
             for pool in resource_pools
-            if any(
+            if (pool_id is None or str(pool.get("pool_id")) == pool_id)
+            and any(
                 str(member.get("physical_resource_id")) == resource_id
                 for member in pool.get("resources") or ()
             )
         ),
         None,
     )
-    if pool_id is None:
+    if holding is None:
         raise QuotaPoolUnavailable(
             f"quota resource {resource_id!r} is in no projected pool"
+            if pool_id is None
+            else f"quota resource {resource_id!r} is no longer in its pool {pool_id!r}"
         )
+    pool_id = holding
     declarations = read_site_declarations(resource_pools)
     if pool_id in declarations.unresolvable:
         raise QuotaPoolUnavailable(
@@ -139,6 +150,32 @@ async def api_credit_listing_binding(
     durable = await repository.load_listing_binding(listing_id=listing_id)
     if durable is None or not durable.physical_resource_id:
         return None
+    return _publication_binding(durable)
+
+
+@dataclass(frozen=True)
+class BoundQuotaSource:
+    """A listing's capacity binding and the pool its durable record names.
+
+    The capacity binding carries what every market's effects need; the pool is
+    this domain's provenance, which its source checks enforce.
+    """
+
+    binding: PublicationBinding
+    pool_id: str
+
+
+async def api_credit_listing_source(
+    repository: Any, listing_id: str
+) -> BoundQuotaSource | None:
+    """The listing's capacity binding with its bound pool, read once."""
+    durable = await repository.load_listing_binding(listing_id=listing_id)
+    if durable is None or not durable.physical_resource_id or not durable.pool_id:
+        return None
+    return BoundQuotaSource(_publication_binding(durable), durable.pool_id)
+
+
+def _publication_binding(durable: StorefrontListingBinding) -> PublicationBinding:
     return publication_binding(
         capacity_backing=durable.capacity_backing,
         site_id=durable.site_id,
@@ -153,7 +190,9 @@ __all__ = [
     "api_credit_registration",
     "QuotaPool",
     "QuotaPoolUnavailable",
+    "BoundQuotaSource",
     "api_credit_listing_binding",
+    "api_credit_listing_source",
     "prepare_api_credit_listing_binding",
     "quota_pool",
 ]
