@@ -69,6 +69,12 @@ specification changes, and adds a delta and clears `skip_specs` if it does.
   values overlay used for validation.
 - How the buyer-CLI scenarios reach the storefront from outside the cluster, since
   the pipeline runs them from inside the compose network.
+- Whether the chart's out-of-band Secrets become optional, with the ordinary values
+  overlays supplying development values when a Secret is absent. Today a deploy
+  with the default values reads six Secrets that must be created by hand first,
+  and validation's preflight (`make -C helm check-local-secrets`) refuses to deploy
+  until they exist. `parallel-change-workflows` gives each validation its own
+  namespace, where the same Secrets would otherwise be needed again.
 
 ## Dependencies and Related Changes
 

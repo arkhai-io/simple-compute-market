@@ -899,11 +899,19 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       At that closeout, decide where two questions from validating this pilot
       belong: a kube namespace per validation, and the chart's out-of-band
       Secrets made optional with the ordinary values overlays as fallback.
+      Placed by the owner after the pilot's closeout, which did not take them up:
+      they were recorded in this change rather than the pilot's, so its closeout
+      could not see them. Optional Secrets is an open question of
+      `helm-e2e-pipeline-parity`; a namespace per validation belongs to a new
+      change, `parallel-change-workflows`, for working changes in parallel —
+      branches, reading rounds, Helm namespaces, and every other shared resource.
 - [ ] 10.5 Amend every other active change's closeout task the same way,
       preserving completed tasks: its unchecked parts reordered to
       `openspec/README.md`'s eleven, with archival a part of its own; comment
       hygiene and import placement made confirmations, any outstanding work on them
-      moved to before the pre-closeout review; unchecked promotion tasks say the archive
+      moved to before the pre-closeout review; any instruction to remove the change from
+      other rows' `Depends on` or reset dependents moved out of closeout, since
+      archive cleanup releases dependents; unchecked promotion tasks say the archive
       synchronizes the specs and is the last step; a change that already
       synchronized its specs by hand archives with `--skip-specs`, recorded as a
       note on its completed task. List the changes amended and any left as they
