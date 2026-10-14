@@ -117,9 +117,7 @@ The inventory also found, each to be closed in this change:
 Decided with the maintainer: the change exists to finish the encapsulation, so API
 credits is not left behind. It diverges furthest today: it builds `CapacityBinding`
 from the listing payload rather than the durable storefront binding, reads no pool
-declarations, reconciles every listing, always places a hold, and publishes no
-`capacity_backing` label, so the registry's backing filter, which fails on a missing
-field, excludes every API-credit listing. Each is unified under task 1.3.
+declarations, reconciles every listing, and always places a hold. Each is unified under task 1.3.
 
 ### The storefront's copy of the vocabulary goes; its database check stays
 
@@ -235,9 +233,8 @@ option yields no listing.
   router, as the compute provisioning service does, so its resource-pool projection
   carries the declarations of the system pool it already seeds and migrates. At
   listing creation the storefront resolves the quota resource's pool through
-  `read_site_declarations`, binds with that pool's delegate, and publishes the
-  `capacity_backing` label, which also brings API-credit listings within the
-  registry's backing filter. An unbacked credits pool would yield no listing, because
+  `read_site_declarations` and binds with that pool's delegate. An unbacked credits
+  pool would yield no listing, because
   every credits mechanism issues against quota — the delegate's settlement
   admissibility decides that, not an API-credit branch.
 - Bare metal keeps refusing unbacked pools, because this change adds no unbacked
@@ -284,20 +281,46 @@ which VM and bare metal copy from the listing binding. That is the same requirem
 gap for threads, but no backing decision reads a thread binding, so it is outside this
 change; it is recorded as unowned in the change index.
 
+### Divergence: the published label (task 1.3)
+
+Today VM publishes its binding's label, through a listing model that types the field
+with its own copy of the vocabulary; bare metal publishes a hard-coded `"backed"`
+through a `Literal["backed"]` field; API credits publishes none, and the API-credit
+registry schema has no such field.
+
+Unified rule: a listing's published `capacity_backing` is always its binding
+delegate's label, nothing else writes it, and no listing model types it with a copy of
+the vocabulary — it is `CapacityBackingLabel`. Whether a market publishes the label at
+all is its registry schema's decision, which is operator curation rather than a backing
+decision: the compute schema carries it, as `registry-discovery`'s "Compute listings
+publish their capacity backing" requires, and the API-credit schema does not.
+
+- VM's listing model types the field `CapacityBackingLabel | None`, `None` remaining
+  only for rows stored before the field existed.
+- Bare-metal derivation sets the field from the candidate's delegate, and
+  `BareMetalListing` types it `CapacityBackingLabel`. That publishes no unbacked
+  bare-metal supply: pool reading still refuses it, and the payload's unbacked form is
+  `unbacked-bare-metal-listings`'.
+- `arkhai-bare-metal` and VM's listings package therefore depend on
+  `kit/resource-pools-contracts`, a downward edge `make check-architecture` permits;
+  planning confirms the VM buyer, which imports the listing models, stays light.
+- API credits publishes no label. Its durable binding records one, which is what every
+  backing decision reads. Rejected: adding the field to the API-credit schema, which
+  would tell a buyer nothing — every published API-credit listing is backed — and
+  would change the schema identity buyers match.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. the published label — from the binding in VM, fixed to backed in bare metal,
-      absent in API credits;
-   2. a binding whose backing disagrees with its source's on refresh and reopen;
-   3. source-check availability;
-   4. reconciliation scope;
-   5. hold placement;
-   6. capacity-effect guard coverage;
-   7. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. a binding whose backing disagrees with its source's on refresh and reopen;
+   2. source-check availability;
+   3. reconciliation scope;
+   4. hold placement;
+   5. capacity-effect guard coverage;
+   6. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
