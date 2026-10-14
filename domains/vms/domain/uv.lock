@@ -142,7 +142,7 @@ name = "arkhai-kit-resource-pools-contracts"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
-    { name = "arkhai-kit-capability-shape" },
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "pydantic" },
 ]
 wheels = [
