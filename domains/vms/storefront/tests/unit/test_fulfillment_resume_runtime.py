@@ -114,12 +114,9 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     )
     db = lifecycle.reopen()
     order: list[str] = []
-    site_authority = SimpleNamespace(
-        commit=AsyncMock(side_effect=lambda **_: order.append("commit") or _RECORDED),
-    )
     capacity = SimpleNamespace(
         site_names=["site-1"],
-        site=lambda name: {"site-1": site_authority}[name],
+        commit=AsyncMock(side_effect=lambda **_: order.append("commit") or _RECORDED),
         reserve=AsyncMock(
             return_value={
                 "capacity_reservation_id": "reservation-1",
@@ -165,10 +162,10 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     # The recovered reservation is committed, beginning the lease and naming
     # the deal, before its fulfillment begins.
     assert order == ["commit", "begin"]
-    # The commit lands at the listing binding's site and nowhere else.
-    committed = site_authority.commit.await_args.kwargs
+    committed = capacity.commit.await_args.kwargs
     assert committed["capacity_reservation_id"] == "reservation-1"
     assert committed["deal_ref"] == {"negotiation_id": "neg-1"}
+    assert committed["site_id"] == "site-1"
     remote.schedule_resource.assert_awaited_once()
     scheduled_body = remote.schedule_resource.await_args.args[0]
     assert scheduled_body.market == "vms"

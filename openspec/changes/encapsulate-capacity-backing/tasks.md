@@ -1,6 +1,6 @@
 # Tasks — encapsulate capacity backing
 
-Design decided 2026-10-14 and planned the same day. Prerequisite of
+Design decided 2026-10-14 and planned the same day; Sections 2–7 implemented, awaiting code review, the two blocked locks, and the end-to-end run. Prerequisite of
 `unbacked-bare-metal-listings`. Planning's two findings and its refinements are in
 `design.md`, "Planning decisions (task 1.6)".
 
@@ -408,16 +408,19 @@ move each domain's behaviour onto the delegate and can land in any order.
 
 ## 7. Whole-tree validation
 
-- [ ] 7.1 No backing switch remains: a search of production code for `CapacityBinding`,
+- [x] 7.1 No backing switch remains: a search of production code for `CapacityBinding`,
       `UnbackedBinding`, `backed_only`, `.backed`, `CAPACITY_BACKED`, `== "backed"`, and
       `"unbacked"` finds only bare metal's pool-reading refusal and the applied
       migrations' literals. Record the search and its result here.
+      *Done.* The search finds bare metal's pool-reading refusal (`site_reading.py`, comparing the delegate), the delegate's own registry, the applied migrations' `'backed'` literals in core and bare metal, and one example script's demo candidate (`domains/vms/storefront/examples/payment_smoke.py`). Nothing else.
 - [ ] 7.2 `make test` and `make check-packaging`.
+      *Partly done; two locks blocked.* Every test target passes except those this container cannot install, and `RELEASING.md`'s rows and the publish manifest's order were corrected for the new edges. `make check-packaging` passes everything but `check-locks`, which reports `domains/vms/buyer` and `domains/vms/storefront` stale: both resolve torch from `download.pytorch.org`, which this environment's network policy denies, so their relock is owed by someone with that index (as for `enforce-package-layers`). The VM storefront and buyer suites ran without torch in hand-built environments: storefront unit 989 passed; integration has the same 7 failures as `dev` in the same environment, run one test per process because a `dev` test hangs after earlier ones; buyer 197 passed. `kit/policy`, unchanged, was not run.
 - [ ] 7.3 The three end-to-end lanes on the branch head: VM (including
       `test_vm_introduction.py`, which exercises unbacked VM supply), bare metal
       (`test_bare_metal_publication.py`, `test_bare_metal_introduction.py`, and the
       typed-client deal), and API credits (`test_credits_payment_deal.py` and
       `test_credits_deal_buyer_cli.py`, over a listing that now records a binding).
+      *Not run.* Docker Hub refuses pulls here (429), and the VM lane's images resolve torch from the denied index. The E2E workflow is dispatch-only; it is owed on the branch head before closeout (9.9).
 
 ## 8. Promotion
 
