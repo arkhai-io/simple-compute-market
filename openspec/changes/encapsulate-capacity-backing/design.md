@@ -250,21 +250,54 @@ option yields no listing.
   machinery for a state that lasts only until that change lands, after which every
   domain would publish every backing.
 
+### Divergence: binding construction (task 1.3)
+
+Today VM builds its binding with `publication_binding` from the durable listing
+binding's recorded label; bare metal builds `CapacityBinding` directly and refuses a
+durable label other than backed; API credits builds `CapacityBinding` from the
+published `listing_resource` and records no durable listing binding at all, so it does
+not meet `storefront-publication`'s requirement that every storefront listing have one
+immutable common mapping.
+
+Unified rule: every domain builds its binding in one place, `publication_binding`,
+from the durable listing binding's recorded site, offering mode, source, and backing
+label. Nothing builds a binding from a published payload or names a binding category.
+
+- VM already does.
+- Bare metal's `binding_for_listing` calls `publication_binding` with the recorded
+  label, and its refusal of a label other than backed goes: its pool reading is the
+  only place it refuses unbacked supply (see "Divergence: admitting unbacked supply").
+- API credits records a durable listing binding at listing creation, through the core
+  write VM and bare metal use: the site, the `api_credits` mode, the quota resource as
+  source, its pool, the domain identity and version, and the backing label its pool
+  declares. Its hold, release, and reconciliation build their binding from that
+  record. That closes the requirement's gap for API-credit listings.
+
+API credits has not launched, so there is no upgrade path and no backfill. The
+API-credit storefront needs a fresh database, and refuses at startup a database
+holding a listing with no binding, naming the remedy, rather than failing later when
+a capacity operation finds none — the same posture `ARCHITECTURE.md` takes for
+incompatible API-credit evidence and grant schemas.
+
+API credits also records no negotiation-thread binding when an opening is accepted,
+which VM and bare metal copy from the listing binding. That is the same requirement's
+gap for threads, but no backing decision reads a thread binding, so it is outside this
+change; it is recorded as unowned in the change index.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. binding construction — three paths;
-   2. the published label — from the binding in VM, fixed to backed in bare metal,
+   1. the published label — from the binding in VM, fixed to backed in bare metal,
       absent in API credits;
-   3. a binding whose backing disagrees with its source's on refresh and reopen;
-   4. source-check availability;
-   5. reconciliation scope;
-   6. hold placement;
-   7. capacity-effect guard coverage;
-   8. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   2. a binding whose backing disagrees with its source's on refresh and reopen;
+   3. source-check availability;
+   4. reconciliation scope;
+   5. hold placement;
+   6. capacity-effect guard coverage;
+   7. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).

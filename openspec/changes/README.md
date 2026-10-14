@@ -145,6 +145,12 @@ One edge in the next wave runs against the others: carving `core/storefront`'s h
 | [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; owns moving bare metal's negotiate and listing routes onto the shell (4a.3–4a.6) now that `bare-metal-mock-provisioned-deal` (archived 2026-10-09) has composed bare-metal negotiation onto the kit runtime (4a.1, 4a.2, and the runtime half of 4a.3 migrated there 2026-10-01); gained the bare-metal buyer CLI requirements (4b.6–4b.9) from it; the stack and both deal scenarios exist | Moves bare metal's negotiate and listing routes onto the shell, recomposes API credits onto kit, and verifies the bare-metal buyer requirements (clean wheel, independent authorities, package boundary, negotiation ownership). Its deal evidence comes from `bare-metal-mock-provisioned-deal`. Delivers the goal's completion test |
 | [`buyers-use-the-storefront-client`](buyers-use-the-storefront-client/) | design phase; depends on the storefront shell's typed-client placement (its `settle-through-arkhai-payments` dependency is satisfied: archived 2026-10-08) | Production buyers call storefront routes through the typed client instead of `core_buyer` signed-JSON helpers and domain transports, so the route contract has one owner on both sides |
 
+No change owns this yet.
+
+| Item | Origin |
+|---|---|
+| The API-credit storefront records no negotiation-thread binding when an opening is accepted, where VM and bare metal copy the listing binding to the thread, so `storefront-publication`'s requirement that a thread inherit its listing's immutable binding is unmet for API credits. Its listings gain a durable binding in `encapsulate-capacity-backing`, which leaves threads alone because no backing decision reads them | `encapsulate-capacity-backing` design review |
+
 ## Roadmap goal — Make capacity exclusivity compensated
 
 ```text
