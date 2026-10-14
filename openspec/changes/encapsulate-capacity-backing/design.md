@@ -489,9 +489,16 @@ conventions were kept out of core and the settlement runtime when settlement rou
 by mechanism was designed. Rejected: a separate per-domain map, which can drift from
 the stage table it describes.
 
+### Site publication views stay outside this change (task 1.5)
+
+The inventory found no backing decision on the site side beyond the pool declaration
+rules: no publication view reads backing, and every bare-metal view is backed by
+construction, requiring a host and carrying availability. Giving resource views the
+pool's delegate here would add behaviour with no existing switch to replace, whose
+only consumer is the unbacked bare-metal view. It moves to
+`unbacked-bare-metal-listings`, which publishes that view, together with the delegate
+operation the view needs.
+
 ## Open questions
 
-Each is a decision gate in `tasks.md`.
-
-1. How the site's resource publication views receive the pool's delegate, given that
-   `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
+None.

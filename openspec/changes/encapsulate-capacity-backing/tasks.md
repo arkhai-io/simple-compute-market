@@ -33,8 +33,11 @@ Design phase; not yet planned. Prerequisite of `unbacked-bare-metal-listings`.
       classes relate to the delegate, and record it. Decided with the maintainer: one
       `PublicationBinding` class carrying the delegate replaces both; a refused
       admission answers 409 ("One binding class carries the delegate").
-- [ ] 1.5 **Decision gate.** Decide how the site's resource publication views receive
-      the pool's delegate, and record it.
+- [x] 1.5 **Decision gate.** Decide how the site's resource publication views receive
+      the pool's delegate, and record it. Decided with the maintainer: not in this
+      change; no site view reads backing today, so the plumbing and its delegate
+      operation move to `unbacked-bare-metal-listings` ("Site publication views stay
+      outside this change").
 - [ ] 1.6 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations, and
       reconcile the plan with the bordering changes `proposal.md` names.

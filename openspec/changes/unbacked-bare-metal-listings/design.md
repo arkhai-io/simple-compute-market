@@ -76,6 +76,24 @@ Consequences, also decided:
   a backed one, and the shape rules — exactly one `units`, a GPU count and model —
   are unchanged.
 
+### The site's views receive the pool's delegate here
+
+`encapsulate-capacity-backing` leaves the site's publication views alone, because no
+view reads backing until this change publishes an unbacked one. This change therefore
+gives views the pool's delegate:
+
+- `InventoryViewProjection.resource_views` receives the pool's context — its provider
+  and its resolved declarations, the backing delegate among them — where today it
+  receives only the declaration and its pool ID. The provisioning service's resource
+  pass resolves each declaration's pool from the pool rows its metadata pass already
+  reads; that is the provisioning composition reading its own pools, not a new
+  `kit/site` read of pool state.
+- The delegate gains an operation for what a view carries (provisionally
+  `view_supply(host_id, available)`): a backed resource's view carries its host
+  identity and availability, an unbacked resource's carries neither.
+- Bare metal's view builder consumes it, so its rule that a declaration naming no host
+  gets no view becomes the delegate's decision rather than a branch of its own.
+
 ### Negotiation and settlement compose the existing kit runtimes
 
 Negotiation and settlement for an unbacked bare-metal listing sit on the kit
