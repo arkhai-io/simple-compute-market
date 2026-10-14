@@ -990,8 +990,16 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
       `make check-packaging` passes with no architecture warning and no lock
       rewritten; `make check-architecture-change CHANGE=agent-driven-change-
       workflow` reports no row; `make check-agent-skills` passes.
-- [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
+- [x] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
+      Run 38627126214 passed on `197bff17`, the closeout commit after the dev merge,
+      run at the owner's word because the merge changed the VM listings reconciler
+      and storefront code after the last run (38460926563, `443f9505`). `e2e-vm`
+      134 passed, `e2e-bare-metal` 51 passed, `e2e-apicredits` 1 passed and 3
+      skipped: the payment-deal scenarios skip when `PAYMENTS.*` is not
+      configured, as on dev's own run 37936939239. The change's own code is
+      contributor tooling the pipeline does not run, except that
+      `make fetch-e2e-logs E2E_RUN_ID=38627126214` fetched this run's logs.
 - [x] 12.10 Resolve the open question on exporting session transcripts and review
       logs: how `change-archive-cleanup` confirms the export ran before `reviews/` is deleted,
       and whether permanent documentation states that they are exported.
@@ -1021,6 +1029,11 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
       packaging. The design-promotion record is complete. The delta's review-records
       requirement says durable content is promoted at closeout, since `reviews/` is
       no longer deleted.
-- [ ] 12.12 Archival, last: `openspec archive agent-driven-change-workflow -y`
+- [x] 12.12 Archival, last: `openspec archive agent-driven-change-workflow -y`
       merges the deltas and moves the change under `openspec/changes/archive/`;
       point the index row at it, and run `openspec validate --specs --strict`.
+      Archived with the deltas merged: neither permanent spec carried them by
+      hand. `change-workflow` gains its 11 requirements under the skeleton's
+      Purpose; `planning-governance` gains 3 and has 2 modified. The row links the
+      archive; `openspec validate --specs --strict` and `make check-change-index`
+      pass.
