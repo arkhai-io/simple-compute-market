@@ -15,7 +15,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock check-agent-skills build-bare-metal-storefront
 .PHONY: dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean dist-arkhai-core-registry dist-bare-metal-buyer
 .PHONY: test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
-.PHONY: review-wheelhouse review-wheelhouse-scope review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage round-view round-done round-e2e-baseline round-view-closed run-e2e fetch-e2e-logs review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: review-wheelhouse review-wheelhouse-scope review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage closeout round-view round-done round-e2e-baseline round-view-closed run-e2e fetch-e2e-logs review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -830,6 +830,10 @@ implement: round-view-closed ## Open a fresh Claude Code session implementing an
 triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-triage $(CHANGE)"
+
+closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude "/change-closeout $(CHANGE)"
 
 round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
 	@python3 scripts/round_view.py check

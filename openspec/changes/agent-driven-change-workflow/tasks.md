@@ -972,6 +972,9 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       design). The ledger records only course corrections: a disposition that
       accepts the agent's proposal writes no entry (`change-triage`, the ledger
       requirement and a scenario, design), at the owner's direction.
+      `make closeout CHANGE=` opens a session on `change-closeout`, finding the
+      change active or archived so an interrupted closeout resumes (a `make -n`
+      test checks it calls the plain lookup and the skill).
 - [ ] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
       notes above), run when the closeout gate is passed:
       the export 12.10 settles, `reviews/` deleted with the ledger kept,

@@ -450,6 +450,16 @@ def test_make_review_passes_the_override() -> None:
     assert "scripts/run_change_review.py" in command and "--unvalidated" in command
 
 
+def test_make_closeout_opens_the_closeout_skill() -> None:
+    command = subprocess.run(
+        ["make", "-n", "--no-print-directory", "closeout", f"CHANGE={CHANGE}"],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
+    ).stdout
+
+    assert "scripts/find_change.py" in command and "--active" not in command
+    assert f"\"/change-closeout {CHANGE}\"" in command
+
+
 def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 
