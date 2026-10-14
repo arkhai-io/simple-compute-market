@@ -116,6 +116,8 @@ def publish_cmd(
     option. Omit all three to publish configured settlement clauses, such as
     Arkhai payments, without requiring an EVM chain.
     """
+    # Imported only once ``--config`` has run: the storefront's settings
+    # resolve when its config module is first imported.
     import apicredits_storefront.container as _container
     from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.server import _build_api_credit_services

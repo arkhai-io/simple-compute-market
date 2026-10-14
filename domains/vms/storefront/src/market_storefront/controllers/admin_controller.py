@@ -15,6 +15,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from arkhai_vms_listings.reconciler import (
+    ReconciliationScope,
+    closed_available_listing_ids,
+    stale_open_listing_ids,
+)
 from core_storefront.auth import AuthenticatedPrincipal
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
@@ -779,12 +784,6 @@ class AdminController:
         so it is refreshed first; reconciling against it unrefreshed would report
         nothing now and let a later operation report these closes as its own.
         """
-        from arkhai_vms_listings.reconciler import (
-            ReconciliationScope,
-            stale_open_listing_ids,
-        )
-
-
         if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
@@ -814,9 +813,6 @@ class AdminController:
     async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
         """Reopen the listings availability bounds that ``changed_site``'s change
         made available again, after refreshing that site's cached projection."""
-        from arkhai_vms_listings.reconciler import closed_available_listing_ids
-
-
         if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()

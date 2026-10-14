@@ -17,12 +17,18 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from market_identity import Identity
 
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.listing_binding import (
     QuotaPool,
     prepare_api_credit_listing_binding,
     quota_pool,
 )
+from apicredits_storefront.services import capacity_client
 from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    settlement_publication_defaults,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +107,6 @@ class ListingService:
         pool's declared backing is recorded on the listing's binding and
         decides which settlement options the listing may publish.
         """
-        from apicredits_storefront.services.capacity_client import (
-            build_capacity_runtime,
-        )
-        from apicredits_storefront.domain_runtime import get_market_domain_contract
-        from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
-
-        from apicredits_storefront.utils.config import settlement_publication_defaults
-
         clauses = (
             settlement_publication_defaults()
             if settlement_clauses is None
@@ -137,7 +135,7 @@ class ListingService:
             suffix = f" ({', '.join(blockers)})" if blockers else ""
             raise ValueError(f"no settlement alternative is ready{suffix}")
 
-        capacity = build_capacity_runtime(lambda: self._db)
+        capacity = capacity_client.build_capacity_runtime(lambda: self._db)
         availability = await capacity.availability()
         matches = [
             (site_id, units)
