@@ -50,6 +50,32 @@ it, and changing it in place would reinterpret listings already published. Movin
 supply between backed and unbacked is a second pool with its resources migrated
 across.
 
+What backing means lives in one delegate, `CapacityBacking` in
+`kit/resource-pools-contracts`, beside the label it interprets. The declared label
+selects it — `capacity_backing(label)` returns `BACKED` or `UNBACKED` and refuses a
+label with no delegate — and the label stays what declarations, bindings, the
+projection, and published listings carry. Every decision that differs between backed
+and unbacked supply is one of the delegate's operations: the declaration rules above,
+admitting a capacity effect, placing a hold, judging supply against its declaration
+and then, where availability bounds it, against availability, which labels
+availability reconciliation may touch, and which settlement clauses an unbacked
+listing keeps. Consumers ask it to act and never learn the category, so none
+branches on the label, and a further category is a change to the delegate rather
+than to its callers. A delegate exposing flags for callers to test would only move
+those branches; one that performed effects would need clients and bindings its
+contracts package may not import, so each operation takes the caller's work as an
+argument and decides whether and how it runs.
+
+The delegate is a kit rather than core or the compute family because backing applies
+to every market whose listings are admitted against capacity an authority holds — VM
+and bare metal against physical capacity, API credits against quota — and to no
+market without such an authority. It sits beside the label because both sides of the
+provisioning boundary consult it: the site's declaration rules, and the storefronts'
+bindings, reconciliation, negotiation, and settlement. Two questions are answered by
+the registry without the caller naming a category: `legacy_producer_backing()`, what a
+pool from a producer predating the declarations resolves to, and `admitted_backing()`,
+the backing of a reservation a site admitted with no listing behind it.
+
 Both declarations are required on every write rather than defaulted. A default
 backing would assert whether anything stands behind a listing, and a default
 advertisable set would widen or silently narrow what a pool may sell. Requiring
