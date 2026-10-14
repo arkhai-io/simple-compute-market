@@ -677,6 +677,12 @@ Decided or learned while implementing, each within a decision above:
   through `api_credit_listing_source`, which returns the capacity binding with its
   bound pool. Creation, which has no record yet, still takes whichever projected
   pool holds the resource.
+- **API-credit negotiation reads only the bound site.** The quota guard matches
+  snapshot rows by quota resource, so the snapshot a round captures comes from the
+  listing's bound site through the aggregate's `site(site_id)`, not from the union
+  of every site; another site naming its resource the same way cannot cover the
+  quantity. Reconciliation already keys availability by site and resource, so this
+  was the one unscoped read. The guard itself is unchanged.
 
 ## Open questions
 

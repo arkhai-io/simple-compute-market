@@ -93,6 +93,8 @@ class _QuotaSnapshot:
 
     The listing's binding decides whether availability bounds it; where it
     does not, no snapshot is captured and the quota guard does not apply.
+    Only the bound site is read: the guard matches rows by quota resource,
+    and another site may name a resource the same way.
     """
 
     def __init__(self, repository: Any, listing_id: str) -> None:
@@ -105,13 +107,19 @@ class _QuotaSnapshot:
             raise NegotiationStateError(
                 f"listing {self._listing_id!r} has no durable capacity binding"
             )
-        capacity = build_capacity_client(lambda: self._repository)
+        try:
+            site = build_capacity_client(lambda: self._repository).site(binding.site_id)
+        except KeyError:
+            raise NegotiationStateError(
+                f"listing {self._listing_id!r} is bound to unconfigured site "
+                f"{binding.site_id!r}"
+            ) from None
 
         async def declared() -> None:
             return None
 
         async def available() -> list[dict[str, Any]]:
-            return list(await capacity.snapshot() or [])
+            return list(await site.snapshot() or [])
 
         return await binding.backing.judge_async(declared, available)
 
