@@ -134,10 +134,11 @@ here as a decision.
    needs VM's held per-site projection state extracted into the kit, owned by
    `kit-owned-listing-and-fulfillment-lifecycles` — or the requirement is scoped to
    availability. Decide which.
-5. **Capacity effects the backed-only guard does not reach.** Bare-metal fulfillment
-   and the administrator's reserve call the site directly rather than through
-   `require_binding`, and the fulfillment routes answer an unbacked deal with an
-   unhandled error. Expected to be closed by the prerequisite; confirm and record.
+5. **The fulfillment routes for an unbacked deal.** The prerequisite routes every
+   bare-metal capacity effect through `CapacityRuntime` and the delegate's admission
+   guard, so an unbacked binding is refused before any site call. What remains here:
+   the fulfillment routes load a context requiring a Physical Resource and host, and
+   answer a binding with no host with an unhandled error rather than a clean refusal.
 6. **The permanent documentation delta.** Besides the requirement this change
    removes, "A bare-metal listing sells one whole unit", "Bare-metal opening rechecks
    its listing against its source", the publication architecture companion, and the

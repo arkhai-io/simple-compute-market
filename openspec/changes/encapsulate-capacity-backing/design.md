@@ -163,6 +163,7 @@ operation.
 | Reconciliation scope | registry-level `labels_reconciled_by_availability()` | included | excluded | VM's binding query, bare-metal and API-credit reconciliation |
 | Settlement admissibility | `admissible_settlement(clauses, fulfils_through_capacity)` returning kept clauses and dropped mechanisms | keeps all | drops clauses whose mechanism delivers through capacity | VM and bare-metal publication |
 | Legacy producer | registry-level `legacy_producer_backing()` | is it | | `read_site_declarations` |
+| Admitted reservation | registry-level `admitted_backing()` | is it | | a binding synthesized for a reservation with no listing |
 | Binding construction | decided by task 1.4 | | | `kit/capacity-publication` |
 
 A caller that judges declared capacity alone for every backing — VM's override
@@ -432,14 +433,43 @@ this change.
   settlement is a capacity effect, guarded under "Divergence: capacity-effect guard
   coverage".
 
+### Divergence: capacity-effect guard coverage (task 1.3)
+
+`CapacityRuntime` is meant to be the one boundary every capacity effect passes, guarded
+before any site call. Five paths bypass it, calling the aggregate capacity client with
+no binding and no guard: bare-metal fulfillment's settlement-time reserve and its
+commit, bare metal's administrator reserve, and VM's fulfillment-resume recovery
+reserve and commit. VM's administrator reserve also synthesizes a backed binding for a
+reservation that has no listing.
+
+Unified rule: every storefront capacity effect — reserve, commit, release, lease
+truncation — goes through `CapacityRuntime` with the listing's `PublicationBinding`,
+whose guard is the delegate's `require_admission`. Nothing reserves, commits, releases,
+or truncates through the aggregate client.
+
+- The five paths move onto `CapacityRuntime`'s binding-taking methods, with the binding
+  built from the durable listing binding. `CapacityRuntime` acts at the binding's site,
+  so bare metal's durable reservation-to-site map no longer routes a commit; planning
+  confirms which of its other uses remain.
+- A reservation exists only because a site admitted it, so a binding synthesized for a
+  reservation with no listing takes its backing from a registry-level
+  `admitted_backing()`, beside `legacy_producer_backing()`, rather than naming a
+  category.
+- Rejected, except as a fallback planning must bring back for decision: keeping the
+  aggregate calls with `require_admission` placed before each, which leaves five
+  places that must each remember the guard.
+
+The bare-metal fulfillment routes' unhandled error for a binding with no host is
+`unbacked-bare-metal-listings`', since only that change creates such a binding; the
+guard here gives it a refused admission rather than a site call.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. capacity-effect guard coverage;
-   2. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
