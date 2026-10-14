@@ -39,6 +39,12 @@ since 2026-10-14; not yet planned.
       covers unbacked candidates; bare-metal publication also refuses any candidate
       whose payload has no settlement option and no accepted escrow ("A candidate with
       no settlement option yields no listing").
+- [x] 1.8 **Decision gate.** Decide the opening source check (review question 4).
+      Decided with the maintainer: the inventory guard requirement is scoped to
+      availability, so an unbacked bare-metal recheck may read its origin site's
+      declarations; held projections for bare metal remain the preferred end state and
+      stay with the changes that own them ("An unbacked listing's recheck reads
+      declarations, never availability").
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 

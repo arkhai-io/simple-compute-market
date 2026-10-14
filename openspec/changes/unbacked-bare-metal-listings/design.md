@@ -156,6 +156,33 @@ report that names the candidate and the readiness blockers. Unbacked supply make
 case likely — a contact-only candidate whose origin has no contact — and the check sits
 on the payload path this change edits.
 
+### An unbacked listing's recheck reads declarations, never availability
+
+`storefront-publication`'s inventory guard says the storefront must neither consult
+availability nor contact a site authority for an unbacked listing, while bare metal's
+recheck reads its site's live projection. The "no site call" half generalized VM's
+mechanics — VM's guard reads the projection its storefront holds — into a rule; what
+the rule protects is that an unbacked listing's origin site is not an admission
+authority, so nothing about capacity is asked of it. The origin site is still the
+authority for the declaration the listing derives from, and source reconciliation
+already reads it.
+
+Decided: the guard requirement is scoped to what it protects. For an unbacked
+listing the storefront must not consult availability, and it may read the declarations
+it compares against from the listing's origin site. "Bare-metal opening rechecks its
+listing against its source" applies its availability refusal to capacity-backed
+listings only; an unreachable or unverifiable site remains a retryable refusal for both
+backings. While its origin site is unreachable, an unbacked bare-metal listing's
+openings are therefore refused as retryable, where VM answers from the projection it
+holds.
+
+The preferred end state is a storefront that reads the projections it holds rather
+than calling a site, for every domain. Moving bare metal onto held projections is out
+of scope here; it belongs with the extraction of VM's held per-site projection state
+into the kit (`kit-owned-listing-and-fulfillment-lifecycles`) and the projection item
+in `resolve-compute-family-findings`. The scoped requirement holds unchanged once it
+lands, and the retryable refusal during a site outage goes away.
+
 ### Negotiation and settlement compose the existing kit runtimes
 
 Negotiation and settlement for an unbacked bare-metal listing sit on the kit
@@ -200,15 +227,8 @@ here as a decision.
    reopen"). Nothing further is owed here.
 3. **Settlement options for unbacked listings.** Decided: "A candidate with no
    settlement option yields no listing".
-4. **The opening source check.** It refuses every unbacked bare-metal listing today,
-   and `storefront-publication`'s inventory guard forbids contacting a site authority
-   for an unbacked listing, while bare metal's recheck reads the site's live
-   projection. The prerequisite routes the check through the backing delegate, so an
-   unbacked listing's availability is never consulted; what remains is the live read
-   of declarations. Either bare metal reads a projection its storefront holds — which
-   needs VM's held per-site projection state extracted into the kit, owned by
-   `kit-owned-listing-and-fulfillment-lifecycles` — or the requirement is scoped to
-   availability. Decide which.
+4. **The opening source check.** Decided: "An unbacked listing's recheck reads
+   declarations, never availability".
 5. **The fulfillment routes for an unbacked deal.** The prerequisite routes every
    bare-metal capacity effect through `CapacityRuntime` and the delegate's admission
    guard, so an unbacked binding is refused before any site call. What remains here:

@@ -80,7 +80,8 @@ Placement and test reliability:
 - The site ledger keys reservation idempotency and release-by-escrow on the escrow,
   which hosted deals lack, while jobs correlate on the capacity reservation.
 - Bare metal's listing recheck and publication read each site's projection live,
-  where VM reads the projections its storefront holds. (API credits' move onto the
+  where VM reads the projections its storefront holds; reading held projections is the
+  preferred end state for every storefront. (API credits' move onto the
   kit's listing-source verdict is `encapsulate-capacity-backing`'s; for unbacked bare
   metal the live read is decided in `unbacked-bare-metal-listings`.)
 - The provisioning service's `db/database.py` and `db/migrations.py` import
