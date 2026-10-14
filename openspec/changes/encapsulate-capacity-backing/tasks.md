@@ -4,10 +4,16 @@ Design phase; not yet planned. Prerequisite of `unbacked-bare-metal-listings`.
 
 ## 1. Design
 
-- [ ] 1.1 **Decision gate.** Inventory every production switch on capacity backing —
+- [x] 1.1 **Decision gate.** Inventory every production switch on capacity backing —
       label comparisons, binding-class tests, hard-coded backed assumptions, and
       mechanism fulfilment declarations — across core, kit, provisioning, and every
-      domain, classified by what each decides. Record it in `design.md`.
+      domain, classified by what each decides. Record it in `design.md`. Decided with
+      the maintainer: nine behaviours become delegate operations; comparing bound and
+      source backing is a divergence, not an operation; API credits moves onto the
+      delegate in this change; the storefront's copy of the vocabulary validates
+      through the delegate while its database check stays ("What the delegate
+      decides", "API credits moves onto the delegate in this change", "The
+      storefront's copy of the vocabulary goes; its database check stays").
 - [ ] 1.2 **Decision gate.** Derive the delegate's operations from the inventory, so
       that no caller compares the label or tests the binding class, and name the
       delegate. Record it in `design.md`.

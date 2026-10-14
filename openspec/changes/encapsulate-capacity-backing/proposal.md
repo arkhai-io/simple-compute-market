@@ -53,8 +53,9 @@ publishes no unbacked listing when it lands; `unbacked-bare-metal-listings` lift
 - `storefront-publication`: one backing comparison and one reconciliation scope for
   every domain, through the delegate.
 
-Further affected capabilities are decided with the delegate's operations (tasks 1.2
-and 1.5).
+Further affected capabilities — among them the API-credit capabilities, which move
+onto the delegate in full — are decided with the delegate's operations and the
+divergences (tasks 1.2, 1.3, and 1.5).
 
 ### New Capabilities
 
@@ -80,7 +81,9 @@ None.
 - `kit/resource-pools` and the compute provisioning service: declaration validation
   and publication views through the delegate.
 - The VM storefront and `domains/vms/listings`; the bare-metal domain and storefront;
-  the API-credit storefront's binding construction.
+  the API-credit storefront and service, which move onto the delegate in full.
+- `core/storefront`'s listing binding, which validates its label through the delegate
+  rather than its own copy of the vocabulary.
 - No wire, database, or deployment break is intended. Each unified divergence is a
   behaviour change recorded in its decision.
 
