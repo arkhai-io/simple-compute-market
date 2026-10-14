@@ -78,8 +78,8 @@ starting, and archive cleanup. An implementation review after a section MUST NOT
 the status. Each step that edits the index MUST check it afterwards: every row has its
 table's cell count; its link resolves to its change's directory, or to its archive
 when it is `archived` or `in closeout`; its status is one the index defines; each
-dependency names a listed change that is not archived; and every change directory
-has a row.
+dependency names a listed change that is not archived; and every active change
+directory has exactly one row. An archived change MAY have no row.
 
 #### Scenario: An edit breaks a row
 
@@ -87,6 +87,11 @@ has a row.
   exist, or depending on an archived change
 - **THEN** the index check reports the row and its line, and the step does not
   proceed until it is fixed
+
+#### Scenario: An archived change's row is pruned
+
+- **WHEN** the index no longer lists a change archived some time ago
+- **THEN** the index check passes, since only an active change needs a row
 
 #### Scenario: A closeout gate is passed
 

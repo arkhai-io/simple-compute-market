@@ -104,7 +104,8 @@ and archive cleanup — run `make check-change-index` after each edit. It checks
 row's cell count; its link to its change's directory (an `archived` row links its
 archive, and a row linking an archive is `archived` or `in closeout`); its status
 against the legend; that each dependency is listed and not archived; and that every
-change directory has a row.
+active change directory has exactly one row. An archived change needs no row:
+archived rows may be pruned from the index over time.
 
 ## The ledger
 

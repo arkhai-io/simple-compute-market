@@ -7,10 +7,8 @@ requires-python = ">=3.12"
 # Models and declarations only, so a pool client or a projection reader never
 # installs the authority's persistence.
 dependencies = [
-    # Inline shape constraints are split by the admissibility kit; asking-rate
-    # shapes use the capability-shape utility directly.
+    # Inline shape constraints are split by the admissibility kit.
     "arkhai-kit-capability-admissibility>=0.1.0",
-    "arkhai-kit-capability-shape>=0.1.0",
     "pydantic>=2.7",
 ]
 
@@ -34,8 +32,4 @@ dev = [
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = [
-    "arkhai-kit-capability-admissibility",
-    "arkhai-kit-capability-shape",
-    "pydantic",
-]
+allowed-dependencies = ["arkhai-kit-capability-admissibility", "pydantic"]

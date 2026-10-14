@@ -1157,6 +1157,27 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `make check-architecture-change`, which `dev` added to closeout part 7, as
       does `change-closeout`'s packaging step.
 
+- [x] 11.5 From implementation review 4 (external, `reviews/04-implementation-external.md`,
+      the merge and section 11), at the owner's dispositions. F1: the index check
+      requires exactly one row for every active change directory, and none for an
+      archived one, whose row may be pruned (a later skill will prune them); it now
+      reports a change listed twice (checker, delta with a scenario, `openspec/README.md`
+      part 6, the guide, design, the Make help). F2: the proposal's index non-goal is
+      scheduling from the index, its tooling list names every workflow target, and
+      its last line records the charts' `persistence.retainOnUninstall`. F3:
+      `openspec/README.md`'s contributor steps record destinations during
+      implementation and promote at closeout. F4: `kit/resource-pools-contracts` no
+      longer declares the shape kit it does not import (`pyproject.toml`, its
+      allowlist, `RELEASING.md`, `ARCHITECTURE.md`); relocked after `make dist-clean`,
+      since a wheel another branch built had been taken as the newest contracts
+      version, and each lock lost only that edge.
+      Checks: `make check-packaging` passes with no architecture warning; `make
+      test-kits` and `make test-storefront` (1037 unit, 411 integration) pass;
+      `scripts/tests` 650 passed, `test_check_change_index.py` 18 of them (unit
+      against a temporary index); comment hygiene, `check-agent-skills`, the index
+      check, and strict validation pass; the scoped citation check reports only the
+      `change-workflow` spec and companion promotion creates.
+
 ## 12. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.

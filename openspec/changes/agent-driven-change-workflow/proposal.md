@@ -77,8 +77,8 @@ directly in the repository is told to write tombstones instead of deleting files
   section's session.
 - **Campaign priority.** Choosing which campaign to work first has no consumer
   until the orchestrator exists, and belongs to that change.
-- **A machine parser for the index.** The index is read by agents; a fixed
-  vocabulary is enough for that, and no `make` target acts on it.
+- **Scheduling from the index.** `make check-change-index` checks hand edits to
+  it; reading it to choose what runs next belongs to the orchestrator.
 - **Removing human gates.** Every review stops for the owner, who reads every
   finding. Triage orders findings and states the implementing agent's own
   position; it does not filter.
@@ -151,11 +151,17 @@ directly in the repository is told to write tombstones instead of deleting files
 - **Index format.** Every change row in `openspec/changes/README.md` is checked
   against its own change and rewritten into `Status`, `Depends on`, and `Notes`.
 - **Tooling.** `scripts/fetch-e2e-logs.py` selects the run for a given commit;
-  new targets `validate-local`, `validate-helm`, `check-push-ready`,
-  `push-branch`, `validate`, and `triage`.
+  `scripts/find_change.py` finds a change by name, active or archived; new targets
+  `design`, `implement`, `review`, `design-review`, `round-view`, `round-done`,
+  `round-e2e-baseline`, `round-view-closed`, `validate-local`, `validate-helm`,
+  `check-push-ready`, `push-branch`, `validate`, `triage`, `closeout`,
+  `archive-cleanup`, `check-agent-skills`, and `check-change-index`.
 - **Follow-up.** The Helm charts lack services the pipeline's compose stacks run,
   so some pipeline scenarios are excluded from the Helm run; bringing the charts
   to parity is a separate change.
 - **External effects.** Validation pushes the change's own branch and triggers the
   end-to-end GitHub Actions workflow against it.
-- No wire, database, deployment, or packaging change.
+- No wire, database, or packaging change. Each stateful chart gains
+  `persistence.retainOnUninstall`, true by default so a deployment keeps its
+  volumes as before; `helm/local-values.yaml` sets it false, and `make deploy-local`
+  layers that file on, so a local release's volumes go with it.

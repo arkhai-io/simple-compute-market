@@ -751,9 +751,11 @@ those edits: it is scoped to the change's own documents, and the index's links a
 relative directory links it never matches. The index check holds each row's cell
 count, its link (an `archived` row links its archive, and a row linking an archive
 is `archived` or `in closeout`), its status against the legend, each dependency
-against the listed and unarchived changes, and a row for every change directory.
-It leaves the dependency graphs alone, since the legend makes the `Depends on`
-column authoritative. Archive
+against the listed and unarchived changes, and exactly one row for every active
+change directory. An archived change needs no row: archived rows record recent
+history and may be pruned from the index at any time, which a later skill will do,
+so only the links of those that remain are checked. It leaves the dependency
+graphs alone, since the legend makes the `Depends on` column authoritative. Archive
 cleanup needs no review of its own, so it is not a phase. It is not named for
 archiving, since `openspec archive` has already run at closeout and the stock
 OpenSpec archive skill answers to that name.

@@ -957,7 +957,7 @@ closeout: round-view-closed ## Open a fresh Claude Code session closing out an O
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-closeout $(CHANGE)"
 
-check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or a change directory with no row
+check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
 	@python3 scripts/check_change_index.py
 
 archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change>)

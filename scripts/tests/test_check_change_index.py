@@ -128,6 +128,19 @@ def test_a_change_directory_without_a_row_is_reported(tmp_path: Path) -> None:
     assert _problems(root) == ["openspec/changes/README.md: no row for openspec/changes/beta/"]
 
 
+def test_an_archived_change_without_a_row_passes(tmp_path: Path) -> None:
+    root = _index(tmp_path, _row("alpha"), directories=("alpha", "archive/2026-01-02-gamma"))
+
+    assert _problems(root) == []
+
+
+def test_a_change_listed_twice_is_reported(tmp_path: Path) -> None:
+    root = _index(tmp_path, _row("alpha"), _row("alpha", status="in design"),
+                  directories=("alpha",))
+
+    assert _problems(root) == ["openspec/changes/README.md: alpha has 2 rows, at lines 5, 6"]
+
+
 def test_a_table_without_a_status_column_is_checked_only_for_its_shape(tmp_path: Path) -> None:
     extra = "\n| Item | Origin |\n|---|---|\n| A finding | `alpha` |\n| Short |\n"
     root = _index(tmp_path, _row("alpha"), directories=("alpha",), extra=extra)

@@ -14,7 +14,11 @@ holds what a hand edit can break:
 - every status is one of the legend's values;
 - every `Depends on` entry names a change the index lists and that is not
   `archived`, with a phase, if any, from the phase list;
-- every change directory under `openspec/changes/` has a row.
+- every active change directory under `openspec/changes/` has exactly one row.
+
+An archived change needs no row: archived rows record recent history and may be
+pruned from the index at any time, so only their links are checked while they
+remain.
 
 The dependency graphs are illustrations and are not checked: the legend makes
 the `Depends on` column authoritative.
@@ -141,7 +145,15 @@ def check(root: Path = ROOT) -> list[str]:
     for row in rows:
         problems.extend(_check_row(root, row))
     problems.extend(_check_dependencies(rows))
-    listed = {row.name for row in rows}
+    lines_by_name: dict[str, list[int]] = {}
+    for row in rows:
+        lines_by_name.setdefault(row.name, []).append(row.line)
+    for name, lines in sorted(lines_by_name.items()):
+        if len(lines) > 1:
+            problems.append(
+                f"{INDEX}: {name} has {len(lines)} rows, at lines "
+                + ", ".join(str(line) for line in lines))
+    listed = set(lines_by_name)
     changes = root / CHANGES
     for directory in sorted(p for p in changes.iterdir() if p.is_dir()):
         if directory.name != "archive" and directory.name not in listed:
