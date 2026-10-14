@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from market_resource_pools import SiteDeclarations, read_site_declarations
+from market_resource_pools_contracts.backing import CapacityBacking
 from market_storefront.services.site_projection_cache import projection_caches
 
 
@@ -50,7 +51,7 @@ def resolve_source_backing(
     pool_id: str | None,
     resource_id: str | None,
     offering_mode: str,
-) -> str:
+) -> CapacityBacking:
     """The backing a listing from this source binds with, or refuse.
 
     The source must be a pool its site currently declares enabled and
@@ -85,30 +86,10 @@ def resolve_source_backing(
             f"pool {resolved_pool_id!r} at site {site_id!r} does not declare "
             f"{offering_mode!r} advertisable"
         )
-    return declaration.capacity_backing
-
-
-def current_source_backing(
-    *,
-    site_id: str,
-    pool_id: str | None,
-    resource_id: str | None,
-) -> str | None:
-    """The backing the source's site declares now, or ``None`` if unreadable."""
-    pools = _site_pools(site_id)
-    if pools is None:
-        return None
-    resolved_pool_id = _pool_for_source(
-        pools, pool_id=pool_id, resource_id=resource_id
-    )
-    if resolved_pool_id is None:
-        return None
-    declaration = read_site_declarations(pools).resolved.get(resolved_pool_id)
-    return declaration.capacity_backing if declaration is not None else None
+    return declaration.backing
 
 
 __all__ = [
     "ListingSourceUnavailable",
-    "current_source_backing",
     "resolve_source_backing",
 ]

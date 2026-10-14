@@ -61,18 +61,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.11.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.12.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -123,6 +124,18 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_identity-0.4.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-resource-pools-contracts"
+version = "0.2.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -17,7 +17,56 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from market_identity import Identity
 
+from apicredits_storefront.listing_binding import (
+    QuotaPool,
+    prepare_api_credit_listing_binding,
+    quota_pool,
+)
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+
 logger = logging.getLogger(__name__)
+
+
+def _admissible_settlement_terms(
+    pool: QuotaPool,
+    *,
+    accepted_escrows: list[dict[str, Any]],
+    settlement_options: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep only the settlement terms the pool's backing lets a listing publish.
+
+    Each seller stage declares whether settling through it issues against
+    quota; where no admission authority stands behind the pool, such a stage
+    would take a buyer's funds for credits that cannot be reserved, so its
+    terms are dropped, and a listing left with none is refused.
+    """
+    backing = pool.declaration.backing
+
+    def fulfils_through_capacity(mechanism: str) -> bool:
+        return SELLER_STAGES[mechanism].fulfils_through_capacity
+
+    kept_options, dropped = backing.admissible_settlement(
+        settlement_options,
+        mechanism=lambda option: str(option.get("mechanism")),
+        fulfils_through_capacity=fulfils_through_capacity,
+    )
+    if accepted_escrows:
+        # Accepted escrows are the Alkahest publication form.
+        _, escrow_dropped = backing.admissible_settlement(
+            ("alkahest.v1",),
+            mechanism=str,
+            fulfils_through_capacity=fulfils_through_capacity,
+        )
+        if escrow_dropped:
+            accepted_escrows = []
+            dropped = (*dropped, *escrow_dropped)
+    if not kept_options and not accepted_escrows:
+        raise ValueError(
+            f"pool {pool.pool_id!r} leaves no settlement option its "
+            f"{backing.label} listings may publish"
+            + (f" (dropped: {', '.join(dict.fromkeys(dropped))})" if dropped else "")
+        )
+    return accepted_escrows, list(kept_options)
 
 
 class ListingService:
@@ -48,7 +97,9 @@ class ListingService:
 
         The resource must exist in the quota ledger with sellable units —
         the listing's lifetime is tied to it from here on (capacity
-        deltas close it on exhaustion and reopen it on replenishment).
+        deltas close it on exhaustion and reopen it on replenishment). Its
+        pool's declared backing is recorded on the listing's binding and
+        decides which settlement options the listing may publish.
         """
         from apicredits_storefront.services.capacity_client import (
             build_capacity_runtime,
@@ -104,6 +155,11 @@ class ListingService:
                 f"Quota resource {resource_id!r} has no sellable units "
                 f"(available={available})."
             )
+        projection = await capacity.site_client(capacity_site_id).resource_pool_projection()
+        pool = quota_pool(projection["resource_pools"], resource_id=resource_id)
+        accepted_escrows, settlement_options = _admissible_settlement_terms(
+            pool, accepted_escrows=accepted_escrows, settlement_options=settlement_options
+        )
 
         listing = get_market_domain_contract().codecs.listing(
             {
@@ -123,8 +179,14 @@ class ListingService:
         )
         listing_id = str(uuid.uuid4())
         now_iso = datetime.now().isoformat()
-        await self._db.upsert_listing(
-            listing_id=listing_id,
+        await self._db.upsert_listing_with_binding(
+            binding=prepare_api_credit_listing_binding(
+                listing_id=listing_id,
+                site_id=capacity_site_id,
+                resource_id=resource_id,
+                pool=pool,
+                domain=get_market_domain_contract(),
+            ),
             status="open",
             created_at=now_iso,
             updated_at=now_iso,

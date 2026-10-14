@@ -12,10 +12,11 @@ from core_storefront.domain_registry import (
     build_storefront_derivation_key,
 )
 from market_capacity_publication import (
-    CapacityBinding,
+    PublicationBinding,
     CapacityRuntime,
     CapacitySite,
 )
+from market_resource_pools_contracts.backing import BACKED
 from market_core.schemas import (
     EscrowProposal,
     ProvisionTerms,
@@ -181,10 +182,11 @@ async def db(tmp_path, monkeypatch):
     async def resolve_capacity_binding(repository, listing_id):
         binding = await repository.load_listing_binding(listing_id=listing_id)
         assert binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             binding.site_id,
             binding.binding.offering_mode,
             str(binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(

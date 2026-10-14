@@ -250,10 +250,9 @@ class SQLiteClient(CoreSQLiteClient):
             ),
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,
-            # Every bare-metal listing is backed by one selected-site Physical
-            # Resource; this domain publishes nothing an admission authority
-            # does not stand behind.
-            capacity_backing="backed",
+            # The backing its pool declared when it was derived, which the
+            # listing publishes; fixed for the life of the binding.
+            capacity_backing=normalized.capacity_backing,
         )
         listing_resource = normalized.model_dump(mode="json", exclude_none=True)
         listing_resource["offering_mode"] = domain_binding.offering_mode

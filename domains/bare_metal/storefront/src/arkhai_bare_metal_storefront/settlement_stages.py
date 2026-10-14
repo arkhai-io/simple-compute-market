@@ -685,9 +685,10 @@ def declined_servicing(runtime: Any) -> ObligationServicing:
 class SellerStage:
     """One mechanism's seller entry: its verification, recovery gate and hooks.
 
-    ``physical`` declares whether the deal provisions the listed machine
-    through site capacity, so admission and evidence follow the entry rather
-    than a separate declaration. ``refund`` is the seller-initiated reversal
+    ``fulfils_through_capacity`` declares whether the deal provisions the
+    listed machine through site capacity, so admission, evidence, and which
+    options an unbacked listing may publish follow the entry rather than a
+    separate declaration. It is required, so an entry cannot omit it. ``refund`` is the seller-initiated reversal
     of an accepted deal and ``reconcile`` advances an accepted deal without
     its buyer; an entry without them refunds or converges through its own
     mechanism path. ``servicing`` builds the entry's obligation servicing over
@@ -698,7 +699,7 @@ class SellerStage:
     registration_factory: Callable[[], Any]
     verify: Callable[..., Any]
     revalidate: Callable[..., Any]
-    physical: bool
+    fulfils_through_capacity: bool
     refund: Callable[..., Any] | None = None
     reconcile: Callable[..., Any] | None = None
     servicing: Callable[[Any], ObligationServicing | None] | None = None

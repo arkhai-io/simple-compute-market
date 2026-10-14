@@ -164,6 +164,7 @@ class ListingsController:
                 resource_id=body.resource_id,
                 service_name=body.service_name,
                 accepted_escrows=body.accepted_escrows,
+                settlement_clauses=body.settlement_clauses,
                 description=body.description,
                 openapi_url=body.openapi_url,
                 base_url=body.base_url,

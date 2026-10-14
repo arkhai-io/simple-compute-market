@@ -8,7 +8,6 @@ from typing import Any, Callable
 from core_storefront.aggregation import PLACEMENT_POLICIES, AggregateCapacityClient
 from market_capacity_publication import (
     run_capacity_event_pollers,
-    CapacityBinding,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite as KitCapacitySite,
@@ -96,17 +95,6 @@ def build_capacity_runtime(sqlite_client_factory: SQLiteClientFactory) -> Capaci
 
 def build_capacity_client(sqlite_client_factory: SQLiteClientFactory) -> AggregateCapacityClient:
     return build_capacity_runtime(sqlite_client_factory).client()
-
-
-def capacity_binding_from_listing_resource(listing_resource: dict[str, Any] | str) -> CapacityBinding:
-    if isinstance(listing_resource, str):
-        import json
-        listing_resource = json.loads(listing_resource)
-    return CapacityBinding(
-        str(listing_resource.get("capacity_site_id") or ""),
-        str(listing_resource.get("offering_mode") or ""),
-        str(listing_resource.get("resource_id") or ""),
-    )
 
 
 async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:

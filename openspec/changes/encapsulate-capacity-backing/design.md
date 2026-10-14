@@ -630,6 +630,43 @@ Refinements of "The delegate's operations", decided in planning:
 - **`resolve-compute-family-findings`** was reconciled in design ("Divergence:
   source-check availability").
 
+## Implementation notes
+
+Decided or learned while implementing, each within a decision above:
+
+- **`CapacityEffects` addresses the aggregate by site.** Every effect calls the
+  aggregate's own `reserve`, `commit`, `release`, or `truncate_lease` with the
+  binding's site, after checking the aggregate names that site. The core aggregate
+  sends a site-addressed effect straight to that site, so this is the runtime's
+  behaviour unchanged, and a storefront's own aggregate keeps whatever it records
+  per reservation.
+- **VM's listings package compares delegates itself.** `compare_listing` in
+  `arkhai_vms_listings`, which the VM buyer imports, cannot depend on
+  `kit/capacity-publication`, so it takes the two delegates and compares them by
+  identity — the predicate `backing_changed` is. Storefront callers pass the
+  binding's delegate and the source's.
+- **A listing left with no settlement option is refused whatever its backing.**
+  VM's creation refused only an unbacked listing left with none; preserving that
+  exactly needs a branch on the label. Refusing any listing with no option
+  publishable satisfies "An unbacked listing publishes only settlement options its
+  domain does not fulfil through capacity" without one. A backed VM listing with no
+  option would have published unbuyable before; no VM suite exercises one.
+- **Bare metal's binding builder has its own module.** Fulfillment and deal
+  controls build the binding the way publication does, and importing it from
+  `publication_service.py` closed an import cycle through `sqlite_client.py`, so
+  `bare_metal_listing_binding` lives in `listing_binding.py`, which depends on
+  neither.
+- **API credits needs no domain registry on its client.** Core's
+  `upsert_listing_with_binding` validates without one, so the planned registry is
+  not added. Test fixtures write listings through the same binding helper creation
+  uses.
+- **The API-credit source check reads the site through the aggregate.** As the
+  bare-metal check does, through `site(site_id)`; an unconfigured site is
+  unverifiable.
+- **The API-credit reconciliation rules take a judge.** The domain package keeps
+  its pure rules and gains no dependency: each rule supplies the availability half,
+  and the storefront judges it through the listing's binding.
+
 ## Open questions
 
 None.

@@ -39,6 +39,7 @@ from arkhai_vms_listings.reconciler import (
     available_compute_slices,
     derivation_reports,
     open_listing_resource_keys,
+    ReconciliationScope,
     stale_open_listing_ids,
 )
 from market_capacity_publication import (
@@ -48,6 +49,7 @@ from market_capacity_publication import (
     ReconciliationPlan,
     converge_registries,
 )
+from market_resource_pools_contracts.backing import capacity_backing
 
 import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
@@ -250,7 +252,7 @@ class VmPublicationCycle:
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
-            backed_only=False,
+            scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
         )
         for listing_id in stale:
@@ -432,8 +434,8 @@ class VmPublicationCycle:
             stored_terms=_terms_of(stored),
             fresh_resource=fresh["listing_resource"],
             fresh_terms=_terms_of(fresh),
-            binding_backing=existing.capacity_backing,
-            source_backing=str(candidate.get("capacity_backing")),
+            binding_backing=capacity_backing(existing.capacity_backing),
+            source_backing=capacity_backing(candidate.get("capacity_backing")),
         )
         is_open = stored.get("status") == "open"
         if comparison.outcome in REFUSE:
@@ -472,7 +474,7 @@ class VmPublicationCycle:
             listing_resource=refreshed_listing_resource(
                 stored_resource=stored_resource,
                 fresh_resource=fresh["listing_resource"],
-                binding_backing=existing.capacity_backing,
+                binding_backing=capacity_backing(existing.capacity_backing),
             ),
             accepted_escrows=fresh.get("accepted_escrows"),
             settlement_options=fresh.get("settlement_options"),

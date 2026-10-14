@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from market_resource_pools_contracts.backing import CapacityBacking
+
 from .projections import TrustedBareMetalProjection
 from .storefront_publication import (
     CANDIDATE,
@@ -59,15 +61,24 @@ def recheck_bare_metal_listing_source(
     generation: TrustedBareMetalProjection,
     *,
     pool_admission: Mapping[str, str],
+    pool_backings: Mapping[str, CapacityBacking],
     pool_regions: Mapping[str, str | None],
     pool_id: str,
     physical_resource_id: str,
     shape_digest: str,
     region: str,
 ) -> ListingSourceCheck:
-    """Whether the listing bound to this resource still matches its source."""
+    """Whether the listing bound to this resource still matches its source.
+
+    Availability is consulted only where the pool's backing says it bounds the
+    resource, through the same classification publication uses. The caller
+    compares the listing's bound backing with its pool's first.
+    """
     classification = classify_bare_metal_resources(
-        generation, pool_admission=pool_admission, pool_regions=pool_regions
+        generation,
+        pool_admission=pool_admission,
+        pool_backings=pool_backings,
+        pool_regions=pool_regions,
     )
     item = next(
         (

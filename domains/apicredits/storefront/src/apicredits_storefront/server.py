@@ -15,7 +15,6 @@ from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
 from core_storefront.domain_registry import (
-    StorefrontDomainRegistration,
     StorefrontDomainRegistry,
 )
 from core_storefront.services.negotiation_service import NegotiationService
@@ -40,6 +39,7 @@ from apicredits_storefront.domain_runtime import (
     prepare_api_credit_settlement,
     reserve_api_credit_settlement,
 )
+from apicredits_storefront.listing_binding import api_credit_registration
 from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.negotiation_runtime import (
     build_api_credit_negotiation_runtime,
@@ -295,15 +295,7 @@ def build_api_credits_storefront_registry(
 ) -> StorefrontDomainRegistry:
     """Build the explicit one-registration API-credit storefront registry."""
 
-    return StorefrontDomainRegistry(
-        (
-            StorefrontDomainRegistration(
-                offering_mode="api_credits",
-                contract=domain,
-                contribution_id="apicredits",
-            ),
-        )
-    )
+    return StorefrontDomainRegistry((api_credit_registration(domain),))
 
 
 def build_api_credits_storefront_app(

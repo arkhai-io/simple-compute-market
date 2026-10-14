@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
 
 import market_storefront.server  # noqa: F401 - initializes controller import order
 from market_storefront.controllers.admin_controller import AdminController
@@ -15,11 +15,11 @@ from tests.fulfillment_fixtures import (
 
 class _FakeCapacity:
     def __init__(self) -> None:
-        self.truncated: tuple[CapacityBinding, str, str] | None = None
+        self.truncated: tuple[PublicationBinding, str, str] | None = None
 
     async def truncate_lease(
         self,
-        binding: CapacityBinding,
+        binding: PublicationBinding,
         *,
         capacity_reservation_id: str,
         lease_end_utc: str,

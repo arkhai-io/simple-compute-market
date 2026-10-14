@@ -17,6 +17,7 @@ cycle rebuilds the two-registration registry a deployed loop builds.
 from __future__ import annotations
 
 import contextlib
+from types import SimpleNamespace
 from copy import deepcopy
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
@@ -185,7 +186,9 @@ class SettlementCompositionDouble:
     mechanism clients, yields one accepted escrow and its exact option per Alkahest clause; a
     contact-exchange clause, which needs no client, is built by the real
     registry, and so is acceptance. ``mechanism_fulfillment`` is the per-test
-    declaration of which mechanisms VM fulfils through capacity.
+    declaration of which mechanisms VM fulfils through capacity, exposed as the
+    ``fulfils_through_capacity`` of each seller stage, as the real stage table
+    declares it.
     """
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
@@ -193,7 +196,10 @@ class SettlementCompositionDouble:
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-        self.mechanism_fulfillment = dict(mechanism_fulfillment)
+        self.seller_stages = {
+            mechanism: SimpleNamespace(fulfils_through_capacity=fulfils)
+            for mechanism, fulfils in mechanism_fulfillment.items()
+        }
 
     async def _registry_options(self, resources, clauses) -> list[dict[str, Any]]:
         contact = [clause for clause in clauses or () if clause.mechanism == CONTACT_MECHANISM]

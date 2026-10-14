@@ -83,6 +83,7 @@ class SourceSites:
     def __init__(self, site: SourceSite | None = None, *, site_id: str = "site-a") -> None:
         self.site_id = site_id
         self.source = site or SourceSite()
+        self.site_names = [site_id]
         self.reservation_sites: dict[str, str] = {}
 
     def site(self, site_id: str) -> SourceSite:

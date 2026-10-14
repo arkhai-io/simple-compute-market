@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -8,10 +9,12 @@ import pytest
 
 from market_core import DomainIdentity
 from market_identity import Identity, IdentityScheme
+from market_resource_pools_contracts.backing import capacity_backing_labels
 from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainBindingError,
     StorefrontDomainRegistry,
+    StorefrontDomainRegistryError,
     StorefrontListingBinding,
     StorefrontThreadBinding,
     build_storefront_derivation_key,
@@ -454,3 +457,23 @@ def test_upgrade_backfills_backing_and_closure_reason_idempotently(tmp_path):
             conn.execute(
                 "UPDATE storefront_listing_bindings SET capacity_backing='unbacked'"
             )
+
+
+def test_the_database_check_admits_exactly_the_registered_backing_labels(tmp_path):
+    # The column check is a backstop beneath the binding's validation through
+    # the backing registry; the two value sets must not drift.
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    with sqlite3.connect(client.db_path) as conn:
+        (ddl,) = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='storefront_listing_bindings'"
+        ).fetchone()
+
+    match = re.search(r"capacity_backing\s+IN\s*\(([^)]*)\)", ddl)
+    assert match is not None, ddl
+    checked = {value.strip().strip("'") for value in match.group(1).split(",")}
+    assert checked == capacity_backing_labels()
+
+
+def test_a_binding_with_an_unregistered_backing_is_refused():
+    with pytest.raises(StorefrontDomainRegistryError, match="capacity_backing"):
+        _listing_binding(backing="sometimes")

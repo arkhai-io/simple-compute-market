@@ -1,12 +1,13 @@
 """Check a listing against its own source, for the seller's inventory guard.
 
 The check asks two questions about one listing: does its source still declare
-what it publishes, and — for a capacity-backed listing only — is the published
-quantity free at its own site. Both are answered from a fresh derivation of the
-listing's own site and pool, never from capacity elsewhere, using the same
-derivation publication uses, so every published field resolves exactly as it
-did when the listing was derived. An unbacked listing makes no availability
-call.
+what it publishes, and — where the listing's backing says availability bounds
+it — is the published quantity free at its own site. Both are answered from a
+fresh derivation of the listing's own site and pool, never from capacity
+elsewhere, using the same derivation publication uses, so every published field
+resolves exactly as it did when the listing was derived. The binding's backing
+delegate decides whether the second question is asked at all, so a listing
+availability does not bound makes no availability call.
 
 It answers with the policy kit's ``ListingSourceVerdict``, which the negotiation
 runtime enforces before every seller decision and every acceptance. A site whose
@@ -31,8 +32,8 @@ from arkhai_vms_listings.reconciler import (
     slice_identity,
     stored_listing_key,
 )
-from market_capacity_publication import CapacityBinding
 from market_policy.listing_source import ListingSourceVerdict
+from market_resource_pools_contracts.backing import capacity_backing
 
 from market_storefront.services.capacity_client import (
     site_capacity_buckets,
@@ -99,8 +100,8 @@ async def check_listing_source(
 
     Both questions use the same shape feasibility publication does: the
     declared match asks whether the listing's own source is still feasible for
-    its shape on declared capacity, and availability whether it is feasible now.
-    An unbacked listing has no availability to consult. A declared mismatch is
+    its shape on declared capacity, and availability whether it is feasible now,
+    where the binding's backing says availability bounds it. A declared mismatch is
     logged with the fields that differ, because the buyer's refusal carries only
     its reason.
     """
@@ -147,53 +148,63 @@ async def _check_listing_source(
             "unverifiable", f"site {site_id!r} projection is not loaded"
         )
     buckets = _site_only(site_capacity_buckets(), site_id)
-    declared = _slices_by_key(
-        available_compute_slices(
+
+    async def declared() -> ListingSourceVerdict | None:
+        slices = _slices_by_key(
+            available_compute_slices(
+                repository.db_path,
+                member_availability=None,
+                site_pool_projection=projection,
+                site_capacity_buckets=buckets,
+                declared_range=True,
+                shape_feasible=shape_feasible,
+            )
+        )
+        fresh = slices.get(key) if key is not None else None
+        if fresh is None:
+            return ListingSourceVerdict(
+                "declared_mismatch", "the listing's source is absent", ("source",)
+            )
+        comparison = compare_listing(
+            stored_resource=stored,
+            stored_terms={},
+            fresh_resource=slice_identity(fresh),
+            fresh_terms={},
+            binding_backing=binding.backing,
+            source_backing=capacity_backing(fresh.get("capacity_backing")),
+        )
+        if comparison.outcome in REFUSE:
+            return ListingSourceVerdict(
+                "declared_mismatch",
+                "the listing differs from its source",
+                tuple(comparison.differing_fields),
+            )
+        return None
+
+    async def available() -> ListingSourceVerdict | None:
+        try:
+            member_availability = await _pinned_site_availability(
+                capacity_runtime, site_id
+            )
+        except Exception as exc:  # noqa: BLE001 - any failure leaves the source unknown
+            return ListingSourceVerdict(
+                "unverifiable", f"site {site_id!r} capacity could not be read: {exc}"
+            )
+        available_rows = available_compute_slices(
             repository.db_path,
-            member_availability=None,
+            member_availability=member_availability,
             site_pool_projection=projection,
             site_capacity_buckets=buckets,
-            declared_range=True,
             shape_feasible=shape_feasible,
         )
-    )
-    fresh = declared.get(key) if key is not None else None
-    if fresh is None:
-        return ListingSourceVerdict(
-            "declared_mismatch", "the listing's source is absent", ("source",)
-        )
-    comparison = compare_listing(
-        stored_resource=stored,
-        stored_terms={},
-        fresh_resource=slice_identity(fresh),
-        fresh_terms={},
-        binding_backing=binding.capacity_backing,
-        source_backing=str(fresh.get("capacity_backing")),
-    )
-    if comparison.outcome in REFUSE:
-        return ListingSourceVerdict(
-            "declared_mismatch",
-            "the listing differs from its source",
-            tuple(comparison.differing_fields),
-        )
-    if not isinstance(binding, CapacityBinding):
-        return ListingSourceVerdict("matches")
-    try:
-        member_availability = await _pinned_site_availability(capacity_runtime, site_id)
-    except Exception as exc:  # noqa: BLE001 - any failure leaves the source unknown
-        return ListingSourceVerdict(
-            "unverifiable", f"site {site_id!r} capacity could not be read: {exc}"
-        )
-    available_rows = available_compute_slices(
-        repository.db_path,
-        member_availability=member_availability,
-        site_pool_projection=projection,
-        site_capacity_buckets=buckets,
-        shape_feasible=shape_feasible,
-    )
-    if key not in _slices_by_key(available_rows):
-        return ListingSourceVerdict("unavailable", "the published quantity is not free")
-    return ListingSourceVerdict("matches")
+        if key not in _slices_by_key(available_rows):
+            return ListingSourceVerdict(
+                "unavailable", "the published quantity is not free"
+            )
+        return None
+
+    verdict = await binding.backing.judge_async(declared, available)
+    return verdict if verdict is not None else ListingSourceVerdict("matches")
 
 
 __all__ = ["check_listing_source", "stored_listing_resource"]

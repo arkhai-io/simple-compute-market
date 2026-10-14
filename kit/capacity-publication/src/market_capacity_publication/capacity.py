@@ -11,10 +11,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, Protocol
+from typing import Any, Protocol
 
 from core_storefront.aggregation import AggregateCapacityClient, PlacementPolicy
 from core_storefront.capacity import CapacityDelta
+from market_resource_pools_contracts.backing import (
+    CapacityBacking,
+    UnknownCapacityBackingError,
+    capacity_backing as resolve_capacity_backing,
+)
 from market_site_client import SiteCapacityClient
 
 from .capacity_remote import (
@@ -32,7 +37,12 @@ class CapacityConfigurationError(ValueError):
 
 
 class CapacityBindingError(ValueError):
-    """A capacity effect does not match its durable authority binding."""
+    """A capacity effect does not match its durable authority binding.
+
+    An identity fault -- an unknown site, a changed or unreadable binding.
+    Supply no admission authority stands behind is refused separately, with
+    the backing delegate's ``CapacityNotAdmittedError``.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,20 +67,23 @@ class CapacitySite:
 
 
 @dataclass(frozen=True, slots=True)
-class _ListingIdentity:
-    """A listing's common identity: origin site, offering mode, and source.
+class PublicationBinding:
+    """A listing's durable identity and the backing behind it.
 
     ``site_id`` is the site the listing originates from, which every listing
     has. ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
     resource ID, Physical Resource ID, or another stable candidate identity).
-    ``offering_mode`` is the exact mode the listing advertises. Whether the
-    origin site admits reservations is carried by the concrete class, never by
-    a field a reader could leave unset.
+    ``offering_mode`` is the exact mode the listing advertises. ``backing`` is
+    the delegate its pool's declared label selects, and decides every effect
+    that differs by backing; the binding never says which backing it holds.
+    Because ``backing`` is a field, two bindings that differ only in backing
+    are unequal, so a durable comparison catches a changed backing.
     """
 
     site_id: str
     offering_mode: str
     source_id: str
+    backing: CapacityBacking
 
     def __post_init__(self) -> None:
         for field_name in ("site_id", "offering_mode", "source_id"):
@@ -78,39 +91,8 @@ class _ListingIdentity:
             if not isinstance(value, str) or not value.strip():
                 raise CapacityBindingError(f"{field_name} must be non-empty")
             object.__setattr__(self, field_name, value.strip())
-
-
-@dataclass(frozen=True, slots=True)
-class CapacityBinding(_ListingIdentity):
-    """A listing whose origin site is an admission authority.
-
-    Reservation, commit, release, scheduling, and dispatch accept only this
-    class. ``UnbackedBinding`` is a sibling rather than a subclass, so an
-    ``isinstance`` check against this class is exactly the backed-only check.
-    """
-
-    capacity_backing: ClassVar[Literal["backed"]] = "backed"
-
-
-@dataclass(frozen=True, slots=True)
-class UnbackedBinding(_ListingIdentity):
-    """A listing with no admission authority behind it.
-
-    It has an origin site and a source like any other listing, and nothing can
-    be reserved against it. Dataclass equality compares classes, so it never
-    equals a ``CapacityBinding`` over the same fields: a durable comparison
-    catches a changed backing without a separate check.
-    """
-
-    capacity_backing: ClassVar[Literal["unbacked"]] = "unbacked"
-
-
-PublicationBinding = CapacityBinding | UnbackedBinding
-
-_BINDING_BY_BACKING: Mapping[str, type[CapacityBinding] | type[UnbackedBinding]] = {
-    CapacityBinding.capacity_backing: CapacityBinding,
-    UnbackedBinding.capacity_backing: UnbackedBinding,
-}
+        if not isinstance(self.backing, CapacityBacking):
+            raise CapacityBindingError("backing must be a capacity backing delegate")
 
 
 def publication_binding(
@@ -120,18 +102,26 @@ def publication_binding(
     offering_mode: str,
     source_id: str,
 ) -> PublicationBinding:
-    """Load a binding from its durable backing value, refusing any other value.
+    """Load a binding from its durable record, refusing an unknown backing label.
 
-    There is no default: a value this kit does not recognize is a durable-state
-    error, not a listing to classify.
+    There is no default: a label no delegate is registered for is a
+    durable-state error, not a listing to classify.
     """
-    binding_type = _BINDING_BY_BACKING.get(capacity_backing)
-    if binding_type is None:
-        raise CapacityBindingError(
-            f"unknown capacity_backing {capacity_backing!r}; expected one of "
-            f"{sorted(_BINDING_BY_BACKING)}"
-        )
-    return binding_type(site_id, offering_mode, source_id)
+    try:
+        backing = resolve_capacity_backing(capacity_backing)
+    except UnknownCapacityBackingError as exc:
+        raise CapacityBindingError(str(exc)) from exc
+    return PublicationBinding(site_id, offering_mode, source_id, backing)
+
+
+def backing_changed(binding: PublicationBinding, source_backing: CapacityBacking) -> bool:
+    """Whether the backing a listing's source now declares differs from its binding's.
+
+    A listing's backing is fixed for the life of its binding, so every domain
+    asks this first on every refresh, reopen, and source check: a changed
+    backing closes the listing rather than refreshing it.
+    """
+    return binding.backing is not source_backing
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +181,133 @@ async def capacity_availability(client: Any) -> dict[tuple[str, str], int]:
     return view
 
 
+def _at_site(
+    result: Mapping[str, Any] | None, binding: PublicationBinding
+) -> dict[str, Any] | None:
+    """An effect's result, tagged with the binding's site that produced it."""
+    if result is None:
+        return None
+    out = dict(result)
+    out["site"] = binding.site_id
+    return out
+
+
+class CapacityEffects:
+    """The one guarded boundary every storefront capacity effect passes.
+
+    Reserve, commit, release, and lease truncation act only at a listing's
+    durable binding site, and only after the binding's backing delegate admits
+    the effect, before any site call. Composed over any aggregate capacity
+    client, so a storefront that builds its own aggregate -- one that records
+    where each reservation lives, say -- passes the same guard as one composed
+    through :class:`CapacityRuntime`. Every effect names its site to the
+    aggregate, so only the sites it names are reachable and nothing is chosen
+    from response data or fanned out.
+    """
+
+    def __init__(self, client: AggregateCapacityClient) -> None:
+        self._client = client
+
+    def require_binding(
+        self, binding: PublicationBinding, effect: str
+    ) -> PublicationBinding:
+        binding.backing.require_admission(effect)
+        if binding.site_id not in self._client.site_names:
+            raise CapacityBindingError(
+                f"capacity binding references unconfigured site {binding.site_id!r}"
+            )
+        return binding
+
+    async def reserve(
+        self,
+        binding: PublicationBinding,
+        *,
+        claim: Mapping[str, Any],
+        deal_ref: Mapping[str, Any] | None = None,
+        ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve only at the candidate's recorded authority."""
+        self.require_binding(binding, "reserve")
+        reserved = await self._client.reserve(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+            site=binding.site_id,
+        )
+        if reserved is not None and reserved.get("site") != binding.site_id:
+            raise CapacityBindingError("capacity authority returned a mismatched site")
+        return reserved
+
+    async def commit(
+        self,
+        binding: PublicationBinding,
+        *,
+        resource_id: str | None,
+        capacity_reservation_id: str,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
+        idempotency_ref: str | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Commit directly at the recorded site, including after restart.
+
+        Returns the reservation as the site recorded it; a repeat commit
+        returns the window the first one recorded. ``deal_ref`` correlates the
+        reservation with its deal.
+        """
+        self.require_binding(binding, "commit")
+        committed = await self._client.commit(
+            resource_id=resource_id,
+            capacity_reservation_id=capacity_reservation_id,
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
+            idempotency_ref=idempotency_ref,
+            deal_ref=deal_ref,
+            site_id=binding.site_id,
+        )
+        return _at_site(committed, binding)
+
+    async def release(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+        deal_ref: Mapping[str, Any] | None = None,
+        failure_reason: str | None = None,
+        failure_message: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Release directly at the recorded site, without discovery fan-out."""
+        self.require_binding(binding, "release")
+        released = await self._client.release(
+            capacity_reservation_id=capacity_reservation_id,
+            deal_ref=deal_ref,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+            site_id=binding.site_id,
+        )
+        return _at_site(released, binding)
+
+    async def truncate_lease(
+        self,
+        binding: PublicationBinding,
+        *,
+        capacity_reservation_id: str,
+        lease_end_utc: str,
+    ) -> dict[str, Any] | None:
+        """Truncate only at the durable site binding."""
+        self.require_binding(binding, "lease truncation")
+        truncated = await self._client.truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end_utc,
+            site_id=binding.site_id,
+        )
+        return _at_site(truncated, binding)
+
+
 class CapacityRuntime:
     """One composed source for projection, reconciliation, and bound effects."""
 
@@ -222,6 +339,7 @@ class CapacityRuntime:
         self._reconcile_hook = reconcile
         self._site_client_factory = site_client_factory
         self._client: AggregateCapacityClient | None = None
+        self._effects: CapacityEffects | None = None
 
     @property
     def site_ids(self) -> tuple[str, ...]:
@@ -246,19 +364,14 @@ class CapacityRuntime:
             raise CapacityBindingError(f"unknown capacity site_id {site_id!r}")
         return self.client().site(site_id)
 
-    def require_binding(self, binding: CapacityBinding) -> CapacityBinding:
-        # Every capacity effect passes through here. An unbacked listing has no
-        # admission authority, so a reservation against it would be a record
-        # with nothing behind it; refuse before any site call.
-        if not isinstance(binding, CapacityBinding):
-            raise CapacityBindingError(
-                "capacity operations require a capacity-backed listing binding"
-            )
-        if binding.site_id not in self._sites:
-            raise CapacityBindingError(
-                f"capacity binding references unconfigured site {binding.site_id!r}"
-            )
-        return binding
+    def effects(self) -> CapacityEffects:
+        """Return the guarded effects over this runtime's aggregate, built once."""
+        if self._effects is None:
+            self._effects = CapacityEffects(self.client())
+        return self._effects
+
+    def require_binding(self, binding: PublicationBinding) -> PublicationBinding:
+        return self.effects().require_binding(binding, "capacity operation")
 
     async def projections(self) -> tuple[CapacityProjection, ...]:
         """Fetch each site separately so no row can choose its own authority."""
@@ -288,102 +401,24 @@ class CapacityRuntime:
         return view
 
     async def reserve(
-        self,
-        binding: CapacityBinding,
-        *,
-        claim: Mapping[str, Any],
-        deal_ref: Mapping[str, Any] | None = None,
-        ttl_seconds: float | None = None,
-        lease_start_utc: str | None = None,
-        lease_duration_seconds: int | None = None,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Reserve only at the candidate's recorded authority."""
-        binding = self.require_binding(binding)
-        reserved = await self.client().reserve(
-            claim=claim,
-            deal_ref=deal_ref,
-            ttl_seconds=ttl_seconds,
-            lease_start_utc=lease_start_utc,
-            lease_duration_seconds=lease_duration_seconds,
-            site=binding.site_id,
-        )
-        if reserved is not None and reserved.get("site") != binding.site_id:
-            raise CapacityBindingError("capacity authority returned a mismatched site")
-        return reserved
+        return await self.effects().reserve(binding, **kwargs)
 
     async def commit(
-        self,
-        binding: CapacityBinding,
-        *,
-        resource_id: str | None,
-        capacity_reservation_id: str,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        idempotency_ref: str | None = None,
-        deal_ref: Mapping[str, Any] | None = None,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Commit directly at the recorded site, including after restart.
-
-        Returns the reservation as the site recorded it; a repeat commit
-        returns the window the first one recorded. ``deal_ref`` correlates the
-        reservation with its deal.
-        """
-        binding = self.require_binding(binding)
-        committed = await self.site_client(binding.site_id).commit(
-            resource_id=resource_id,
-            capacity_reservation_id=capacity_reservation_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            idempotency_ref=idempotency_ref,
-            deal_ref=deal_ref,
-        )
-        if committed is None:
-            return None
-        out = dict(committed)
-        out["site"] = binding.site_id
-        return out
+        return await self.effects().commit(binding, **kwargs)
 
     async def release(
-        self,
-        binding: CapacityBinding,
-        *,
-        capacity_reservation_id: str,
-        deal_ref: Mapping[str, Any] | None = None,
-        failure_reason: str | None = None,
-        failure_message: str | None = None,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Release directly at the recorded site, without discovery fan-out."""
-        binding = self.require_binding(binding)
-        released = await self.site_client(binding.site_id).release(
-            capacity_reservation_id=capacity_reservation_id,
-            deal_ref=deal_ref,
-            failure_reason=failure_reason,
-            failure_message=failure_message,
-        )
-        if released is None:
-            return None
-        out = dict(released)
-        out["site"] = binding.site_id
-        return out
+        return await self.effects().release(binding, **kwargs)
 
     async def truncate_lease(
-        self,
-        binding: CapacityBinding,
-        *,
-        capacity_reservation_id: str,
-        lease_end_utc: str,
+        self, binding: PublicationBinding, **kwargs: Any
     ) -> dict[str, Any] | None:
-        """Truncate only at the durable site binding."""
-        binding = self.require_binding(binding)
-        truncated = await self.site_client(binding.site_id).truncate_lease(
-            capacity_reservation_id=capacity_reservation_id,
-            lease_end_utc=lease_end_utc,
-        )
-        if truncated is None:
-            return None
-        out = dict(truncated)
-        out["site"] = binding.site_id
-        return out
+        return await self.effects().truncate_lease(binding, **kwargs)
 
     async def reconcile_now(self) -> None:
         await self._run_reconcile(None)

@@ -21,6 +21,10 @@ from market_core import (
     MarketDomainContract,
     validate_domain_contracts,
 )
+from market_resource_pools_contracts.backing import (
+    UnknownCapacityBackingError,
+    capacity_backing,
+)
 
 
 REQUIRED_STOREFRONT_CAPABILITIES = frozenset(
@@ -200,9 +204,6 @@ def build_storefront_derivation_key(
     ).hexdigest()
 
 
-CAPACITY_BACKING_VALUES = frozenset({"backed", "unbacked"})
-
-
 @dataclass(frozen=True)
 class StorefrontListingBinding:
     """Trusted common publication mapping for one durable listing."""
@@ -215,8 +216,9 @@ class StorefrontListingBinding:
     last_reconciled_at: str
     # Whether an admission authority stands behind the listing. ``site_id`` is
     # the listing's origin, which every listing has; this says whether that
-    # origin admits reservations. Required with no default so no writer can
-    # leave a listing to be classified by omission, and immutable once bound.
+    # origin admits reservations. It is the label of a registered backing
+    # delegate, required with no default so no writer can leave a listing to
+    # be classified by omission, and immutable once bound.
     capacity_backing: str
     pool_id: str | None = None
     physical_resource_id: str | None = None
@@ -224,11 +226,10 @@ class StorefrontListingBinding:
     def __post_init__(self) -> None:
         _nonempty(self.listing_id, field="listing_id")
         _nonempty(self.site_id, field="site_id")
-        if self.capacity_backing not in CAPACITY_BACKING_VALUES:
-            raise StorefrontDomainRegistryError(
-                "capacity_backing must be one of "
-                f"{sorted(CAPACITY_BACKING_VALUES)}, not {self.capacity_backing!r}"
-            )
+        try:
+            capacity_backing(self.capacity_backing)
+        except UnknownCapacityBackingError as exc:
+            raise StorefrontDomainRegistryError(str(exc)) from exc
         _nonempty(self.derivation_key, field="derivation_key")
         _nonempty(self.last_reconciled_at, field="last_reconciled_at")
         if self.pool_id is not None:

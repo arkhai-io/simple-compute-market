@@ -34,6 +34,7 @@ from arkhai_vms_listings.reconciler import (
     listing_resource_key,
     listing_shape_key,
     open_listing_resource_keys,
+    ReconciliationScope,
     stale_open_listing_ids,
 )
 from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
@@ -96,6 +97,7 @@ __all__ = [
     "resource_is_compute",
     "short_ts",
     "shorten",
+    "ReconciliationScope",
     "stale_open_listing_ids",
     "TokenErc20ResourceAdapter",
     "TokenResource",

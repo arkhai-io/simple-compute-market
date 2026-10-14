@@ -30,7 +30,10 @@ def test_what_the_builders_produce_validates():
     projection = _projection()
 
     validate_resource_pool_projection(projection)
+    backed = projection["resource_pools"][0]["pool_metadata"]["policy_tags"]
     broker = projection["resource_pools"][1]["pool_metadata"]["policy_tags"]
+    # Each pool's default delivery is the one its backing permits.
+    assert backed["deliverable_modes"] == backed["advertisable_modes"]
     assert broker["deliverable_modes"] == []
 
 
@@ -54,3 +57,11 @@ def test_a_response_a_consumer_could_not_derive_from_is_refused(damage, message)
 
     with pytest.raises(AssertionError, match=message):
         validate_resource_pool_projection(projection)
+
+
+def test_a_pool_with_an_unregistered_label_is_built_for_consumer_tests():
+    row = build_resource_pool_row("odd", capacity_backing="Unbacked")
+
+    tags = row["pool_metadata"]["policy_tags"]
+    assert tags["capacity_backing"] == "Unbacked"
+    assert tags["deliverable_modes"] == []

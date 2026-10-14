@@ -247,9 +247,8 @@ async def capacity_binding_for_listing(
 ) -> PublicationBinding:
     """Resolve the VM listing's exact durable site, mode, source, and backing.
 
-    The result is a ``CapacityBinding`` only when the durable binding records
-    the listing as capacity-backed; callers that reserve, commit, or release
-    require that class and refuse an ``UnbackedBinding``.
+    Every capacity effect takes this binding, and the capacity runtime's guard
+    refuses one whose backing admits no effect before any site call.
     """
     from arkhai_vms_listings.models import Listing
 

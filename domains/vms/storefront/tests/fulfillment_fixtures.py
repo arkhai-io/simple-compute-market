@@ -9,7 +9,8 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     StorefrontThreadBinding,
 )
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 from market_core import SettlementEvidence
 from market_core import VersionedEnvelope
 from market_fulfillment import (
@@ -35,7 +36,7 @@ class VmLifecycleFixture:
     db: SQLiteClient
     listing_binding: StorefrontListingBinding
     thread_binding: StorefrontThreadBinding
-    capacity_binding: CapacityBinding
+    capacity_binding: PublicationBinding
     evidence: SettlementEvidence
 
     def reopen(self) -> SQLiteClient:
@@ -202,7 +203,7 @@ async def make_vm_lifecycle_fixture(
         db=db,
         listing_binding=listing_binding,
         thread_binding=thread_binding,
-        capacity_binding=CapacityBinding(site_id, "vm", pool_id),
+        capacity_binding=PublicationBinding(site_id, "vm", pool_id, BACKED),
         evidence=evidence,
     )
 

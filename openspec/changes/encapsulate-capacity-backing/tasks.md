@@ -64,7 +64,7 @@ move each domain's behaviour onto the delegate and can land in any order.
 
 ## 2. The delegate
 
-- [ ] 2.1 `kit/resource-pools-contracts/src/market_resource_pools_contracts/backing.py`
+- [x] 2.1 `kit/resource-pools-contracts/src/market_resource_pools_contracts/backing.py`
       (new): `CapacityBacking`, one class with private configuration and `label`;
       module-level `BACKED` and `UNBACKED`; `CapacityNotAdmittedError`; the registry
       `capacity_backing(label)`, refusing an unknown label with the resolver's
@@ -79,7 +79,8 @@ move each domain's behaviour onto the delegate and can land in any order.
       `vocabulary.py` that both modules import and `hints.py` re-exports unchanged, so
       `hints.py` can call the delegate without an import cycle. Neither module imports
       beyond the standard library and the package, so the allowlist holds.
-- [ ] 2.2 `kit/resource-pools-contracts/src/market_resource_pools_contracts/hints.py`:
+      *Done.* `backing.py` and `vocabulary.py`; the one private fact every operation follows from is whether an admission authority stands behind the supply.
+- [x] 2.2 `kit/resource-pools-contracts/src/market_resource_pools_contracts/hints.py`:
       rename the `CapacityBacking` literal `CapacityBackingLabel`; drop
       `CAPACITY_BACKED`, `CAPACITY_UNBACKED`, and `CAPACITY_BACKING_VALUES` in favour of
       the registry; `pool_declaration_problems` resolves the label through
@@ -88,13 +89,15 @@ move each domain's behaviour onto the delegate and can land in any order.
       `backing: CapacityBacking` and loses its `backed` property. Update the module
       docstring to say the delegate decides the cross-tag rules. Re-export from
       `__init__.py`. Bump the package version.
-- [ ] 2.3 `kit/resource-pools/src/market_resource_pools/site_declarations.py`:
+      *Done.* Version 0.2.0; the problem codes and messages are unchanged.
+- [x] 2.3 `kit/resource-pools/src/market_resource_pools/site_declarations.py`:
       `ResolvedPool` carries `backing: CapacityBacking`, loses `backed`, and the
       compatibility rule resolves pools with `legacy_producer_backing()`.
       `service.py`'s `_require_backing_unchanged` and `_backing_change_problems` keep
       comparing stored labels — immutability is label equality, not a backing decision.
       Bump the package version.
-- [ ] 2.4 Every importer of the dropped names, mechanically, in the same commit:
+      *Done.* Version 0.7.0.
+- [x] 2.4 Every importer of the dropped names, mechanically, in the same commit:
       `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`
       (the backfill writes `legacy_producer_backing().label`);
       `domains/apicredits/service/src/apicredits_service/db/database.py` and
@@ -104,7 +107,8 @@ move each domain's behaviour onto the delegate and can land in any order.
       whose refusal becomes `pool.backing is not BACKED` — the one comparison left in
       the tree, with the comment saying it stands until bare metal publishes unbacked
       supply, not naming the change.
-- [ ] 2.5 Tests. `kit/resource-pools-contracts/tests/unit/test_backing.py` (new): each
+      *Done.* VM's `listing_sources.py` and `reconciler.py` read `backing.label` here and move onto the delegate in Section 4.
+- [x] 2.5 Tests. `kit/resource-pools-contracts/tests/unit/test_backing.py` (new): each
       operation for both delegates, including `judge`'s short-circuit (an unbacked
       delegate never calls `available`; a backed one never calls it after a declared
       refusal), `place_hold` not calling `place` when unbacked, the registry refusing an
@@ -113,13 +117,15 @@ move each domain's behaviour onto the delegate and can land in any order.
       assert on `backing` rather than `backed`. Provisioning's
       `test_pool_advertisement_backing_migration.py` and `test_capacity_api.py`,
       and the credits service's `test_pool_declarations_migration.py`, likewise.
-- [ ] 2.6 Validation: `make -C kit test-resource-pools-contracts test-resource-pools`,
+      *Done.* `test_backing.py` covers every operation for both delegates and the registry.
+- [x] 2.6 Validation: `make -C kit test-resource-pools-contracts test-resource-pools`,
       `make test-provisioning`, `cd domains/apicredits/service && make test`,
       `make test-bare-metal`, and `make check-architecture`.
+      *Done.* Contracts 165, resource pools 138, provisioning 675 + 456, credits service 70, bare metal green; `make check-architecture` passes.
 
 ## 3. Bindings and capacity effects
 
-- [ ] 3.1 `kit/capacity-publication/src/market_capacity_publication/capacity.py`:
+- [x] 3.1 `kit/capacity-publication/src/market_capacity_publication/capacity.py`:
       replace `_ListingIdentity`, `CapacityBinding`, and `UnbackedBinding` with one
       frozen `PublicationBinding(site_id, offering_mode, source_id, backing)`;
       `publication_binding(capacity_backing=label, ...)` resolves the delegate through
@@ -131,14 +137,17 @@ move each domain's behaviour onto the delegate and can land in any order.
       `truncate_lease` move here unchanged otherwise. `CapacityRuntime` builds one over
       its own aggregate and delegates its effect methods and `require_binding` to it.
       Export `CapacityEffects` and `backing_changed`; stop exporting the two classes.
-- [ ] 3.2 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
+      *Done.* `CapacityEffects` addresses the aggregate's own effects by site (`design.md`, "Implementation notes"). Version 0.7.0.
+- [x] 3.2 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
       answer `CapacityNotAdmittedError` with 409, keeping 500 for `CapacityBindingError`;
       update the hook comment. `publication.py`: docstrings only — the persisted-binding
       comparison now covers backing through the field.
-- [ ] 3.3 `kit/capacity-publication/pyproject.toml`: add
+      *Done.*
+- [x] 3.3 `kit/capacity-publication/pyproject.toml`: add
       `arkhai-kit-resource-pools-contracts`; bump the version and every `==` pin of it
       (the VM, bare-metal, and API-credit storefronts).
-- [ ] 3.4 Every importer of the two classes, mechanically, in the same commit:
+      *Done.*
+- [x] 3.4 Every importer of the two classes, mechanically, in the same commit:
       construct `PublicationBinding(..., BACKED)` or call `publication_binding`, and
       replace `isinstance(binding, (CapacityBinding, UnbackedBinding))` identity checks
       with `isinstance(binding, PublicationBinding)`. VM: `negotiation_runtime.py`,
@@ -149,18 +158,21 @@ move each domain's behaviour onto the delegate and can land in any order.
       `services/publication_service.py`. The backing switches among them keep their
       current behaviour here, expressed against the delegate's label until Sections
       4–6 replace them, so no section leaves a suite red.
-- [ ] 3.5 `core/storefront/src/core_storefront/domain_registry.py`: delete
+      *Done.* Bare metal's binding took its final form here (5.2).
+- [x] 3.5 `core/storefront/src/core_storefront/domain_registry.py`: delete
       `CAPACITY_BACKING_VALUES`; `StorefrontListingBinding.__post_init__` validates
       through `capacity_backing(label)`, keeping `StorefrontDomainRegistryError` as the
       refusal. Remove the re-export from `__init__.py`. `pyproject.toml`: add
       `arkhai-kit-resource-pools-contracts`, bump the version and
       `kit/capacity-publication`'s `==` pin. VM's `publication_binding.py` validates
       through the registry instead of the removed copy.
-- [ ] 3.6 `kit/site-client/src/market_site_client/fixtures/resource_pools.py`: delete
+      *Done.* `arkhai-core-storefront` 0.12.0.
+- [x] 3.6 `kit/site-client/src/market_site_client/fixtures/resource_pools.py`: delete
       `_BACKING_VALUES`; validate the label through the registry; choose the default
       deliverable set through `declaration_problems`, per `design.md`. Add the contracts
       dependency and bump the version.
-- [ ] 3.7 Tests. `kit/capacity-publication/tests/unit/test_capacity.py`: one binding
+      *Done.* A label no delegate is registered for is projected as given, delivering nothing, so consumer tests can build an unresolvable pool. Version 0.10.0.
+- [x] 3.7 Tests. `kit/capacity-publication/tests/unit/test_capacity.py`: one binding
       class; two bindings differing only in backing are unequal; an unbacked binding
       is refused by every effect before any site call with `CapacityNotAdmittedError`;
       `CapacityEffects` over a fake aggregate acts only at its named sites;
@@ -171,37 +183,44 @@ move each domain's behaviour onto the delegate and can land in any order.
       migration's DDL. `kit/site-client/tests/unit/test_resource_pool_fixture.py`:
       both defaults. Every VM, bare-metal, and API-credit test constructing the
       removed classes, mechanically.
-- [ ] 3.8 Validation: `make -C kit test-capacity-publication test-site-client`,
+      *Done.* Capacity publication 69, core storefront 192, site client 49.
+- [x] 3.8 Validation: `make -C kit test-capacity-publication test-site-client`,
       `make test-core`, `make test-storefront`, `make test-bare-metal`,
       `make test-apicredits`, `make lock`, and `make check-architecture`.
+      *Done*, with `make lock` deferred to 7.2.
 
 ## 4. VM onto the delegate
 
-- [ ] 4.1 **Published label.** `domains/vms/listings/src/arkhai_vms_listings/models.py`
+- [x] 4.1 **Published label.** `domains/vms/listings/src/arkhai_vms_listings/models.py`
       types `capacity_backing` as `CapacityBackingLabel | None`.
       `domains/vms/listings/pyproject.toml` moves `arkhai-kit-resource-pools-contracts`
       from the `pools` extra to the base dependencies; bump the version. The buyer's
       `test_no_resource_pools_dependency.py` still passes.
-- [ ] 4.2 **Feasibility.** `arkhai_vms_listings/reconciler.py`: `_judge_members`
+      *Done.* `arkhai-vms-listings` 0.5.0.
+- [x] 4.2 **Feasibility.** `arkhai_vms_listings/reconciler.py`: `_judge_members`
       becomes the two halves of `judge` over the declaration's delegate; a
       `declared_only` caller calls the declared half alone. The string comparison at
       the `backed` assignment goes.
-- [ ] 4.3 **Reconciliation scope.** `reconciler.py`: `_bound_vm_listings` and
+      *Done.*
+- [x] 4.3 **Reconciliation scope.** `reconciler.py`: `_bound_vm_listings` and
       `stale_open_listing_ids` take a scope — availability or source — in place of
       `backed_only`; availability binds `labels_reconciled_by_availability()` as SQL
       parameters. Update the five availability call sites
       (`services/publication_service.py` twice, `failure_actions.py`,
       `controllers/admin_controller.py` twice) and the source call sites
       (`services/publication_loop.py`'s `_close_stale` and `open_listing_resource_keys`).
-- [ ] 4.4 **Backing comparison.** `arkhai_vms_listings/listing_comparison.py`'s
+      *Done.* `ReconciliationScope.SOURCE` and `.AVAILABILITY`.
+- [x] 4.4 **Backing comparison.** `arkhai_vms_listings/listing_comparison.py`'s
       `BACKING_DISAGREES` outcome runs first through `backing_changed`; the legacy
       `BACKING_UNDISCLOSED` refresh stays as the published-label rule.
       `services/publication_loop.py`, `reconciler.py`'s `closed_available_listing_ids`,
       and `services/listing_source_check.py` pass the binding and the source's delegate.
-- [ ] 4.5 **Source check.** `services/listing_source_check.py`: the declared re-derivation
+      *Done.* `compare_listing` compares the two delegates by identity, since the buyer-imported package cannot depend on the kit (`design.md`, "Implementation notes").
+- [x] 4.5 **Source check.** `services/listing_source_check.py`: the declared re-derivation
       and the pinned-site availability read become `judge_async`'s halves; the class
       test goes.
-- [ ] 4.6 **Settlement admissibility.** `settlement_stages.py`: each of the three seller
+      *Done.*
+- [x] 4.6 **Settlement admissibility.** `settlement_stages.py`: each of the three seller
       stages declares `fulfils_through_capacity` as a required field.
       `settlement_composition.py`: delete `VM_MECHANISM_FULFILLS_THROUGH_CAPACITY`,
       `UndeclaredMechanismFulfillmentError`, `mechanism_fulfills_through_capacity`,
@@ -210,21 +229,25 @@ move each domain's behaviour onto the delegate and can land in any order.
       `admissible_settlement` for every listing, reading each clause's stage, and the
       site-configured check becomes `judge`'s available half; `_unbacked_settlement_terms`
       and the `== "backed"` branch go. `services/publication_terms.py` follows.
-- [ ] 4.7 **Hold.** `negotiation_runtime.py`'s `_place_capacity_hold` places through
+      *Done.* Any listing left with no publishable option is refused, whatever its backing (`design.md`, "Implementation notes").
+- [x] 4.7 **Hold.** `negotiation_runtime.py`'s `_place_capacity_hold` places through
       `binding.backing.place_hold`; a hold not placed records the same
       `capacity_hold_not_applicable` event with the binding's label.
-- [ ] 4.8 **Effects.** `services/fulfillment_resume_runtime.py`: the recovery reserve and
+      *Done.*
+- [x] 4.8 **Effects.** `services/fulfillment_resume_runtime.py`: the recovery reserve and
       commit call the runtime with the listing's binding from
       `capacity_binding_for_listing`, not the aggregate. `services/vm_fulfillment_service.py`:
       the class test goes; the effects' guard refuses. `controllers/admin_controller.py`:
       `_reservation_binding` synthesizes `admitted_backing()` for a reservation with no
       listing; `reserve_capacity` lets `CapacityNotAdmittedError` reach the kit route
       (409) and keeps its unconfigured-site message for `CapacityBindingError` only.
-- [ ] 4.9 **Legacy and dead code.** `domain_migration.py` binds a legacy listing with
+      *Done.* The resume pass's effects go through `CapacityEffects` over the aggregate it already holds.
+- [x] 4.9 **Legacy and dead code.** `domain_migration.py` binds a legacy listing with
       `legacy_producer_backing()`. `services/listing_sources.py`'s unused
       `current_source_backing` goes. `services/capacity_client.py`'s
       `capacity_binding_for_listing` docstring states the guard, not the class.
-- [ ] 4.10 Tests (all under `domains/vms/storefront/tests/` unless noted):
+      *Done.*
+- [x] 4.10 Tests (all under `domains/vms/storefront/tests/` unless noted):
       `unit/test_unbacked_settlement_options.py` (rewritten over stage declarations; a
       stage without the declaration cannot be constructed);
       `unit/test_listing_source_check.py` (backing changed → declared mismatch; unbacked
@@ -236,46 +259,54 @@ move each domain's behaviour onto the delegate and can land in any order.
       the no-listing reservation binds as admitted); `integration/test_reconciler_derivation.py`
       and `integration/test_publication_loop.py` (availability scope at reconciler level,
       not only end to end); `domains/vms/domain/tests/test_storefront_adapter.py`.
-- [ ] 4.11 Validation: `make test-storefront`, `make test-vms-domain`,
+      *Done.* Unit 988 passed. Integration matches the `dev` baseline exactly: the same 7 failures on both trees (2 Alkahest, 5 publication-loop pricing refreshes), run without `torch` and one test per process (7.2).
+- [x] 4.11 Validation: `make test-storefront`, `make test-vms-domain`,
       `make test-vms-buyer`, `make -C domains test-compute`, and
       `make check-architecture`.
+      *Done* as 4.10 records; `make test-storefront` and `make test-vms-buyer` need `download.pytorch.org` (7.2).
 
 ## 5. Bare metal onto the delegate
 
-- [ ] 5.1 **Published label.** `domains/bare_metal/src/arkhai_bare_metal/schema.py`:
+- [x] 5.1 **Published label.** `domains/bare_metal/src/arkhai_bare_metal/schema.py`:
       `BareMetalListing.capacity_backing` is `CapacityBackingLabel`.
       `publication.py`'s `available_bare_metal_listings` sets it from the candidate's
       delegate. `pyproject.toml`: add `arkhai-kit-resource-pools-contracts`; bump.
-- [ ] 5.2 **Binding.** `storefront/.../publication_service.py`: one
+      *Done.* `arkhai-bare-metal` 0.12.0.
+- [x] 5.2 **Binding.** `storefront/.../publication_service.py`: one
       `bare_metal_listing_binding(db, listing_id)` builds the binding through
       `publication_binding` from the durable record, and `binding_for_listing` uses it;
       the refusal of a label other than backed goes. `sqlite_client.py`'s
       `upsert_bare_metal_listing` records the candidate's delegate's label rather than
       `"backed"`.
-- [ ] 5.3 **Backing comparison.** `arkhai_bare_metal/storefront_publication.py`: remove
+      *Done.* The builder lives in `listing_binding.py`, breaking an import cycle (`design.md`, "Implementation notes").
+- [x] 5.3 **Backing comparison.** `arkhai_bare_metal/storefront_publication.py`: remove
       `capacity_backing` from `TERM_RESOURCE_FIELDS`; `compare_bare_metal_listing` gains
       a backing-changed outcome, checked first through `backing_changed`, which closes
       an open listing and refuses any refresh or reopen.
       `storefront/.../publication.py`'s `_reconcile_existing` handles it as it handles
       an identity change.
-- [ ] 5.4 **Judgement.** `storefront_publication.py`'s `_classify` splits into a declared
+      *Done.* `BACKING_CHANGED`; the storefront supplies the kit's `backing_changed`, so the domain package stays free of the kit.
+- [x] 5.4 **Judgement.** `storefront_publication.py`'s `_classify` splits into a declared
       half (enablement, shape digest, region, pool admission) and an available half
       (the view's `available`), joined by the resolved pool's `judge`. Publication and
       `inventory_guard.py`'s `recheck_bare_metal_listing_source` share it; the guard
       runs `backing_changed` first and reports a mismatch as declared.
-- [ ] 5.5 **Stages.** `storefront/.../settlement_stages.py`: rename `SellerStage.physical`
+      *Done.* Classification and the recheck take each pool's delegate; the storefront check compares backing first.
+- [x] 5.5 **Stages.** `storefront/.../settlement_stages.py`: rename `SellerStage.physical`
       `fulfils_through_capacity`; update `settlement_composition.py`'s table,
       `negotiation_runtime.py`'s admission gating, and `settlement_service.py`'s
       evidence gating. Bare-metal publication applies `admissible_settlement` to every
       candidate through the stage table; no listing it publishes changes, since every
       candidate is backed.
-- [ ] 5.6 **Effects.** `storefront/.../site_clients.py` builds a `CapacityEffects` over
+      *Done.* Admissibility runs in `publication_payload_builder`.
+- [x] 5.6 **Effects.** `storefront/.../site_clients.py` builds a `CapacityEffects` over
       the aggregate it already builds; `runtime.py` holds it. `fulfillment_service.py`'s
       settlement reserve and commit, and `deal_controls.py`'s administrator reserve,
       call it with the listing's binding; nothing reserves or commits through the
       aggregate. Recovery's reservation listing and the map write, and the release
       callback's map removal, stay: they are not effects.
-- [ ] 5.7 Tests (under `domains/bare_metal/`): `tests/test_storefront_publication.py`
+      *Done.* `CapacityEffects` is built over the runtime's aggregate where each effect runs; fulfillment maps the kit's refusals to its own 409.
+- [x] 5.7 Tests (under `domains/bare_metal/`): `tests/test_storefront_publication.py`
       (backing is not a term; a changed backing refuses refresh; the classification
       halves); `tests/test_inventory_guard.py` (a changed backing is a declared
       mismatch); `tests/test_schema.py`; `storefront/tests/test_publication_cycle.py`
@@ -288,18 +319,21 @@ move each domain's behaviour onto the delegate and can land in any order.
       `storefront/tests/test_selection_dispatch.py` and `test_domain_runtime.py` (the
       renamed attribute); `storefront/tests/test_site_clients.py` (the map still
       routes fulfillment after a reserve through the effects).
-- [ ] 5.8 Validation: `make test-bare-metal`, `make test-provisioning-adapter`, and
+      *Done.* Bare-metal storefront 311 passed, domain 134, buyer 11, adapter 40.
+- [x] 5.8 Validation: `make test-bare-metal`, `make test-provisioning-adapter`, and
       `make check-architecture`.
+      *Done.*
 
 ## 6. API credits onto the delegate
 
-- [ ] 6.1 **Service projection.** `domains/apicredits/service/src/apicredits_service/main.py`
+- [x] 6.1 **Service projection.** `domains/apicredits/service/src/apicredits_service/main.py`
       passes a pool directory to `make_capacity_router`, built from its stored pools as
       provisioning's `load_capacity_pool_metadata` does; the container exposes the
       session factory it needs. Test in `service/tests/integration/`: the
       resource-pool projection carries the system pool's declarations, and
       `read_site_declarations` resolves it backed.
-- [ ] 6.2 **Durable binding.** `storefront/.../utils/sqlite_client.py` sets its domain
+      *Done.* `load_pool_directory` in `db/database.py`; credits service 71 passed. Version 0.6.0.
+- [x] 6.2 **Durable binding.** `storefront/.../utils/sqlite_client.py` sets its domain
       registry as bare metal's does. `services/listing_service.py`'s
       `publish_from_quota` reads the quota resource's pool from the site's resource-pool
       projection through `read_site_declarations`, refuses a pool that is unresolvable,
@@ -310,28 +344,33 @@ move each domain's behaviour onto the delegate and can land in any order.
       and version, and the pool's label — with the listing ID as the derivation source
       identity. `storefront/pyproject.toml`: add `arkhai-kit-resource-pools` and
       `arkhai-kit-resource-pools-contracts`; bump.
-- [ ] 6.3 **Binding reads.** Delete `capacity_binding_from_listing_resource`
+      *Done.* `listing_binding.py`. No domain registry is set on the client: core's binding write needs none (`design.md`, "Implementation notes"). Storefront 0.9.0, domain 0.6.0.
+- [x] 6.3 **Binding reads.** Delete `capacity_binding_from_listing_resource`
       (`services/capacity_client.py`); `services/publication_service.py`'s
       `binding_for_listing`, `settlement_stages.py`'s payment hold, and
       `services/fulfillment_service.py`'s release build the binding through
       `publication_binding` from the durable record.
-- [ ] 6.4 **Stages and hold.** `settlement_stages.py`: both seller stages declare
+      *Done.*
+- [x] 6.4 **Stages and hold.** `settlement_stages.py`: both seller stages declare
       `fulfils_through_capacity=True`; the payment stage's hold places through
       `binding.backing.place_hold`.
-- [ ] 6.5 **Reconciliation and reopen.** `storefront/.../services/publication_service.py`:
+      *Done.*
+- [x] 6.5 **Reconciliation and reopen.** `storefront/.../services/publication_service.py`:
       availability closes and reopens judge each listing through its binding's
       delegate, with `arkhai_apicredits/listings/reconciler.py`'s pure rules as the
       available half, and reopen runs `backing_changed` against the pool's current
       declaration first. The pure rules key on the binding's site and source rather
       than the published `listing_resource`, so the domain package stays free of the
       delegate.
-- [ ] 6.6 **Source check.** `storefront/.../listing_source_check.py` (new): the declared
+      *Done.* The domain rules take a `judge`; reopen reads each site's pool projection once.
+- [x] 6.6 **Source check.** `storefront/.../listing_source_check.py` (new): the declared
       half confirms the quota resource is still in its bound pool, the pool is enabled
       and advertises `api_credits`, and `backing_changed` is false; the available half
       requires one available unit; `judge_async` joins them; an unreachable or
       unverifiable site is `unverifiable`. Wire it as `check_listing_source` in
       `negotiation_runtime.py`'s `NegotiationDomainHooks`.
-- [ ] 6.7 **Quota guard.** `storefront/.../negotiation_runtime.py`'s
+      *Done.* Reads the listing's site through the aggregate, as bare metal does.
+- [x] 6.7 **Quota guard.** `storefront/.../negotiation_runtime.py`'s
       `_default_seller_round_hook` resolves the listing's binding and hands the domain
       round hook a snapshot source that reads the quota snapshot as `judge_async`'s
       available half, yielding nothing where availability does not bound the listing.
@@ -339,14 +378,17 @@ move each domain's behaviour onto the delegate and can land in any order.
       when the source yields nothing, and `negotiation/policies.py`'s
       `credit_quota_guard` reports itself not applicable without a snapshot. The
       domain package gains no dependency.
-- [ ] 6.8 **Fresh database.** `storefront/.../utils/sqlite_client.py`'s
+      *Done.*
+- [x] 6.8 **Fresh database.** `storefront/.../utils/sqlite_client.py`'s
       `_ensure_domain_indexes` refuses to start when a listing has no binding, naming
       the listing and that a fresh database is required, beside the existing schema
       refusal.
-- [ ] 6.9 **Defects.** `cli.py` constructs `ListingService` with its settlement
+      *Done.*
+- [x] 6.9 **Defects.** `cli.py` constructs `ListingService` with its settlement
       composition; `controllers/listings_controller.py` passes `settlement_clauses`
       through.
-- [ ] 6.10 Tests (under `domains/apicredits/`): `storefront/tests/integration/test_publish_reconcile.py`
+      *Done.*
+- [x] 6.10 Tests (under `domains/apicredits/`): `storefront/tests/integration/test_publish_reconcile.py`
       (creation writes the binding with the pool's label; two listings over one quota
       resource each bind; an unbacked credits pool yields no listing; submitted clauses
       reach the listing; the reconciler reads the binding, not the payload);
@@ -359,8 +401,10 @@ move each domain's behaviour onto the delegate and can land in any order.
       with plain `upsert_listing` (`integration/credit_negotiation.py`,
       `test_payment_recovery.py`, `test_payment_settlement.py`,
       `unit/test_settlement_fulfillment.py`) write a binding.
-- [ ] 6.11 Validation: `make test-apicredits`, `cd domains/apicredits/service && make test`,
+      *Done.* Storefront 135 passed.
+- [x] 6.11 Validation: `make test-apicredits`, `cd domains/apicredits/service && make test`,
       and `make check-architecture`.
+      *Done.*
 
 ## 7. Whole-tree validation
 

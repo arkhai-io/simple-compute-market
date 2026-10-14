@@ -37,6 +37,11 @@ from market_negotiation_runtime import (
 from market_policy.scalar_policies import _amount_from_proposal
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.listing_binding import api_credit_listing_binding
+from apicredits_storefront.listing_source_check import (
+    ListingSourceCheck,
+    build_listing_source_check,
+)
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
@@ -83,9 +88,38 @@ def _seller_wallet_address() -> str | None:
     return str(settings.get("wallet.address", "") or "") or None
 
 
+class _QuotaSnapshot:
+    """The quota snapshot one listing's round reads, through its backing.
+
+    The listing's binding decides whether availability bounds it; where it
+    does not, no snapshot is captured and the quota guard does not apply.
+    """
+
+    def __init__(self, repository: Any, listing_id: str) -> None:
+        self._repository = repository
+        self._listing_id = listing_id
+
+    async def snapshot(self) -> list[dict[str, Any]] | None:
+        binding = await api_credit_listing_binding(self._repository, self._listing_id)
+        if binding is None:
+            raise NegotiationStateError(
+                f"listing {self._listing_id!r} has no durable capacity binding"
+            )
+        capacity = build_capacity_client(lambda: self._repository)
+
+        async def declared() -> None:
+            return None
+
+        async def available() -> list[dict[str, Any]]:
+            return list(await capacity.snapshot() or [])
+
+        return await binding.backing.judge_async(declared, available)
+
+
 def _default_seller_round_hook(
     domain: MarketDomainContract,
     repository: Any,
+    listing_id: str,
 ) -> ApiCreditsSellerRoundHook:
     policy = domain.storefront
     if policy is None:
@@ -93,7 +127,7 @@ def _default_seller_round_hook(
             f"domain {domain.identity!s} has no storefront negotiation capability"
         )
     return policy.run_negotiation_policy(
-        build_capacity_client(lambda: repository),
+        _QuotaSnapshot(repository, listing_id),
         lookup_key_record,
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
@@ -633,8 +667,17 @@ def build_api_credit_negotiation_runtime(
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     settlement_artifacts_builder: Callable[[Mapping[str, Any]], dict[str, Any]]
     | None = None,
+    listing_source_check: ListingSourceCheck | None = None,
 ) -> NegotiationRuntime:
-    """Compose the shared lifecycle with API-credit codecs and effects."""
+    """Compose the shared lifecycle with API-credit codecs and effects.
+
+    ``listing_source_check`` rechecks a listing against its source before every
+    seller decision and acceptance; by default it reads the listing's own site
+    through the aggregate capacity client.
+    """
+    source_check = listing_source_check or build_listing_source_check(
+        lambda repository: build_capacity_client(lambda: repository)
+    )
 
     dispatch = (
         accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
@@ -696,6 +739,7 @@ def build_api_credit_negotiation_runtime(
         policy = seller_round_hook or _default_seller_round_hook(
             domain,
             request.repository,
+            str(request.listing_record.get("listing_id") or ""),
         )
         decoded = request.terms.decoded
         result = await policy(
@@ -767,6 +811,9 @@ def build_api_credit_negotiation_runtime(
             repository, acceptance, dispatch
         ),
         persist_artifacts=_persist_artifacts,
+        check_listing_source=lambda repository, resolved: source_check(
+            repository, resolved.listing_id
+        ),
     )
     return NegotiationRuntime(
         resolve_opening=resolve_opening,

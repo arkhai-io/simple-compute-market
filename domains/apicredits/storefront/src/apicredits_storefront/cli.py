@@ -116,9 +116,10 @@ def publish_cmd(
     option. Omit all three to publish configured settlement clauses, such as
     Arkhai payments, without requiring an EVM chain.
     """
-    from apicredits_storefront.services.listing_service import ListingService
+    import apicredits_storefront.container as _container
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
+    from apicredits_storefront.server import _build_api_credit_services
     from apicredits_storefront.utils.config import CHAINS
-    from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
     legacy_requested = any(
         value is not None for value in (price_per_token, token, chain)
@@ -160,21 +161,13 @@ def publish_cmd(
             }
         ]
 
-    from apicredits_storefront.utils.config import (
-        BASE_URL_OVERRIDE,
-        resolve_identity_config,
-    )
-
-    principal = resolve_identity_config().principal
-    svc = ListingService(
-        sqlite_client=get_sqlite_client(
-            local_listing_principal=principal,
-            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-        ),
-        seller_principal=principal,
-    )
+    # The same listing service the running storefront composes, with its
+    # settlement composition, and the signer its capacity runtime reads.
+    services = _build_api_credit_services(get_market_domain_contract())
+    _container.resolved_marketplace_signer = services.marketplace_signer
+    _container.resolved_sqlite_client = services.sqlite_client
     result = asyncio.run(
-        svc.publish_from_quota(
+        services.listing_service.publish_from_quota(
             resource_id=resource_id,
             service_name=service_name,
             accepted_escrows=accepted_escrows,

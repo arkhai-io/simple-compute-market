@@ -17,7 +17,8 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import PublicationBinding, CapacityRuntime, CapacitySite
+from market_resource_pools_contracts.backing import BACKED
 from market_core.schemas import EscrowProposal
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -182,10 +183,11 @@ def exact_capacity_binding(monkeypatch):
     async def resolve(repository, listing_id):
         binding = await repository.load_listing_binding(listing_id=listing_id)
         assert binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             binding.site_id,
             binding.binding.offering_mode,
             str(binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(
