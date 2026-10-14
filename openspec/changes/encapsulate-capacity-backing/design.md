@@ -692,6 +692,19 @@ Decided or learned while implementing, each within a decision above:
   of every site; another site naming its resource the same way cannot cover the
   quantity. Reconciliation already keys availability by site and resource, so this
   was the one unscoped read. The guard itself is unchanged.
+- **API-credit reconciliation has a source pass.** API credits has no publication
+  loop: its listings are reconciled only when the capacity runtime reconciles, on
+  each capacity event and on the full reconcile when a poller starts or finds a gap
+  in its feed. Each of those passes now closes, before the availability passes,
+  every open listing whose bound pool no longer supports it — the resource gone from
+  the pool, the pool unresolvable, disabled or not advertising API credits, or its
+  backing changed — under the same rule the reopen path refuses by. It runs on every
+  pass rather than inside the availability close, because a resource moved between
+  pools with its capacity unchanged is fed as a release, which the availability
+  close never sees. A site whose pools cannot be read closes nothing. A pool's
+  declarations edited in place emit no capacity event, so its listings close on the
+  next pass rather than at once; the listing-source check refuses them meanwhile,
+  and a timer would add a publication loop this domain does not otherwise need.
 - **The credits projection is proven over the real service.** The pool directory
   reaches the resource-pool projection only through the credits service's own
   router wiring, which no lower test sees. The service's signed-authority suite

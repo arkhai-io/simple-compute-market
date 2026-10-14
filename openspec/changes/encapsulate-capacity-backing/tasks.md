@@ -407,6 +407,20 @@ move each domain's behaviour onto the delegate and can land in any order.
 - [x] 6.11 Validation: `make test-apicredits`, `cd domains/apicredits/service && make test`,
       and `make check-architecture`.
       *Done.*
+- [x] 6.12 **Review corrections.** `listing_binding.py`'s `api_credit_listing_source`
+      returns the binding with its bound pool, and `quota_pool` takes that pool: the
+      source check and reopen refuse a resource moved to another pool.
+      `negotiation_runtime.py`'s quota snapshot reads only the bound site.
+      `publication_service.py`'s `close_token_listings_on_source_mismatch` closes, on
+      every reconcile pass and first, each open listing its bound pool no longer
+      supports, under the rule reopen refuses by; an unreadable site closes nothing.
+      Tests: the moved pool in `test_listing_source_check.py` and
+      `test_publish_reconcile.py`; the source pass with quota left, through a release,
+      and an unreadable site, in `test_publish_reconcile.py`; the pass's order in
+      `unit/test_capacity_reconcile_converges.py`; two sites sharing a resource ID in
+      `test_sync_negotiation.py`; the projection through the typed reader client over
+      the real service in `service/tests/integration/test_signed_authority.py`.
+      *Done.* Storefront 141 passed; service 72 passed.
 
 ## 7. Whole-tree validation
 

@@ -75,16 +75,20 @@ class _QuotaRuntime:
         *,
         backing: str = "backed",
         pool_id: str = "default",
+        reachable: bool = True,
     ) -> None:
         self._values = values
         self._backing = backing
         self._pool_id = pool_id
+        self._reachable = reachable
 
     def site_client(self, site_id: str) -> "_QuotaRuntime":
         assert site_id == "tokens"
         return self
 
     async def resource_pool_projection(self) -> dict:
+        if not self._reachable:
+            raise ConnectionError("credits site unreachable")
         return {
             "resource_pools": [
                 {
@@ -356,6 +360,50 @@ async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
 
     assert await reopen_token_listings_after_capacity_change(db, released) == []
     assert (await db.load_listing(listing_id="L-moved"))["status"] == "closed"
+
+
+async def _reconcile_release(db, monkeypatch, runtime):
+    """Run the capacity reconciler as the ledger feeds a pool move: a release."""
+    from apicredits_storefront.services import publication_service as publication_module
+
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(publication_module, "build_capacity_runtime", lambda factory: runtime)
+    await _capacity_reconciler(lambda: db)(
+        CapacityReconcileContext(
+            projections=(),
+            availability=await runtime.availability(),
+            delta=CapacityDelta(kind="released", version=2, site="tokens"),
+        )
+    )
+    return await db.load_listing(listing_id="L-bound")
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        _QuotaRuntime({"svc-a": 5}, backing="unbacked"),
+        _QuotaRuntime({"svc-a": 5}, pool_id="other"),
+    ],
+    ids=["backing-changed", "moved-to-a-pool-with-the-same-backing"],
+)
+async def test_an_open_listing_whose_source_changed_closes_with_quota_left(
+    db, monkeypatch, runtime
+):
+    await _insert_listing(db, "L-bound", "svc-a", "open")
+
+    listing = await _reconcile_release(db, monkeypatch, runtime)
+
+    assert (listing["status"], listing["closed_by"]) == ("closed", "reconciliation")
+
+
+async def test_an_unreadable_source_closes_no_open_listing(db, monkeypatch):
+    await _insert_listing(db, "L-bound", "svc-a", "open")
+
+    listing = await _reconcile_release(
+        db, monkeypatch, _QuotaRuntime({"svc-a": 5}, reachable=False)
+    )
+
+    assert listing["status"] == "open"
 
 
 def _quota_service(db, monkeypatch, runtime):

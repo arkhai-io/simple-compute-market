@@ -56,11 +56,16 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
     async def reconcile(context: CapacityReconcileContext) -> None:
         from apicredits_storefront.services.publication_service import (
             close_token_listings_after_capacity_change,
+            close_token_listings_on_source_mismatch,
             converge_registries,
             reopen_token_listings_after_capacity_change,
         )
         delta = context.delta
         db = sqlite_client_factory()
+        # Source reconciliation runs on every pass, whatever the event: moving
+        # a resource to another pool changes no capacity and is fed as a
+        # release, which the availability close never sees.
+        await close_token_listings_on_source_mismatch(db)
         if delta is None or delta.kind in _CONSUMING or delta.kind in _MIXED:
             await close_token_listings_after_capacity_change(db, dict(context.availability))
         if delta is None or delta.kind == "released" or delta.kind in _MIXED:

@@ -1,4 +1,4 @@
-"""Each capacity reconciliation ends by converging the registries."""
+"""Each capacity reconciliation starts with its source pass and ends by converging."""
 
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ async def test_every_reconciliation_ends_by_converging_the_registries(
 
     monkeypatch.setattr(
         publication_service,
+        "close_token_listings_on_source_mismatch",
+        await record("source"),
+    )
+    monkeypatch.setattr(
+        publication_service,
         "close_token_listings_after_capacity_change",
         await record("close"),
     )
@@ -48,5 +53,8 @@ async def test_every_reconciliation_ends_by_converging_the_registries(
         )
     )
 
+    # A pool move is fed as a release, so the source pass cannot wait for a
+    # consuming event.
+    assert calls[0] == "source"
     assert calls[-1] == "converge"
     assert calls.count("converge") == 1

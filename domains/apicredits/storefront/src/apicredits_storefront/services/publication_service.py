@@ -17,11 +17,11 @@ from market_capacity_publication import (
     ReconciliationPlan,
     backing_changed,
 )
-from market_resource_pools_contracts.backing import CapacityBacking
 from registry_client import ListingRequest, UpdateListingRequest
 
 from apicredits_storefront.listing_binding import (
     BoundQuotaSource,
+    QuotaPool,
     QuotaPoolUnavailable,
     api_credit_listing_binding,
     api_credit_listing_source,
@@ -159,18 +159,26 @@ async def close_token_listings_after_capacity_change(db: Any, availability: dict
     return list(result["closed"])
 
 
-async def _source_backings(
-    bound: dict[str, BoundQuotaSource], db: Any
-) -> dict[str, CapacityBacking | None]:
-    """The backing each listing's bound pool declares now, or ``None`` if unknown.
+#: The listing's bound pool could not be read; nothing about its source is known.
+SOURCE_UNCONFIRMED = "source_unconfirmed"
+#: The bound pool no longer holds, enables, or advertises the listing's resource.
+SOURCE_MISMATCH = "source_mismatch"
+#: The bound pool declares a backing other than the listing's.
+BACKING_CHANGED = "backing_changed"
 
-    Read once per site from its resource-pool projection. A site that cannot
-    be read, or a resource no longer in the pool its listing was bound to,
-    leaves the listing's backing unknown, which reopens nothing.
+
+async def _bound_pools(
+    bound: dict[str, BoundQuotaSource], db: Any
+) -> dict[str, QuotaPool | QuotaPoolUnavailable | None]:
+    """Each listing's bound pool as its site declares it now.
+
+    Read once per site from its resource-pool projection. A pool that cannot
+    back the listing is its refusal; a site that cannot be read is ``None``,
+    which says nothing about the source either way.
     """
     capacity = build_capacity_runtime(lambda: db)
     pools_by_site: dict[str, list[dict[str, Any]] | None] = {}
-    backings: dict[str, CapacityBacking | None] = {}
+    pools: dict[str, QuotaPool | QuotaPoolUnavailable | None] = {}
     for listing_id, source in bound.items():
         binding = source.binding
         if binding.site_id not in pools_by_site:
@@ -179,20 +187,64 @@ async def _source_backings(
                     binding.site_id
                 ).resource_pool_projection()
                 pools_by_site[binding.site_id] = list(projection["resource_pools"])
-            except Exception:  # noqa: BLE001 - an unreadable site reopens nothing
+            except Exception:  # noqa: BLE001 - an unreadable site confirms nothing
                 pools_by_site[binding.site_id] = None
-        pools = pools_by_site[binding.site_id]
+        site_pools = pools_by_site[binding.site_id]
+        if site_pools is None:
+            pools[listing_id] = None
+            continue
         try:
-            backings[listing_id] = (
-                quota_pool(
-                    pools, resource_id=binding.source_id, pool_id=source.pool_id
-                ).declaration.backing
-                if pools is not None
-                else None
+            pools[listing_id] = quota_pool(
+                site_pools, resource_id=binding.source_id, pool_id=source.pool_id
             )
-        except QuotaPoolUnavailable:
-            backings[listing_id] = None
-    return backings
+        except QuotaPoolUnavailable as exc:
+            pools[listing_id] = exc
+    return pools
+
+
+def _source_problem(
+    source: BoundQuotaSource, pool: QuotaPool | QuotaPoolUnavailable | None
+) -> str | None:
+    """Why ``source`` no longer matches its bound pool, or ``None`` if it does.
+
+    A listing's backing is fixed for the life of its binding, so a pool that
+    now declares another is a mismatch whatever else it declares.
+    """
+    if pool is None:
+        return SOURCE_UNCONFIRMED
+    if isinstance(pool, QuotaPoolUnavailable):
+        return SOURCE_MISMATCH
+    if backing_changed(source.binding, pool.declaration.backing):
+        return BACKING_CHANGED
+    return None
+
+
+async def close_token_listings_on_source_mismatch(db: Any) -> list[str]:
+    """Close every open listing its bound pool no longer supports.
+
+    Source reconciliation applies to every listing, whatever its backing, and
+    closes only on a definite mismatch: a site that cannot be read leaves its
+    listings as they are. The reopen pass refuses the same mismatches, so a
+    listing closed here reopens only once its bound pool supports it again,
+    and never after a backing change.
+    """
+    rows = await db.list_listings(status="open", limit=200)
+    _sources, bound = await _credit_listing_sources(db, rows)
+    if not bound:
+        return []
+    pools = await _bound_pools(bound, db)
+    plan = ReconciliationPlan(
+        close=tuple(
+            BoundListing(listing_id, source.binding)
+            for listing_id, source in bound.items()
+            if _source_problem(source, pools[listing_id])
+            in (SOURCE_MISMATCH, BACKING_CHANGED)
+        )
+    )
+    if not plan.close:
+        return []
+    result = await build_publication_runtime(db).reconcile(plan)
+    return list(result["closed"])
 
 
 async def reopen_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
@@ -200,17 +252,11 @@ async def reopen_token_listings_after_capacity_change(db: Any, availability: dic
     sources, bound = await _credit_listing_sources(db, rows)
     if availability is None or not sources:
         return []
-    source_backings = await _source_backings(bound, db)
+    pools = await _bound_pools(bound, db)
 
     def declared(listing_id: str) -> str | None:
-        # A listing's backing is fixed for the life of its binding: one whose
-        # pool now declares another, or cannot be read, is not reopened.
-        source_backing = source_backings.get(listing_id)
-        if source_backing is None:
-            return "source_unconfirmed"
-        if backing_changed(bound[listing_id].binding, source_backing):
-            return "backing_changed"
-        return None
+        # A listing reopens only while its bound pool is known to support it.
+        return _source_problem(bound[listing_id], pools[listing_id])
 
     ids = reopenable_credit_listing_ids(
         sources,
