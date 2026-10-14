@@ -9,6 +9,12 @@ Statuses here describe readiness, not merely whether a checklist exists:
 - **blocked** — retain design/specification, but do not begin blocked implementation;
 - **deferred** — no implementation checklist until the recorded activation condition is met.
 
+## Focused registry repair
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`supply-bare-metal-registry-credential`](supply-bare-metal-registry-credential/) | implemented and promoted; focused checks passed, external review/deployment qualification pending | Bare-metal signed publication supplies an optional Secret-backed bearer to its configured registry; dedicated Helm deployment exposes the public registry trust pin |
+
 ## Focused scenario qualification
 
 | Change | Status | Acceptance boundary |

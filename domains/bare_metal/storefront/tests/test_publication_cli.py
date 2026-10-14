@@ -17,6 +17,7 @@ from market_identity import Eip191Signer, TrustedIdentitySet
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.publication_cli import run_publication_once
+from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
@@ -116,6 +117,31 @@ def test_the_registry_transport_is_the_one_configured_registry(tmp_path):
 
     assert isinstance(client, MultiRegistryClient)
     assert client.urls == ["https://registry.example"]
+
+
+@pytest.mark.parametrize("api_key", [None, "", "development-registry-api-key"])
+async def test_registry_environment_and_factory_supply_only_the_optional_bearer(api_key):
+    # Deterministic development bearer; never use it on a public network.
+    environ = dict(ENVIRON)
+    if api_key is not None:
+        environ["BARE_METAL_STOREFRONT_REGISTRY_API_KEY"] = api_key
+    configuration = BareMetalRegistryConfiguration.from_environment(environ)
+
+    assert configuration.api_key == (api_key or None)
+    assert configuration.url == ENVIRON["BARE_METAL_STOREFRONT_REGISTRY_URL"]
+    assert configuration.trust.authority == (
+        ENVIRON["BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY"]
+    )
+    assert configuration.trust.principals.identities == (REGISTRY.identity,)
+    if api_key:
+        assert api_key not in repr(configuration)
+    factory = configuration.client_factory(SELLER)
+    async with factory() as client:
+        assert client.urls == [configuration.url]
+        (registry,) = client._clients
+        assert registry._client.headers.get("Authorization") == (
+            f"Bearer {api_key}" if api_key else None
+        )
 
 
 def test_the_command_fails_closed_without_trusted_site_clients(tmp_path):
