@@ -211,6 +211,6 @@ MUST own no architecture exception row when it is archived.
 - The single permitted directional roadmap and its no-tasks/no-acceptance-criteria/no-status constraints: `docs/development/ROADMAP.md`.
 - Roadmap currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 5.
 - Campaign index currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 6.
-- Packaging check at change closeout: `openspec/README.md#plan-closeout-requirements`, part 8; `make check-packaging`, which runs `make check-architecture`; a change's own exception rows: `make check-architecture-change CHANGE=<name>`.
+- Packaging check at change closeout: `openspec/README.md#plan-closeout-requirements`, part 7; `make check-packaging`, which runs `make check-architecture`; a change's own exception rows: `make check-architecture-change CHANGE=<name>`.
 
 Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.

@@ -5,7 +5,10 @@ each step uses and how to start it, what a review leaves behind, and where the
 owner's corrections are recorded. The phases, the closeout parts, and the rules
 each step follows are in [`openspec/README.md`](../../openspec/README.md); the
 status a change is in, and what it waits on, are in its row of the
-[change index](../../openspec/changes/README.md).
+[change index](../../openspec/changes/README.md). The workflow's contract is the
+[`change-workflow` specification](../../openspec/specs/change-workflow/spec.md),
+and why it is shaped as it is, its
+[architecture companion](../../openspec/specs/change-workflow/architecture.md).
 
 ## Skills
 

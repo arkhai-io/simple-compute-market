@@ -119,7 +119,7 @@ wrote it, so the reviewer keeps the context behind its findings, but MUST still 
 the triage and dispositions from the records. The `reviews/` directory MUST NOT be
 tracked by version control and MUST NOT be cited by permanent documentation;
 anything durable in it MUST reach permanent documentation through the ordinary
-promotion path before the directory is deleted.
+promotion path at closeout.
 
 #### Scenario: A pre-closeout review asks whether feedback was addressed
 

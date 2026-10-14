@@ -1,6 +1,7 @@
 Skills are written in the order the workflow uses them, and each is proven on a
 pilot before the next is written. `capacity-shape-envelope` runs the whole
-sequence; `add-full-stack-ci-job` proves design and planning from a bare proposal.
+sequence; `add-full-stack-ci-job` was to prove design and planning from a bare
+proposal, and that pilot was withdrawn (3.3).
 A pilot task records what the skill produced and what, if anything, the owner had
 to repair by hand.
 
@@ -20,10 +21,9 @@ to repair by hand.
 - [x] 1.4 Add `make check-agent-skills` (`scripts/check_agent_skills.py`, tests in
       `scripts/tests/test_check_agent_skills.py`): every shared skill has a
       `SKILL.md` and a link in every harness, no harness holds a copy, and every
-      link resolves to the shared skill of its own name. Amended: there is no
-      general check aggregate to wire it into — `check-packaging` aggregates
-      packaging checks only — so `change-closeout` runs it among closeout's
-      mechanical checks (10.1).
+      link resolves to the shared skill of its own name. Amended: no general check
+      aggregate exists (`check-packaging` is packaging only), so `change-closeout`
+      runs it among closeout's mechanical checks (10.3).
 - [x] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
       included, to `.gitignore`; confirmed for an active and an archived path.
 
@@ -36,16 +36,14 @@ to repair by hand.
       gates earlier than implementation. List for the owner every row whose
       recorded state the change does not support. 88 rows migrated by a
       fresh-context agent and checked mechanically (vocabulary, dependency
-      targets). Rows the change files contradicted were corrected, among them
-      `bare-metal-mock-provisioned-deal` (recorded "not planned", 55 tasks done)
-      and `repair-storefront-alkahest-configuration` (recorded "implemented",
-      tasks open). By owner decision every change not already implementing is
-      `ready for design`, and external-verification waits are `blocked in
-      closeout` (see `design.md`). Dependencies inferred from proposals were added
-      where the old cells omitted them. Contradictions between two changes' own
-      dependency claims are left for each change's design review, recorded in
-      `Notes` where the migration noticed them. Index prose that contradicted the
-      rows was corrected, and a pre-existing malformed table repaired.
+      targets); rows the change files contradicted were corrected, among them
+      `bare-metal-mock-provisioned-deal` and
+      `repair-storefront-alkahest-configuration`. By owner decision every change
+      not already implementing is `ready for design`, and external-verification
+      waits are `blocked in closeout` (`design.md`). Dependencies inferred from
+      proposals were added; contradictions between two changes' own dependency
+      claims are left for each change's design review, noted in `Notes`.
+      Contradicting index prose and a malformed table were repaired.
 - [x] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
       and the `Depends on` rule.
 - [x] 2.3 Amend part 6 (campaign index currency) of
@@ -53,6 +51,7 @@ to repair by hand.
       step: remove the completing change from every dependent's `Depends on`,
       return each dependent not yet implementing to `ready for design`, and record
       reverification as owed on a `blocked in` dependent rather than overwriting it.
+      (Moved to archive cleanup by 10.3a; dependents returned per 10.6a F4.)
 
 ## 3. Design discussion
 
@@ -64,25 +63,18 @@ to repair by hand.
       refuses to start while a dependency gating design is unlanded, checks for
       drift since an earlier design, and leaves `tasks.md` to planning.
 - [x] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
-      judges depth against a browser session on the same questions. First
-      response compared: the skill matched the browser session on every shared
-      point and raised a conceptual error, a guidance violation, and a false
-      claim the browser missed; the browser alone raised a double-claimed call
-      site and separate reporting of inadmissible shapes. Amended the skill at
-      the owner's direction: open with a summary of the change, then
-      corrections, then each decision as context, alternatives, and a
-      recommendation with its reason. After the design was recorded, the owner's
-      review of the session amended it again: decisions are classified as
-      judgement, consequence, or convention, with the latter two batched;
-      documentation placement is never asked; absence of a caller is not on its
-      own a reason to leave a capability out; representations are shown as
-      concrete example documents; every caller is walked through a new
-      interface; a corrected premise reopens the decision resting on it; the
-      owner's redirections are logged to the ledger; and before recording, the
-      rationales, callers, scope growth, and unrecorded principles are checked
-      as a whole.
-      Done: the design was recorded, passed its design gate after reviews 03–06,
-      and the change went on to archival.
+      judges depth against a browser session on the same questions.
+      The skill matched the browser on every shared point and also raised a
+      conceptual error, a guidance violation, and a false claim it missed; the
+      browser alone raised a double-claimed call site and separate reporting of
+      inadmissible shapes. Amended at the owner's direction: a summary, then
+      corrections, then each decision as context, alternatives, and a reasoned
+      recommendation; after the owner's review of the session, decision classes
+      (judgement, consequence, convention, the latter two batched), no placement
+      questions, no caller not alone a reason to omit a capability, example
+      documents, every caller walked through a new interface, reopening on a
+      corrected premise, ledgered redirections, and a whole-design check before
+      recording. The design passed its gate after reviews 03–06.
 - [x] 3.3 **Withdrawn** 2026-10-14: Pilot: design `add-full-stack-ci-job` from its proposal.
       The `add-full-stack-ci-job` pilot (3.3, 4.4, 6.3, and 5.2's half) is withdrawn
       at the owner's direction: no second full design cycle is run for this change.
@@ -99,18 +91,17 @@ to repair by hand.
       compliance lenses as exhaustive cited checking, reading earlier reviews and
       triage from `reviews/`, and producing one Markdown review whose findings
       carry lens, basis, severity, and evidence in the fixed field layout.
-      Written at `.agents/skills/change-review/`. Beyond the owner's questions,
-      the design review also walks every caller through each new interface,
-      checks each rationale against the other decisions, and compares scope with
-      the original proposal — the gaps the first pilot design discussion left.
+      Written at `.agents/skills/change-review/`. The design review also walks
+      every caller through each new interface, checks each rationale against the
+      other decisions, and compares scope with the proposal — gaps the first
+      design pilot left.
 - [x] 4.2 Add `make review CHANGE=<change> KIND=<kind>`, running the skill in Codex
       non-interactively with a read-only sandbox and capturing its final message
       as the next numbered file in `reviews/`.
       `scripts/run_change_review.py`, tests in
-      `scripts/tests/test_run_change_review.py`. The full session goes to
-      `reviews/NN-<kind>.log` beside the review, for the session export. The
-      implementation kinds take `REVIEW_BASE` (default `dev`); `MODEL` overrides
-      the Codex model. A failed or empty run leaves no review record.
+      `scripts/tests/test_run_change_review.py`. The implementation kinds take
+      `REVIEW_BASE` (default `dev`); `MODEL` overrides the Codex model. The
+      transcript's location and failed-run handling are superseded by 4.2a.
 - [x] 4.2a Amended after implementation review 1 (browser): the reviewer's
       session moved to `reviews/transcripts/`, which no review or triage step
       reads, so the Markdown review stays the only record of its findings; the
@@ -126,28 +117,26 @@ to repair by hand.
       that wrote the latest review of the same kind, read-only through
       configuration (verified to refuse writes), named by a session comment in
       each published record; `FRESH=1` starts a new reviewer. `change-triage`
-      amended after its second use: findings that depend on an open decision are
-      held from the first pass, review findings are always logged under their
-      own review, revised dispositions name what they revise, the count of
-      ledger entries written is reported, and a re-review is recommended when
-      dispositions changed a central decision. `make review` also streams a
-      condensed progress view to the terminal — session header, each command,
-      failures, errors, and the agent's messages cut to four lines — while the
-      transcript keeps everything.
+      amended after its second use: findings depending on an open decision held
+      from the first pass, review findings logged under their own review, revised
+      dispositions naming what they revise, the count of ledger entries reported,
+      and a re-review recommended when dispositions changed a central decision.
+      `make review` streams a condensed progress view; the transcript keeps
+      everything.
 - [x] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.
-      Result: failed. Compared at closeout from the records — browser reviews 04 and
-      05, harness reviews 03 and 06 — four accepted browser findings had no harness
-      counterpart: older storefronts silently ignoring the new declaration (04 F2,
-      should), the envelope constraining stated dimensions rather than what is
-      provisioned (04 F6, should), and a `tasks.md` still describing the earlier
-      design, missed in both rounds (04 F7, 05 F6, blocking). The harness raised
-      findings the browser missed too (06 matched all four round-2 architecture
-      findings). `change-review`'s design questions were amended at the owner's
-      direction: consistency checks that a promised behaviour acts on what it says it
-      governs, architecture walks each interface across versions, and readiness asks
-      whether an existing `tasks.md` describes the settled design.
+      Result: failed. From the records — browser 04 and 05, harness 03 and 06 —
+      four accepted browser findings had no harness counterpart: older storefronts
+      silently ignoring the new declaration (04 F2, should), the envelope
+      constraining stated rather than provisioned dimensions (04 F6, should), and
+      a `tasks.md` still describing the earlier design, missed in both rounds
+      (04 F7, 05 F6, blocking). The harness raised findings the browser missed too
+      (06 matched all four round-2 architecture findings). `change-review`'s
+      design questions amended at the owner's direction: consistency checks that a
+      promised behaviour acts on what it says it governs, architecture walks each
+      interface across versions, and readiness asks whether an existing
+      `tasks.md` describes the settled design.
 - [x] 4.4 **Withdrawn** 2026-10-14: Pilot: design review of `add-full-stack-ci-job`.
       See 3.3.
 
@@ -163,19 +152,13 @@ to repair by hand.
       to the next phase's `ready for` status per the transition table in
       `design.md`.
       Written at `.agents/skills/change-triage/`. It also saves a pasted external
-      review as the next numbered record (`NN-<kind>-external.md`) and triages
-      it beside the harness review of the same kind, merging duplicate findings;
-      classifies each accepted finding's outcome as an edit, a design decision
-      (sent to `change-design`, never settled in triage), a task, or none; and
-      never dismisses a finding that challenges an owner decision on the
-      grounds that the owner made it. Amended after its first use, where the owner could
-      not decide from the triage without opening the review: each finding now
-      states what the change says now, the reviewer's reasoning, why it matters,
-      and the agent's position in prose; findings needing no choice are
-      confirmed in one batch, and each finding needing a design choice is
-      presented alone with its alternatives, so choosing the option is the
-      disposition; one label per issue throughout. `change-design` now triages
-      waiting reviews before opening its own discussion.
+      review as `NN-<kind>-external.md`, merged with the harness review of its
+      kind; classifies accepted outcomes as edit, design decision (sent to
+      `change-design`), task, or none; and never dismisses a finding for
+      challenging an owner decision. Amended after first use: each finding states,
+      in prose, what the change says, the reviewer's reasoning, why it matters,
+      and the agent's position. Presentation superseded by 9.8 and 9.10, ledger
+      scope by 10.3d. `change-design` triages waiting reviews first.
 - [x] 5.2 Pilot: triage the 4.3 and 4.4 reviews, passing each design gate.
       Done for `capacity-shape-envelope`: its design reviews 03–06 were triaged and
       the design gate passed. The `add-full-stack-ci-job` half is withdrawn with 4.4
@@ -191,30 +174,21 @@ to repair by hand.
       implemented in one fresh session. It moves the index row to `in planning`
       when planning starts and to `ready for implementation` when the owner
       accepts the plan.
-      Written at `.agents/skills/change-plan/`. Built to continue the design
-      session, at the owner's preference, for its context; to keep the plan
-      standing on the record, it first writes into `design.md` anything a task
-      relies on that only the discussion holds, and stops for design on any
-      question the design did not answer. It settles the provisional
-      documentation destinations the design delegated to planning, and logs
-      plan redirections to the ledger as `"review": "plan"`. Amended after
-      implementation review 2 (browser): a design question planning exposes
-      returns the change to design, and planning resumes after another design
-      review or the owner's recorded waiver of it (also in the `change-workflow`
-      delta); the gate evidence — index row and latest design triage — is read
-      from files before planning starts; completed tasks may be amended or
-      corrected, never deleted or rewritten; tasks may trace to a cited
-      repository obligation as well as a decision or requirement.
-      `change-triage`'s gate step now rewrites the index row's notes with its
-      status.
+      Written at `.agents/skills/change-plan/`, continuing the design session
+      (`design.md`); it settles destinations the design delegated and logs plan
+      redirections as `"review": "plan"`. Amended after implementation review 2
+      (browser): an exposed design question returns the change to design, resuming
+      after another design review or the owner's recorded waiver; gate evidence is
+      read from files; completed tasks are amended, never deleted or rewritten;
+      tasks may trace to a cited repository obligation. `change-triage`'s gate
+      step rewrites the row's notes.
 - [x] 6.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its reviewed
       design. Run continuing the design session, at the owner's preference.
-      The stale 24-task plan was replanned into seven sections and 45 tasks and
-      accepted. Planning stopped correctly on one design question the design
-      left open (local-table derivation) and the owner decided it; the skill
-      then lacked the return-to-design step added afterwards, so the owner's
-      waiver of a re-review was recorded after the fact. Section 4 is confined
-      to a ~2,100-line module and is the section most likely to outgrow one
+      The stale 24-task plan became seven sections and 45 tasks, accepted.
+      Planning stopped correctly on one open design question (local-table
+      derivation), which the owner decided; lacking the return-to-design step
+      added afterwards, the owner's waiver of a re-review was recorded after the
+      fact. Section 4 (a ~2,100-line module) was the likeliest to outgrow one
       session. `make check-doc-citations` now skips untracked `reviews/`.
 - [x] 6.3 **Withdrawn** 2026-10-14: Pilot: plan `add-full-stack-ci-job` from nothing.
       See 3.3.
@@ -235,41 +209,30 @@ to repair by hand.
       section touches. It moves the index row to `in implementation` when the
       first section starts. Decide whether it wraps or replaces
       `openspec-apply-change`.
-      Written at `.agents/skills/change-implement/`. It replaces
-      `openspec-apply-change` for this workflow rather than wrapping it: that
-      generated skill implements every remaining task in one session, the
-      opposite of a section per session, and `openspec update` would overwrite
-      any edit to it; it stays available for changes worked outside this
-      workflow. The skill also refuses to start on a branch that does not carry
-      the change, since several changes are often in flight in one checkout,
-      and stops at a verified point when a section proves larger than planned. Amended at the owner's direction during
-      pilot 7.3: a session may continue into later sections, by a range named at
-      the start (`make implement SECTIONS=1-3`) or on the owner's word after a
-      section is committed, and one implementation review may cover every
-      section committed since the last; each section is still checked, handed
-      off, and committed on its own. After the first multi-section run (sections
-      2–4 in one session, 404k tokens, no compaction, compliance findings
-      decreasing per section): every section now runs `make test` before
-      commit; task notes and plans name each suite's level as `TESTING.md`
-      defines them, and the fresh-context check verifies those claims. The
-      pilot's sections were committed to this change's branch at the owner's
-      direction; the two changes merge together.
+      Written at `.agents/skills/change-implement/`, replacing
+      `openspec-apply-change` for this workflow (`design.md`); it refuses a branch
+      not carrying the change and stops at a verified point when a section
+      outgrows its plan. Amended at the owner's direction during 7.3: a session
+      may continue into later sections (`make implement SECTIONS=1-3`, or on the
+      owner's word), one review covering them, each section still checked, handed
+      off, and committed alone. After the first multi-section run (sections 2–4,
+      404k tokens, no compaction, compliance findings falling per section): every
+      section runs `make test`, and notes name each suite's `TESTING.md` level,
+      verified by the fresh-context check. The pilot's sections were committed to
+      this branch at the owner's direction; the two changes merge together.
 - [x] 7.2 Add a committed Claude Code project hook that, when a session resumes
       after compaction, re-reads the required guidance documents and restates the
       change and section being worked.
       `.claude/settings.json` (now un-ignored; `.claude/settings.local.json`
       stays ignored) runs `scripts/post_compaction_context.py` on `SessionStart`
-      with the `compact` matcher, whose output Claude Code adds to context.
-      Claude Code caps injected context at 10,000 characters and the required
-      documents are about 250 KB, so the hook names them to re-read in full —
-      never a digest — with the branch and the changes in progress. Tests in
-      `scripts/tests/test_post_compaction_context.py`; the hook's firing is
-      proven on the first compaction in a new session.
+      with the `compact` matcher. Under the 10,000-character cap (`design.md`) it
+      names the documents to re-read in full, with the branch and the changes in
+      progress. Tests in `scripts/tests/test_post_compaction_context.py`; the
+      hook's firing is proven on the first compaction in a new session.
 - [x] 7.3 Pilot: implement the first section of `capacity-shape-envelope` in its
       own session, recording what the fresh-context check caught.
-      Done as sections 1–4 of `capacity-shape-envelope` (7.1's notes): the check
-      caught a blocking constraint-loss bug in section 1, and compliance findings
-      fell per section across the multi-section run.
+      Done as sections 1–4 (7.1): the check caught a blocking constraint-loss bug
+      in section 1, and compliance findings fell per section.
 
 ## 8. Pre-review validation
 
@@ -285,14 +248,12 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       after; stopping at the first failure; each step's log under
       `.snapshot/validation/<commit>/`; and a summary of each step's result,
       duration, and a failing step's output tail.
-      Done; the part starts with `make dist-clean` (`design.md`), and logs go
-      under `.snapshot/validation/<short commit>/local/` (corrected by 8.8: one
-      numbered directory per attempt beneath it). Unit
-      (`test_validate_slice.py`, fake runner and reader injected): the step order
-      against fakes, the first-failure stop with its output tail, a dirty tree
-      (the fake answers only `git status --porcelain --untracked-files=all`)
-      running nothing, and a step that dirties the tree failing the check after it.
-      Not yet run for real: `make validate-local` is first exercised by 8.6.
+      Done; the part starts with `make dist-clean` (`design.md`), logs under
+      `.snapshot/validation/<short commit>/local/<n>/` (8.8). Unit (fake runner
+      and reader): the step order, the first-failure stop with its tail, a dirty
+      tree (the fake answers only `git status --porcelain --untracked-files=all`)
+      running nothing, and a step that dirties the tree failing the check after
+      it. First run for real in 8.6.
 - [x] 8.2 Add `make validate-helm` to the same script: refuse a kube context other
       than `HELM_CONTEXT` (default `docker-desktop`); fail before running anything
       when the VM storefront environment is absent, naming `make init-storefront`;
@@ -303,35 +264,22 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       run with `make test-module` and reported as not run; `make unforward`
       whatever failed; a clean worktree afterwards. The list starts from the
       services the default chart values do not deploy and is confirmed by 8.6.
-      Corrected after 8.6: the exclusion list became `HELM_SCENARIOS`, the scenarios
-      the default charts serve (`contracts`, `e2e_alkahest_escrow_codecs`); every
-      other pipeline scenario is reported as not run against Helm.
-      Corrected by 8.10 and 8.11: preflights now include Docker, the node, the
-      Secrets, freed ports, and retained volumes, and `make deploy` became the
-      uninstall-then-`deploy-local` sequence.
-      Done, in `validate_slice.py`, also starting with `make dist-clean`, then
-      `make build-dev` and a reinstall of the VM storefront environment before the
-      render checks, so the loader check runs this commit's code. Unit: the step order, the exclusions reported as
-      not run, the context refusal and the missing storefront environment running
-      nothing, a render `skip:` line failing, a failing scenario and ports that never
-      open both still unforwarding, and a marker list that is not a plain `or` list
-      refused. One test reads the real `e2e-tests/Makefile` variables through
-      `make`, so a renamed or reshaped variable fails it. Beyond the plan:
-      `e2e-tests/Makefile`'s `test-module` now quotes `MODULE`, so a marker
-      expression passes through; and the scenarios wait, with a bound, for
-      the forwarded ports to accept connections, because `make forward` starts its
-      port-forwards in the background. The exclusion list is
-      `HELM_EXCLUSIONS`: `multi_registry`, `e2e_credits_deal`,
-      `e2e_vm_introduction` (Mailpit is deployed but not forwarded), and both
-      bare-metal scenarios, each with what is missing. `HELM_ALL_SCENARIOS=1`
-      (`--all-scenarios`) ignores the list, for 8.6; the tests prove the empty
-      list's effect, not the flag's plumbing. 8.6 risk: `build-dev` regenerates
-      the tracked `alkahest_anvil_addresses.json` and syncs the storefront without
-      `--frozen`, so the clean check afterwards fails unless both are
-      reproducible. Not yet run against a cluster; 8.6 should expect
-      `e2e_deal_buyer_cli` and `e2e_buy` may also fail for topology, since the
-      pipeline runs them inside the compose network and this run reaches the
-      storefront through port-forwards.
+      Done in `validate_slice.py`, as corrected by 8.6, 8.10, and 8.11:
+      `make dist-clean`, the preflights, `make build-dev`, and a VM storefront
+      reinstall before the render checks, so the loader check runs this commit;
+      uninstall then `deploy-local`; `HELM_SCENARIOS` (`contracts`,
+      `e2e_alkahest_escrow_codecs`, what the default charts serve) run, every
+      other pipeline scenario reported not run (replacing `HELM_EXCLUSIONS`);
+      `HELM_ALL_SCENARIOS=1` runs all. Scenarios wait, bounded, for the background
+      port-forwards; `test-module` quotes `MODULE` for marker expressions. Unit:
+      step order, unserved scenarios not run, the context and missing-environment
+      refusals running nothing, a render `skip:` failing, unforwarding after a
+      failing scenario or unopened ports, a non-`or` marker list refused; one test
+      reads the real `e2e-tests/Makefile` variables through `make`. The tests
+      prove the flag's effect, not its plumbing. The risk that `build-dev`, which
+      regenerates the tracked `alkahest_anvil_addresses.json` and syncs the
+      storefront without `--frozen`, would dirty the tree did not occur: every
+      Helm part from validation 10 on ended clean.
 - [x] 8.3 Add `make check-push-ready` and `make push-branch`
       (`scripts/check_push_ready.py`, tests against temporary Git repositories):
       refuse a detached `HEAD`, a dirty worktree, `main` or `dev`, and an upstream
@@ -339,25 +287,20 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       same name on `origin` with its upstream set; push exactly `HEAD`, never
       forced; report and never repair.
       Done. `test_check_push_ready.py` drives real Git against a temporary
-      repository and bare remote: a new branch pushed and tracking its own name,
-      exactly `HEAD` pushed, a remote that moved on rejecting the unforced push,
-      and each refusal (detached, protected, dirty, another upstream) pushing
-      nothing; the detached and dirty cases also leave the checkout as it was.
+      repository and bare remote: a new branch pushed tracking its own name,
+      exactly `HEAD` pushed, a moved remote rejecting the unforced push, and each
+      refusal pushing nothing, detached and dirty leaving the checkout as it was.
 - [x] 8.4 Make `scripts/fetch-e2e-logs.py` select the run whose head commit is the
       local `HEAD` (`--commit`, defaulting to `HEAD` when no `--run-id` is given),
       polling with a bound for a just-dispatched run and taking the newest match,
       with tests for both gaps: a finished earlier run on the branch, and a run not
       yet listed. Update the run-selection paragraph of
       `docs/development/TESTING.md`'s system integration section to match.
-      Done. Unit (`test_fetch_e2e_logs.py`, existing fake runner extended): a
-      finished run of an earlier commit never fetched, a run listed only on the third
-      poll waited for, the newest of several runs of one commit taken, `--commit`
-      replacing `HEAD` (the script asks Git to resolve it; the fake answers), a
-      repeated dispatch of one commit waiting for a run newer than `--after-run`,
-      `--run-id` refusing either selector, and the error when no run appears,
-      tested with a zero wait. `E2E_COMMIT` and `E2E_AFTER_RUN` reach the script
-      through `make` (asserted on the Makefile text); `TESTING.md` describes the
-      selection.
+      Done. Unit (`test_fetch_e2e_logs.py`, fake runner): an earlier commit's run
+      never fetched, a late-listed run waited for, the newest match taken,
+      `--commit`, `--after-run` for a repeated dispatch, `--run-id` refusing either
+      selector, the no-run error. `E2E_COMMIT` and `E2E_AFTER_RUN` reach the
+      script through `make` (Makefile text asserted); `TESTING.md` describes it.
 - [x] 8.5 Write the `change-validate` skill (`.agents/skills/change-validate/`,
       linked for both harnesses) and `make validate CHANGE=`: check the branch
       carries the change; `make push-branch` and `make run-e2e`; the local and Helm
@@ -366,54 +309,36 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       `reviews/NN-validation.md`, numbered when written, naming the commit, each
       part's result, the Helm exclusions, the run and its conclusion, and the
       diagnoses. It never edits or fixes. `make check-agent-skills`.
-      Done. The skill writes failures as `V<n>` so triage carries them beside review
-      findings; it runs the Helm part even after a local failure, unless the
-      worktree was dirty, so one triage sees every failure. It records the newest
-      run ID before dispatching and fetches only a later run. Proven only by 8.6.
-      Section checks: `make check-packaging` and `make test` passed after
-      `make dist-clean`, with no lock rewritten (before the clean, other
-      branches' wheels in `.dist` made `make test` rewrite six locks and fail
-      `kit/site`); the three new suites, 41 tests, pass; `make
-      check-comment-hygiene` and `make check-agent-skills` pass;
-      `test-release-tooling` fails only
-      `test_settlement_deployment_surfaces.py`'s two tests, as at the section's
-      starting commit. `scripts/tests` is not part of `make test`, so
+      Done. Failures are `V<n>`; Helm runs after a local failure unless the tree
+      was dirty; the newest run ID is recorded before dispatch. Proven only by
+      8.6. Section checks: `check-packaging` and `make test` passed after `make
+      dist-clean`, no lock rewritten (before it, other branches' wheels rewrote
+      six locks and failed `kit/site`); the three new suites, 41 tests, pass;
+      comment hygiene and `check-agent-skills` pass; `test-release-tooling` fails
+      only `test_settlement_deployment_surfaces.py`'s two tests, as at the
+      starting commit. `scripts/tests` is outside `make test`, so
       `validate-local` does not run it.
 - [x] 8.6 Pilot: validate `capacity-shape-envelope` at `HEAD`. The Helm part runs
       the whole scenario set once with no exclusions, and the exclusion list is set
       from what fails for a missing service, as distinct from what fails for a real
       reason.
-      Handoff: run `make validate CHANGE=capacity-shape-envelope` and tell the
-      session to run the Helm part as `make validate-helm HELM_ALL_SCENARIOS=1`;
-      afterwards set `HELM_EXCLUSIONS` in `scripts/validate_slice.py` to what the
-      run shows, as a commit of this change. Both parts run `make dist-clean`, so
-      no other session should be building in the checkout meanwhile.
-      Attempt 1 (`capacity-shape-envelope`'s `09-validation.md`, commit
-      `75c121de`): local and pipeline passed; Helm produced no scenario evidence —
-      a Docker credential-helper timeout, then provisioning crash-looping on a
-      volume another commit's migration had rewritten. The skill ran with the
-      exclusions, because the instruction sat in this change, not the one validated.
-      The owner's review of that record produced 8.8–8.14; re-run after them, as
-      `make validate CHANGE=capacity-shape-envelope HELM_ALL_SCENARIOS=1`.
-      Attempt 2 (`capacity-shape-envelope`'s `10-validation.md`, commit
-      `004e580e`): local passed; pipeline run 37917228588 passed (VM lane 135
-      passed and 3 skipped — the API-credits payment cases, which skip as
-      `blocked: PAYMENTS… not configured` and arrived with the merged `dev`;
-      bare-metal 16 passed). The Helm part's first attempt stopped at the
-      retained-volume preflight before any build, as designed; on the owner's word
-      the release was uninstalled and its three `keep` PVCs deleted. The second
-      deployed fresh and ran every pipeline scenario: all that create a listing
-      failed, because the default chart values configure no settlement mechanism
-      (`Settlement.priority: []`, no chain) — unchanged since before this branch
-      merged `dev`, and never exercised before, since earlier Helm runs ran the
-      contract checks only. Only the codec cases and setup stages passed. The owner
-      chose to keep chart work in `helm-e2e-pipeline-parity` and narrow the Helm
-      part to the scenarios the charts serve (8.2's correction); on that scope the
-      record is `passed`. What the pilot showed about the skill: the
-      retained-volume stop and the settle-with-the-owner step worked as written;
-      the three outcomes have no case for "the tooling produced no evidence"; the
-      exclusion list could not be established while one gap blocked every
-      scenario.
+      Attempt 1 (`capacity-shape-envelope`'s `09-validation.md`, `75c121de`):
+      local and pipeline passed; Helm gave no scenario evidence (a credential-helper
+      timeout, then a volume another commit's migration rewrote) and ran with the
+      exclusions, the instruction sitting in this change rather than the one
+      validated. The owner's review produced 8.8–8.14. Attempt 2
+      (`10-validation.md`, `004e580e`, with `HELM_ALL_SCENARIOS=1`): local passed;
+      pipeline run 37917228588 passed (VM 135 passed, 3 skipped — API-credits
+      payment cases from the merged `dev`; bare-metal 16 passed). The
+      retained-volume preflight stopped the first Helm attempt, as designed; on the
+      owner's word the release and its three `keep` PVCs were removed. The second
+      ran every scenario: all that create a listing failed, the default chart
+      values configuring no settlement mechanism (`design.md`). The owner kept
+      chart work in `helm-e2e-pipeline-parity` and narrowed the Helm part (8.2); on
+      that scope the record is `passed`. Skill findings: the retained-volume stop
+      and owner settlement worked; no outcome covered missing evidence (now
+      `inconclusive`, 8.8); one gap blocking every scenario prevented setting the
+      exclusion list.
 - [x] 8.7 Propose a change bringing the Helm charts and `make forward` to the
       pipeline's compose topology, using the compose configuration the pipeline
       runs, so the exclusion list empties; add its row to
@@ -429,21 +354,18 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       `.snapshot/validation/<short commit>/<part>/<n>/` and prints its path; tests
       for attempt numbering. Amend `change-validate`'s record template and
       `run_change_review.py`'s pre-closeout check (9.3) to accept only `passed`.
-      Done. Unit: two attempts of one part write `1/` and `2/`, each with its own
-      `summary.json` carrying its `attempt`; the printed path is not asserted. The
-      outcome is the skill's, in the record template, since only the diagnosis
-      tells an environmental fault from a broken build; 9.3 now names the
-      `passed` result.
+      Done. Unit: two attempts write `1/` and `2/`, each `summary.json` carrying
+      its `attempt`; the printed path is not asserted. The outcome is the skill's
+      (`design.md`); 9.3 names `passed`.
 - [x] 8.9 Environmental failures in the session: amend `change-validate` to stop on
       a failure diagnosed as environmental with good confidence, put the evidence
       and remedy to the owner, rerun the part as a new attempt on the owner's word,
       record `inconclusive` when the owner declines, never treat an unknown cause
       as environmental, and report validation-tooling defects in a section of the
       record about the validation. State the full-control premise in the skill.
-      Done in the skill: settle-with-the-owner step, an `## Environment` section
-      for environmental failures, `## Failures` only for commit or unknown causes,
-      `## About the validation` for tooling defects, and the full-control premise.
-      Skill text; proven only by 8.6's re-run.
+      Done in the skill (`## Environment`, `## Failures` for commit or unknown
+      causes, `## About the validation`, the premise). Skill text; proven only by
+      8.6's re-run.
 - [x] 8.10 Fresh Helm state: add `persistence.retainOnUninstall` (default `true`)
       to the storefront, provisioning, registry, and bare-metal storefront charts,
       rendering `helm.sh/resource-policy: keep` only when it is true, with render
@@ -451,72 +373,56 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       `make -C helm deploy-local`; the Helm part uninstalls an existing release,
       waits for its PVCs to go, stops on a surviving one, and deploys with
       `deploy-local`. Tests for the sequence and the surviving-PVC stop.
-      Done. Chart render tests (`helm/scripts/test-render.sh`, needs Helm, no
-      cluster): every persistent chart enabled renders five PVCs, all retained by
-      default and none under `local-values.yaml`; breaking the registry template's
-      condition made the overlay check fail, then restored. `deploy` takes
-      `EXTRA_VALUES`, `deploy-local` passes the overlay, `undeploy` uninstalls with
-      `--wait --ignore-not-found`, and `stop` is now its alias. The condition reads
-      the value as a string, so `--set-string …=false` turns retention off too.
-      Each PVC is checked by name in both renders; breaking the storefront
-      template's condition failed exactly its check. Unit (fakes that record the
-      cluster queries and port probes with the commands, and model the forwards
-      and volumes as state): before the build, the forwards stopped, their ports
-      polled until free, and a PVC carrying `keep` refused; after it, `undeploy`,
-      the volumes polled until gone (one removed on the second poll), then
-      `deploy-local`; a volume still present at the deadline stops the deploy. The PVC query
-      selects `app.kubernetes.io/instance=<release>`, which every release PVC
-      carries; release and namespace are read from `helm/Makefile`. The bare-metal
-      storefront schema gains the property; the other charts' schemas do not
-      constrain `persistence`. `DEPLOYMENT_AND_CONFIG.md` describes the
-      convention. Not yet run against a cluster.
+      Done. Render tests (`helm/scripts/test-render.sh`, needs Helm, no cluster):
+      five PVCs, each by name, retained by default and not under
+      `local-values.yaml`; breaking a template's condition fails exactly its
+      check; `--set-string …=false` also disables retention. `deploy` takes
+      `EXTRA_VALUES`; `deploy-local` passes the overlay; `undeploy` uninstalls with
+      `--wait --ignore-not-found` (`stop` its alias). Unit (fakes modelling
+      forwards and volumes as state): before the build, forwards stopped, ports
+      free, a `keep` PVC refused; after it, `undeploy`, volumes polled until gone,
+      `deploy-local`; a volume left at the deadline stops the deploy. PVCs are
+      selected by `app.kubernetes.io/instance=<release>`; only the bare-metal
+      storefront schema gains the property. `DEPLOYMENT_AND_CONFIG.md` describes
+      the convention. Not run against a cluster when written; first exercised by
+      8.6's attempt 2.
 - [x] 8.11 Preflights: `gh auth status` before the push (skill); in the Helm part,
       `docker info`, a `Ready` node, `make -C helm check-local-secrets` (a new
       target over the chart's eight out-of-band Secret names, with a test that each
       name appears in `helm/values.yaml`), and the forwarded ports free after
       `unforward`; a credential-helper response check that warns only. Tests for
       each refusal and the warning.
-      Done. With the default values a deploy reads six out-of-band Secrets, not
-      eight (`arkhai-api-credits-registry-identity` joins them when
-      `api-credits-registry` is enabled):
-      `arkhai-e2e-credentials` and `arkhai-buyer-profile-credential` (and the
-      `arkhai-buyer-profiles` PVC) are read only by the e2e-tests chart's
-      `helm test` hook, which validation does not run. `check-local-secrets`
-      passes on `docker-desktop`. Unit (fakes): Docker unreachable, a node not
-      Ready, no node, and a missing Secret each stop before `make dist-clean`; a
-      silent credential helper warns and the part still passes; a helper that times
-      out, exits non-zero, or cannot run is each named, and `$DOCKER_CONFIG` is
-      honoured; each listed Secret appears in
-      `helm/values.yaml`. The node query and the helper check were also run
-      against the live machine; the retention query found three `keep` PVCs on the
-      owner's current `docker-desktop` release, so a validation started now stops
-      there and asks. `gh auth status` is a skill step. The ports and retained-volume
-      checks run before the build, after `unforward`, since validation owns the
-      forwards.
+      Done. Default values read six out-of-band Secrets, not eight
+      (`arkhai-api-credits-registry-identity` only with `api-credits-registry`;
+      `arkhai-e2e-credentials`, `arkhai-buyer-profile-credential`, and the
+      `arkhai-buyer-profiles` PVC only by the e2e-tests chart's `helm test` hook,
+      which validation does not run); `check-local-secrets` passes on
+      `docker-desktop`. Unit (fakes): Docker unreachable, a node not Ready or
+      absent, and a missing Secret each stop before `make dist-clean`; a silent
+      helper warns and the part passes; a helper timing out, failing, or missing
+      is named; `$DOCKER_CONFIG` honoured; each Secret appears in
+      `helm/values.yaml`. Node and helper checks also run live; the retention query
+      found three `keep` PVCs on the owner's release (settled in 8.6). Port and
+      volume checks run after `unforward`, before the build.
 - [x] 8.12 Coverage: amend `change-validate` to write the record's coverage section
       (scenario, basis, lane, result; or that none covers the change), reading the
       scenarios from the change's task notes and adding what the diff shows; amend
       `change-plan` to name the end-to-end scenarios each section's verification
       point relies on, and `change-implement` to confirm or correct them in the
       section's notes before committing.
-      Done in the three skills. `change-plan`'s verification point now names the
-      covering scenarios, replacing its rule on when a section owes the Helm
-      checks, which predated validation running them on every commit;
-      `change-implement` confirms them before the last task is checked, and its
-      closing report now describes the round (part of 9.4). Skill text; proven by
-      the next plan and section that use them.
+      Done in the three skills; `change-plan`'s covering scenarios replace its
+      older Helm-checks rule, and `change-implement` confirms them before the last
+      task is checked. Skill text; proven by the next plan and section using them.
 - [x] 8.13 `make validate CHANGE=<change> HELM_ALL_SCENARIOS=1` passes the
       instruction into the session's prompt, and `change-validate` runs the Helm
       part with it and records which scenarios fail only for a missing service.
-      Done. `make validate … HELM_ALL_SCENARIOS=1` opens the session as
-      `/change-validate <change> with HELM_ALL_SCENARIOS=1`; the skill's first step
-      reads it. The Makefile text is asserted; the session read it in 8.6. After 8.6
-      it runs every pipeline scenario instead of the served list, so the list can
-      grow.
+      Done: the session opens as `/change-validate <change> with
+      HELM_ALL_SCENARIOS=1` (Makefile text asserted; read by the session in 8.6);
+      it runs every pipeline scenario, so the served list can grow.
 - [x] 8.14 Record for `capacity-shape-envelope`'s closeout (10.3), to place there:
       a namespace per validation, and chart Secrets made optional with the ordinary
       values overlays as fallback.
-      Done: added to 10.3.
+      Done: recorded in 10.4, where the owner placed them.
 
 ## 8A. Reconcile the development-branch merge
 
@@ -541,26 +447,15 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       roadmap/index currency, and existing promotion destinations. Record failures
       and unrun typing, Docker/Helm end-to-end, or remote pipeline checks; retain
       the corresponding post-review closeout and promotion gates.
-      Local merge checks (2026-10-08): every root unit/integration target passed
-      across the aggregate and resumed run, including the migrated pool-contract
-      and pool API tests, shape-admissibility integration, workflow tooling, all
-      three middleware implementations, E2E unit tests, and Helm render checks.
-      Agent skill links, comment hygiene, strict OpenSpec 1.14.0 validation, and
-      the index's row schema, statuses, link targets, and citations passed.
-      Registry-client typing passed. Core typing still reports its inherited
-      `query_dsl.py:487` assignment error; that file is identical on both parents.
-      The scoped citation check reports four inherited references to the planned
-      workflow specification, architecture companion, and contributor guide,
-      which remain absent until closeout; no missing permanent document is added
-      by this merge. Import placement adds no function-local imports, and roadmap
-      gaps and feature gates remain applicable. Docker and Helm end-to-end and
-      the remote pipeline remain unrun: local containers are already running and
-      the standard stack tests replace volumes; this uncommitted merge has no
-      corresponding pipeline revision. Section 12's promotion and closeout remain
-      open. `make check-packaging` passed against the final rebuilt wheelhouse.
-      Done: the checks above are its record; the closeout and promotion gates it
-      retained are section 12's tasks.
-
+      Local merge checks (2026-10-08) passed: every root unit/integration target,
+      agent skill links, comment hygiene, strict OpenSpec 1.14.0 validation, the
+      index checks, registry-client typing, and `make check-packaging` on the
+      final wheelhouse. Core typing reports the inherited `query_dsl.py:487`
+      error, identical on both parents; scoped citations reported four inherited
+      references to the workflow documents closeout creates; no function-local
+      imports added. Not run: Docker and Helm end-to-end (local containers
+      running; stack tests replace volumes) and the remote pipeline (no revision
+      for the uncommitted merge). The retained gates are section 12's tasks.
 ## 9. Implementation-round triage
 
 The review, validation, and the owner's notes on one commit are triaged together in
@@ -578,19 +473,15 @@ session").
       check, are committed as one commit, and the owner is told to validate it
       again; the pre-closeout gate does not pass without a passing validation of
       `HEAD`.
-      Done in `.agents/skills/change-triage/`, amending its steps rather than adding
-      a parallel procedure, so the presentation and ledger rules keep one copy. A
-      new outcome, `fix`, covers code changes made in the session; the
-      implementation round runs `change-implement`'s checks (its step 5) before
-      one commit — fixes, edited change documents, and `interventions.jsonl` — and
-      never pushes. Environmental entries and `inconclusive` parts are missing
-      evidence; observations about other changes or the tooling are presented, not
-      triaged against the change. After the fresh-context check, it also states:
-      how a round is recognized, the branch and worktree check and the base the
-      fixes are diffed against, a lone re-validation, and owner-note labels `O<n>`.
-      Superseded records and differing commits were later reworked by
-      implementation review 1 (F2, F1; see the notes after 9.5). Skill text;
-      proven by 9.5.
+      Done in `.agents/skills/change-triage/`, amending its steps so the
+      presentation and ledger rules keep one copy. Outcome `fix`: in-session code
+      changes, checked by `change-implement`'s step 5, committed once with the
+      change documents and ledger, never pushed. Environmental entries and
+      `inconclusive` parts are missing evidence; observations about other changes
+      or the tooling are presented, not triaged. The fresh-context check added
+      round recognition, the branch, worktree, and diff-base checks, a lone
+      re-validation, and `O<n>` labels. Reworked by implementation review 1 F1, F2
+      (after 9.10). Skill text; proven by 9.5.
 - [x] 9.2 Add `make triage CHANGE=`, opening a Claude Code session with
       `/change-triage <change>`.
       Done. Its help names the round's inputs.
@@ -599,70 +490,49 @@ session").
       and make `KIND=pre-closeout` refuse unless the latest validation record names
       `HEAD` and its result is `passed`, overridden by `UNVALIDATED=1`. Tests in
       `scripts/tests/test_run_change_review.py`.
-      Done. Corrected by implementation review 1 (external) F3: the note's earlier
-      claim that parallel records "never share" a number was wrong; the
-      requirement is now an establishable order and no overwrite, which the
-      exclusive claim below provides.
-      Unit (`test_run_change_review.py`, the runner and `HEAD` injected): a
-      record written while the reviewer runs makes the review take the next
-      number, and its transcript is renamed from its provisional name, also when
-      the run is interrupted; a
-      pre-closeout review refuses, and starts no reviewer, with no validation
-      record, one naming another commit, an `inconclusive` result, or a later
-      `failed` record over an earlier `passed` one; it runs on a passing record or
-      `UNVALIDATED=1`; an implementation review never checks; a short commit
-      prefix is accepted and a decorated `Commit:` or `Result:` line fails closed,
-      which `change-validate`'s template now warns about. `make -n review …
-      UNVALIDATED=1` emits `--unvalidated`. The test of the reviewer's command
-      passes the override, since it is about the command, not the gate.
+      Done; per implementation review 1 (external) F3 the requirement is an
+      establishable order and no overwrite (the exclusive claim), not unique
+      numbers. Unit (runner and `HEAD` injected): a record written mid-run moves
+      the review to the next number and renames its transcript, also on
+      interruption; pre-closeout refuses, starting nothing, with no record,
+      another commit's, `inconclusive`, or a later `failed` over `passed`, and runs
+      on `passed` or `UNVALIDATED=1`; implementation reviews never check; a short
+      commit prefix is accepted and a decorated `Commit:` or `Result:` fails
+      closed (warned of in the template). `make -n review … UNVALIDATED=1` emits
+      `--unvalidated`.
 - [x] 9.4 Amend `change-implement`'s closing report (review and validation in
       parallel, the owner's notes, then `make triage`; the first three were done
       in 8.12, `make triage` remains) and `change-review`'s inputs
       (read the validation record of the reviewed commit when one exists; never
       wait for one).
-      Done. `change-review` reads the validation of the commit it reviews when one
-      exists, never waits, and names the pre-closeout requirement;
-      `change-implement` and `change-validate` close with `make triage`.
+      Done. `change-review` reads the validation of its commit when one exists,
+      never waits, and names the pre-closeout requirement; `change-implement` and
+      `change-validate` close with `make triage`.
 - [x] 9.5 Pilot: triage `capacity-shape-envelope`'s `07-implementation.md` and
       `08-implementation-external.md` with 8.6's validation record and the owner's
       notes, through `make triage`; compare the two reviews for the pilot record;
       the change stays `in implementation`.
-      Handoff: the owner runs `make triage CHANGE=capacity-shape-envelope` in a
-      fresh session and pastes their notes when asked. The record is
-      `10-validation.md` (commit `004e580e`, `passed` on the narrowed Helm scope,
-      no `V<n>` findings; it notes the API-credits payment skips from the merged
-      `dev`). `07` reviewed sections 1–4 against base `22115762`, so the triage
-      should say how far the validated commit has moved past what the reviews
-      read. Record here what the skill could not handle unaided.
-      Round 1 (`07`, `08`, `09`, `10`) was triaged by the owner under the skill as
-      first built (`93d5733a`). Round 2 ran the amended workflow end to end:
-      `make validate` (`11-validation.md`, `e4bf7a81`, passed; the retained-volume
-      preflight stopped Helm attempt 1 on volumes an agent's plain `make deploy`
-      had left, remedied on the owner's word) and `make review` resuming `07`'s
-      reviewer (`12-implementation.md`, same commit), then `make triage`. Unaided:
-      the triage compared the two records' commits first and found them equal,
-      wrote no notes record since the owner had none, marked the validation's
-      triage file "not a gate", fixed 12 F1 more broadly than the review asked (all
-      rationals, with a test that fails without the fix), logged both findings,
-      and recorded the gate; the resumed reviewer accounted for every earlier
-      finding from `03` to `10` in one table. Gaps, amended in the skills: the fix
-      note did not record the checks it ran (`change-triage` now records them as
-      `change-implement` does); the session presented findings in the labelled
-      layout the owner had replaced in an earlier session, since that layout lived
-      only in session memory (`change-triage` now prescribes the agreed layout).
-      Comparing round 1's reviews: the harness (`07`) found both code defects,
-      which the browser (`08`) missed; the browser's accepted `should` (the
-      publication loop proven only at derivation level) appears in `07`'s testing
-      answer but was never raised as a finding (`change-review` now makes such a
-      gap a finding). An agent's plain `make deploy` caused the retained volumes:
-      `DEPLOYMENT_AND_CONFIG.md`, both Makefiles, and the e2e-tests quick start now
-      say a local cluster is deployed with `make -C helm deploy-local`, and why.
-      The fix commit's round closed with a lone re-validation, both steps run as
-      subagents at the owner's direction: `13-validation.md` (`22bc1408`, which
-      contains `6f04fc01`) passed on every part's first attempt, its
-      retained-volume preflight passing; its triage checked the record against
-      the step summaries and the pipeline log and wrote only the confirming
-      triage file, as the skill's lone re-validation rule says.
+      Round 1 (`07`–`10`; `10-validation.md`, `004e580e`, passed on the narrowed
+      Helm scope; `07` read sections 1–4 against `22115762`) was triaged by the
+      owner under the first-built skill (`93d5733a`). Round 2 ran the amended
+      workflow end to end: `11-validation.md` (`e4bf7a81`, passed after the
+      retained-volume preflight stopped Helm attempt 1 on volumes an agent's plain
+      `make deploy` left, remedied on the owner's word), `12-implementation.md`
+      from `07`'s resumed reviewer, then `make triage`. Unaided, the triage checked
+      the records' commits, fixed 12 F1 more broadly than asked with a test that
+      fails without the fix, and recorded the gate; the resumed reviewer accounted
+      for every finding from `03` to `10`. Gaps, amended in the skills: unrecorded
+      fix checks (`change-triage` records them) and a presentation layout kept
+      only in session memory (`change-triage` prescribes it). Round 1's reviews:
+      the harness (`07`) found both code defects the browser (`08`) missed; the
+      browser's accepted `should` (publication loop proven only at derivation
+      level) was in `07`'s testing answer but not a finding (`change-review` now
+      makes such gaps findings). The stray volumes led `DEPLOYMENT_AND_CONFIG.md`,
+      both Makefiles, and the e2e-tests quick start to require `make -C helm
+      deploy-local`. The fix round closed with a lone re-validation, as subagents
+      at the owner's direction: `13-validation.md` (`22bc1408`, containing
+      `6f04fc01`) passed every part first time; its triage wrote only the
+      confirming file.
 
 - [x] 9.6 Give the owner the round to read as uncommitted changes:
       `make round-diff CHANGE= [BASE=]` (a worktree script, removed by 9.7) checks out
@@ -673,25 +543,12 @@ session").
       runner's `reviewed-commit` comment (`change-triage`). Spec delta and design
       amended (`design.md`, "An implementation round is triaged in a fresh
       session").
-      Done at the owner's direction after round 3 of the pilot, whose sections
-      were committed before the owner could read them; leaving sections
-      uncommitted is the recorded fallback if the worktree does not serve.
-      Integration against real temporary Git repositories
-      (its tests, 11 passed): the worktree's status is
-      the round — modified, deleted, and new files, the change's own documents and
-      `openspec/changes/README.md` included, another change's directory at its
-      base; new files Git would quote and new tracked files `.gitignore` matches
-      appear; the change's directory removed in the round shows as deleted; the
-      base is the latest triaged validation; with none, the base must be given; a
-      second run replaces the worktree, also after its directory was deleted by
-      hand; a path that is not a worktree is never removed; an empty change name
-      and `archive` are refused; the checkout's `HEAD` and status are untouched.
-      `main()`'s output and the Make target are untested.
-      Run once by hand on `capacity-shape-envelope`: base `22bc1408` from
-      `13-validation`, 21 files.
-      Corrected by 9.7: the owner tried the worktree and found a second editor
-      project each round, without the owner's inline test setup, worse than reading
-      in the checkout; `round-diff`, its script, and its tests were removed.
+      Done at the owner's direction after pilot round 3, whose sections were
+      committed before the owner could read them. Integration, real temporary Git
+      repositories (11 passed); `main()` and the Make target untested; run once by
+      hand on `capacity-shape-envelope` (base `22bc1408`, 21 files). Removed by
+      9.7: the owner found a second editor project each round, without the owner's
+      inline test setup, worse than reading in the checkout.
 
 - [x] 9.7 Show the round in the owner's own checkout instead:
       `make round-view CHANGE= [BASE=] [NO_E2E=1]` (`scripts/round_view.py`)
@@ -712,39 +569,20 @@ session").
       second dispatch cancels the run in progress; `change-implement` and
       `change-triage` put the owner's reading before validation and review. Spec
       requirement and scenario, and design, amended.
-      Done at the owner's direction, choosing this over an editor comparison
-      against a named base and over leaving sections uncommitted (the fallback).
-      A fresh-context check found that a commit during the view stranded the
-      branch, that an interrupted run or a view left by hand could not be closed,
-      that the recorded run was never forgotten, that the skill's order would
-      dispatch over the running pipeline, that the guard missed the push,
-      dispatch, snapshot, and diff targets, that the error's docstring claimed
-      nothing changed after a push, and that the note overstated its tests; all
-      fixed here. A second check found that a fix committed after returning by
-      hand was reset off the branch, and that the stray commits listed included
-      the round's own; fixed too.
-      Integration against real temporary Git repositories, with the push and the
-      dispatch through an injected runner (`scripts/tests/test_round_view.py`,
-      26 passed): the round shows as modified, deleted, and intent-to-add new
-      files with the branch at the base (file contents checked for the new file);
-      `done` restores the commit and keeps an edit, or leaves a clean tree; a
-      commit made during the view leaves only its own change uncommitted on the
-      round's commit and is reported; a view reset back by hand, or recorded but
-      never reset, is closed; a fix committed after returning by hand stays on the
-      branch; a branch reset to an earlier round commit returns with no strays
-      named; `done` on another branch, or with the branch moved
-      off the base, refuses and keeps the view, naming the way back; the base is
-      the latest triaged validation, or must be given; `check` and a second
-      `start` refuse while a view is open; a dirty or untracked tree, a
-      non-ancestor base, a detached `HEAD`, a base equal to `HEAD`, and an unknown
-      change or `archive` are refused with the branch unmoved and no view open;
-      `start` pushes while `HEAD` is still the round's commit, reads the baseline,
-      then dispatches, and records the baseline for `HEAD` only; a refused push or
-      a failed baseline read or dispatch opens no view and records no baseline;
-      the baseline is read once; the command line's `check` fails while a view is
-      open and `e2e-baseline` prints once. Not exercised: the Make targets and
-      their prerequisite, the rollback when the reset itself fails, and the real
-      `gh` and push.
+      Done at the owner's direction, over an editor comparison against a named
+      base and the uncommitted-sections fallback (`design.md`). Two fresh-context
+      checks' findings were fixed: branches stranded by a commit during the view
+      or a fix after a hand return, views that could not be closed, a recorded run
+      never forgotten, a dispatch over the running pipeline, an incomplete guard,
+      the round's own commits named as strays, and overstated claims. Integration,
+      real temporary Git repositories with push and dispatch through an injected
+      runner (`scripts/tests/test_round_view.py`, 26 passed): the view's status and
+      branch position; `done` in each case (edit kept, commit during the view,
+      hand reset, never reset, fix after a hand return, earlier round commit) and
+      its refusals off the branch or base; the base selection; the refusals that
+      open no view; `start`'s push, baseline, dispatch order and failures. Not
+      exercised: the Make targets and their prerequisite, the rollback when the
+      reset itself fails, and the real `gh` and push.
 - [x] 9.8 Present a triage one finding per message (`change-triage` step 3): the
       first message opens with an agenda of labels only; a finding is disposed of
       only when the owner names a disposition for it, and any left undisposed is
@@ -762,19 +600,15 @@ session").
       and design amended. At the owner's direction: `capacity-shape-envelope`'s
       validation 18 triage left a ledger line that could not be committed before its
       pre-closeout review without revalidating.
-      Unit, with the comparison injected (`scripts/tests/test_run_change_review.py`,
-      49 passed): records of this change or another admit; an empty diff admits;
-      any other path, a path outside a change directory, or `archive`'s refuses
-      and names the path; a validated commit that is not an ancestor refuses;
-      `run_review` admits a pre-closeout review after a ledger commit. Against the
-      real Git command in a temporary repository: `_changed_since` lists the
-      paths, a non-ASCII one included, lists a rename as both paths, and returns
-      nothing for a non-ancestor or an unknown commit. Not exercised: the check
-      on real Git output end to end, and the `make review` invocation with a real
-      ledger commit. The fresh-context check found that a rename into a change's
-      reviews was listed only at its new path, letting a code deletion through,
-      that the texts did not require ancestry, and that the note overstated its
-      tests; all fixed.
+      Unit, comparison injected (`scripts/tests/test_run_change_review.py`, 49
+      passed): records of any change and an empty diff admit; any other path, one
+      outside a change directory, `archive`'s, or a non-ancestor refuses, naming
+      the path; `run_review` admits pre-closeout after a ledger commit. Real Git in
+      a temporary repository: `_changed_since` lists paths (non-ASCII included,
+      renames as both paths) and nothing for a non-ancestor or unknown commit. Not
+      exercised: the check on real Git output end to end, and `make review` with a
+      real ledger commit. Fresh-context findings (renames, ancestry, overstated
+      tests) fixed.
 - [x] 9.10 Show the triage presentation instead of describing it (`change-triage`
       step 3): the five parts of a finding are one sentence of guidance rather
       than a list of bold names, the placeholder template is a complete worked
@@ -786,32 +620,29 @@ session").
       third time the owner had asked for prose. Text only, proven when a session
       follows it.
 
-Implementation review 1 (external, `reviews/01-implementation-external.md`)
+Implementation review 1 (external, `reviews/01-implementation-external.md`),
 triaged. Script fixes are proven at unit level; skill and spec fixes are text,
 proven only when a session follows them:
 
 - F1 — `make review` appends `<!-- reviewed-commit: <HEAD> -->` to each published
-  review (one test asserts it, `HEAD` injected); `change-triage` names every
-  record's commit, compares them, and treats a mismatch as one round only on the
-  owner's waiver, logged; a pasted review's commit is the owner's word, recorded;
-  spec delta and design amended.
-- F2 — `change-triage` presents earlier untriaged validation failures, merged
-  with later evidence; only a record with no `V<n>` is marked superseded.
-- F3 — the record order must be establishable (number, or file time) and nothing
-  overwritten: `claim_record` creates the name exclusively and takes the next
-  number if it exists (tested both with a record written before the proposal and
-  with a proposal that collides); an interrupted run leaves no empty record. An
-  agent writing a record checks the name is free and takes the next number — a
-  check, not an exclusive claim.
+  review (one test, `HEAD` injected); `change-triage` compares every record's
+  commit and triages a mismatch as one round only on the owner's logged waiver; a
+  pasted review's commit is the owner's word, recorded; spec delta and design.
+- F2 — `change-triage` presents earlier untriaged validation failures, merged with
+  later evidence; only a record with no `V<n>` is marked superseded.
+- F3 — record order establishable (number, or file time), nothing overwritten:
+  `claim_record` creates the name exclusively and takes the next number if it
+  exists (tested with a record written before the proposal and with a colliding
+  proposal); an interrupted run leaves no empty record. An agent writing a record
+  checks the name is free — a check, not an exclusive claim.
 - F4 (section 8) — `Validation.step()` checks after every command that `HEAD` is
-  the recorded commit and the tree is clean, failing the step otherwise; every
-  caller stops on a step that did not pass, though `unforward` still runs as
-  cleanup. Tests cover a dirtied tree in the local part and `HEAD` moving in the
-  Helm part; the other stop points are by reading the code.
+  the recorded commit and the tree clean; every caller stops on a failed step,
+  `unforward` still running as cleanup. Tested for a dirtied tree in the local
+  part and `HEAD` moving in the Helm part; the other stop points by reading.
 - F5 — before closeout, `make check-doc-citations` may report only the documents
   the change creates at closeout (`change-implement`, `change-triage`).
-- S1, S2 — owner notes saved exactly as pasted with `O<n>` labels only in triage;
-  validation and owner-note triage files are "not a gate".
+- S1, S2 — owner notes saved as pasted, `O<n>` labels only in triage; validation
+  and owner-note triage files are "not a gate".
 - S3 — the spec scenario lets the owner continue a session into the next section.
 - S4 (section 8) — `fetch-e2e-logs.py` takes its command runner as a parameter;
   its tests pass a fake instead of patching `subprocess.run`.
@@ -830,28 +661,20 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `make validate` and its parts, `make round-view`, and
       `make check-doc-citations CHANGE=` — and test it against a temporary tree
       with an active, an archived, a missing, and a twice-archived name.
-      Done: `scripts/find_change.py` (`change_directory`; run as a script it
-      prints the directory). `run_change_review.run_review`, `round_view.start`,
-      `check_doc_citations.documents`, the `design`, `implement`, `triage`, and
-      `validate` targets, and `change-validate`'s record path use it; an
-      archived change reaching design or implementation is refused by those
-      skills' status check. `validate-local` and `validate-helm` take no change. Unit (`test_find_change.py`, temporary
-      tree): active, archived, active preferred over archived, missing,
-      archived twice refused naming both, a name that only ends an archived
-      one not matched, non-names refused, and the command's output and failure.
-      Wiring: a closeout review of an archived change is recorded in the
-      archive's `reviews/` (unit, runner injected); an archived change's
-      triaged validation is the round view's base (integration, real temporary
-      Git repository); the citation check scopes to an archived change and
-      refuses an unknown one (unit, temporary tree). The Make targets were run
-      by hand only (`make triage CHANGE=nope` names both locations).
-      Found on the real tree: `make check-doc-citations CHANGE=bare-metal-buyer-domain`,
-      an archived change, reports six unresolved citations — one of the
-      change's own unarchived path, five of documents since moved or removed.
-      A scoped run on an archived change therefore fails on citations the
-      unscoped run deliberately lets move on. Closeout runs the check before
-      archiving, so closeout is unaffected; a fix made after the closeout
-      review, if it runs the check, would meet it. Left for the owner.
+      Done: `scripts/find_change.py` (`change_directory`; prints the directory as
+      a script), used by `run_review`, `round_view.start`,
+      `check_doc_citations.documents`, the `triage` and `validate` targets, and
+      `change-validate`'s record path; `make design` and `make implement` refuse an
+      archived change (10.3d F7); `validate-local` and `validate-helm` take no
+      change. Unit (`test_find_change.py`, temporary tree): active, archived,
+      active preferred, missing, twice archived refused naming both, a suffix not
+      matched, non-names refused, the command's output and failure. Wiring: an
+      archived closeout review recorded in the archive (unit, runner injected); an
+      archived change's validation as round-view base (integration, real temporary
+      Git repository); scoped citations on archived and unknown changes (unit,
+      temporary tree). Make targets run by hand only. Own-path misses of a scoped
+      check on an archived change, found on `bare-metal-buyer-domain`, are fixed by
+      10.3b.
 - [x] 10.2 Amend the guidance to match: `openspec/README.md`'s closeout part 10
       ends with `openspec archive <change> -y` (`--skip-specs` where the specs
       were synchronized by hand), parts 5 and 6 lose "not at archival", and the
@@ -859,63 +682,38 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `openspec/changes/README.md`'s legend drops `ready for archival` and
       `Depends on` names `archived`; `change-triage`'s gate table, `change-review`'s
       closeout kind, and `change-design`'s dependency rule likewise.
-      Done. `openspec/README.md`: the closeout task ends by archiving; part 10
-      is "Promotion and archival", naming `--skip-specs` and the lookup; parts
-      5 and 6 no longer contrast completion with archival, and part 6 moves the
-      row's link to the archive. The index legend has `deferred` and `archived`
-      outside the grid, and the landing rule fires when a dependency is closed
-      out. `change-review` and `change-triage` find the change through the
-      lookup; the closeout review reads the merged specifications and asks
-      whether the merge kept each delta's meaning and whether the change may
-      ship; the triage gate table's `closeout` row is `archived`, written by
-      `change-ship`. Text, proven when 10.4 follows it.
+      Done: closeout ends by archiving (`--skip-specs`, the lookup); parts 5 and 6
+      no longer contrast completion with archival; the legend has `deferred` and
+      `archived` outside the grid; `change-review` and `change-triage` use the
+      lookup, the closeout review reading the merged specifications and asking
+      whether each delta kept its meaning and the change may land; the gate
+      table's `closeout` row is `archived`. Part order superseded by 10.3d F3, the
+      landing rule's timing by 10.3a, the writer of `archived` by 10.6. Text,
+      proven when 10.4 follows it.
 - [x] 10.3 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
       and reporting the parts that need judgement, including
       `make check-agent-skills`; it moves the index row to `in closeout` when
       closeout starts, updates the row's link to the archived directory, archives
       the change last, and commits, so that the closeout review reads the archive.
-      Done at `.agents/skills/change-closeout/`, linked for both harnesses
-      (`make check-agent-skills` passes). It checks the pre-closeout gate in its
-      triage file, runs the citation check before archiving, puts any decision
-      the change left to closeout to the owner, and after the archive reads each
-      merged `spec.md` diff, then repoints the index row, all in one commit.
-      Beyond the plan: a change with no deltas archives with `--skip-specs`;
-      the row stays `in closeout` until shipping writes `archived`; when
-      closeout moves code, the report says the pipeline run no longer describes
-      `HEAD` and a validation is owed before shipping. No `make closeout`
-      target: none was planned. Text, proven by 10.4.
-      End-to-end coverage for 10.1–10.3: none. This is workflow tooling and
-      skill text, proven by its own suites and by the pilot.
-      Section checks: the four focused script suites, 95 passed;
-      `make check-packaging` passed; `make check-agent-skills`,
-      `make check-comment-hygiene`, and `openspec validate --strict` (1.14.0)
-      pass; the scoped citation check reports only the four closeout documents
-      the plan creates (the `change-workflow` spec and companion,
-      `docs/agents/change-workflow.md`). `make test`: every suite passed up to
-      `test-release-tooling`, where three compose-rendering tests
-      (`test_bare_metal_compose.py`, `test_multi_storefront_compose.py`) failed
-      because Docker was unreachable in the session's WSL distro; the section
-      touches no compose file. The aggregate stopped there, so the Helm render
-      checks did not run.
-      Fresh-context check: fixed a weakened test match, the overstated
-      citation count, `change-validate`'s record path, `make design` and
-      `make implement` against the spec's "every step", part 6 moving the
-      row's link before the archive exists (now in part 10), and the
-      checklist's "active change". Declined: a guard refusing a closeout
-      review of an active change (not asked for), and a ledger line for owner
-      overrides during closeout (the ledger's shape has no closeout kind;
-      design's to decide). Left for the owner, recorded below.
-      Handoff: (1) Closeout now releases dependents (part 6) before the
-      closeout gate, while `Depends on` gates until `archived`, written at
-      shipping; a failed closeout review leaves dependents released. Either
-      the release moves to `change-ship` or the gate becomes closeout.
-      (2) The permanent `planning-governance` spec's "Roadmap currency at
-      change closeout" still contrasts completion with archival and has a
-      "complete but not yet archived" scenario; the delta needs a MODIFIED
-      requirement, a spec change no task names. (3) The scoped citation check
-      on an archived change, above. (4) `change-triage`'s closeout row names
-      `change-ship`, written by 10.6.
+      Done at `.agents/skills/change-closeout/`, linked for both harnesses. It
+      checks the pre-closeout gate, puts decisions left to closeout to the owner,
+      archives (`--skip-specs` with no deltas), reads each merged `spec.md` diff,
+      and repoints the row, in one commit; the row stays `in closeout` until
+      archive cleanup (10.6). Part order, citation timing, code moves, and `make
+      closeout` superseded by 10.3d. End-to-end coverage for 10.1–10.3: none;
+      tooling and skill text, proven by its suites and the pilot. Section checks:
+      four focused script suites, 95 passed; `check-packaging`,
+      `check-agent-skills`, comment hygiene, and `openspec validate --strict`
+      (1.14.0) pass; scoped citations report only the closeout documents the plan
+      creates. `make test` passed up to `test-release-tooling`, where three
+      compose-rendering tests (`test_bare_metal_compose.py`,
+      `test_multi_storefront_compose.py`) failed with Docker unreachable in the
+      session's WSL distro (no compose file touched); the Helm render checks did
+      not run. The fresh-context check's fixes were made; declined: a ledger line
+      for closeout overrides (no closeout kind), and a guard on closeout reviews of
+      active changes, later added by 10.3c. Handoff items resolved by 10.3a,
+      10.3b, and 10.6 (then called `change-ship`).
 - [x] 10.4 Pilot the closeout half: run `change-closeout` on
       `capacity-shape-envelope`, after amending its section 7 to the new closeout —
       the eleven parts in order, comment hygiene and import placement as
@@ -924,17 +722,14 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       At that closeout, decide where two questions from validating this pilot
       belong: a kube namespace per validation, and the chart's out-of-band
       Secrets made optional with the ordinary values overlays as fallback.
-      Placed by the owner after the pilot's closeout, which did not take them up:
-      they were recorded in this change rather than the pilot's, so its closeout
-      could not see them. Optional Secrets is an open question of
-      `helm-e2e-pipeline-parity`; a namespace per validation belongs to a new
-      change, `parallel-change-workflows`, for working changes in parallel —
-      branches, reading rounds, Helm namespaces, and every other shared resource.
-      Done: closeout archived it in `f7447b35`, documentation only. Closeout review
-      21 found one blocking documentation finding, F1 (the hold-or-close summaries
-      in `ARCHITECTURE.md` and `DEPLOYMENT_AND_CONFIG.md` contradicted the spec's
-      base-shape-first rule), fixed in `f7acf392`; the external review 22 passed it.
-      The owner passed the gate on both.
+      Placed by the owner after the pilot's closeout, which could not see them,
+      being recorded here: optional Secrets is an open question of
+      `helm-e2e-pipeline-parity`; a namespace per validation belongs to
+      `parallel-change-workflows`. Closeout archived the pilot in `f7447b35`,
+      documentation only. Closeout review 21's one blocking finding, F1
+      (hold-or-close summaries in `ARCHITECTURE.md` and `DEPLOYMENT_AND_CONFIG.md`
+      contradicting the spec's base-shape-first rule), was fixed in `f7acf392`;
+      external review 22 passed it; the owner passed the gate on both.
 - [x] 10.5 Amend every other active change's closeout task the same way,
       preserving completed tasks: its unchecked parts reordered to
       `openspec/README.md`'s eleven, with archival a part of its own; comment
@@ -970,23 +765,20 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `retain-authenticated-request-outcomes`, `separate-marketplace-registry`,
       `service-identity-signing`, `settle-capacity-claim-vocabulary`,
       `shorten-long-requirements`, `sign-multi-language-credits-middleware`,
-      `storefront-domain-parameterization`, `type-core-packages`. A section with no
-      checked closeout task was rewritten as the eleven parts; one with checked tasks
-      kept them as they were, reworded its unchecked ones, appended the missing parts,
-      and notes that closeout works them in `openspec/README.md`'s order. Comment and
-      import work moved to the last implementation section; nine hand-synchronized
-      specifications noted for `--skip-specs`; implementation-section tasks that
-      hand-copied delta-covered specs or archived were withdrawn into closeout, at the
-      owner's direction. A change with no spec deltas records that instead of
-      `openspec validate <change> --strict`, which rejects it (`openspec/README.md`
-      part 10, `change-closeout`), at the owner's direction.
-      Left as they were: `bare-metal-mock-provisioned-deal`,
+      `storefront-domain-parameterization`, `type-core-packages`. Sections with no
+      checked closeout task were rewritten as the eleven parts; others kept their
+      checked tasks, reworded the rest, appended missing parts, and note the
+      order. Comment and import work moved to the last implementation section;
+      nine hand-synchronized specs noted for `--skip-specs`; implementation tasks
+      hand-copying delta-covered specs or archiving withdrawn into closeout, and a
+      change without spec deltas records that in place of strict validation
+      (`openspec/README.md` part 10, `change-closeout`), both at the owner's
+      direction. Left as they were: `bare-metal-mock-provisioned-deal`,
       `pools-9-retire-local-physical-authority`, and
-      `remove-dead-storefront-physical-surfaces`, archived on `dev`;
-      `unbacked-bare-metal-listings`, whose closeout `dev` rewrote, swept after the
-      merge (11.4); `redesign-authenticated-replay-state`, not yet planned, with no
-      closeout task; and the changes with no `tasks.md`. This change's own section 12
-      was aligned the same way.
+      `remove-dead-storefront-physical-surfaces` (archived on `dev`);
+      `unbacked-bare-metal-listings` (rewritten by `dev`, swept in 11.4);
+      `redesign-authenticated-replay-state` (unplanned, no closeout task); changes
+      with no `tasks.md`. Section 12 here was aligned too.
 - [x] 10.3a From the 10.1–10.3 handoff, at the owner's direction: dependents are
       released at archive cleanup, after the closeout gate, not at closeout, since a dependency lands
       at `archived` and closeout runs before its review (`openspec/README.md`
@@ -1001,59 +793,47 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       the archive move; citations of anything else still must resolve. Test it
       against a temporary tree. Done before 10.4.
       Done in `scripts/check_doc_citations.py`. Unit, real temporary tree
-      (`scripts/tests/test_check_doc_citations.py`): an archived change citing its
-      own unarchived path resolves while a missing file under that path, and a
-      missing citation elsewhere, are still reported; an active change's own-path citation must resolve as written.
-      Against the repository, `bare-metal-buyer-domain` drops from six misses to
-      the five documents that moved after it was archived.
+      (`scripts/tests/test_check_doc_citations.py`): an archived change's own-path
+      citation resolves, a missing file under that path and a missing citation
+      elsewhere are reported, an active change's own-path citation must resolve as
+      written. `bare-metal-buyer-domain` drops from six misses to the five
+      documents moved after its archive.
 - [x] 10.3c `make review KIND=closeout` refuses a change that is not archived,
       with no override: the closeout review reads the archive, and the remedy is
       to finish closeout, which archives. A change closed out before this rule,
       with specs synchronized by hand, archives with `--skip-specs` first. Test it
       beside the pre-closeout validation guard. Done before 10.4.
-      Done in `run_review`, before any transcript or record is created. Unit, with
-      the reviewer runner injected (`scripts/tests/test_run_change_review.py`): a
-      closeout review of an active change is refused with nothing run or written;
-      the existing case shows an archived change's closeout review recorded in the
-      archive.
+      Done in `run_review`, before any transcript or record. Unit, runner injected
+      (`scripts/tests/test_run_change_review.py`): an active change's closeout
+      review is refused with nothing run or written.
 - [x] 10.3d Implementation review 2 (external, `reviews/02-implementation-external.md`),
       triaged: F2 and F5 are 10.3a and 10.3c.
-      - F1: the `planning-governance` delta modifies "Canonical planning homes" — the
-        `archived` status, not the directory's place, marks a completed change.
-      - F3: `openspec/README.md`'s closeout parts are reordered to the order the
-        work needs — judgement parts, packaging, pipeline evidence, promotion,
-        citations, archival — eleven parts, archival on its own; `change-closeout`
-        checks citations and the change's specs after promotion and before the
-        archive; `AGENTS.md`'s list and `change-plan` follow.
-      - F4: closeout changes documentation only. Comment hygiene and import
-        placement are confirmed at closeout, done before pre-closeout, and asked
-        about by the pre-closeout review (`change-review`); a needed code edit
-        returns the change to implementation. `change-closeout` runs no suites and
-        owes no validation.
+      - F1: the `planning-governance` delta modifies "Canonical planning homes":
+        the `archived` status, not the directory, marks a completed change.
+      - F3: closeout parts reordered to the order the work needs — judgement
+        parts, packaging, pipeline evidence, promotion, citations, archival on its
+        own — with `AGENTS.md`'s list and `change-plan` following.
+      - F4: closeout changes documentation only; comment hygiene and import
+        placement are done before pre-closeout, asked about by its review, and
+        confirmed at closeout, a needed code edit returning the change to
+        implementation; `change-closeout` runs no suites and owes no validation.
       - F6: `change-triage` validates an archived change with `openspec validate
         --specs --strict`.
-      - F7: only the steps after the archive find an archived change by name;
-        `make design` and `make implement` refuse one (`scripts/find_change.py
-        --active`; there is no plan target). Unit for the script's flag
-        (`scripts/tests/test_find_change.py`); the two Make targets were run by
-        hand against an archived change, and no test covers their wiring.
+      - F7: only steps after the archive find an archived change; `make design`
+        and `make implement` refuse one (`find_change.py --active`; unit in
+        `scripts/tests/test_find_change.py`); the two targets were run by hand,
+        and no test covers their wiring.
       - F8: `change-closeout` resolves the change through `find_change.py` and
-        resumes after an archive that was not committed.
+        resumes after an uncommitted archive.
       - S1: `scripts/harness-review-context.sh`'s lifecycle sentence.
-      Spec deltas (`change-workflow`, `planning-governance`) and design amended.
-      Skill text is proven when a session follows it; 10.4 is that session.
-      From the fresh-context check: the index legend and `change-plan` no longer
-      have closeout release dependents; `change-implement` places imports at
-      module level as it writes them, since closeout only confirms; closeout's
-      packaging and citation parts name `check-agent-skills` and the change's
-      `openspec validate`; a closeout triage stops for the owner on a finding
-      that needs code, at the owner's direction (`change-triage`, delta scenario,
-      design). The ledger records only course corrections: a disposition that
-      accepts the agent's proposal writes no entry (`change-triage`, the ledger
-      requirement and a scenario, design), at the owner's direction.
-      `make closeout CHANGE=` opens a session on `change-closeout`, finding the
-      change active or archived so an interrupted closeout resumes (a `make -n`
-      test checks it calls the plain lookup and the skill).
+      Spec deltas and design amended; skill text proven by 10.4. From the
+      fresh-context check: the legend and `change-plan` no longer have closeout
+      release dependents; `change-implement` places imports at module level as
+      written; closeout names `check-agent-skills` and `openspec validate`. At the
+      owner's direction, a closeout triage stops for the owner on a finding needing
+      code, and the ledger records only course corrections (`change-triage`, delta,
+      design). `make closeout CHANGE=` opens `change-closeout`, active or
+      archived, so an interrupted closeout resumes (`make -n` test).
 - [x] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
       notes above), run when the closeout gate is passed:
       `reviews/` kept in place as 12.10 decided,
@@ -1062,56 +842,43 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       promotion record, and the validation evidence; it sets the index row to
       `archived`. Pilot it on `capacity-shape-envelope`.
       Written: `.agents/skills/change-archive-cleanup/SKILL.md`, opened by `make
-      archive-cleanup CHANGE=`, which takes only an archived change
-      (`find_change.py --archived`, unit-tested; a `make -n` test checks the
-      target). It checks the branch, the archive, the `in closeout` row, and every
-      closeout review triaged with the latest gate passed; edits only the index;
-      keeps `reviews/`; commits without pushing; and writes the merge commit
-      message and pull request description to the archived change's
-      `reviews/pull-request.md`. Triage now stops at a passed closeout gate and
-      names `make archive-cleanup` (`change-triage` gate table, the delta's
-      closeout-gate scenario, design), at the owner's direction after the pilot's
-      closeout triage went on to clean up the archive itself before the skill
-      existed; that unpushed commit was dropped so the pilot starts from
-      `in closeout`. Piloted on `capacity-shape-envelope` in `093dc8f6`: the
-      index edits matched the dropped reference — row `archived`,
-      `publish-shape-bounds` released and left `ready for design`, the campaign
-      graph marked, the resize change's notes rewritten — with the row's notes
-      taken more exactly from the promotion record; the merge drafts were written
-      and named the other changes the branch carries.
-      `openspec validate --strict` had failed since 10.3d: the MODIFIED roadmap
-      currency requirement renamed a scenario, which the validator reads as
-      dropping it; the scenario keeps its name, with the new body.
+      archive-cleanup CHANGE=` (archived changes only, `find_change.py
+      --archived`, unit-tested; the target by `make -n`). It checks the branch, the
+      archive, the `in closeout` row, and that every closeout review is triaged
+      with the latest gate passed; edits only the index; keeps `reviews/`; commits
+      without pushing; writes the merge drafts to the archive's
+      `reviews/pull-request.md`. At the owner's direction triage stops at a passed
+      closeout gate and names `make archive-cleanup` (gate table, delta scenario,
+      design), after the pilot's triage cleaned up the archive itself before the
+      skill existed; that unpushed commit was dropped. Pilot in `093dc8f6`: the
+      index edits matched the dropped reference (row `archived`,
+      `publish-shape-bounds` released and left `ready for design`, graph marked,
+      the resize change's notes rewritten), the row's notes more exact; the drafts
+      named the other changes the branch carries. Also fixed: strict validation,
+      failing since 10.3d because a MODIFIED requirement renamed a scenario, which
+      keeps its name.
 
 - [x] 10.6a From implementation review 3 (external, `reviews/03-implementation-external.md`),
-      at the owner's dispositions. F1: the delta's archive-cleanup scenario keeps
-      `reviews/` until an export flow exists, and the design no longer treats the
-      export as existing. F2: closeout code fixes stay owner-directed in-session;
-      `change-triage` now suggests a review of the fix once validated, never required.
-      F3: `scripts/check_change_index.py` and `make check-change-index` check every
-      row's cells, link, status, and dependencies, and that every change directory has
-      a row; unit tests over a temporary index in
-      `scripts/tests/test_check_change_index.py`, the target by `make -n`. Triage at a
-      phase-closing gate, closeout, and archive cleanup run it after their index
-      edits (skills, `openspec/README.md` part 6, the delta's index-transition
-      requirement and a scenario, design, `docs/agents/change-workflow.md`). F4:
-      archive cleanup returns `ready for planning`, `in planning`, and `ready for
-      implementation` dependents to `ready for design`, and keeps `in implementation`,
-      reading no `tasks.md` (`openspec/README.md` part 6, the index legend, the
-      `planning-governance` delta with a scenario, design, the skill). F5: the
-      proposal's phase list, ledger bullet, and archived-lookup bullet describe the
-      current workflow.
-      Checks: `scripts/tests` 648 passed (unit and `make -n` tooling tests;
-      `test_check_change_index.py` 16, unit against a temporary index); comment
-      hygiene, `check-agent-skills`, the index check, and strict validation pass; the
-      scoped citation check reports only the `change-workflow` spec and companion
-      promotion creates. A fresh-context compliance check of the diff against
-      `7cd6bedd` found a function-local `subprocess` import in the new test (moved), an
-      old phrasing in a `planning-governance` scenario (restated), and three
-      descriptions of the index check omitting its cell count and the `in closeout`
-      archive link (completed); it also noted that `AGENTS.md`'s "Domain docs" cites
-      `docs/adr/`, which does not exist, inherited and left for its own change.
-
+      at the owner's dispositions. F1: `reviews/` is kept until an export flow
+      exists (delta, design). F2: closeout code fixes stay owner-directed
+      in-session, `change-triage` suggesting, never requiring, a review of the
+      validated fix. F3: `scripts/check_change_index.py` (`make
+      check-change-index`) checks every row's cells, link, status, and
+      dependencies and that every change directory has a row, run after index
+      edits by gate triage, closeout, and archive cleanup (skills,
+      `openspec/README.md` part 6, delta with a scenario, design,
+      `docs/agents/change-workflow.md`). F4: archive cleanup returns `ready for
+      planning`, `in planning`, and `ready for implementation` dependents to
+      `ready for design` and keeps `in implementation`, reading no `tasks.md`
+      (part 6, legend, `planning-governance` delta with a scenario, design, skill).
+      F5: the proposal describes the current workflow. Checks: `scripts/tests` 648
+      passed (unit and `make -n` tooling tests; `test_check_change_index.py` 16,
+      unit against a temporary index); comment hygiene, `check-agent-skills`, the
+      index check, and strict validation pass; scoped citations report only the
+      spec and companion promotion creates. The fresh-context check against
+      `7cd6bedd` led to a moved test import, a restated scenario, and three
+      completed index-check descriptions; `AGENTS.md`'s "Domain docs" citing the
+      nonexistent `docs/adr/` is inherited, left for its own change.
 ## 11. Shared guidance
 
 - [x] 11.1 Remove the "Generated implementation artifacts" section and the fileset
@@ -1121,15 +888,14 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       tombstone survives into production code or permanent documentation.
       Done: `AGENTS.md`'s section is gone and its packaging bullet says "before the
       work is committed"; the checklist item is gone. `docs/prompts/implementation.md`
-      and `change-grooming.md` carry the whole convention, including that no
-      tombstone remains in final production code or permanent documentation, and
-      nothing cited the removed section. The comment rule's ban on tombstone
-      references stays, since the browser process still produces them.
+      and `change-grooming.md` carry the whole convention, and nothing cited the
+      removed section. The comment rule's ban on tombstone references stays, since
+      the browser process still produces them.
 - [x] 11.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
       `make review`, the review file layout, and the ledger; link it from
       `AGENTS.md`'s "Agent skills" section.
-      Done: the skill table (step, skill, how to start it, what it writes),
-      the order of steps and their refusals, `make review`'s options and external
+      Done: the skill table (step, skill, how to start it, what it writes), the
+      order of steps and their refusals, `make review`'s options and external
       reviews, the round view, the review directory, and the ledger; linked from a
       "Change workflow" subsection of `AGENTS.md`'s "Agent skills". It cites only
       documents that exist; promotion (12.11) adds the links to the
@@ -1141,42 +907,38 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       against the documents as they are on `dev`. Then sweep, as 10.5 did, the
       closeout section of `unbacked-bare-metal-listings`, whose `dev` version
       rewrote it, and of any change `dev` added.
-      Merged in `7cd6bedd`. Conflicts resolved toward `dev`'s retirement of
-      local-table derivation and `home_site`, carrying this branch's admissibility
-      default and pricing-hold exclusions onto it, and dropping the local-table
-      admissibility tests, scenario, and documentation with the path. The index kept
-      this branch's format, with `dev`'s rows converted and the dependents of the
-      five changes `dev` archived released. `dev`'s architecture check rejected
-      `kit/resource-pools-contracts` depending on the admissibility kit: at the
-      owner's choice the contracts allowlist names that kit, which gained its own
-      package allowlist in place of its boundary test. The new kit was added to the
-      three publication lists `dev`'s publish-matrix tests check. Swept afterwards:
-      `unbacked-bare-metal-listings` and `encapsulate-capacity-backing`, both
-      unplanned, so each closeout placeholder now names the eleven parts in order;
-      `deduplicate-dynaconf-bootstrap`'s packaging part runs
-      `make check-architecture-change`, which `dev` added to closeout part 7, as
-      does `change-closeout`'s packaging step.
+      Merged in `7cd6bedd`, resolved toward `dev`'s retirement of local-table
+      derivation and `home_site`, carrying this branch's admissibility default and
+      pricing-hold exclusions and dropping the local-table admissibility tests,
+      scenario, and documentation. The index kept this format, `dev`'s rows
+      converted and the dependents of the five changes `dev` archived released.
+      For `dev`'s architecture check the contracts allowlist named the
+      admissibility kit, at the owner's choice (edge removed by 11.5 F4), and that
+      kit gained its own allowlist; it joined the three publication lists `dev`'s
+      publish-matrix tests check. Swept: `unbacked-bare-metal-listings` and
+      `encapsulate-capacity-backing` (placeholders name the eleven parts);
+      `deduplicate-dynaconf-bootstrap` and `change-closeout` run `make
+      check-architecture-change` in packaging, which `dev` added to part 7.
 
 - [x] 11.5 From implementation review 4 (external, `reviews/04-implementation-external.md`,
       the merge and section 11), at the owner's dispositions. F1: the index check
-      requires exactly one row for every active change directory, and none for an
-      archived one, whose row may be pruned (a later skill will prune them); it now
-      reports a change listed twice (checker, delta with a scenario, `openspec/README.md`
-      part 6, the guide, design, the Make help). F2: the proposal's index non-goal is
-      scheduling from the index, its tooling list names every workflow target, and
-      its last line records the charts' `persistence.retainOnUninstall`. F3:
+      requires one row per active change directory and reports duplicates; an
+      archived change's row may be pruned (checker, delta with a scenario,
+      `openspec/README.md` part 6, the guide, design, the Make help). F2: the
+      proposal's non-goal, tooling list, and chart retention line corrected. F3:
       `openspec/README.md`'s contributor steps record destinations during
-      implementation and promote at closeout. F4: `kit/resource-pools-contracts` no
-      longer declares the shape kit it does not import (`pyproject.toml`, its
-      allowlist, `RELEASING.md`, `ARCHITECTURE.md`); relocked after `make dist-clean`,
-      since a wheel another branch built had been taken as the newest contracts
-      version, and each lock lost only that edge.
-      Checks: `make check-packaging` passes with no architecture warning; `make
-      test-kits` and `make test-storefront` (1037 unit, 411 integration) pass;
-      `scripts/tests` 650 passed, `test_check_change_index.py` 18 of them (unit
-      against a temporary index); comment hygiene, `check-agent-skills`, the index
-      check, and strict validation pass; the scoped citation check reports only the
-      `change-workflow` spec and companion promotion creates.
+      implementation and promote at closeout. F4: `kit/resource-pools-contracts`
+      no longer declares the shape kit it does not import (`pyproject.toml`, its
+      allowlist, `RELEASING.md`, `ARCHITECTURE.md`); relocked after `make
+      dist-clean`, a wheel another branch built having been taken as the newest
+      contracts version; each lock lost only that edge. Checks: `make
+      check-packaging` passes with no architecture warning; `make test-kits` and
+      `make test-storefront` (1037 unit, 411 integration) pass; `scripts/tests`
+      650 passed (`test_check_change_index.py` 18, unit against a temporary
+      index); comment hygiene, `check-agent-skills`, the index check, and strict
+      validation pass; scoped citations report only the spec and companion
+      promotion creates.
+
 
 ## 12. Closeout
 
@@ -1184,21 +946,50 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
 
-- [ ] 12.1 Comment hygiene — confirm: `make check-comment-hygiene`, and read the
+- [x] 12.1 Comment hygiene — confirm: `make check-comment-hygiene`, and read the
       comments this change added; anything to rewrite returns it to implementation.
-- [ ] 12.2 Import placement — confirm: check the imports this change added or touched,
+      Confirmed: `make check-comment-hygiene` passes, and the comments the change
+      added to `scripts/` describe current behaviour; none names the review or
+      migration that introduced it.
+- [x] 12.2 Import placement — confirm: check the imports this change added or touched,
       including in `scripts/fetch-e2e-logs.py`, `scripts/validate_slice.py`, and
       `scripts/check_push_ready.py`.
-- [ ] 12.3 Documentation compliance: re-check this change's decisions against
+      Confirmed: an AST scan of every script and test this change added or touched
+      under `scripts/` finds no function-local import.
+- [x] 12.3 Documentation compliance: re-check this change's decisions against
       `openspec/README.md`'s placement rules.
-- [ ] 12.4 Narrative compression of completed-task notes.
-- [ ] 12.5 Roadmap currency: record that no roadmap goal is affected, or update it.
-- [ ] 12.6 Campaign index currency: this change's row and its campaign placement;
+      Done: every decision has a placement-rule destination in the promotion record.
+      Corrected in `design.md`: the index is checked by `make check-change-index`
+      and the landing rule runs at archive cleanup; concurrent validation and a
+      namespace per validation belong to `parallel-change-workflows`, optional chart
+      Secrets to `helm-e2e-pipeline-parity`. The `TESTING.md` run-selection and
+      `DEPLOYMENT_AND_CONFIG.md` retention paragraphs, written in section 8, match
+      the code.
+- [x] 12.4 Narrative compression of completed-task notes.
+      Done: sections 1–11's notes cut by about a third — final behaviour, evidence
+      with test levels, deferrals, destinations, superseded detail replaced by a
+      pointer. Moved to `design.md` first: the OpenSpec skills' links, planning's
+      default run in the design session, and `change-implement` replacing `openspec-
+      apply-change`.
+- [x] 12.5 Roadmap currency: record that no roadmap goal is affected, or update it.
+      No roadmap goal affected: `docs/development/ROADMAP.md` has no goal covering
+      contributor workflow.
+- [x] 12.6 Campaign index currency: this change's row and its campaign placement;
       other rows' `Depends on` are left to archive cleanup.
-- [ ] 12.7 Documentation citations, after promotion (12.11):
+      This change's row is `in closeout`, under independent active changes, with no
+      campaign graph; `parallel-change-workflows`' `Depends on` is left for archive
+      cleanup. `make check-change-index` passes.
+- [x] 12.7 Documentation citations, after promotion (12.11):
       `make check-doc-citations CHANGE=agent-driven-change-workflow`, then
       `openspec validate agent-driven-change-workflow --strict`.
-- [ ] 12.8 Packaging: `make check-packaging`.
+      `make check-doc-citations CHANGE=agent-driven-change-workflow` reports
+      nothing; `openspec validate agent-driven-change-workflow --strict` (1.14.0)
+      passes. The unscoped check's 11 misses are all elsewhere and predate this
+      closeout.
+- [x] 12.8 Packaging: `make check-packaging`.
+      `make check-packaging` passes with no architecture warning and no lock
+      rewritten; `make check-architecture-change CHANGE=agent-driven-change-
+      workflow` reports no row; `make check-agent-skills` passes.
 - [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
 - [x] 12.10 Resolve the open question on exporting session transcripts and review
@@ -1208,7 +999,7 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
       cleanup does not delete `reviews/` until an export flow exists, and then
       exports as part of archive cleanup; permanent documentation states nothing
       about export meanwhile. Recorded in `design.md`'s open question.
-- [ ] 12.11 Promotion: complete the design-promotion record against the proposal's
+- [x] 12.11 Promotion: complete the design-promotion record against the proposal's
       knowledge-to-promote list — `change-workflow` spec and architecture
       companion, the five `planning-governance` requirements (three added, two
       modified), closeout part 6,
@@ -1220,6 +1011,16 @@ Listed in an earlier order; closeout works the parts in `openspec/README.md`'s o
       linking the spec and architecture companion in `openspec/specs/README.md`.
       The `change-workflow` and `planning-governance` `spec.md` files the deltas
       cover are written by the archive in 12.12, not by hand.
+      Done: `openspec/specs/change-workflow/architecture.md` written;
+      `openspec/specs/change-workflow/spec.md` created as a skeleton (Purpose,
+      Evidence) the archive fills with the delta's requirements, so it is never left
+      "Purpose: TBD"; `openspec/specs/README.md` gains the capability row;
+      `docs/agents/change-workflow.md` links the spec and companion;
+      `openspec/specs/deployment-state/architecture.md` points at the retention
+      paragraph; `planning-governance`'s Evidence names closeout part 7 for
+      packaging. The design-promotion record is complete. The delta's review-records
+      requirement says durable content is promoted at closeout, since `reviews/` is
+      no longer deleted.
 - [ ] 12.12 Archival, last: `openspec archive agent-driven-change-workflow -y`
       merges the deltas and moves the change under `openspec/changes/archive/`;
       point the index row at it, and run `openspec validate --specs --strict`.
