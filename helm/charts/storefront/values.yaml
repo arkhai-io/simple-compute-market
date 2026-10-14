@@ -54,6 +54,12 @@ agents:
       principals:
         - scheme: eip191
           identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    # Environment variables read from existing Secrets, for credentials the
+    # storefront takes from its environment, such as the arkhai.payments.v1
+    # bearer named by Settlement.arkhai_payments.api_key_env:
+    # secretEnv:
+    #   - name: ARKHAI_PAYMENTS_API_KEY
+    #     secretKeyRef: {name: arkhai-bob-payments, key: api-key}
     # Non-identity runtime secrets remain in a separately managed overlay.
     # The chart never accepts or renders private signing material.
     secret:
