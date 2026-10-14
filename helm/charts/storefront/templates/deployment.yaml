@@ -136,6 +136,13 @@ spec:
                 secretKeyRef:
                   name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
                   key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
+            {{- range $agent.secretEnv }}
+            - name: {{ .name | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretKeyRef.name | quote }}
+                  key: {{ .secretKeyRef.key | quote }}
+            {{- end }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device
