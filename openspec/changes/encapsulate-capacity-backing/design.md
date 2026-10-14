@@ -463,13 +463,35 @@ The bare-metal fulfillment routes' unhandled error for a binding with no host is
 `unbacked-bare-metal-listings`', since only that change creates such a binding; the
 guard here gives it a refused admission rather than a site call.
 
+### Divergence: whether a mechanism delivers through capacity (task 1.3)
+
+Settlement admissibility needs, for each mechanism a domain composes, whether settling
+through it delivers through capacity. Today VM keeps that in a map separate from its
+seller stage table, checked only when an unbacked listing is derived; bare metal keeps
+it on each seller stage-table entry as a required `physical` field, which also gates
+admission and evidence at acceptance; API credits declares it nowhere. Where both
+exist, the values agree.
+
+Unified rule: it is a required attribute of every seller stage-table entry, named
+`fulfils_through_capacity`, and each domain's admissibility callback reads it from the
+entry a clause's mechanism selects.
+
+- Bare metal renames `physical`; its admission and evidence gating is unchanged.
+- VM declares it on its three seller stages and removes its separate map, its lookup,
+  and the undeclared-mechanism error. A stage that does not declare it cannot be
+  constructed, so the lazy check goes.
+- API credits declares it `True` on both stages, each of which issues against quota;
+  that is what makes an unbacked credits pool yield no listing through the delegate.
+
+It is a per-domain convention with one name, read only by each domain's own callback.
+No kit protocol is added: core's stage table is opaque by design, and shared stage
+conventions were kept out of core and the settlement runtime when settlement routing
+by mechanism was designed. Rejected: a separate per-domain map, which can drift from
+the stage table it describes.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
-1. The unified behaviour for each divergence between VM, bare metal, and API credits
-   (task 1.3):
-   1. the mechanism fulfilment declaration — VM's separate map, bare metal's
-      `physical` on each seller stage.
-2. How the site's resource publication views receive the pool's delegate, given that
+1. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).

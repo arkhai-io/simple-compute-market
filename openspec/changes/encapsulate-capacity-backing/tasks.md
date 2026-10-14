@@ -20,9 +20,15 @@ Design phase; not yet planned. Prerequisite of `unbacked-bare-metal-listings`.
       `CapacityBacking` in `kit/resource-pools-contracts`, one class with `BACKED` and
       `UNBACKED` instances, whose operations take the caller's work as callables
       ("The delegate's operations").
-- [ ] 1.3 **Decision gate.** Decide the unified behaviour for each divergence between
+- [x] 1.3 **Decision gate.** Decide the unified behaviour for each divergence between
       VM, bare metal, and API credits, and where bare metal's refusal of unbacked
-      pools is expressed while this change keeps it. Record each as its own decision.
+      pools is expressed while this change keeps it. Record each as its own decision. Decided
+      with the maintainer, one decision per divergence ("Divergence: …" in `design.md`):
+      admitting unbacked supply (bare metal's refusal stays, explicit and temporary,
+      removed by `unbacked-bare-metal-listings`), binding construction, the published
+      label, backing disagreement on refresh and reopen, source-check availability,
+      reconciliation scope, hold placement, capacity-effect guard coverage, and
+      whether a mechanism delivers through capacity.
 - [x] 1.4 **Decision gate.** Decide how the `CapacityBinding` and `UnbackedBinding`
       classes relate to the delegate, and record it. Decided with the maintainer: one
       `PublicationBinding` class carrying the delegate replaces both; a refused
