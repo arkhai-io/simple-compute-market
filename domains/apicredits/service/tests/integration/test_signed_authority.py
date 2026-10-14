@@ -39,6 +39,8 @@ from market_identity import (
     canonical_body_hash,
     sign_request,
 )
+from market_resource_pools import read_site_declarations
+from market_resource_pools_contracts import BACKED
 
 AUTHORITY_SEED = b"credits-authority-seed-32-byte!!"
 STOREFRONT_SIGNER = Ed25519Signer(b"credits-storefront-seed-32-byte!")
@@ -543,6 +545,35 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
         key_id=issued.key_id, amount=2, idempotency_key="i-1"
     )
     assert again.balance == 3, again
+
+
+@pytest.mark.asyncio
+async def test_the_storefront_reads_its_quota_pools_declarations(signed_app):
+    """The projection a storefront binds a credit listing from, as it reads it.
+
+    The pool's declarations reach the projection only through the pool
+    directory this service hands its capacity router; without it the pool
+    advertises nothing, and no credit listing can be created from it.
+    """
+    await _seed_quota(signed_app)
+
+    projection = await _capacity_client(signed_app, admin=False).resource_pool_projection()
+    pools = projection["resource_pools"]
+    holding = [
+        pool["pool_id"]
+        for pool in pools
+        if any(
+            member.get("physical_resource_id") == "weather-quota"
+            for member in pool.get("resources") or ()
+        )
+    ]
+    declarations = read_site_declarations(pools)
+
+    assert holding == ["default"]
+    assert not declarations.unresolvable
+    pool = declarations.resolved["default"]
+    assert pool.backing is BACKED
+    assert pool.enabled and pool.advertises("api_credits")
 
 
 @pytest.mark.asyncio

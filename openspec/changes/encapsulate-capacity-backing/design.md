@@ -683,6 +683,13 @@ Decided or learned while implementing, each within a decision above:
   of every site; another site naming its resource the same way cannot cover the
   quantity. Reconciliation already keys availability by site and resource, so this
   was the one unscoped read. The guard itself is unchanged.
+- **The credits projection is proven over the real service.** The pool directory
+  reaches the resource-pool projection only through the credits service's own
+  router wiring, which no lower test sees. The service's signed-authority suite
+  reads the projection through the storefront's typed reader client against the
+  real application and resolves the quota resource's pool to backed, enabled, and
+  advertising API credits. Without the directory the pool still resolves backed
+  but advertises nothing, which that test catches.
 
 ## Open questions
 
