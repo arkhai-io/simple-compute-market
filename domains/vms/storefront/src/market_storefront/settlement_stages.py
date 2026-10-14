@@ -82,6 +82,10 @@ class PaymentSettleResult:
 class VmAlkahestSellerStage:
     build_plan: Callable[..., Any]
     mechanism: str = "alkahest.v1"
+    # Whether settling through this stage delivers through VM capacity-backed
+    # fulfillment. Required of every VM seller stage, with no default, because
+    # publication drops such a stage's options from an unbacked listing.
+    fulfils_through_capacity: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         chains = tuple(
@@ -396,6 +400,7 @@ class VmAlkahestSellerStage:
 @dataclass(frozen=True)
 class VmPaymentsSellerStage:
     mechanism: str = "arkhai.payments.v1"
+    fulfils_through_capacity: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -682,6 +687,7 @@ class VmContactSellerStage:
     """
 
     mechanism: str = CONTACT_MECHANISM
+    fulfils_through_capacity: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -707,9 +713,14 @@ class VmContactSellerStage:
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
         {
-            "alkahest.v1": VmAlkahestSellerStage(build_plan),
-            "arkhai.payments.v1": VmPaymentsSellerStage(),
-            CONTACT_MECHANISM: VmContactSellerStage(),
+            "alkahest.v1": VmAlkahestSellerStage(
+                build_plan, fulfils_through_capacity=True
+            ),
+            # A payment deal provisions its VM through capacity, like Alkahest.
+            "arkhai.payments.v1": VmPaymentsSellerStage(fulfils_through_capacity=True),
+            # An introduction settles by revealing contacts; nothing is admitted
+            # against capacity, so an unbacked listing may offer it.
+            CONTACT_MECHANISM: VmContactSellerStage(fulfils_through_capacity=False),
         }
     )
 

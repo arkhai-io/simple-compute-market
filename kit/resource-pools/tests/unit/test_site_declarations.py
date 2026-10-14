@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from market_resource_pools_contracts.backing import (
+    BACKED,
+    UNBACKED,
+    legacy_producer_backing,
+)
+
 from market_resource_pools import (
     POOL_ENABLEMENT_UNDECLARED,
     read_site_declarations,
@@ -25,7 +31,7 @@ def test_a_generation_with_neither_declaration_reads_as_an_older_producer():
     assert reading.unresolvable == {}
     for pool_id in ("p1", "p2"):
         declaration = reading.resolved[pool_id]
-        assert declaration.backed
+        assert declaration.backing is legacy_producer_backing()
         assert declaration.advertises("vm")
         assert declaration.enabled
 
@@ -52,8 +58,8 @@ def test_a_generation_declaring_every_pool_resolves_normally():
     )
 
     assert reading.compatibility_rule is False
-    assert reading.resolved["backed"].backed
-    assert not reading.resolved["unbacked"].backed
+    assert reading.resolved["backed"].backing is BACKED
+    assert reading.resolved["unbacked"].backing is UNBACKED
     assert reading.resolved["unbacked"].advertises("vm")
 
 

@@ -57,6 +57,16 @@
       "dist": "arkhai-core-buyer"
     },
     {
+      "key": "kit-capability-shape",
+      "path": "kit/capability-shape",
+      "dist": "arkhai-kit-capability-shape"
+    },
+    {
+      "key": "kit-resource-pools-contracts",
+      "path": "kit/resource-pools-contracts",
+      "dist": "arkhai-kit-resource-pools-contracts"
+    },
+    {
       "key": "core-storefront",
       "path": "core/storefront",
       "dist": "arkhai-core-storefront"
@@ -70,16 +80,6 @@
       "key": "core-registry",
       "path": "core/registry",
       "dist": "arkhai-core-registry"
-    },
-    {
-      "key": "kit-capability-shape",
-      "path": "kit/capability-shape",
-      "dist": "arkhai-kit-capability-shape"
-    },
-    {
-      "key": "kit-resource-pools-contracts",
-      "path": "kit/resource-pools-contracts",
-      "dist": "arkhai-kit-resource-pools-contracts"
     },
     {
       "key": "kit-resource-pools",

@@ -11,6 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from apicredits_storefront import negotiation_runtime as runtime_module
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.negotiation_runtime import (
     _place_quota_hold,
@@ -25,6 +26,7 @@ from market_policy.seller_round import SellerRoundResult
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
+    FakeCapacity,
     SELLER_PRINCIPAL,
     payment_option,
     payment_selection,
@@ -95,7 +97,9 @@ async def test_accept_result_satisfies_the_controllers_response_model(
     controller's `except`, one with no traceback logged anywhere.
 
     Constructing the model is the whole assertion. Nothing about the
-    values is re-checked here; the tests above own those.
+    values is re-checked here; the tests above own those. The accepted
+    response is proven over the wire, through the buyer's own negotiation
+    client against the served routes, in `test_credits_negotiate_cli.py`.
     """
     response = await _start(db, amount=300, quantity=3)
     assert response["action"] == "accept"
@@ -115,6 +119,31 @@ async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_rec
         await _start(db, amount=300, quantity=3)
     assert exc.value.reason.startswith("quota_exhausted")
     assert not fake_capacity.reserved
+
+
+async def test_quota_guard_reads_only_the_listings_own_site(db, monkeypatch, key_records):
+    """Another site naming the same quota resource cannot cover the quantity."""
+    bound = FakeCapacity(available=2)
+    other = FakeCapacity(available=100)
+
+    class _TwoSites:
+        site_names = ["tokens", "elsewhere"]
+
+        def site(self, site_id):
+            return {"tokens": bound, "elsewhere": other}[site_id]
+
+        async def snapshot(self):
+            return [
+                {**row, "site": name}
+                for name, site in (("tokens", bound), ("elsewhere", other))
+                for row in await site.snapshot()
+            ]
+
+    monkeypatch.setattr(runtime_module, "build_capacity_client", lambda factory: _TwoSites())
+
+    with pytest.raises(OfferUnfulfillableError) as exc:
+        await _start(db, amount=300, quantity=3)
+    assert exc.value.reason.startswith("quota_exhausted")
 
 
 async def test_existing_key_owned_by_buyer_principal(db, fake_capacity, key_records):

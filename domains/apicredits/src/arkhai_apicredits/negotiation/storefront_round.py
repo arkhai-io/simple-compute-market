@@ -176,8 +176,7 @@ async def _run_seller_round(
         our_reference_amount=int(reference_amount),
         listing=listing_dict,
         our_escrow_proposal=their_proposal,
-        available_resources=policy_inputs.get("available_resources")
-        or {"resources": []},
+        available_resources=policy_inputs.get("available_resources") or {},
         intermediate={
             "requested_quantity": requested_quantity,
             "key_mode": key_mode or "new",
@@ -231,11 +230,12 @@ class _DefaultSellerRoundHook:
         key_id: str | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
-        policy_inputs: dict[str, Any] = {
-            "available_resources": {
-                "resources": await self._capacity.snapshot() or [],
-            },
-        }
+        policy_inputs: dict[str, Any] = {}
+        # The capacity source captures no snapshot for a listing availability
+        # does not bound, and the quota guard then does not apply.
+        snapshot = await self._capacity.snapshot()
+        if snapshot is not None:
+            policy_inputs["available_resources"] = {"resources": snapshot}
         if (key_mode or "new") == "existing" and key_id and self._key_lookup:
             try:
                 policy_inputs["key_record"] = await self._key_lookup(key_id)
@@ -274,7 +274,8 @@ def default_seller_round_hook(
 ) -> ApiCreditsSellerRoundHook:
     """Build the default API-credits seller round hook.
 
-    ``capacity`` provides the quota snapshot for ``credit_quota_guard``;
+    ``capacity`` provides the quota snapshot for ``credit_quota_guard``, or
+    ``None`` where availability does not bound the listing;
     ``key_lookup`` provides the key→owner record for
     ``key_owned_by_buyer_principal`` (both captured per round — the chain
     itself stays synchronous and side-effect free).

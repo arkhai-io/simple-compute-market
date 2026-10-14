@@ -12,7 +12,8 @@ through.
 from __future__ import annotations
 
 import pytest
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 
 from market_storefront.services.fulfillment_resume_runtime import (
     _commit_recovered_reservation,
@@ -25,7 +26,7 @@ _END = "2099-01-01 01:00"
 
 
 async def _committed(capacity, fake) -> str:
-    binding = CapacityBinding("default", "vm", _POOL)
+    binding = PublicationBinding("default", "vm", _POOL, BACKED)
     reserved = await capacity.reserve(binding, claim={"offering_mode": "vm"})
     assert reserved is not None
     reservation_id = str(reserved["capacity_reservation_id"])
@@ -66,7 +67,7 @@ async def test_a_resumed_deal_never_moves_its_lease():
         reservation_id=reservation_id,
         context={"duration_seconds": 3600},
         capacity_client=capacity.client(),
-        site_id="default",
+        binding=PublicationBinding("default", "vm", _POOL, BACKED),
     )
 
     recorded = fake.reservations[reservation_id]

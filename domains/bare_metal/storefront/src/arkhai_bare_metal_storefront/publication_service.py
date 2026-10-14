@@ -16,13 +16,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
 from core_storefront.multi_registry_client import (
     MultiRegistryClient,
     RegistryAuthorityTrust,
 )
 from market_capacity_publication import (
-    CapacityBinding,
     CapacityBindingError,
     PublicationBinding,
     PublicationCandidate,
@@ -36,6 +34,7 @@ from registry_client import (
     UpdateListingRequest,
 )
 
+from .listing_binding import bare_metal_listing_binding
 from .sqlite_client import SQLiteClient
 
 RegistryClientFactory = Callable[[], Any]
@@ -64,30 +63,7 @@ class BareMetalPublicationHooks:
             )
 
     async def binding_for_listing(self, listing_id: str) -> PublicationBinding | None:
-        """The listing's binding, whose source is the Physical Resource it offers.
-
-        A bare-metal listing sells one specific machine, so its binding's source
-        is that Physical Resource rather than its pool; the pool stays part of
-        the listing's derivation key. Every bare-metal listing is
-        capacity-backed, so a binding recording anything else is refused.
-        """
-        durable = await self._db.load_listing_binding(listing_id=listing_id)
-        if durable is None or not durable.physical_resource_id:
-            return None
-        if durable.binding.offering_mode != BARE_METAL_OFFERING_MODE:
-            raise CapacityBindingError(
-                f"listing {listing_id!r} is not bound as a bare-metal listing"
-            )
-        if durable.capacity_backing != CapacityBinding.capacity_backing:
-            raise CapacityBindingError(
-                f"bare-metal listing {listing_id!r} is not recorded as "
-                "capacity-backed"
-            )
-        return CapacityBinding(
-            durable.site_id,
-            BARE_METAL_OFFERING_MODE,
-            durable.physical_resource_id,
-        )
+        return await bare_metal_listing_binding(self._db, listing_id)
 
 
 async def bare_metal_publication_candidate(
@@ -95,9 +71,7 @@ async def bare_metal_publication_candidate(
     listing_id: str,
 ) -> PublicationCandidate[dict[str, Any]]:
     """The persisted listing, as the kit runtime publishes it, with its binding."""
-    binding = await BareMetalPublicationHooks(sqlite_client).binding_for_listing(
-        listing_id
-    )
+    binding = await bare_metal_listing_binding(sqlite_client, listing_id)
     listing = await sqlite_client.load_listing(listing_id=listing_id)
     if binding is None or listing is None:
         raise CapacityBindingError(

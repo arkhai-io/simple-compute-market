@@ -17,6 +17,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
+from tests.listing_bindings import upsert_bound_listing
 
 BUYER_SIGNER = Ed25519Signer(bytes.fromhex("11" * 32))
 SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -79,9 +80,36 @@ def terms(quantity=3, key_mode="new", key_id=None) -> ProvisionTerms:
 
 
 class FakeCapacity:
+    """The credits service's site: its quota snapshot and its pool projection."""
+
+    site_names = ["tokens"]
+
     def __init__(self, available: int = 100) -> None:
         self.available = available
         self.reserved: list[dict] = []
+
+    def site(self, site_id: str) -> "FakeCapacity":
+        if site_id not in self.site_names:
+            raise KeyError(site_id)
+        return self
+
+    async def resource_pool_projection(self):
+        return {
+            "resource_pools": [
+                {
+                    "pool_id": "default",
+                    "resources": [{"physical_resource_id": "svc-quota"}],
+                    "pool_metadata": {
+                        "enabled": True,
+                        "policy_tags": {
+                            "deliverable_modes": ["api_credits"],
+                            "advertisable_modes": ["api_credits"],
+                            "capacity_backing": "backed",
+                        },
+                    },
+                }
+            ]
+        }
 
     async def snapshot(self):
         return [
@@ -112,7 +140,8 @@ class FakeCapacity:
 
 async def seed_listing(client) -> None:
     """Open the one quota-backed listing these tests negotiate."""
-    await client.upsert_listing(
+    await upsert_bound_listing(
+        client,
         listing_id="L-tok",
         status="open",
         created_at=datetime.now().isoformat(),

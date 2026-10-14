@@ -6,6 +6,7 @@ them as an administrator, or as the site, would, over the production app.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 
 import httpx
@@ -181,6 +182,28 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
     assert call["claim"]["resource_id"] == "resource-1"
     assert call["deal_ref"] == {"listing_id": "listing-1", "reserved_by": "admin"}
     assert refused.value.status_code == 409
+
+
+async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:
+    runtime, _negotiation_id, capacity = await _runtime(tmp_path)
+    # A binding recorded unbacked: bare metal publishes none today, so the
+    # durable record is written directly past its immutability trigger.
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
+        conn.execute(
+            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
+            "WHERE listing_id='listing-1'"
+        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.admin_reserve_capacity(
+                    required_attributes={}, listing_id="listing-1"
+                )
+
+    assert refused.value.status_code == 409
+    assert capacity.reserve_calls == []
 
 
 async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> None:

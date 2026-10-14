@@ -27,6 +27,7 @@ from apicredits_storefront.settlement_stages import SettlementRefusal
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from arkhai_apicredits.settlement.credits_client import CreditIssuanceResult
+from tests.listing_bindings import upsert_bound_listing
 
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
 SELLER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -78,7 +79,8 @@ async def payment_context(tmp_path):
     )
     stage = SELLER_STAGES[ARKHAI_PAYMENTS_MECHANISM]
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    await db.upsert_listing(
+    await upsert_bound_listing(
+        db,
         listing_id="listing-payment", status="open", created_at=now, updated_at=now,
         listing_resource={"service_name": "test-api", "resource_id": "svc-quota",
                           "capacity_site_id": "quota", "offering_mode": "api_credits",

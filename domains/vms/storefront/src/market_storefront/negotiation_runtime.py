@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
@@ -25,7 +26,7 @@ from arkhai_vms_negotiation.policies import _amount_from_proposal
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_arkhai_payments import PaymentSellerStage
-from market_capacity_publication import CapacityBinding, CapacityRuntime
+from market_capacity_publication import CapacityRuntime
 from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
@@ -55,10 +56,7 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_resource_pools_contracts.hints import capped_hold_seconds
 from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
-from market_capacity_publication import (
-    PublicationBinding,
-    UnbackedBinding,
-)
+from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
@@ -556,9 +554,9 @@ def _build_response_artifacts(
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
 ) -> Mapping[str, Any]:
-    # Settlement artifacts carry the listing's site, mode, and source for both
-    # backed and unbacked listings; only capacity effects need the backed form.
-    if not isinstance(acceptance.binding, (CapacityBinding, UnbackedBinding)):
+    # Settlement artifacts carry the listing's site, mode, and source whatever
+    # its backing; only capacity effects ask the backing to admit them.
+    if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
     if accepted:
         artifacts = _with_agreement(
@@ -666,6 +664,17 @@ def lookup_pool_policy_tags(
     return {}
 
 
+@dataclass(frozen=True)
+class _HoldAttempt:
+    """A reservation attempt's outcome, which may be no reservation.
+
+    Distinct from the ``None`` a backing that admits no hold returns, so a hold
+    that was not applicable is never reported as one that was unavailable.
+    """
+
+    reservation: Mapping[str, Any] | None
+
+
 async def _place_capacity_hold(
     repository: Any,
     acceptance: Acceptance,
@@ -690,37 +699,32 @@ async def _place_capacity_hold(
     )
     if ttl <= 0:
         return
-    if isinstance(acceptance.binding, UnbackedBinding):
-        # Nothing can be reserved against a listing with no admission authority,
-        # so there is no hold to place and nothing has failed.
-        stage_event(
-            "negotiation",
-            "capacity_hold_not_applicable",
-            negotiation_id=acceptance.negotiation_id,
-            listing_id=acceptance.listing_id,
-            capacity_backing=acceptance.binding.capacity_backing,
-        )
-        return
-    try:
-        if not isinstance(acceptance.binding, CapacityBinding):
-            raise RuntimeError("capacity hold requires a durably bound listing")
+    binding = acceptance.binding
+
+    async def reserve() -> _HoldAttempt:
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
-        capacity = capacity_runtime
-        ttl = capped_hold_seconds(
+        capped_ttl = capped_hold_seconds(
             ttl,
             lookup_pool_policy_tags(repository, acceptance.listing_id),
         )
-        held = await capacity.reserve(
-            acceptance.binding,
-            claim=claim,
-            deal_ref={
-                "listing_id": acceptance.listing_id,
-                "negotiation_id": acceptance.negotiation_id,
-            },
-            ttl_seconds=ttl,
-            lease_start_utc=acceptance.agreement.start_utc,
-            lease_duration_seconds=acceptance.agreement.duration_seconds,
+        return _HoldAttempt(
+            await capacity_runtime.reserve(
+                binding,
+                claim=claim,
+                deal_ref={
+                    "listing_id": acceptance.listing_id,
+                    "negotiation_id": acceptance.negotiation_id,
+                },
+                ttl_seconds=capped_ttl,
+                lease_start_utc=acceptance.agreement.start_utc,
+                lease_duration_seconds=acceptance.agreement.duration_seconds,
+            )
         )
+
+    try:
+        if not isinstance(binding, PublicationBinding):
+            raise RuntimeError("capacity hold requires a durably bound listing")
+        attempt = await binding.backing.place_hold(reserve)
     except Exception as exc:
         logger.warning(
             "[NEGOTIATION] Could not place capacity hold for %s: %s",
@@ -728,6 +732,18 @@ async def _place_capacity_hold(
             exc,
         )
         return
+    if attempt is None:
+        # The listing's backing admits no hold, so there is none to place and
+        # nothing has failed.
+        stage_event(
+            "negotiation",
+            "capacity_hold_not_applicable",
+            negotiation_id=acceptance.negotiation_id,
+            listing_id=acceptance.listing_id,
+            capacity_backing=binding.backing.label,
+        )
+        return
+    held = attempt.reservation
     if not held:
         stage_event(
             "negotiation",
@@ -954,7 +970,7 @@ def build_vm_negotiation_runtime(
             listing_id=opening.listing_id,
         )
         require_domain_binding(copied.binding)
-        if not isinstance(opening.binding, (CapacityBinding, UnbackedBinding)):
+        if not isinstance(opening.binding, PublicationBinding):
             raise NegotiationStateError(
                 "VM negotiation opening has no listing binding"
             )

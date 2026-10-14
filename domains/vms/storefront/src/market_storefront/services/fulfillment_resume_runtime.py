@@ -22,18 +22,21 @@ from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
+from market_capacity_publication import CapacityEffects, PublicationBinding
 from market_core import SettlementEvidence, VersionedEnvelope
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
 )
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 
 from market_storefront import container as _container
 from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
+    capacity_binding_for_listing,
 )
 from market_storefront.services.fulfillment_service import (
     _fulfillment_result_to_connection,
@@ -74,7 +77,7 @@ async def _commit_recovered_reservation(
     reservation_id: str,
     context: dict[str, Any],
     capacity_client: Any,
-    site_id: str,
+    binding: PublicationBinding,
 ) -> None:
     """Commit the deal's reservation before its fulfillment begins.
 
@@ -92,13 +95,14 @@ async def _commit_recovered_reservation(
         start_utc=context.get("start_utc"),
         duration_seconds=int(context.get("duration_seconds") or 3600),
     )
-    await capacity_client.commit(
+    await CapacityEffects(capacity_client).commit(
+        binding,
+        resource_id=None,
         capacity_reservation_id=reservation_id,
         lease_start_utc=lease_start_utc,
         lease_end_utc=lease_end_utc,
         idempotency_ref=negotiation_id,
         deal_ref={"negotiation_id": negotiation_id},
-        site_id=site_id,
     )
 
 
@@ -231,6 +235,7 @@ async def _ensure_recovery_capacity(
     reservation_id: Any,
     settlement_resource_id: Any,
     thread_binding: Any,
+    binding: PublicationBinding,
 ) -> tuple[str | None, str | None]:
     if reservation_id:
         return str(reservation_id), (
@@ -252,13 +257,15 @@ async def _ensure_recovery_capacity(
         raise RuntimeError("recovery context offering mode disagrees with binding")
     claim["offering_mode"] = thread_binding.binding.offering_mode
     try:
-        reserved = await capacity_client.reserve(
+        reserved = await CapacityEffects(capacity_client).reserve(
+            binding,
             claim=claim,
             deal_ref={"listing_id": listing_id, "negotiation_id": negotiation_id},
             lease_start_utc=context.get("start_utc"),
             lease_duration_seconds=int(context.get("duration_seconds") or 3600),
-            site=site_id,
         )
+    except CapacityNotAdmittedError:
+        raise
     except Exception as exc:
         if site_id is None:
             raise
@@ -457,6 +464,12 @@ async def converge_delivery_once(
     )
     site_id = thread_binding.site_id
     negotiation_id = str(delivery["negotiation_id"])
+    # Every recovery effect passes the listing binding's admission guard.
+    binding = await capacity_binding_for_listing(
+        sqlite_client, thread_binding.listing_id
+    )
+    if binding.site_id != site_id:
+        raise RuntimeError("accepted binding site disagrees with the listing binding")
     request_envelope = context.get("fulfillment_request")
     if not delivery.get("fulfillment_id") and not isinstance(request_envelope, dict):
         logger.error(
@@ -478,6 +491,7 @@ async def converge_delivery_once(
         reservation_id=delivery.get("capacity_reservation_id"),
         settlement_resource_id=delivery.get("settlement_resource_id"),
         thread_binding=thread_binding,
+        binding=binding,
     )
     if not reservation_id:
         return False
@@ -487,7 +501,7 @@ async def converge_delivery_once(
             reservation_id=reservation_id,
             context=context,
             capacity_client=capacity_client,
-            site_id=site_id,
+            binding=binding,
         )
     fulfillment_id, resource_id = await _ensure_recovery_fulfillment_started(
         negotiation_id=negotiation_id,

@@ -25,7 +25,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-_BACKING_VALUES = frozenset({"backed", "unbacked"})
+from market_resource_pools_contracts.backing import (
+    UnknownCapacityBackingError,
+    capacity_backing as backing_for,
+    capacity_backing_labels,
+)
 
 
 def build_projected_resource(
@@ -75,11 +79,22 @@ def build_resource_pool_row(
 ) -> dict[str, Any]:
     """One projected pool with both declarations.
 
-    A backed pool delivers what it advertises unless told otherwise; an unbacked
-    pool delivers nothing, as the pool contract requires.
+    Unless told otherwise, a pool delivers what it advertises where its backing
+    permits that declaration, and nothing where it does not -- so a backed pool
+    delivers its advertised modes and an unbacked one delivers none, as the pool
+    contract requires. A label no backing is registered for is projected as
+    given, delivering nothing, so a consumer test can supply an unresolvable
+    pool.
     """
     if deliverable_modes is None:
-        deliverable_modes = advertisable_modes if capacity_backing == "backed" else ()
+        advertised = frozenset(advertisable_modes)
+        try:
+            permitted = not backing_for(capacity_backing).declaration_problems(
+                advertised, advertised
+            )
+        except UnknownCapacityBackingError:
+            permitted = False
+        deliverable_modes = advertisable_modes if permitted else ()
     return {
         "pool_id": pool_id,
         "resources": [
@@ -141,7 +156,7 @@ def validate_resource_pool_projection(response: Mapping[str, Any]) -> None:
         )
         tags = metadata.get("policy_tags")
         assert isinstance(tags, Mapping), f"pool {pool_id} projects no policy tags"
-        assert tags.get("capacity_backing") in _BACKING_VALUES, (
+        assert tags.get("capacity_backing") in capacity_backing_labels(), (
             f"pool {pool_id} backing {tags.get('capacity_backing')!r}"
         )
         _modes(tags.get("advertisable_modes"), f"pool {pool_id} advertisable_modes")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
+
 import pytest
 from market_capability_shape import shape_digest
 
@@ -48,10 +50,11 @@ def _generation(*, capacity=None, attributes=None, enabled=True, available=True,
 
 
 def _check(generation, *, admission=POOL_ADMITTED, region="us-west", published_region="us-west",
-           digest=PUBLISHED):
+           digest=PUBLISHED, backing=BACKED):
     return recheck_bare_metal_listing_source(
         generation,
         pool_admission={"pool-1": admission},
+        pool_backings={"pool-1": backing},
         pool_regions={"pool-1": region},
         pool_id="pool-1",
         physical_resource_id="r1",
@@ -106,3 +109,7 @@ def test_a_source_that_no_longer_supports_the_listing_is_a_declared_mismatch(
 )
 def test_a_source_that_no_longer_offers_the_resource_is_absent(generation, kwargs):
     assert _check(generation, **kwargs).outcome == SOURCE_ABSENT
+
+
+def test_supply_availability_does_not_bound_matches_while_its_machine_is_leased():
+    assert _check(_generation(available=False), backing=UNBACKED).outcome == SOURCE_MATCHES

@@ -18,7 +18,7 @@ from core_storefront.site_projections import (
     ProjectionState,
 )
 from market_identity import create_signer
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
@@ -67,7 +67,7 @@ async def _persist_terminal_negotiation(
     agreement_ref: str,
     listing_id: str,
     pool_id: str,
-) -> CapacityBinding:
+) -> PublicationBinding:
     now = datetime.now(timezone.utc).isoformat()
     listing_binding = prepare_vm_listing_binding(
         listing_id=listing_id,

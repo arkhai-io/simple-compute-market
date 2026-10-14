@@ -11,7 +11,8 @@ from core_storefront.site_projections import (
     ProjectionIdentity,
     ProjectionState,
 )
-from market_capacity_publication import CapacityBinding, UnbackedBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_policy.listing_source import ListingSourceVerdict
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
@@ -101,7 +102,7 @@ def _listing(pool_id="pool-a", gpu_count=2, gpu_model="H100"):
 async def _bind(repository, binding, listing):
     """Store the listing's binding as publication does; the guard reads its key there."""
     resource = listing["listing_resource"]
-    backing = "unbacked" if isinstance(binding, UnbackedBinding) else "backed"
+    backing = binding.backing.label
     await repository.upsert_listing_with_binding(
         binding=prepare_vm_listing_binding(
             listing_id=listing["listing_id"],
@@ -151,7 +152,7 @@ async def test_availability_is_read_from_the_pinned_site_only(repository):
     result = await _check(
         repository,
         {"site-a": [_pool("pool-a")], "site-b": [_pool("pool-a")]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         capacity,
     )
@@ -165,7 +166,7 @@ async def test_a_match_only_at_another_site_is_not_a_match(repository):
     result = await _check(
         repository,
         {"site-a": [_pool("pool-a", gpu_model="A100")], "site-b": [_pool("pool-a")]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         capacity,
     )
@@ -180,7 +181,7 @@ async def test_a_match_only_in_another_pool_is_not_a_match(repository):
     result = await _check(
         repository,
         {"site-a": [_pool("pool-b")]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         _Capacity({}),
     )
@@ -193,11 +194,11 @@ async def test_a_fungible_match_needs_one_member_large_enough(repository):
 
     too_large = await _check(
         repository, {"site-a": [pool]},
-        CapacityBinding("site-a", "vm", "pool-a"), _listing(gpu_count=4), _Capacity({}),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED), _listing(gpu_count=4), _Capacity({}),
     )
     fits = await _check(
         repository, {"site-a": [pool]},
-        CapacityBinding("site-a", "vm", "pool-a"), _listing(gpu_count=2), _Capacity({}),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED), _listing(gpu_count=2), _Capacity({}),
     )
 
     assert too_large.outcome == "declared_mismatch"
@@ -211,7 +212,7 @@ async def test_an_unbacked_listing_makes_no_site_call(repository):
     result = await _check(
         repository,
         {"site-a": [_pool("pool-a", tags=tags, members=(("r1", 4, 0),))]},
-        UnbackedBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", UNBACKED),
         _listing(),
         capacity,
     )
@@ -224,7 +225,7 @@ async def test_a_backed_listing_with_nothing_free_is_declared_but_unavailable(re
     result = await _check(
         repository,
         {"site-a": [_pool("pool-a", members=(("r1", 4, 0),))]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         _Capacity({"site-a": [{"resource_id": "pool-a-r1", "available_units": 0}]}),
     )
@@ -238,7 +239,7 @@ async def test_an_unloaded_site_projection_confirms_nothing(repository):
     result = await _check(
         repository,
         {"site-b": [_pool("pool-a")]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         capacity,
     )
@@ -256,7 +257,7 @@ async def test_a_site_whose_capacity_cannot_be_read_confirms_nothing(repository)
     result = await _check(
         repository,
         {"site-a": [_pool("pool-a")]},
-        CapacityBinding("site-a", "vm", "pool-a"),
+        PublicationBinding("site-a", "vm", "pool-a", BACKED),
         _listing(),
         _Unreachable({}),
     )

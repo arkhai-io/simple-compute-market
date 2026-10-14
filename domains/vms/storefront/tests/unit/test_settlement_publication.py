@@ -18,8 +18,12 @@ from market_core import SettlementStageTable
 from market_storefront.settlement_stages import VmAlkahestSellerStage, VmPaymentsSellerStage
 
 _STAGES = SettlementStageTable({
-    "alkahest.v1": VmAlkahestSellerStage(lambda **kwargs: {}),
-    "example.payment.v1": VmPaymentsSellerStage(mechanism="example.payment.v1"),
+    "alkahest.v1": VmAlkahestSellerStage(
+        lambda **kwargs: {}, fulfils_through_capacity=True
+    ),
+    "example.payment.v1": VmPaymentsSellerStage(
+        mechanism="example.payment.v1", fulfils_through_capacity=True
+    ),
 })
 
 

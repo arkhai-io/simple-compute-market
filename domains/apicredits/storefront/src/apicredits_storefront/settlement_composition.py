@@ -40,8 +40,8 @@ from apicredits_storefront.settlement_stages import AlkahestSellerStage, ArkhaiP
 from apicredits_storefront.utils import config as storefront_config
 
 SELLER_STAGES = SettlementStageTable({
-    "alkahest.v1": AlkahestSellerStage(),
-    ARKHAI_PAYMENTS_MECHANISM: ArkhaiPaymentsSellerStage(),
+    "alkahest.v1": AlkahestSellerStage(fulfils_through_capacity=True),
+    ARKHAI_PAYMENTS_MECHANISM: ArkhaiPaymentsSellerStage(fulfils_through_capacity=True),
 })
 
 logger = logging.getLogger(__name__)

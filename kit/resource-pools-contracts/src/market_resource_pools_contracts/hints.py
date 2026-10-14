@@ -21,12 +21,11 @@ and admission declarations, and every pool must carry both:
   trading by private arrangement can prove nothing and must still be able to
   list.
 - ``capacity_backing`` is ``backed`` when an admission authority stands behind
-  the pool and ``unbacked`` when none does. It is a discriminator, so an
-  unrecognized value is refused rather than resolved to either side.
-- A backed pool may advertise only what it delivers, otherwise a buyer could
-  reach admission for a mode the provider will refuse. An unbacked pool must
-  deliver nothing: no layer reads backing at admission, so an empty
-  deliverable set is what keeps every capacity path unreachable for it.
+  the pool and ``unbacked`` when none does. The label selects the pool's backing
+  delegate (see :mod:`.backing`), so a label with no delegate is refused rather
+  than resolved to either side.
+- How the two sets may relate is the backing delegate's rule, judged here only
+  once both sets and the label have parsed.
 
 An absent declaration is reported as absent, never defaulted, so a consumer
 reading projected tags can tell a producer that predates these tags from one
@@ -49,27 +48,31 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, cast
+from typing import Any, Mapping
 
 from market_capability_shape import shape_structure_problems
 
+from .backing import (
+    CapacityBacking,
+    UnknownCapacityBackingError,
+    capacity_backing,
+    capacity_backing_labels,
+)
+# The tag names, problem codes, and problem record stay importable from here,
+# where every reader of declarations has always found them.
+from .vocabulary import (
+    ADVERTISABLE_EXCEEDS_DELIVERABLE,
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKING_POLICY_TAG,
+    DELIVERABLE_MODES_POLICY_TAG,
+    INVALID_ADVERTISABLE_MODES,
+    INVALID_CAPACITY_BACKING,
+    INVALID_DELIVERABLE_MODES,
+    MISSING_DECLARATION,
+    UNBACKED_POOL_DELIVERS,
+    PoolDeclarationProblem,
+)
 
-DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
-ADVERTISABLE_MODES_POLICY_TAG = "advertisable_modes"
-CAPACITY_BACKING_POLICY_TAG = "capacity_backing"
-CAPACITY_BACKED = "backed"
-CAPACITY_UNBACKED = "unbacked"
-CAPACITY_BACKING_VALUES = frozenset({CAPACITY_BACKED, CAPACITY_UNBACKED})
-CapacityBacking = Literal["backed", "unbacked"]
-
-# Structured problem codes shared by the pool models, document validation,
-# stored-state checks, and the projection resolver.
-MISSING_DECLARATION = "missing_declaration"
-INVALID_DELIVERABLE_MODES = "invalid_deliverable_modes"
-INVALID_ADVERTISABLE_MODES = "invalid_advertisable_modes"
-INVALID_CAPACITY_BACKING = "invalid_capacity_backing"
-ADVERTISABLE_EXCEEDS_DELIVERABLE = "advertisable_exceeds_deliverable"
-UNBACKED_POOL_DELIVERS = "unbacked_pool_delivers"
 LISTING_CARDINALITY_MODE_POLICY_TAG = "listing_cardinality_mode"
 # Producers emit LISTING_CARDINALITY_MODE_POLICY_TAG. This spelling is accepted
 # on read so a pool written by an older producer resolves to the cardinality it
@@ -140,24 +143,11 @@ def validate_deliverable_modes(policy_tags: Mapping[str, Any]) -> list[str]:
 
 
 @dataclass(frozen=True)
-class PoolDeclarationProblem:
-    """One reason a pool's advertisement or backing declaration is invalid."""
-
-    tag: str
-    code: str
-    message: str
-
-
-@dataclass(frozen=True)
 class PoolDeclarations:
     """A pool's resolved advertisement and admission declarations."""
 
     advertisable_modes: frozenset[str]
-    capacity_backing: CapacityBacking
-
-    @property
-    def backed(self) -> bool:
-        return self.capacity_backing == CAPACITY_BACKED
+    backing: CapacityBacking
 
     def advertises(self, requested_mode: str) -> bool:
         """Whether the pool's listings may advertise `requested_mode`.
@@ -195,8 +185,8 @@ def pool_declaration_problems(
     """Every problem with a pool's mode and backing declarations.
 
     The one owner of the declaration invariant: deliverable shape, the
-    presence and shape of both advertisement and backing, and the two
-    cross-tag rules. The pool models, the service, document validation, and
+    presence and shape of both advertisement and backing, and the backing
+    delegate's rule relating the two sets. The pool models, the service, document validation, and
     the resolver all use it, so they cannot disagree about what a valid
     declaration is. A cross-tag rule is not judged against a set or value
     that did not parse; the parse failure is reported instead.
@@ -226,7 +216,7 @@ def pool_declaration_problems(
                 ADVERTISABLE_MODES_POLICY_TAG, INVALID_ADVERTISABLE_MODES, str(exc),
             ))
 
-    backing: str | None = None
+    backing: CapacityBacking | None = None
     if CAPACITY_BACKING_POLICY_TAG not in policy_tags:
         problems.append(PoolDeclarationProblem(
             CAPACITY_BACKING_POLICY_TAG,
@@ -234,34 +224,18 @@ def pool_declaration_problems(
             f"{CAPACITY_BACKING_POLICY_TAG} is required",
         ))
     else:
-        raw = policy_tags[CAPACITY_BACKING_POLICY_TAG]
-        if isinstance(raw, str) and raw in CAPACITY_BACKING_VALUES:
-            backing = raw
-        else:
+        try:
+            backing = capacity_backing(policy_tags[CAPACITY_BACKING_POLICY_TAG])
+        except UnknownCapacityBackingError:
+            labels = " or ".join(f"'{label}'" for label in sorted(capacity_backing_labels()))
             problems.append(PoolDeclarationProblem(
                 CAPACITY_BACKING_POLICY_TAG,
                 INVALID_CAPACITY_BACKING,
-                f"{CAPACITY_BACKING_POLICY_TAG} must be "
-                f"'{CAPACITY_BACKED}' or '{CAPACITY_UNBACKED}'",
+                f"{CAPACITY_BACKING_POLICY_TAG} must be {labels}",
             ))
 
-    if backing == CAPACITY_BACKED and advertisable is not None and deliverable is not None:
-        excess = advertisable - deliverable
-        if excess:
-            problems.append(PoolDeclarationProblem(
-                ADVERTISABLE_MODES_POLICY_TAG,
-                ADVERTISABLE_EXCEEDS_DELIVERABLE,
-                f"a backed pool may advertise only modes it delivers; "
-                f"{ADVERTISABLE_MODES_POLICY_TAG} names undelivered "
-                f"{', '.join(sorted(excess))}",
-            ))
-    if backing == CAPACITY_UNBACKED and deliverable:
-        problems.append(PoolDeclarationProblem(
-            DELIVERABLE_MODES_POLICY_TAG,
-            UNBACKED_POOL_DELIVERS,
-            f"an unbacked pool must deliver nothing; "
-            f"{DELIVERABLE_MODES_POLICY_TAG} names {', '.join(sorted(deliverable))}",
-        ))
+    if backing is not None and advertisable is not None and deliverable is not None:
+        problems.extend(backing.declaration_problems(advertisable, deliverable))
     return tuple(problems)
 
 
@@ -287,7 +261,7 @@ def resolve_pool_declarations(policy_tags: Mapping[str, Any]) -> PoolDeclaration
         raise PoolDeclarationError(tuple(problems))
     return PoolDeclarations(
         advertisable_modes=_declared_advertisable_modes(policy_tags),
-        capacity_backing=cast(CapacityBacking, policy_tags[CAPACITY_BACKING_POLICY_TAG]),
+        backing=capacity_backing(policy_tags[CAPACITY_BACKING_POLICY_TAG]),
     )
 
 

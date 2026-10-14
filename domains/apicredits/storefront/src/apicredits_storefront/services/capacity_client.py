@@ -8,7 +8,6 @@ from typing import Any, Callable
 from core_storefront.aggregation import PLACEMENT_POLICIES, AggregateCapacityClient
 from market_capacity_publication import (
     run_capacity_event_pollers,
-    CapacityBinding,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite as KitCapacitySite,
@@ -57,11 +56,16 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
     async def reconcile(context: CapacityReconcileContext) -> None:
         from apicredits_storefront.services.publication_service import (
             close_token_listings_after_capacity_change,
+            close_token_listings_on_source_mismatch,
             converge_registries,
             reopen_token_listings_after_capacity_change,
         )
         delta = context.delta
         db = sqlite_client_factory()
+        # Source reconciliation runs on every pass, whatever the event: moving
+        # a resource to another pool changes no capacity and is fed as a
+        # release, which the availability close never sees.
+        await close_token_listings_on_source_mismatch(db)
         if delta is None or delta.kind in _CONSUMING or delta.kind in _MIXED:
             await close_token_listings_after_capacity_change(db, dict(context.availability))
         if delta is None or delta.kind == "released" or delta.kind in _MIXED:
@@ -96,17 +100,6 @@ def build_capacity_runtime(sqlite_client_factory: SQLiteClientFactory) -> Capaci
 
 def build_capacity_client(sqlite_client_factory: SQLiteClientFactory) -> AggregateCapacityClient:
     return build_capacity_runtime(sqlite_client_factory).client()
-
-
-def capacity_binding_from_listing_resource(listing_resource: dict[str, Any] | str) -> CapacityBinding:
-    if isinstance(listing_resource, str):
-        import json
-        listing_resource = json.loads(listing_resource)
-    return CapacityBinding(
-        str(listing_resource.get("capacity_site_id") or ""),
-        str(listing_resource.get("offering_mode") or ""),
-        str(listing_resource.get("resource_id") or ""),
-    )
 
 
 async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:

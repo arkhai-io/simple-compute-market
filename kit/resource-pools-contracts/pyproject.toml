@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Resource-pool wire models, declaration vocabulary, and route declarations, without the pool authority's persistence."
 requires-python = ">=3.12"

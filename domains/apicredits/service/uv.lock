@@ -138,7 +138,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -151,7 +151,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -172,7 +172,7 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-service"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -200,7 +200,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
     { name = "arkhai-kit-site", specifier = ">=0.10.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -298,7 +298,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
@@ -308,19 +308,19 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -355,15 +355,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.9.1"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.9.1-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -24,14 +24,11 @@ from market_negotiation_runtime import OfferUnfulfillableError
 from market_settlement_runtime import PreparedSettlement, FulfillmentOutcome, derive_obligation_ref
 from core_storefront.stage_log import stage_event
 
-from apicredits_storefront.services.capacity_client import (
-    build_capacity_runtime,
-    capacity_binding_from_listing_resource,
-)
+from apicredits_storefront.listing_binding import api_credit_listing_binding
+from apicredits_storefront.services.capacity_client import build_capacity_runtime
 from apicredits_storefront.services.issuance_evidence import ApiCreditPrivateResultRepository
 from apicredits_storefront.utils.config import CHAINS, settings
 from arkhai_apicredits.domain_runtime import market_domain
-from arkhai_apicredits.listings.models import coerce_resource_dict
 from arkhai_apicredits.negotiation.terms import ApiCreditsProvisionTerms, provision_quantity
 from arkhai_apicredits.schema import ApiCreditsListing
 from arkhai_apicredits.settlement.fulfillment import credit_delivery
@@ -396,6 +393,12 @@ class ArkhaiPaymentsSellerStage:
 
     registration = staticmethod(create_arkhai_payments_registration)
 
+    def __init__(self, *, fulfils_through_capacity: bool) -> None:
+        # Whether settling through this stage issues credits against quota.
+        # Required of every stage, with no default, because publication drops
+        # such a stage's options from a listing no admission authority backs.
+        self.fulfils_through_capacity = fulfils_through_capacity
+
     def validate_selection(self, selection: Any) -> None:
         params = selection.params
         if not isinstance(params, Mapping) or set(params) != {"payer_account"}:
@@ -426,24 +429,29 @@ class ArkhaiPaymentsSellerStage:
         if ttl <= 0 or not quantity:
             return
         try:
-            listing_resource = coerce_resource_dict(acceptance.listing_record.get("listing_resource"))
+            binding = await api_credit_listing_binding(repository, acceptance.listing_id)
+            if binding is None:
+                raise RuntimeError("API-credit listing has no durable binding")
             claim: dict[str, Any] = {
                 "offering_mode": "api_credits",
                 "units": int(quantity),
+                "resource_id": binding.source_id,
             }
-            if listing_resource.get("resource_id"):
-                claim["resource_id"] = str(listing_resource["resource_id"])
             capacity = build_capacity_runtime(lambda: repository)
-            binding = capacity_binding_from_listing_resource(listing_resource)
-            held = await capacity.reserve(
-                binding,
-                claim=claim,
-                deal_ref={
-                    "listing_id": acceptance.listing_id,
-                    "negotiation_id": acceptance.negotiation_id,
-                },
-                ttl_seconds=ttl,
-            )
+
+            async def reserve() -> Any:
+                return await capacity.reserve(
+                    binding,
+                    claim=claim,
+                    deal_ref={
+                        "listing_id": acceptance.listing_id,
+                        "negotiation_id": acceptance.negotiation_id,
+                    },
+                    ttl_seconds=ttl,
+                )
+
+            # A hold stands only where an admission authority backs the listing.
+            held = await binding.backing.place_hold(reserve)
         except Exception as exc:
             logger.warning(
                 "[NEGOTIATION] Could not place quota hold for %s: %s",
@@ -514,6 +522,10 @@ class AlkahestSellerStage:
     _delivery_locks: dict[str, asyncio.Lock] = {}
     registration = staticmethod(create_alkahest_registration)
     retry_uncertain = False
+
+    def __init__(self, *, fulfils_through_capacity: bool) -> None:
+        # As for the payment stage: required, with no default.
+        self.fulfils_through_capacity = fulfils_through_capacity
 
     def validate_selection(self, selection: Any) -> None:
         if selection.expiration_unix is None:

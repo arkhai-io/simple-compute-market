@@ -1,8 +1,10 @@
 """Framework-free capacity admin routes every storefront binds.
 
 Admin reserve takes a hold through a listing's capacity binding, as a
-negotiated acceptance would, without negotiating; the capacity-released callback
-is how a site tells the storefront that a reservation's capacity is free again.
+negotiated acceptance would, without negotiating, and is refused as a conflict
+when no admission authority stands behind the listing; the capacity-released
+callback is how a site tells the storefront that a reservation's capacity is
+free again.
 What each storefront does around those — which listings close or reopen, what
 its fulfillment lifecycle records — is its own, supplied as hooks. The kit owns
 the request contract, the refusals, and the response shape.
@@ -12,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
+
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 
 from .capacity import CapacityBindingError
 
@@ -26,8 +30,10 @@ class CapacityAdminRouteError(RuntimeError):
 
 
 #: ``(listing_id, claim, deal_ref)`` → the reservation, or ``None`` when no
-#: capacity matched the claim. Raises ``CapacityBindingError`` when the listing's
-#: site is not configured and ``LookupError`` when the listing has no binding.
+#: capacity matched the claim. Raises ``CapacityNotAdmittedError`` when no
+#: admission authority stands behind the listing, ``CapacityBindingError`` when
+#: the listing's site is not configured, and ``LookupError`` when the listing has
+#: no binding.
 ReserveHook = Callable[
     [str, Mapping[str, Any], Mapping[str, Any]], Awaitable[Mapping[str, Any] | None]
 ]
@@ -56,6 +62,8 @@ class CapacityAdminRouteService:
             )
         except LookupError as exc:
             raise CapacityAdminRouteError(404, str(exc)) from exc
+        except CapacityNotAdmittedError as exc:
+            raise CapacityAdminRouteError(409, str(exc)) from exc
         except CapacityBindingError as exc:
             raise CapacityAdminRouteError(500, str(exc)) from exc
         except (ConnectionError, TimeoutError, OSError) as exc:

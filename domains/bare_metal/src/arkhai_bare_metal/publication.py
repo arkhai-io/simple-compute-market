@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from market_capability_shape import flatten_shape
+from market_resource_pools_contracts.backing import CapacityBacking
 
 from .projections import (
     BareMetalResourceProjection,
@@ -104,23 +105,33 @@ def trusted_bare_metal_projection(
     )
 
 
+def _availability(resource: TrustedBareMetalResource) -> Callable[[], str | None]:
+    def available() -> str | None:
+        return None if resource.view.available else "unavailable"
+
+    return available
+
+
 def available_bare_metal_listings(
     resources: Iterable[TrustedBareMetalResource],
     *,
+    backing: CapacityBacking,
     region: str,
     min_duration_seconds: int | None = None,
     max_duration_seconds: int | None = None,
 ) -> list[BareMetalListing]:
-    """Derive listings from trusted resources whose whole machine is available.
+    """Derive listings from trusted resources of one pool that ``backing`` admits.
 
-    Each listing publishes its resource's declared shape under the compute
-    family's flat names. A resource whose declaration does not read as a shape
+    Where the pool's backing says availability bounds its resources, only a
+    resource whose whole machine is available yields a listing. Each listing
+    publishes its pool's backing label and its resource's declared shape under
+    the compute family's flat names. A resource whose declaration does not read as a shape
     raises ``BareMetalShapeError``; callers that must hold rather than fail
     classify resources first (see ``storefront_publication``).
     """
     listings: list[BareMetalListing] = []
     for resource in resources:
-        if not resource.view.available:
+        if backing.judge(lambda: None, _availability(resource)) is not None:
             continue
         shape = derive_bare_metal_shape(
             resource.declared_capacity, resource.declared_attributes
@@ -128,7 +139,7 @@ def available_bare_metal_listings(
         flat = flatten_shape(shape, COMPUTE_CAPABILITY_SCHEMA)
         listings.append(
             BareMetalListing(
-                capacity_backing="backed",
+                capacity_backing=backing.label,
                 host_id=resource.view.host_id,
                 physical_host_id=resource.view.physical_host_id,
                 access_methods=list(resource.view.access_methods),

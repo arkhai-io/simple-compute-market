@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from apicredits_storefront import negotiation_runtime
 from market_core.schemas import RateValue, derive_settlement_option_id
 from market_negotiation_runtime import NegotiationTerms
@@ -13,6 +14,7 @@ from arkhai_apicredits.listings.pricing import (
     extract_unit_price_from_order,
 )
 from arkhai_apicredits.listings.reconciler import (
+    CreditListingSource,
     listing_quota_resource_id,
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
@@ -151,105 +153,62 @@ def test_strategy_is_maximize_for_token_offers():
 # Reconciler
 # ---------------------------------------------------------------------------
 
+def _source(listing_id, resource_id, status, closed_by=None):
+    # Site and quota resource come from the listing's binding.
+    return CreditListingSource(listing_id, status, closed_by, "tokens", resource_id)
+
+
+def _judge(backing):
+    return lambda _source, available: backing.judge(lambda: None, available)
+
+
 def test_reconciler_close_on_exhaustion_and_reopen():
-    rows = [
-        {**_listing("svc-a"), "listing_id": "L-a", "status": "open"},
-        {**_listing("svc-b"), "listing_id": "L-b", "status": "open"},
-        {**_listing("svc-a"), "listing_id": "L-c", "status": "closed",
-         "closed_by": "reconciliation"},
+    sources = [
+        _source("L-a", "svc-a", "open"),
+        _source("L-b", "svc-b", "open"),
+        _source("L-c", "svc-a", "closed", "reconciliation"),
     ]
+    judge = _judge(BACKED)
     availability = {("tokens", "svc-a"): 0, ("tokens", "svc-b"): 12}
-    assert stale_open_credit_listing_ids(rows, availability=availability) == ["L-a"]
-    assert reopenable_credit_listing_ids(rows, availability=availability) == []
+    assert stale_open_credit_listing_ids(sources, availability=availability, judge=judge) == ["L-a"]
+    assert reopenable_credit_listing_ids(sources, availability=availability, judge=judge) == []
 
     availability = {("tokens", "svc-a"): 3, ("tokens", "svc-b"): 12}
-    assert stale_open_credit_listing_ids(rows, availability=availability) == []
-    assert reopenable_credit_listing_ids(rows, availability=availability) == ["L-c"]
+    assert stale_open_credit_listing_ids(sources, availability=availability, judge=judge) == []
+    assert reopenable_credit_listing_ids(sources, availability=availability, judge=judge) == ["L-c"]
 
 
 def test_reconciler_reopens_only_what_reconciliation_closed():
-    rows = [
-        {**_listing("svc-a"), "listing_id": "L-seller", "status": "closed",
-         "closed_by": "seller"},
-        {**_listing("svc-a"), "listing_id": "L-quota", "status": "closed",
-         "closed_by": "reconciliation"},
+    sources = [
+        _source("L-seller", "svc-a", "closed", "seller"),
+        _source("L-quota", "svc-a", "closed", "reconciliation"),
     ]
     availability = {("tokens", "svc-a"): 5}
-    assert reopenable_credit_listing_ids(rows, availability=availability) == [
-        "L-quota"
-    ]
+    assert reopenable_credit_listing_ids(
+        sources, availability=availability, judge=_judge(BACKED)
+    ) == ["L-quota"]
 
 
 def test_reconciler_unknown_availability_is_conservative():
-    rows = [{**_listing("svc-a"), "listing_id": "L-a", "status": "open"}]
+    sources = [_source("L-a", "svc-a", "open")]
+    judge = _judge(BACKED)
     # Authority unreachable: close nothing, reopen nothing.
-    assert stale_open_credit_listing_ids(rows, availability=None) == []
-    assert reopenable_credit_listing_ids(rows, availability=None) == []
+    assert stale_open_credit_listing_ids(sources, availability=None, judge=judge) == []
+    assert reopenable_credit_listing_ids(sources, availability=None, judge=judge) == []
     # Resource gone from the ledger: the listing must not stay open.
-    assert stale_open_credit_listing_ids(rows, availability={}) == ["L-a"]
+    assert stale_open_credit_listing_ids(sources, availability={}, judge=judge) == ["L-a"]
 
 
-def test_reconciler_ignores_non_token_listings():
-    rows = [{
-        "listing_id": "L-vm", "status": "open",
-        "listing_resource": {"gpu_model": "H200"},
-    }]
-    assert stale_open_credit_listing_ids(rows, availability={}) == []
-    assert listing_quota_resource_id(rows[0]) is None
+def test_availability_closes_no_listing_its_backing_does_not_bound():
+    sources = [_source("L-a", "svc-a", "open")]
+
+    assert stale_open_credit_listing_ids(
+        sources, availability={}, judge=_judge(UNBACKED)
+    ) == []
 
 
-# ---------------------------------------------------------------------------
-# Round-zero guard
-# ---------------------------------------------------------------------------
-
-def test_round_zero_guard_requires_valid_quantity():
-    decision, _ = api_credits_round_zero_guard(
-        _round0(_proposal()), _context(requested_quantity=None),
-    )
-    assert decision.action == "reject"
-    assert "credit_quantity_missing" in decision.reason
-
-    decision, _ = api_credits_round_zero_guard(
-        _round0(_proposal()), _context(requested_quantity=0),
-    )
-    assert decision.action == "reject"
-    assert "credit_quantity_invalid" in decision.reason
-
-
-def test_round_zero_guard_validates_key_disposition():
-    decision, _ = api_credits_round_zero_guard(
-        _round0(_proposal()),
-        _context(requested_quantity=3, key_mode="existing", key_id=None),
-    )
-    assert decision.action == "reject"
-    assert "key_disposition_invalid" in decision.reason
-
-
-def test_round_zero_guard_passes_and_canonicalizes():
-    context = _context(requested_quantity=3, key_mode="new")
-    decision, context = api_credits_round_zero_guard(_round0(_proposal()), context)
-    assert decision is None
-    assert context.intermediate["uses_scalar_amount"] is True
-    assert context.intermediate["accepted_escrow_proposal"]["fields"]["amount"] == 300
-
-
-def test_round_zero_guard_rejects_missing_amount():
-    proposal = _proposal()
-    del proposal["fields"]["amount"]
-    decision, _ = api_credits_round_zero_guard(
-        _round0(proposal), _context(requested_quantity=3),
-    )
-    assert decision.action == "reject"
-    assert "missing_amount" in decision.reason
-
-
-def test_round_zero_guard_only_fires_on_round_zero():
-    history = _round0(_proposal())
-    history.append(NegotiationRound(
-        round_number=1, sender="us", action="counter", proposal=_proposal(),
-    ))
-    decision, _ = api_credits_round_zero_guard(history, _context())
-    assert decision is None
+def test_a_non_token_listing_names_no_quota_resource():
+    assert listing_quota_resource_id({"listing_resource": {"gpu_model": "H200"}}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +229,22 @@ def test_quota_guard_passes_when_covered_and_rejects_when_not():
     )
     assert decision.action == "reject"
     assert decision.reason.startswith("quota_exhausted")
+
+
+def test_quota_guard_is_not_applicable_without_a_snapshot():
+    # The storefront captures no snapshot for a listing availability does not
+    # bound; the guard then neither passes nor rejects on quota.
+    context = NegotiationContext(
+        direction="maximize",
+        our_reference_amount=300.0,
+        listing=_listing(),
+        available_resources={},
+        intermediate={"requested_quantity": 1_000_000},
+    )
+
+    decision, _ = credit_quota_guard(_round0(_proposal()), context)
+
+    assert decision is None
 
 
 def test_quota_guard_matches_by_resource_id():

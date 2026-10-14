@@ -8,6 +8,8 @@ exercising exactly the tables it reads/writes is the right level.
 
 from __future__ import annotations
 
+from arkhai_vms_listings.reconciler import ReconciliationScope
+
 import json
 import sqlite3
 import pytest
@@ -373,7 +375,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), scope=ReconciliationScope.SOURCE)
         assert stale == []
 
     def test_listing_whose_slice_no_longer_fits_is_stale(self, db_path):
@@ -385,7 +387,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), scope=ReconciliationScope.SOURCE)
         assert stale == ["listing-1"]
 
     def test_unbound_listing_is_skipped_even_with_one_configured_site(
@@ -397,7 +399,7 @@ class TestStaleOpenListingIds:
             db_path,
             site_pool_projection=projection,
             configured_sites=("site-a",),
-            backed_only=False,
+            scope=ReconciliationScope.SOURCE,
         )
         assert stale == []
 
@@ -405,7 +407,7 @@ class TestStaleOpenListingIds:
         """Configured topology never supplies a missing durable binding."""
         projection = _gpu_pool_projection(1)
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b"), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b"), scope=ReconciliationScope.SOURCE)
         assert stale == []
 
     def test_listing_bound_to_a_different_site_uses_that_site(self, db_path):
@@ -418,7 +420,7 @@ class TestStaleOpenListingIds:
             site_id="site-b",
         )
         # Only site-a's projection is held.
-        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), scope=ReconciliationScope.SOURCE)
         # VM availability is scoped to site-a, so the site-b-bound listing
         # is stale rather than silently reassigned.
         assert stale == ["listing-1"]
@@ -435,7 +437,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b", "site-c", "site-d", "site-e"), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b", "site-c", "site-d", "site-e"), scope=ReconciliationScope.SOURCE)
         assert stale == []
 
 
@@ -598,7 +600,7 @@ class TestHeldAndWithdrawnListings:
         stale = stale_open_listing_ids(
             db_path,
             configured_sites=("site-a",),
-            backed_only=False,
+            scope=ReconciliationScope.SOURCE,
             site_pool_projection={"site-a": [declared, undeclared]},
         )
 
@@ -611,7 +613,7 @@ class TestHeldAndWithdrawnListings:
         stale = stale_open_listing_ids(
             db_path,
             configured_sites=("site-a",),
-            backed_only=False,
+            scope=ReconciliationScope.SOURCE,
             site_pool_projection={"site-a": [pool]},
         )
 

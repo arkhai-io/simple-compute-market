@@ -15,6 +15,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from arkhai_vms_listings.reconciler import (
+    ReconciliationScope,
+    closed_available_listing_ids,
+    stale_open_listing_ids,
+)
 from core_storefront.auth import AuthenticatedPrincipal
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
@@ -80,9 +85,13 @@ from market_pool_overrides import (
 from market_capacity_publication import (
     CapacityAdminRouteError,
     CapacityAdminRouteService,
-    CapacityBinding,
     CapacityBindingError,
+    PublicationBinding,
     remote_site_clients,
+)
+from market_resource_pools_contracts.backing import (
+    CapacityNotAdmittedError,
+    admitted_backing,
 )
 
 logger = logging.getLogger(__name__)
@@ -643,7 +652,7 @@ class AdminController:
         *,
         site_id: str,
         capacity_reservation_id: str,
-    ) -> tuple[dict[str, Any] | None, CapacityBinding, str | None]:
+    ) -> tuple[dict[str, Any] | None, PublicationBinding, str | None]:
         """Resolve one reservation through its supplied authority and durable listing."""
         from market_site_client import SiteCapacityClientError
         from market_storefront.services.capacity_client import (
@@ -662,18 +671,19 @@ class AdminController:
         listing_id = deal_ref.get("listing_id")
         if isinstance(listing_id, str) and listing_id.strip():
             binding = await capacity_binding_for_listing(self._db, listing_id)
-            if not isinstance(binding, CapacityBinding):
-                raise CapacityBindingError(
-                    "a reservation cannot belong to a listing with no admission "
-                    "authority"
-                )
             if binding.site_id != site_id:
                 raise CapacityBindingError(
                     "reservation authority disagrees with the durable listing binding"
                 )
             return reservation, binding, listing_id
+        # A reservation with no listing exists only because the site admitted
+        # it, so its binding takes the backing an admitted reservation implies.
         source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
-        return reservation, CapacityBinding(site_id, "vm", source_id), None
+        return (
+            reservation,
+            PublicationBinding(site_id, "vm", source_id, admitted_backing()),
+            None,
+        )
 
     async def _apply_fulfillment_event(
         self,
@@ -709,6 +719,8 @@ class AdminController:
                     result.setdefault(
                         "gpu_count", released.get("allocated_gpu_count")
                     )
+        except CapacityNotAdmittedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except CapacityBindingError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except Exception as exc:
@@ -766,15 +778,12 @@ class AdminController:
             return None
 
     async def _close_oversized_compute_listings(self, changed_site: str) -> list[str]:
-        """Close the capacity-backed listings ``changed_site``'s change made stale.
+        """Close the listings availability bounds that ``changed_site``'s change made stale.
 
         The site's cached projection predates the change this operation just made,
         so it is refreshed first; reconciling against it unrefreshed would report
         nothing now and let a later operation report these closes as its own.
         """
-        from arkhai_vms_listings.reconciler import stale_open_listing_ids
-
-
         if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
@@ -790,7 +799,7 @@ class AdminController:
             # cannot close a listing publication would keep.
             site_pool_projection=projection,
             site_capacity_buckets=site_capacity_buckets(),
-            backed_only=True,
+            scope=ReconciliationScope.AVAILABILITY,
             shape_feasible=vm_shape_feasibility(),
         )
         for listing_id in closed_listing_ids:
@@ -802,11 +811,8 @@ class AdminController:
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
-        """Reopen the capacity-backed listings ``changed_site``'s change made
-        available again, after refreshing that site's cached projection."""
-        from arkhai_vms_listings.reconciler import closed_available_listing_ids
-
-
+        """Reopen the listings availability bounds that ``changed_site``'s change
+        made available again, after refreshing that site's cached projection."""
         if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
@@ -1037,6 +1043,8 @@ class AdminController:
                 reserved = await self._runtime().reserve(
                     binding, claim=claim, deal_ref=deal_ref
                 )
+            except CapacityNotAdmittedError:
+                raise
             except CapacityBindingError as exc:
                 raise CapacityBindingError(
                     f"Listing {listing_id!r} is mapped to site "
