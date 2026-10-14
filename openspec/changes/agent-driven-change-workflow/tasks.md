@@ -63,7 +63,7 @@ to repair by hand.
       when discussion starts. Written at `.agents/skills/change-design/`; it also
       refuses to start while a dependency gating design is unlanded, checks for
       drift since an earlier design, and leaves `tasks.md` to planning.
-- [ ] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
+- [x] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
       judges depth against a browser session on the same questions. First
       response compared: the skill matched the browser session on every shared
       point and raised a conceptual error, a guidance violation, and a false
@@ -81,7 +81,14 @@ to repair by hand.
       owner's redirections are logged to the ledger; and before recording, the
       rationales, callers, scope growth, and unrecorded principles are checked
       as a whole.
-- [ ] 3.3 Pilot: design `add-full-stack-ci-job` from its proposal.
+      Done: the design was recorded, passed its design gate after reviews 03–06,
+      and the change went on to archival.
+- [x] 3.3 **Withdrawn** 2026-10-14: Pilot: design `add-full-stack-ci-job` from its proposal.
+      The `add-full-stack-ci-job` pilot (3.3, 4.4, 6.3, and 5.2's half) is withdrawn
+      at the owner's direction: no second full design cycle is run for this change.
+      Its gap stays open here — design discussion, design review, and planning from a
+      proposal alone, where `capacity-shape-envelope` only amended an existing plan —
+      and is verified by `parallel-change-workflows`' pilots instead.
 
 ## 4. Change review
 
@@ -127,10 +134,22 @@ to repair by hand.
       condensed progress view to the terminal — session header, each command,
       failures, errors, and the agent's messages cut to four lines — while the
       transcript keeps everything.
-- [ ] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
+- [x] 4.3 Pilot: design review of `capacity-shape-envelope`, also run through the
       browser process. Passes if no `blocking` or `should` browser finding the
       owner accepts is absent from the harness review.
-- [ ] 4.4 Pilot: design review of `add-full-stack-ci-job`.
+      Result: failed. Compared at closeout from the records — browser reviews 04 and
+      05, harness reviews 03 and 06 — four accepted browser findings had no harness
+      counterpart: older storefronts silently ignoring the new declaration (04 F2,
+      should), the envelope constraining stated dimensions rather than what is
+      provisioned (04 F6, should), and a `tasks.md` still describing the earlier
+      design, missed in both rounds (04 F7, 05 F6, blocking). The harness raised
+      findings the browser missed too (06 matched all four round-2 architecture
+      findings). `change-review`'s design questions were amended at the owner's
+      direction: consistency checks that a promised behaviour acts on what it says it
+      governs, architecture walks each interface across versions, and readiness asks
+      whether an existing `tasks.md` describes the settled design.
+- [x] 4.4 **Withdrawn** 2026-10-14: Pilot: design review of `add-full-stack-ci-job`.
+      See 3.3.
 
 ## 5. Review triage and the intervention ledger
 
@@ -157,7 +176,10 @@ to repair by hand.
       presented alone with its alternatives, so choosing the option is the
       disposition; one label per issue throughout. `change-design` now triages
       waiting reviews before opening its own discussion.
-- [ ] 5.2 Pilot: triage the 4.3 and 4.4 reviews, passing each design gate.
+- [x] 5.2 Pilot: triage the 4.3 and 4.4 reviews, passing each design gate.
+      Done for `capacity-shape-envelope`: its design reviews 03–06 were triaged and
+      the design gate passed. The `add-full-stack-ci-job` half is withdrawn with 4.4
+      (see 3.3).
 
 ## 6. Planning
 
@@ -194,7 +216,8 @@ to repair by hand.
       waiver of a re-review was recorded after the fact. Section 4 is confined
       to a ~2,100-line module and is the section most likely to outgrow one
       session. `make check-doc-citations` now skips untracked `reviews/`.
-- [ ] 6.3 Pilot: plan `add-full-stack-ci-job` from nothing.
+- [x] 6.3 **Withdrawn** 2026-10-14: Pilot: plan `add-full-stack-ci-job` from nothing.
+      See 3.3.
 
 ## 7. Implementation
 
@@ -510,7 +533,7 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       phase/state columns while applying development's archive, scope, and progress
       updates. Record the merge rationale in `design.md`; leave unfinished pilots,
       validation gates, and feature sections open.
-- [ ] 8A.3 Regenerate locks through `make lock` after a clean wheel build. Run
+- [x] 8A.3 Regenerate locks through `make lock` after a clean wheel build. Run
       focused workflow and shape-admissibility tests and the root unit/integration
       aggregate; run `make check-packaging`, `make check-agent-skills`, comment
       hygiene, scoped documentation citations, and strict OpenSpec validation.
@@ -535,6 +558,8 @@ is the tooling that runs them, proven by its own suites and by 8.6.
       the standard stack tests replace volumes; this uncommitted merge has no
       corresponding pipeline revision. Section 12's promotion and closeout remain
       open. `make check-packaging` passed against the final rebuilt wheelhouse.
+      Done: the checks above are its record; the closeout and promotion gates it
+      retained are section 12's tasks.
 
 ## 9. Implementation-round triage
 
@@ -1058,21 +1083,79 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       currency requirement renamed a scenario, which the validator reads as
       dropping it; the scenario keeps its name, with the new body.
 
+- [x] 10.6a From implementation review 3 (external, `reviews/03-implementation-external.md`),
+      at the owner's dispositions. F1: the delta's archive-cleanup scenario keeps
+      `reviews/` until an export flow exists, and the design no longer treats the
+      export as existing. F2: closeout code fixes stay owner-directed in-session;
+      `change-triage` now suggests a review of the fix once validated, never required.
+      F3: `scripts/check_change_index.py` and `make check-change-index` check every
+      row's cells, link, status, and dependencies, and that every change directory has
+      a row; unit tests over a temporary index in
+      `scripts/tests/test_check_change_index.py`, the target by `make -n`. Triage at a
+      phase-closing gate, closeout, and archive cleanup run it after their index
+      edits (skills, `openspec/README.md` part 6, the delta's index-transition
+      requirement and a scenario, design, `docs/agents/change-workflow.md`). F4:
+      archive cleanup returns `ready for planning`, `in planning`, and `ready for
+      implementation` dependents to `ready for design`, and keeps `in implementation`,
+      reading no `tasks.md` (`openspec/README.md` part 6, the index legend, the
+      `planning-governance` delta with a scenario, design, the skill). F5: the
+      proposal's phase list, ledger bullet, and archived-lookup bullet describe the
+      current workflow.
+      Checks: `scripts/tests` 648 passed (unit and `make -n` tooling tests;
+      `test_check_change_index.py` 16, unit against a temporary index); comment
+      hygiene, `check-agent-skills`, the index check, and strict validation pass; the
+      scoped citation check reports only the `change-workflow` spec and companion
+      promotion creates. A fresh-context compliance check of the diff against
+      `7cd6bedd` found a function-local `subprocess` import in the new test (moved), an
+      old phrasing in a `planning-governance` scenario (restated), and three
+      descriptions of the index check omitting its cell count and the `in closeout`
+      archive link (completed); it also noted that `AGENTS.md`'s "Domain docs" cites
+      `docs/adr/`, which does not exist, inherited and left for its own change.
+
 ## 11. Shared guidance
 
-- [ ] 11.1 Remove the "Generated implementation artifacts" section and the fileset
+- [x] 11.1 Remove the "Generated implementation artifacts" section and the fileset
       wording from `AGENTS.md`, and the tombstone item from the
       `openspec/README.md` completion checklist. Confirm the browser session
       prompts still carry the whole tombstone convention, including that no
       tombstone survives into production code or permanent documentation.
-- [ ] 11.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
+      Done: `AGENTS.md`'s section is gone and its packaging bullet says "before the
+      work is committed"; the checklist item is gone. `docs/prompts/implementation.md`
+      and `change-grooming.md` carry the whole convention, including that no
+      tombstone remains in final production code or permanent documentation, and
+      nothing cited the removed section. The comment rule's ban on tombstone
+      references stays, since the browser process still produces them.
+- [x] 11.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
       `make review`, the review file layout, and the ledger; link it from
       `AGENTS.md`'s "Agent skills" section.
-- [ ] 11.3 Confirm no committed skill refers to `docs/prompts/`.
-- [ ] 11.4 Merge `dev` into this branch before closeout, so closeout promotes
+      Done: the skill table (step, skill, how to start it, what it writes),
+      the order of steps and their refusals, `make review`'s options and external
+      reviews, the round view, the review directory, and the ledger; linked from a
+      "Change workflow" subsection of `AGENTS.md`'s "Agent skills". It cites only
+      documents that exist; promotion (12.11) adds the links to the
+      `change-workflow` spec and architecture companion it creates.
+- [x] 11.3 Confirm no committed skill refers to `docs/prompts/`.
+      Done: no skill, and nothing under `.claude/` or `.codex/`, names
+      `docs/prompts/`.
+- [x] 11.4 Merge `dev` into this branch before closeout, so closeout promotes
       against the documents as they are on `dev`. Then sweep, as 10.5 did, the
       closeout section of `unbacked-bare-metal-listings`, whose `dev` version
       rewrote it, and of any change `dev` added.
+      Merged in `7cd6bedd`. Conflicts resolved toward `dev`'s retirement of
+      local-table derivation and `home_site`, carrying this branch's admissibility
+      default and pricing-hold exclusions onto it, and dropping the local-table
+      admissibility tests, scenario, and documentation with the path. The index kept
+      this branch's format, with `dev`'s rows converted and the dependents of the
+      five changes `dev` archived released. `dev`'s architecture check rejected
+      `kit/resource-pools-contracts` depending on the admissibility kit: at the
+      owner's choice the contracts allowlist names that kit, which gained its own
+      package allowlist in place of its boundary test. The new kit was added to the
+      three publication lists `dev`'s publish-matrix tests check. Swept afterwards:
+      `unbacked-bare-metal-listings` and `encapsulate-capacity-backing`, both
+      unplanned, so each closeout placeholder now names the eleven parts in order;
+      `deduplicate-dynaconf-bootstrap`'s packaging part runs
+      `make check-architecture-change`, which `dev` added to closeout part 7, as
+      does `change-closeout`'s packaging step.
 
 ## 12. Closeout
 

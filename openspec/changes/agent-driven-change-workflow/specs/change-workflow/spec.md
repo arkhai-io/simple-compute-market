@@ -75,7 +75,18 @@ active-change index by the skill that makes it, in the same step: design
 discussion starting, triage passing a phase-closing gate, planning starting and
 the owner accepting the plan, the first implementation section starting, closeout
 starting, and archive cleanup. An implementation review after a section MUST NOT change
-the status.
+the status. Each step that edits the index MUST check it afterwards: every row has its
+table's cell count; its link resolves to its change's directory, or to its archive
+when it is `archived` or `in closeout`; its status is one the index defines; each
+dependency names a listed change that is not archived; and every change directory
+has a row.
+
+#### Scenario: An edit breaks a row
+
+- **WHEN** a step edits the index and leaves a row linking a directory that does not
+  exist, or depending on an archived change
+- **THEN** the index check reports the row and its line, and the step does not
+  proceed until it is fixed
 
 #### Scenario: A closeout gate is passed
 
@@ -208,8 +219,8 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 
 - **WHEN** a change whose findings were dispositioned is cleaned up after its
   closeout gate
-- **THEN** its `reviews/` directory is gone and its intervention ledger is in the
-  archived change directory
+- **THEN** its intervention ledger is in the archived change directory, and its
+  `reviews/` directory stays there, untracked, until an export flow exists
 
 ### Requirement: One implementation section per fresh session
 

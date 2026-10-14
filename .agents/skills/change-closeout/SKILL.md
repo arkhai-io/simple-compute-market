@@ -95,10 +95,15 @@ list its parts in another order; work in this order, and note it on the section.
   dependency graph. Leave every other row's `Depends on` and status as they are:
   the change lands, and its dependents are released, only at archive cleanup after
   the closeout gate (`openspec/README.md#plan-closeout-requirements` part 6). The
-  status stays `in closeout`: archive cleanup writes `archived`.
-- **Packaging.** Run `make check-packaging`, and `make check-agent-skills` when the
-  change touched `.agents/`, `.claude/`, or `.codex/`. A failure that needs a code
-  or lock change stops closeout as above.
+  status stays `in closeout`: archive cleanup writes `archived`. Run
+  `make check-change-index` after the edit.
+- **Packaging.** Run `make check-packaging`, then `make check-architecture-change
+  CHANGE=<change>`, and `make check-agent-skills` when the change touched
+  `.agents/`, `.claude/`, or `.codex/`. A failure that needs a code or lock change
+  stops closeout as above. An architecture exception or override row the change
+  still owns is deleted with its edge, which is code, or reassigned in
+  `docs/development/ARCHITECTURE.toml` to the open change that now owns the
+  divergence; reassigning is the owner's decision, so put it to them.
 - **End-to-end pipeline.** Record the run the latest passing validation names, its
   result, and the scenarios that exercise the change, from the validation record's
   coverage section. Closeout changes no code, so that run still describes the code
@@ -149,7 +154,8 @@ part is checked first.
 4. Point the change's row in `openspec/changes/README.md` at the directory
    `python3 scripts/find_change.py <change>` now prints, and update any other link
    to the change's directory in the index.
-5. Run `openspec validate --specs --strict` with the pinned validator.
+5. Run `openspec validate --specs --strict` with the pinned validator, and
+   `make check-change-index`.
 
 If the archive fails, nothing has moved: fix what it reports, or, when the fix is
 not closeout's to make, stop and tell the owner.

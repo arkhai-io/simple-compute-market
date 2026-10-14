@@ -47,6 +47,9 @@ earlier run of the same ref, not of another branch.
 - Inventory every other resource two parallel changes would share, and make each
   per change, safely shared, or explicitly serialized with a refusal that names the
   holder.
+- Its pilots also verify what `agent-driven-change-workflow`'s could not: design
+  discussion, design review, and planning (`change-plan`) from a proposal alone,
+  since this change starts from one.
 
 ## Capabilities
 

@@ -196,8 +196,9 @@ openspec/changes/<change>/interventions.jsonl   (tracked)
 
 Files are numbered in the order they were produced, so the directory reads as the
 change's review history. Closeout promotes whatever is durable through the ordinary
-promotion path, and the directory moves with the change into the archive; archive
-cleanup deletes it once the closeout review's gate is passed.
+promotion path, and the directory moves with the change into the archive. Archive
+cleanup leaves it there until an export flow exists (see the decision on exporting
+session transcripts).
 
 A review is one Markdown file, and it is the only record of its findings. The owner
 reads review files directly, so they are written to be read; a structured copy
@@ -228,7 +229,8 @@ publishes nothing and is kept beside the transcript as `NN-<kind>.rejected.md`. 
 failed run keeps its number, so a rerun never overwrites its evidence.
 
 The reviewer's whole session is kept as a transcript under `reviews/transcripts/`,
-because the owner's session export carries each change's full review history. A
+for the owner's export of each change's full review history once an export flow
+exists. A
 transcript is not a record: it holds the reviewer's intermediate reasoning, and a
 later reviewer or triage step reading it would inherit exactly the session context
 the file-based exchange exists to exclude. No review or triage step reads
@@ -686,9 +688,11 @@ the design it reaches rests on a codebase its dependency is about to change. Whe
 a dependency lands, every dependent's design is reverified before implementation
 begins, however far the dependent had progressed. The landing change does this
 at archive cleanup, the step that writes `archived`: it removes itself from each
-dependent's `Depends on`, and sets each dependent that is `ready for` or `in`
-planning or implementation, and has not begun implementing, to `ready for design`.
-A dependent that is `blocked in` some phase keeps its status, because the blocker
+dependent's `Depends on`, and sets each dependent that is `ready for planning`,
+`in planning`, or `ready for implementation` to `ready for design`. A dependent
+`in implementation` keeps its status: the status says its implementation has begun,
+which a checked task cannot say reliably, since a first section interrupted before
+any task is checked has begun too. A dependent that is `blocked in` some phase keeps its status, because the blocker
 is independent of the dependency and overwriting it would lose it; the landing
 change instead records in its `Notes` that design reverification is owed, and
 whoever clears the blocker sets it to `ready for design`. A design review of that
@@ -739,7 +743,17 @@ did the cleanup from memory, before the skill existed; a separate step with its 
 entry checks — archived, `in closeout`, every closeout review triaged and its gate
 passed — keeps that work where it is checked.
 Archive cleanup leaves `reviews/` in place (see the decision on exporting session
-transcripts below). Archive
+transcripts below).
+
+Every step that edits the index — triage at a phase-closing gate, closeout, archive
+cleanup — runs `make check-change-index` afterwards. The citation check cannot see
+those edits: it is scoped to the change's own documents, and the index's links are
+relative directory links it never matches. The index check holds each row's cell
+count, its link (an `archived` row links its archive, and a row linking an archive
+is `archived` or `in closeout`), its status against the legend, each dependency
+against the listed and unarchived changes, and a row for every change directory.
+It leaves the dependency graphs alone, since the legend makes the `Depends on`
+column authoritative. Archive
 cleanup needs no review of its own, so it is not a phase. It is not named for
 archiving, since `openspec archive` has already run at closeout and the stock
 OpenSpec archive skill answers to that name.
@@ -780,9 +794,12 @@ A closeout review should find nothing in the code, which was reviewed, triaged, 
 validated before closeout began. When one does, its triage does not fix it: it stops
 for the owner, who directs any correction within that session — a short design,
 plan, and implementation, validated before archive cleanup — on the archived change,
-which validation finds by name. Reverting the closeout so the change could return to
-implementation was considered and not chosen: the case is expected to be rare enough
-that the owner handles it directly.
+which validation finds by name. The agent then suggests a review of the fix's diff,
+and the owner decides whether to have one. Reverting the closeout so the change could
+return to implementation was considered and not chosen, and so was requiring that
+review before the gate: the case is expected to be rare enough that the owner handles
+it directly, and whether a small fix needs another reader is the owner's judgement,
+not a rule.
 
 A closeout interrupted after the archive and before its commit resumes from the
 archive: the change resolves under `archive/` while its row says `in closeout`, so
@@ -893,8 +910,10 @@ workflow uses it and proven on a pilot before the next is written.
 its open questions, design review, triage, planning against its existing plan of 24
 tasks, an implementation slice, validation, implementation review, triage, then
 pre-closeout review, closeout and archival, closeout review, and archive cleanup.
-`add-full-stack-ci-job` has only a proposal, so it proves design discussion, design
-review, and planning from nothing, which the first pilot cannot.
+`add-full-stack-ci-job` was to prove design discussion, design review, and planning
+from a proposal alone, which the first pilot cannot. It was withdrawn at closeout
+rather than hold this change for a second design cycle; `parallel-change-workflows`'
+pilots verify that gap instead.
 
 What counts as proven:
 

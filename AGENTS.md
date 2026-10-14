@@ -115,15 +115,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
-- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before returning a fileset. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
-
-## Generated implementation artifacts
-
-Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
-
-```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py
-```
+- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
 ## Public repository discipline
 
@@ -201,6 +193,12 @@ run one before promoting documentation, and treat an unresolvable citation as a
 blocking defect rather than a stale link to fix later.
 
 ## Agent skills
+
+### Change workflow
+
+Each step of an OpenSpec change is a leaf skill under `.agents/skills/`, started
+through `make` or a slash command. See `docs/agents/change-workflow.md` for which
+skill each step uses, the review files, and the intervention ledger.
 
 ### Issue tracker
 

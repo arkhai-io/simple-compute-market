@@ -19,7 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
-.PHONY: check-agent-skills review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -956,6 +956,9 @@ triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSp
 closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-closeout $(CHANGE)"
+
+check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or a change directory with no row
+	@python3 scripts/check_change_index.py
 
 archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change>)
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null

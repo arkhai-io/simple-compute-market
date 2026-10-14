@@ -43,10 +43,10 @@ change MUST be stated in the explanatory column rather than in `Depends on`.
 ### Requirement: Design reverification when a dependency lands
 
 When a change's archive is cleaned up, the step that sets it to `archived` MUST remove it from every
-dependent's `Depends on`, and MUST set each dependent whose status is `ready for` or
-`in` planning or implementation, and which has not begun implementing, to `ready
-for design`, so that its design is reverified against the codebase the dependency
-left before it is planned or implemented. A dependent whose status is `blocked in`
+dependent's `Depends on`, and MUST set each dependent whose status is `ready for
+planning`, `in planning`, or `ready for implementation` to `ready for design`, so that its design is reverified against the codebase the dependency
+left before it is planned or implemented. A dependent `in implementation` MUST keep
+that status, since its implementation has begun. A dependent whose status is `blocked in`
 a phase MUST keep that status, and the completing change MUST record in its
 explanatory column that design reverification is owed. Closeout MUST NOT change
 a dependent's `Depends on` or status before the closeout review's gate is passed.
@@ -54,10 +54,17 @@ a dependent's `Depends on` or status before the closeout review's gate is passed
 #### Scenario: A planned dependent
 
 - **WHEN** a change that another row depends on is archived and cleaned up, and that
-  dependent has a reviewed design and a plan but has not begun implementation
+  dependent is `ready for planning`, `in planning`, or `ready for implementation`
 - **THEN** the completing change removes itself from the dependent's `Depends on`
   and sets the dependent to `ready for design`, and the dependent's design is
   reviewed again before it is planned or implemented
+
+#### Scenario: A dependent in implementation
+
+- **WHEN** a change that another row depends on is archived and cleaned up, and that
+  dependent is `in implementation`
+- **THEN** the completing change removes itself from the dependent's `Depends on`,
+  and the dependent stays `in implementation`
 
 #### Scenario: A blocked dependent
 

@@ -1,8 +1,8 @@
 ## Why
 
 Every OpenSpec change moves through the same phases: design discussion, planning,
-design review, implementation in slices, implementation review, closeout, closeout
-review, archival, and a pull request. Today those phases run in browser chat
+design review, implementation in slices, implementation review, closeout and
+archival, closeout review, and a pull request. Today those phases run in browser chat
 sessions fed by a zipped snapshot of the repository. The repository owner carries
 every review between two agents without editing it, restarts implementation after
 each tool-use limit, and keeps a browser window per change for each change worked
@@ -38,7 +38,8 @@ directly in the repository is told to write tombstones instead of deleting files
   fresh-context compliance check of the section's diff before it is committed, so
   that guidance compliance does not degrade as a session grows or compacts. A
   Claude Code hook re-reads the required documents after compaction as a backstop.
-- Record every owner disposition of a finding in the change's tracked intervention
+- Record each owner course correction — deciding otherwise than the agent proposed,
+  or adding context that changes the work — in the change's tracked intervention
   ledger, which is archived with the change and feeds periodic guidance refinement.
 - Automate the validation run beside every implementation review, as an
   observation of a committed slice that never alters it: packaging, tests, the
@@ -57,9 +58,9 @@ directly in the repository is told to write tombstones instead of deleting files
 - Make closeout and archival one phase: closeout archives the change, which
   merges its spec deltas, and its one review reads the archived change and the
   specifications as they will land; the gate passing is followed by archive
-  cleanup. Every target and
-  skill that takes a change by name finds an archived one, and every active
-  change's closeout task is amended to match.
+  cleanup. Every step after closeout finds an archived change by its name; design,
+  planning, and implementation refuse one. Every active change's closeout task is
+  amended to match.
 - Remove the browser delivery rules from `AGENTS.md` and `openspec/README.md`.
   They remain, with the rule that no tombstone survives into the tree, in the
   browser session prompts under `docs/prompts/` for as long as that process is

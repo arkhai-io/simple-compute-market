@@ -271,7 +271,9 @@ the owner cannot otherwise see that it was written.
   the owner what needs to change and why, and wait. The owner decides whether a
   correction is needed and directs it in this session — typically a short design,
   plan, and implementation of it, then `make validate CHANGE=<change>`, which finds
-  the archived change, before the gate is asked about.
+  the archived change, before the gate is asked about. Once it is validated, suggest
+  a review of the fix's diff — an external one, or `make review KIND=implementation`
+  — and say why; whether to have it is the owner's call, and nothing requires it.
 - **fix:** once every finding has a disposition, make the accepted fixes, as
   `change-implement` makes a section's changes: the change and the decision it
   rests on, and no more; at the lowest test level that proves it; comments
@@ -312,7 +314,8 @@ decides whether the fix needs another review round.
 When the owner passes a phase-closing gate, set the change's `Status` in
 `openspec/changes/README.md`, and rewrite the row's `Notes` in the same edit so
 nothing in it still describes the phase being left — a row whose notes contradict
-its status misleads every agent that reads the index:
+its status misleads every agent that reads the index — then run
+`make check-change-index`:
 
 | Review | Status when its gate passes |
 |---|---|

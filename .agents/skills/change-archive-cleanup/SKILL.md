@@ -47,14 +47,14 @@ validation record in `reviews/`.
 For every row whose `Depends on` lists this change:
 
 - Remove the change from its `Depends on`, leaving `—` when nothing remains.
-- When its status is `ready for` or `in` planning or implementation, and its
-  `tasks.md` shows no implementation task checked, set it to `ready for design`, and
-  say in its `Notes` that its design is reverified against the codebase this change
-  left. Its design rests on code this change has just altered.
+- When its status is `ready for planning`, `in planning`, or `ready for
+  implementation`, set it to `ready for design`, and say in its `Notes` that its
+  design is reverified against the codebase this change left. Its design rests on
+  code this change has just altered.
 - When its status is `blocked in` a phase, keep it, and record in its `Notes` that
   design reverification is owed once the blocker clears.
-- Any other status — `ready for design`, `in design`, or implementation already
-  begun — is kept as it is.
+- Any other status — `ready for design`, `in design`, or `in implementation`, whose
+  implementation has begun — is kept as it is. Do not read its `tasks.md` to decide.
 
 A row that does not list the change in `Depends on` but describes it in its `Notes`
 as still to land is rewritten to say it has; its status is not touched.
@@ -71,7 +71,9 @@ Leave the change's `reviews/` where it is, transcripts included: it is untracked
 it costs the repository nothing, and it is the only copy of the review history
 until an export flow exists.
 
-Run `make check-doc-citations CHANGE=<change>`; it must report nothing.
+Run `make check-change-index` and `make check-doc-citations CHANGE=<change>`; both
+must report nothing. The citation check reads only the change's own documents, so
+the index check is the one that sees this edit.
 
 ## 5. Commit
 
@@ -105,5 +107,5 @@ Tell the owner:
 
 - each dependent released, its status before and after, and why;
 - any row whose notes were rewritten;
-- the commit, and the citation check's result;
+- the commit, and the index and citation checks' results;
 - the two drafts, and anything on the branch that the pull request would also carry.

@@ -66,7 +66,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
       dependents after the closeout gate.
 - [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
-      implementation).
+      implementation), then `make check-architecture-change
+      CHANGE=deduplicate-dynaconf-bootstrap`: the change owns an exception row in
+      `docs/development/ARCHITECTURE.toml`, which must be gone, with its edge, before
+      archival.
 - [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates

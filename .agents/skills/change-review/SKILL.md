@@ -75,7 +75,9 @@ checks your understanding here before reading anything that rests on it. Then:
    say the same thing, and does every decision's rationale still hold given the
    other decisions? Re-read the proposal's `Why` and `What Changes` against the
    settled decisions: a motivating claim the design no longer delivers — a promise
-   broader than what the decisions actually constrain — is a finding.
+   broader than what the decisions actually constrain — is a finding. Check that each
+   promised behaviour acts on what the design says it governs: a rule over what a
+   listing states is not a rule over what is provisioned or enforced.
 2. **`direction`** — What would you change about this design? Treat this as a design
    discussion: for each point, state the context, the alternatives with their
    trade-offs, and what you recommend and why. Engage every central decision the
@@ -101,6 +103,10 @@ checks your understanding here before reading anything that rests on it. Then:
      but empty input, for an unknown or wrong-kind argument, for malformed values,
      and for operations on an empty result; and whether its results carry the
      provenance its callers must report. Undefined semantics are findings.
+   - **Versions.** Say what a component built before this change does with what the
+     change writes, and what this change does with what an older component writes:
+     a new field an older reader silently ignores, or an older writer's value the new
+     reader misreads, during a rollout or a rollback.
 4. **`documentation`** — Does the proposal name a permanent destination for every
    material decision? Does every delta requirement describe only behavior this
    change implements, with a WHEN/THEN scenario, and does the delta modify every
@@ -112,7 +118,8 @@ checks your understanding here before reading anything that rests on it. Then:
    it be its own change? Does anything give the change a prerequisite it could close
    out without?
 6. **`readiness`** — Are there related changes that must land first? Is the design
-   ready for planning?
+   ready for planning? If the change already has a `tasks.md`, does it describe the
+   design as now settled, or an earlier one?
 
 ### Implementation review
 
