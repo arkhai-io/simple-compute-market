@@ -87,7 +87,7 @@ test-container-module:
 # NETWORK defaults to the VM lane project's default network; each lane target
 # passes its own.
 NETWORK ?= simple-market-service_default
-BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
+BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy or e2e_vm_payment_deal
 # The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
 # stays here; `multi_registry` reads VM's two registries;
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
@@ -95,7 +95,7 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_listing_shapes or e2e_vm_introduction \
-              or e2e_non_erc20_settlement
+              or e2e_non_erc20_settlement or e2e_vm_payment_deal
 # The API-credit lane's scenarios. The payment deal is blocked without a
 # payments target and skips naming it.
 E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal

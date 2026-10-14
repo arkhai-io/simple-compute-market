@@ -30,6 +30,8 @@ from core_buyer.run_log import RunLog
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 from market_alkahest.token import TokenResolutionError, resolve_token
+from market_core.schemas import SettlementSelection
+from market_policy.scalar_policies import selected_settlement_artifact
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -453,6 +455,59 @@ def register(credits_app: typer.Typer) -> None:
             )
             raise typer.Exit(0)
         expiration_unix = int(time.time()) + int(expiration_seconds)
+        from .escrow_selection import select_escrow_entry
+
+        def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | Any | None:
+            if "_selected_buyer_proposal" in match:
+                return match["_selected_buyer_proposal"]
+            return select_buyer_proposal(
+                buyer_settlement, match, expiration_unix=expiration_unix,
+                payer_account=payer_account,
+                alkahest=(lambda: alkahest_proposal(match)) if alkahest_available else None,
+            )
+
+        def alkahest_proposal(match: dict) -> EscrowProposal | None:
+            entry = select_escrow_entry(
+                match,
+                chain_name=selected_chain_name,
+                token_contract_filter=tc,
+                assume_yes=assume_yes,
+                rpc_url=rpc,
+                buyer_address=evm_addr,
+                console=console,
+                compatible=_policy.compatible,
+                preference=_policy.prefer_settlement,
+            )
+            if entry is None:
+                return None
+            return escrow_proposal_from_accepted_entry(
+                listing=match, entry=entry, expiration_unix=expiration_unix
+            )
+
+        # The opening and ceiling belong to the selected settlement asset,
+        # not the first legacy escrow advertised beside it. Retain the choice
+        # so interactive selection is not repeated during negotiation.
+        selected_matches = []
+        for match in matches:
+            proposal = build_escrow_proposal_for_match(match)
+            if proposal is None:
+                continue
+            is_selection = isinstance(proposal, SettlementSelection)
+            wire = (
+                {"settlement_selection": proposal.model_dump(mode="json")}
+                if is_selection else encode_escrow_proposal(proposal)
+            )
+            artifact = selected_settlement_artifact(match, wire)
+            if artifact is None:
+                continue
+            normalized = dict(match)
+            normalized["_selected_buyer_proposal"] = proposal
+            normalized["accepted_escrows"] = [] if is_selection else [artifact]
+            if is_selection:
+                normalized["settlement_options"] = [artifact]
+            selected_matches.append(normalized)
+        matches = selected_matches
+
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
@@ -483,33 +538,6 @@ def register(credits_app: typer.Typer) -> None:
         provision = make_api_credits_provision_terms(
             quantity=int(quantity), key_mode=key_mode, key_id=resolved_key_id
         )
-        from .escrow_selection import select_escrow_entry
-
-        def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | Any | None:
-            return select_buyer_proposal(
-                buyer_settlement, match, expiration_unix=expiration_unix,
-                payer_account=payer_account,
-                alkahest=(lambda: alkahest_proposal(match)) if alkahest_available else None,
-            )
-
-        def alkahest_proposal(match: dict) -> EscrowProposal | None:
-            entry = select_escrow_entry(
-                match,
-                chain_name=selected_chain_name,
-                token_contract_filter=tc,
-                assume_yes=assume_yes,
-                rpc_url=rpc,
-                buyer_address=evm_addr,
-                console=console,
-                compatible=_policy.compatible,
-                preference=_policy.prefer_settlement,
-            )
-            if entry is None:
-                return None
-            return escrow_proposal_from_accepted_entry(
-                listing=match, entry=entry, expiration_unix=expiration_unix
-            )
-
         run_log = RunLog.start(
             profile_id=identity.profile_id,
             principal=identity.principal,

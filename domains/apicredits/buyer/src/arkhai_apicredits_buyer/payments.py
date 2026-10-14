@@ -189,7 +189,6 @@ def settle_api_credit_payment(
         escrow_uid=negotiation_id,
         payload={
             "negotiation_id": negotiation_id,
-            "buyer_principal": buyer.principal.model_dump(mode="json"),
         },
         principal=buyer.principal,
         signer=buyer.signer,
