@@ -891,7 +891,7 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       requirement, a spec change no task names. (3) The scoped citation check
       on an archived change, above. (4) `change-triage`'s closeout row names
       `change-ship`, written by 10.6.
-- [ ] 10.4 Pilot the closeout half: run `change-closeout` on
+- [x] 10.4 Pilot the closeout half: run `change-closeout` on
       `capacity-shape-envelope`, after amending its section 7 to the new closeout —
       the eleven parts in order, comment hygiene and import placement as
       confirmations, 7.10's `spec.md` entries the archive's synchronization, and
@@ -905,7 +905,12 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `helm-e2e-pipeline-parity`; a namespace per validation belongs to a new
       change, `parallel-change-workflows`, for working changes in parallel —
       branches, reading rounds, Helm namespaces, and every other shared resource.
-- [ ] 10.5 Amend every other active change's closeout task the same way,
+      Done: closeout archived it in `f7447b35`, documentation only. Closeout review
+      21 found one blocking documentation finding, F1 (the hold-or-close summaries
+      in `ARCHITECTURE.md` and `DEPLOYMENT_AND_CONFIG.md` contradicted the spec's
+      base-shape-first rule), fixed in `f7acf392`; the external review 22 passed it.
+      The owner passed the gate on both.
+- [x] 10.5 Amend every other active change's closeout task the same way,
       preserving completed tasks: its unchecked parts reordered to
       `openspec/README.md`'s eleven, with archival a part of its own; comment
       hygiene and import placement made confirmations, any outstanding work on them
@@ -916,6 +921,47 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       synchronized its specs by hand archives with `--skip-specs`, recorded as a
       note on its completed task. List the changes amended and any left as they
       were, with the reason.
+      Amended, 46: `add-alkahest-attestation-reference-query`,
+      `add-database-migration-commands`, `add-deterministic-regression-contract`,
+      `add-future-domain-shape-validation`, `add-harness-buyer-action-slice`,
+      `add-harness-findings-projection`, `add-harness-scenario-contract`,
+      `add-persistent-buyer-profiles`, `apicredits-end-to-end-lane`,
+      `automate-seller-spot`, `bare-metal-and-credits-domain-stacks`,
+      `billable-capacity-reservations`, `capacity-reservation-lifecycle-hardening`,
+      `contain-embedded-host-key-material`, `deduplicate-dynaconf-bootstrap`,
+      `default-no-pre-settlement-capacity-hold`, `disburse-a-settlement-disposition`,
+      `fix-golden-image-config`, `fix-resource-pool-provider-at-creation`,
+      `kit-owned-capacity-and-publication`, `kit-owned-negotiation-runtime`,
+      `kit-storefront-composition-seam`,
+      `market-platform-compute-40-multi-domain-proof`,
+      `multi-domain-storefront-composition`, `name-unverifiable-responses`,
+      `negotiation-capacity-feasibility-probe`, `negotiation-driven-capacity-resize`,
+      `negotiation-time-capacity-hold`, `never-strand-the-host-on-passthrough`,
+      `pools-6-fair-scheduling-policy`, `pools-7-storefront-fulfillment-cutover`,
+      `pools-8-capacity-projection-and-listing-hints`, `publish-wheels-through-a-gate`,
+      `refactor-e2e-fulfillment-lifecycle`, `relay-vm-access-without-a-dashboard`,
+      `repair-storefront-alkahest-configuration`,
+      `replace-polling-with-authenticated-push`, `restore-issue-discovery-thin-runner`,
+      `retain-authenticated-request-outcomes`, `separate-marketplace-registry`,
+      `service-identity-signing`, `settle-capacity-claim-vocabulary`,
+      `shorten-long-requirements`, `sign-multi-language-credits-middleware`,
+      `storefront-domain-parameterization`, `type-core-packages`. A section with no
+      checked closeout task was rewritten as the eleven parts; one with checked tasks
+      kept them as they were, reworded its unchecked ones, appended the missing parts,
+      and notes that closeout works them in `openspec/README.md`'s order. Comment and
+      import work moved to the last implementation section; nine hand-synchronized
+      specifications noted for `--skip-specs`; implementation-section tasks that
+      hand-copied delta-covered specs or archived were withdrawn into closeout, at the
+      owner's direction. A change with no spec deltas records that instead of
+      `openspec validate <change> --strict`, which rejects it (`openspec/README.md`
+      part 10, `change-closeout`), at the owner's direction.
+      Left as they were: `bare-metal-mock-provisioned-deal`,
+      `pools-9-retire-local-physical-authority`, and
+      `remove-dead-storefront-physical-surfaces`, archived on `dev`;
+      `unbacked-bare-metal-listings`, whose closeout `dev` rewrote, swept after the
+      merge (11.4); `redesign-authenticated-replay-state`, not yet planned, with no
+      closeout task; and the changes with no `tasks.md`. This change's own section 12
+      was aligned the same way.
 - [x] 10.3a From the 10.1–10.3 handoff, at the owner's direction: dependents are
       released at archive cleanup, after the closeout gate, not at closeout, since a dependency lands
       at `archived` and closeout runs before its review (`openspec/README.md`
@@ -983,7 +1029,7 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `make closeout CHANGE=` opens a session on `change-closeout`, finding the
       change active or archived so an interrupted closeout resumes (a `make -n`
       test checks it calls the plain lookup and the skill).
-- [ ] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
+- [x] 10.6 Write the `change-archive-cleanup` skill (named `change-ship` in the
       notes above), run when the closeout gate is passed:
       `reviews/` kept in place as 12.10 decided,
       dependents released as `openspec/README.md` part 6 states, and the
@@ -1002,7 +1048,12 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       closeout-gate scenario, design), at the owner's direction after the pilot's
       closeout triage went on to clean up the archive itself before the skill
       existed; that unpushed commit was dropped so the pilot starts from
-      `in closeout`. Pilot open.
+      `in closeout`. Piloted on `capacity-shape-envelope` in `093dc8f6`: the
+      index edits matched the dropped reference — row `archived`,
+      `publish-shape-bounds` released and left `ready for design`, the campaign
+      graph marked, the resize change's notes rewritten — with the row's notes
+      taken more exactly from the promotion record; the merge drafts were written
+      and named the other changes the branch carries.
       `openspec validate --strict` had failed since 10.3d: the MODIFIED roadmap
       currency requirement renamed a scenario, which the validator reads as
       dropping it; the scenario keeps its name, with the new body.
@@ -1018,20 +1069,31 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `make review`, the review file layout, and the ledger; link it from
       `AGENTS.md`'s "Agent skills" section.
 - [ ] 11.3 Confirm no committed skill refers to `docs/prompts/`.
+- [ ] 11.4 Merge `dev` into this branch before closeout, so closeout promotes
+      against the documents as they are on `dev`. Then sweep, as 10.5 did, the
+      closeout section of `unbacked-bare-metal-listings`, whose `dev` version
+      rewrote it, and of any change `dev` added.
 
 ## 12. Closeout
 
-- [ ] 12.1 Comment hygiene: `make check-comment-hygiene`.
-- [ ] 12.2 Import placement: review the imports this change added or touched,
+Per `openspec/README.md#plan-closeout-requirements`.
+
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
+- [ ] 12.1 Comment hygiene — confirm: `make check-comment-hygiene`, and read the
+      comments this change added; anything to rewrite returns it to implementation.
+- [ ] 12.2 Import placement — confirm: check the imports this change added or touched,
       including in `scripts/fetch-e2e-logs.py`, `scripts/validate_slice.py`, and
       `scripts/check_push_ready.py`.
 - [ ] 12.3 Documentation compliance: re-check this change's decisions against
       `openspec/README.md`'s placement rules.
 - [ ] 12.4 Narrative compression of completed-task notes.
 - [ ] 12.5 Roadmap currency: record that no roadmap goal is affected, or update it.
-- [ ] 12.6 Campaign index currency: this change's row, including the
-      dependency-landing step for any dependent.
-- [ ] 12.7 Documentation citations: `make check-doc-citations CHANGE=agent-driven-change-workflow`.
+- [ ] 12.6 Campaign index currency: this change's row and its campaign placement;
+      other rows' `Depends on` are left to archive cleanup.
+- [ ] 12.7 Documentation citations, after promotion (12.11):
+      `make check-doc-citations CHANGE=agent-driven-change-workflow`, then
+      `openspec validate agent-driven-change-workflow --strict`.
 - [ ] 12.8 Packaging: `make check-packaging`.
 - [ ] 12.9 End-to-end pipeline: record a passing run and the scenarios it covers,
       or an explicit blocker naming its cause and owner.
@@ -1052,3 +1114,8 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
       `openspec/specs/deployment-state/architecture.md`'s paragraph on explicit
       volume choices should cite it), and a `change-workflow` row
       linking the spec and architecture companion in `openspec/specs/README.md`.
+      The `change-workflow` and `planning-governance` `spec.md` files the deltas
+      cover are written by the archive in 12.12, not by hand.
+- [ ] 12.12 Archival, last: `openspec archive agent-driven-change-workflow -y`
+      merges the deltas and moves the change under `openspec/changes/archive/`;
+      point the index row at it, and run `openspec validate --specs --strict`.

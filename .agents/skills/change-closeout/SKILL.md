@@ -126,7 +126,8 @@ exists:
 - `make check-doc-citations CHANGE=<change>` must report nothing; fix the
   documents until it does.
 - `openspec validate <change> --strict`, with the validator `openspec/README.md`
-  pins.
+  pins. A change with no spec deltas cannot pass it — the validator rejects a change
+  with none — so record on the citations task that it has none, and skip it.
 
 **Archive** — the last change to the change's files. Check every other closeout
 part is checked first.

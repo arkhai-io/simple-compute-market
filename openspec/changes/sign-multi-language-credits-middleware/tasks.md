@@ -60,38 +60,46 @@
 
 ## 4. Closeout
 
-- [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.
-- [ ] 4.2 **Import placement.** Python-only rule; record the disposition if no
-      Python changed.
-- [ ] 4.3 **Documentation compliance.** Re-check this change's accepted
-      decisions against `openspec/README.md`'s placement rules.
-- [ ] 4.4 **Narrative compression.** Reduce completed-task notes to final
-      behavior, validation evidence, and deferred work.
-- [ ] 4.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, or
-      record that this change has no roadmap impact.
-- [ ] 4.6 **Campaign index currency.** Update this change's row and its
-      campaign's dependency graph in `openspec/changes/README.md`.
-- [ ] 4.7 **Promotion.** Complete the design-promotion record. The "a shared
-      behavioural fixture that pins inbound behaviour does not pin outbound
-      authentication" finding wants a permanent home; `conformance/README.md`
-      is the candidate.
-- [ ] 4.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=sign-multi-language-credits-middleware` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 4.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 4.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 4.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 4.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation. The rule is Python-only; record the disposition if no Python
+      changed.
+- [ ] 4.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 4.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 4.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+- [ ] 4.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 4.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 4.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change (the per-implementation
+      signed-mode scenarios of 1.3), or an explicit blocker naming its cause and the
+      change that owns it, with the validations it gates treated as unrun.
+- [ ] 4.9 **Promotion.** Write the permanent documents this change owes —
+      `conformance/README.md`, the candidate home for the finding that a shared
+      behavioural fixture pinning inbound behaviour does not pin outbound
+      authentication — and complete the design-promotion record. This change has no
+      spec deltas, so the archive in 4.11 writes no `spec.md`.
+- [ ] 4.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=sign-multi-language-credits-middleware` and
+      resolve every match, then
+      `openspec validate sign-multi-language-credits-middleware --strict`, or, while the change has no spec deltas, record that instead: the validator rejects a change with none.
+- [ ] 4.11 **Archival.** Last, once every other part is checked: `openspec archive
+      sign-multi-language-credits-middleware -y --skip-specs` moves the change under
+      `openspec/changes/archive/`, there being no deltas to merge; point the index row
+      at the archived directory, and run `openspec validate --specs --strict`.

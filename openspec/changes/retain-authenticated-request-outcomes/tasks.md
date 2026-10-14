@@ -49,29 +49,53 @@ Blocked on `redesign-authenticated-replay-state`; see `proposal.md`. Its decisio
       a restart is returned after it.
 - [ ] 4.3 `kit/site`, `domains/apicredits/service`, and
       `provisioning/compute/service`.
+- [ ] 4.4 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 5. Closeout
 
-- [ ] 5.1 **Comment hygiene.** `make check-comment-hygiene`.
-- [ ] 5.2 **Import placement.** Module level where safe, checked against this
-      change's own diff.
-- [ ] 5.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement rules.
-- [ ] 5.4 **Narrative compression.** Reduce completed-task notes to final
-      behavior, validation evidence, and deferred work.
-- [ ] 5.5 **Roadmap currency.** Update `docs/development/ROADMAP.md`, or record
-      that this change has no roadmap impact.
-- [ ] 5.6 **Campaign index currency.** Update this change's row and its
-      campaign's dependency graph in `openspec/changes/README.md`.
-- [ ] 5.7 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=retain-authenticated-request-outcomes`.
-- [ ] 5.8 **End-to-end pipeline.** Confirm the pipeline passes and record the
-      evidence. The credits buy/use/top-up flow is the path that exercises an
-      authenticated mutation surface end to end.
-- [ ] 5.9 **Promotion.** Complete the design-promotion record. The exact-retry
-      implementation belongs in
-      `openspec/specs/marketplace-identity/spec.md`'s neighbourhood.
-- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 5.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 5.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 5.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 5.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 5.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change — the credits
+      buy/use/top-up flow is the path that exercises an authenticated mutation surface
+      end to end — or an explicit blocker naming its cause and the change that owns
+      it, with the validations it gates treated as unrun.
+- [ ] 5.9 **Promotion.** Write the permanent documents this change owes and complete
+      the design-promotion record. The exact-retry behaviour belongs in
+      `openspec/specs/marketplace-identity/spec.md`'s neighbourhood; a `spec.md` the
+      deltas cover is written by the archive in 5.11, not by hand, and the record
+      names it all the same.
+- [ ] 5.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=retain-authenticated-request-outcomes` and resolve every match,
+      then `openspec validate retain-authenticated-request-outcomes --strict`, or, while the change has no spec deltas, record that instead: the validator rejects a change with none.
+- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
+      retain-authenticated-request-outcomes -y` merges the deltas into `openspec/specs/` and
+      moves the change under `openspec/changes/archive/`; point the index row at the
+      archived directory, and run `openspec validate --specs --strict`.
