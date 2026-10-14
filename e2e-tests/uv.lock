@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 
 [[package]]
@@ -207,7 +207,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.15.0"
+version = "0.15.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -237,7 +237,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.15.1-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -195,7 +195,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.15.0"
+version = "0.15.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -225,7 +225,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.15.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.15.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -783,7 +783,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.15.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.15.1" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },

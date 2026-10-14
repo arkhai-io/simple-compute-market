@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
@@ -132,6 +132,7 @@ class BareMetalRegistryConfiguration:
 
     url: str
     trust: RegistryAuthorityTrust
+    api_key: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_environment(
@@ -153,6 +154,7 @@ class BareMetalRegistryConfiguration:
             raise RuntimeError(f"{exc.args[0]} is required for publication") from exc
         return cls(
             url=url,
+            api_key=env.get("BARE_METAL_STOREFRONT_REGISTRY_API_KEY") or None,
             trust=RegistryAuthorityTrust(
                 authority=authority,
                 principals=TrustedIdentitySet(
@@ -172,6 +174,7 @@ class BareMetalRegistryConfiguration:
                 signer=signer,
                 caller_role="seller",
                 expected_registries={self.url: self.trust},
+                auth={self.url: self.api_key} if self.api_key else None,
             )
 
         return factory
@@ -198,6 +201,7 @@ class BareMetalRegistryConfiguration:
                 registry_authority=self.trust.authority,
                 timeout=timeout,
                 transport=transport,
+                api_key=self.api_key,
             ) as client:
                 await client.get_health()
         except RegistryClientError as exc:

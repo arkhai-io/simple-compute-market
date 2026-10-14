@@ -37,6 +37,21 @@ def test_production_values_render_dedicated_secret_bound_role() -> None:
     assert "name: BARE_METAL_STOREFRONT_SITES" in manifest
     assert "name: \"bare-metal-storefront-identity\"" in manifest
     assert "name: \"bare-metal-storefront-sites\"" in manifest
+    assert "name: BARE_METAL_STOREFRONT_REGISTRY_URL" in manifest
+    assert 'value: "https://registry.example.com/compute"' in manifest
+    assert "name: BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY" in manifest
+    assert 'value: "registry.example.com"' in manifest
+    assert "name: BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS" in manifest
+    assert "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" in manifest
+    assert (
+        'name: BARE_METAL_STOREFRONT_REGISTRY_API_KEY\n'
+        '              valueFrom:\n'
+        '                secretKeyRef:\n'
+        '                  name: "bare-metal-storefront-registry"\n'
+        '                  key: "api-key"'
+    ) in manifest
+    assert "kind: Secret" not in manifest
+    assert "kind: ConfigMap" not in manifest
     assert "path: /health" in manifest
     assert "wait-for-" not in manifest
     for forbidden in (
@@ -44,6 +59,7 @@ def test_production_values_render_dedicated_secret_bound_role() -> None:
         "private_key",
         "provider_metadata",
         "ARKHAI_IDENTITY_CREDENTIAL\n              value:",
+        "BARE_METAL_STOREFRONT_REGISTRY_API_KEY\n              value:",
     ):
         assert forbidden not in manifest
 
@@ -107,9 +123,49 @@ def test_a_partial_alkahest_group_fails_closed() -> None:
         assert rendered.returncode != 0, partial
 
 
+def test_publication_can_omit_the_bearer_or_the_registry() -> None:
+    rendered = _render("--set-string", "registry.apiKeySecret.name=")
+    assert rendered.returncode == 0, rendered.stderr
+    assert "BARE_METAL_STOREFRONT_REGISTRY_URL" in rendered.stdout
+    assert "BARE_METAL_STOREFRONT_REGISTRY_API_KEY" not in rendered.stdout
+
+    rendered = _render(
+        "--set-string", "registry.url=",
+        "--set-string", "registry.authority=",
+        "--set-json", "registry.principals=[]",
+        "--set-string", "registry.apiKeySecret.name=",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    assert "BARE_METAL_STOREFRONT_REGISTRY_" not in rendered.stdout
+
+
+def test_registry_requires_a_complete_public_trust_pin() -> None:
+    for flag, value in (
+        ("--set-string", "registry.url="),
+        ("--set-string", "registry.authority="),
+        ("--set-json", "registry.principals=[]"),
+    ):
+        rendered = _render(flag, value)
+        assert rendered.returncode != 0, value
+        assert "registry" in rendered.stderr, rendered.stderr
+
+
+def test_registry_credential_must_be_a_secret_reference() -> None:
+    for value, error_key in (
+        ("registry.apiKey=development-only", "apiKey"),
+        ("registry.apiKeySecret.key=", "key"),
+    ):
+        rendered = _render("--set-string", value)
+        assert rendered.returncode != 0, value
+        assert error_key in rendered.stderr, rendered.stderr
+
+
 if __name__ == "__main__":
     test_production_values_render_dedicated_secret_bound_role()
     test_missing_site_secret_fails_closed()
     test_a_hosted_only_release_renders_no_alkahest_inputs()
     test_the_alkahest_group_renders_together_with_the_key_by_reference()
     test_a_partial_alkahest_group_fails_closed()
+    test_publication_can_omit_the_bearer_or_the_registry()
+    test_registry_requires_a_complete_public_trust_pin()
+    test_registry_credential_must_be_a_secret_reference()
