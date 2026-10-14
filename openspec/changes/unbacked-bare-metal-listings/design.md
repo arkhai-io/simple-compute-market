@@ -202,6 +202,75 @@ whatever its listing's backing; no unbacked deal reaches fulfillment, since cont
 exchange is the only option admissibility leaves an unbacked listing. Delivery routes
 for a stage that fulfils through capacity are unchanged.
 
+### The bare-metal evidence is VM's introduction scenario, stage for stage
+
+Decided with the maintainer:
+
+- A new bare-metal lane scenario, `e2e_bare_metal_unbacked_introduction`, runs VM's
+  Goal 7 introduction scenario stage for stage and adds what this change introduces:
+  - supply: a backed pool with a host-bearing declaration and a rate; an unbacked pool
+    (no deliverable mode, advertising `bare_metal`, a configuration-free provider)
+    with a host-less declaration that enables bare-metal publication and a rate; and a
+    listing that publishes no rate. Contact settlement reaches the unbacked pool
+    through a storefront pool override, as in VM's scenario, so the lane's default
+    clauses and the mock deal are untouched;
+  - discovery through the buyer CLI: a rate-bounded `market bare-metal list` returns
+    the backed and unbacked listings together and excludes the one without a rate, and
+    a `capacity_backing=unbacked` query returns only the unbacked one;
+  - the unbacked listing publishes `capacity_backing: unbacked`, no host fields, no
+    `access_methods`, and exactly `contact-exchange.v1`;
+  - the reveal through the buyer CLI, with the buyer's file sink receiving the seller's
+    contact, and seller-side delivery reaching the lane's mail sink;
+  - the fulfillment status route answering 404 for the introduction deal.
+- The bare-metal lane gains a mail sink and the storefront's delivery configuration
+  for a `seller-mail` SMTP sink.
+- The stages both domains run identically move into a shared introduction stage
+  module, each domain supplying a driver for supply seeding and its CLI verbs, as the
+  compute deal stages already do; VM's introduction scenario moves onto it.
+- Both buyer plugins register a root-level `settlement` command group, and the core
+  buyer application adds every installed domain's commands without a duplicate check,
+  so with both plugins installed one domain's `settlement contact introduce` runs the
+  other's recovery. Bare metal's settlement group moves under `market bare-metal`,
+  beside its `request-introduction`, and the core buyer application refuses at
+  startup a root command name two installed domains register, naming both. VM's
+  root-level commands stay.
+- The existing backed bare-metal introduction scenario stays: its retention and
+  operator-deletion coverage is independent of backing.
+- There is no Helm evidence for bare metal in this change. The bare-metal chart
+  forwards no registry, publication clauses, or delivery configuration, so a
+  chart-deployed bare-metal storefront cannot publish at all; that is chart work,
+  recorded with the chart item in `resolve-compute-family-findings`. An introduction
+  involves no provisioning, so the lane's mock provisioning profile does not weaken
+  this evidence.
+
+### Permanent documentation
+
+Decided with the maintainer (review question 6). Spec deltas this change carries:
+
+- `storefront-publication`: remove "An unbacked pool yields no bare-metal listing";
+  add "Bare-metal publication derives unbacked listings", written to the decisions
+  above; scope "A bare-metal listing sells one whole unit" to capacity-backed
+  listings; scope the availability refusal in "Bare-metal opening rechecks its listing
+  against its source" to capacity-backed listings; scope the inventory guard's
+  unbacked rule to availability; add requirements that a bare-metal listing carries
+  delivery terms only when backed, that a bare-metal candidate with no settlement
+  option yields no listing, and that a deal settled by introduction has no
+  fulfillment.
+- `physical-provisioning`: "A bare-metal publication view is built from its capacity
+  declaration" carries delivery terms only as the pool's delegate passes them; "Domains
+  contribute their inventory views" gives resource views the pool's context.
+- `resource-pool-management`: the delegate requirement the prerequisite adds gains
+  the delivery-term decisions.
+- `registry-discovery`: "Compute listings publish their capacity backing" publishes a
+  bare-metal listing's binding backing, backed or unbacked.
+
+Promotion at closeout: the publication architecture companion's bare-metal passages
+(candidates, the backed-only statement, the one-unit commitment, and the recheck with
+its held-projection end state); `ARCHITECTURE.md`'s bare-metal commitment sentence;
+the bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
+machines; `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` for the evidence and topology;
+the roadmap's Goal 7 and the change index at completion.
+
 ### Negotiation and settlement compose the existing kit runtimes
 
 Negotiation and settlement for an unbacked bare-metal listing sit on the kit
@@ -250,14 +319,9 @@ here as a decision.
    declarations, never availability".
 5. **The fulfillment routes for an unbacked deal.** Decided: "A deal settled by
    introduction has no fulfillment".
-6. **The permanent documentation delta.** Besides the requirement this change
-   removes, "A bare-metal listing sells one whole unit", "Bare-metal opening rechecks
-   its listing against its source", the publication architecture companion, and the
-   bare-metal seller quickstart state that every bare-metal listing is backed.
-7. **The bare-metal system evidence.** The existing bare-metal introduction scenario
-   uses a backed pool and the typed client and has no delivery; the bare-metal lane has
-   no mail sink; the bare-metal chart forwards no delivery or registry configuration.
-   Decide the evidence and whether it includes a Helm release.
+6. **The permanent documentation delta.** Decided: see "Permanent documentation".
+7. **The bare-metal system evidence.** Decided: "The bare-metal evidence is VM's
+   introduction scenario, stage for stage".
 8. **The two-seller topology for both lanes (task 2.2).** Adding a second site to
    either existing lane breaks single-site assertions and configuration. Decide the
    topology, and whether it stays in this change.

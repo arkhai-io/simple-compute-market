@@ -49,6 +49,13 @@ since 2026-10-14; not yet planned.
       question 5). Decided with the maintainer: the routes answer 404 for any deal
       whose accepted stage does not fulfil through capacity, before building the
       fulfillment service ("A deal settled by introduction has no fulfillment").
+- [x] 1.10 **Decision gate.** Decide the permanent documentation delta and the system
+      evidence (review questions 6 and 7). Decided with the maintainer ("Permanent
+      documentation"; "The bare-metal evidence is VM's introduction scenario, stage for
+      stage"): a new bare-metal unbacked introduction scenario on shared introduction
+      stages, VM moved onto them, the bare-metal lane's mail sink, bare metal's
+      settlement commands namespaced with a core refusal of duplicate root commands,
+      and no Helm evidence.
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 

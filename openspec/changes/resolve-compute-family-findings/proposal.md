@@ -61,7 +61,10 @@ Behaviour that answers wrongly:
   ask each domain's driver which opening to send; one rule for both belongs with
   moving bare metal onto the shell's negotiation routes.
 - The bare-metal Compose wrapper and Helm chart forward no seller negotiation
-  chain, so only the lane's overlay sets one.
+  chain, so only the lane's overlay sets one. The chart also forwards no registry,
+  publication clauses, or introduction delivery configuration, so a chart-deployed
+  bare-metal storefront cannot publish at all; `unbacked-bare-metal-listings` proves
+  unbacked bare metal in its end-to-end lane only for that reason.
 - An interrupted contact-exchange reveal is finished only by the buyer retrying,
   though the servicing worker could finish it from the persisted introduction.
 - A seller's EVM address and wallet key are separate inputs nothing checks against
