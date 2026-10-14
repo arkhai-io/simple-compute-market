@@ -23,8 +23,10 @@ Design phase; not yet planned. Prerequisite of `unbacked-bare-metal-listings`.
 - [ ] 1.3 **Decision gate.** Decide the unified behaviour for each divergence between
       VM, bare metal, and API credits, and where bare metal's refusal of unbacked
       pools is expressed while this change keeps it. Record each as its own decision.
-- [ ] 1.4 **Decision gate.** Decide how the `CapacityBinding` and `UnbackedBinding`
-      classes relate to the delegate, and record it.
+- [x] 1.4 **Decision gate.** Decide how the `CapacityBinding` and `UnbackedBinding`
+      classes relate to the delegate, and record it. Decided with the maintainer: one
+      `PublicationBinding` class carrying the delegate replaces both; a refused
+      admission answers 409 ("One binding class carries the delegate").
 - [ ] 1.5 **Decision gate.** Decide how the site's resource publication views receive
       the pool's delegate, and record it.
 - [ ] 1.6 Plan the implementation, naming the files each decision touches, the focused

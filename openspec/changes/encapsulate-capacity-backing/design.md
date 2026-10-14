@@ -184,6 +184,39 @@ Rejected: flags on the delegate for callers to branch on, which moves the switch
 rather than encapsulating them; and effects performed by the delegate, which the
 contracts allowlist forbids and which belong to the storefront and site layers.
 
+### One binding class carries the delegate (task 1.4)
+
+`kit/capacity-publication`'s sibling `CapacityBinding` and `UnbackedBinding` classes,
+which encode backing as a type, are replaced by one class,
+`PublicationBinding(site_id, offering_mode, source_id, backing)`, whose `backing` is the
+`CapacityBacking` delegate. The name is the union alias the kit already exports, so
+annotations written against it stand.
+
+- `publication_binding(capacity_backing=label, ...)` resolves the delegate from the
+  label; no label-to-type table remains.
+- `require_binding` asks `binding.backing.require_admission(effect)`, and every
+  capacity effect accepts `PublicationBinding`. Every other test of the binding class
+  becomes the delegate operation the inventory assigned it.
+- `backing` is a field, so two bindings differing only in backing are unequal, and the
+  publication runtime's persisted-binding comparison still catches a backing change.
+- A refused admission raises the delegate's `CapacityNotAdmittedError`, which the
+  kit's administrator route service answers with 409. `CapacityBindingError` stays for
+  identity faults — an unknown site or a changed binding. VM's administrator reserve
+  no longer reports a refused admission as an unconfigured site.
+- A further category needs no further binding class.
+
+The type checker no longer proves that a capacity effect receives a backed binding;
+the runtime guard did that already and remains, now as the delegate's. Rejected:
+keeping the sibling classes with the delegate as a class attribute, which still needs
+a category-to-class table beside the delegate's own registry and a new class per
+category; and keeping the class test as the guard, which is the switch this change
+removes.
+
+`kit/capacity-publication` therefore depends on `kit/resource-pools-contracts`, a
+downward edge between kits that `make check-architecture` permits. Capacity
+publication and resource pools belong together: every market that publishes capacity
+does so from capacity declared in pools, as API credits does with its system pool.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
@@ -202,10 +235,7 @@ Each is a decision gate in `tasks.md`.
    8. capacity-effect guard coverage;
    9. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
-2. How the sibling `CapacityBinding` and `UnbackedBinding` classes relate to the
-   delegate: whether the binding carries the delegate, or the class stays the type
-   that capacity effects require (task 1.4).
-3. How the site's resource publication views receive the pool's delegate, given that
+2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
-4. Where bare metal's refusal of unbacked pools is expressed while this change keeps
+3. Where bare metal's refusal of unbacked pools is expressed while this change keeps
    it (task 1.3).
