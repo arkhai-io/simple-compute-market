@@ -37,10 +37,10 @@ with no bare-metal branch on backing: what differs is the delegate's.
 ### Identity is the site and the Physical Resource; host fields are optional when unbacked
 
 An unbacked listing's derivation identity is its site and Physical Resource, the same
-identity a backed listing has, with `host_id` and `physical_host_id` optional because
-an unbacked declaration need name no host. This is the resource-granular identity VM
+identity a backed listing has, with `host_id` and `physical_host_id` absent because
+nothing delivers a host for unbacked supply. This is the resource-granular identity VM
 adopted when capacity stopped requiring hosts, applied to bare metal unchanged. The
-listing payload itself is reviewed under "Open questions".
+payload is decided under "Delivery terms are the delegate's decision".
 
 ### The site emits the bare-metal view for unbacked supply
 
@@ -66,8 +66,9 @@ Consequences, also decided:
 - The resource's own `bare_metal_publication` declaration attribute remains the
   opt-in for backed and unbacked pools alike, and it is where the view's access
   methods and capabilities come from. An unbacked pool advertising bare metal lists
-  only the resources that enable it, as a backed pool does. Whether an unbacked
-  listing should publish access methods at all is open (see "Open questions").
+  only the resources that enable it, as a backed pool does. Its access methods are
+  a delivery term, so an unbacked listing does not publish them (see "Delivery terms
+  are the delegate's decision").
 - An unbacked resource is never judged against availability: an enabled, shaped
   resource is a candidate and a disabled one is withdrawn. It never closes as
   unavailable. This is the delegate's decision, consistent with an unbacked listing
@@ -88,11 +89,56 @@ gives views the pool's delegate:
   pass resolves each declaration's pool from the pool rows its metadata pass already
   reads; that is the provisioning composition reading its own pools, not a new
   `kit/site` read of pool state.
-- The delegate gains an operation for what a view carries (provisionally
-  `view_supply(host_id, available)`): a backed resource's view carries its host
-  identity and availability, an unbacked resource's carries neither.
+- The view carries the resource's delivery terms only as the delegate's
+  `carry_delivery_terms` passes them (see "Delivery terms are the delegate's
+  decision"): a backed resource's view carries its host identity, access methods, and
+  availability; an unbacked resource's carries none of them.
 - Bare metal's view builder consumes it, so its rule that a declaration naming no host
   gets no view becomes the delegate's decision rather than a branch of its own.
+
+### Delivery terms are the delegate's decision
+
+Some fields of a listing commit the marketplace to delivering something: on a backed
+listing it stands behind them, and on an unbacked one nothing does, and neither the
+storefront nor the site could verify them. These are delivery terms. Whether a
+listing carries them is the backing delegate's decision, through two domain-neutral
+operations a domain applies to the fields it names as delivery terms:
+
+- `carry_delivery_terms(terms)`, used where the site builds a publication view: a
+  backed delegate passes the terms through, an unbacked delegate carries none.
+- `delivery_term_constraints(terms)`, used by a listing model's validation: a backed
+  delegate requires every term present and non-empty, an unbacked delegate requires
+  every term absent.
+
+Bare metal names `host_id`, `physical_host_id`, `access_methods`, and, on the view,
+`available` as its delivery terms. The payload model holds no backing knowledge, and
+its rule is that the terms are absent exactly when the listing is unbacked:
+
+| Field | Backed listing | Unbacked listing |
+|---|---|---|
+| `capacity_backing` | `backed` | `unbacked` |
+| `host_id`, `physical_host_id` | required | absent, even where the declaration names a host |
+| `access_methods` | required, non-empty, as declared | absent |
+| hardware, region, `asking_rate`, durations | as today | as today |
+
+The `["ssh"]` default for `access_methods` is removed: an absent field makes no
+commitment, and a default would publish one nothing stands behind. A backed listing
+still always carries its declared list, so its behaviour is unchanged. Hardware,
+region, rate, and durations remain the seller's description of the supply and its
+terms, not a delivery commitment. Rejected: publishing a declared host or access
+methods on an unbacked listing, which would read as a machine and access the
+marketplace delivers.
+
+`capacity_backing` is the buyer-visible indicator. The compute registry schema filters
+it exactly, and every buyer CLI compiles its resource query from that schema, so a
+buyer can already ask for `capacity_backing=unbacked`. Nothing proves that across
+running services yet, so this change's end-to-end evidence includes it.
+
+Every remaining reader of the host fields is on a path an unbacked listing cannot
+reach — escrow negotiation, accepted terms, and settlement verification are reached
+only through stages that deliver through capacity, which publication never offers an
+unbacked listing, and capacity effects are refused by the delegate's admission guard —
+except the fulfillment routes' context loader (open question 5).
 
 ### Negotiation and settlement compose the existing kit runtimes
 
@@ -129,10 +175,8 @@ From the 2026-10-14 review. Each is to be decided with the maintainer, after the
 prerequisite's delegate operations are known where it depends on them, and recorded
 here as a decision.
 
-1. **The unbacked listing payload.** `BareMetalListing` declares
-   `capacity_backing: Literal["backed"]` and requires non-empty host fields, and
-   `access_methods` defaults to `["ssh"]`, a commitment nothing delivers for unbacked
-   supply. Decide the payload and every reader of host fields.
+1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
+   decision".
 2. **Backing on refresh and reopen.** Settled by the prerequisite: every domain,
    bare metal included, applies one shared backing comparison first on every refresh,
    reopen, and source check, and backing is no longer a bare-metal term field

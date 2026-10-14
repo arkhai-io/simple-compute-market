@@ -27,6 +27,13 @@ since 2026-10-14; not yet planned.
       pools `encapsulate-capacity-backing` keeps in bare-metal publication. Decided
       with the maintainer ("This change removes bare metal's temporary refusal of
       unbacked pools"); planning names the deletion as a task.
+- [x] 1.6 **Decision gate.** Decide the unbacked listing payload (review question 1).
+      Decided with the maintainer: host identity, access methods, and availability are
+      delivery terms the backing delegate carries or forbids through
+      `carry_delivery_terms` and `delivery_term_constraints`; an unbacked listing
+      publishes none of them; the `access_methods` default goes ("Delivery terms are
+      the delegate's decision"). This change's end-to-end evidence proves the backing
+      filter through the buyer CLI.
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
