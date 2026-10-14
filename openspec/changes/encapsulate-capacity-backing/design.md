@@ -309,18 +309,51 @@ publish their capacity backing" requires, and the API-credit schema does not.
   would tell a buyer nothing — every published API-credit listing is backed — and
   would change the schema identity buyers match.
 
+### Divergence: backing disagreement on refresh and reopen (task 1.3)
+
+`storefront-publication` fixes a listing's backing for the life of its binding: a
+listing whose binding's backing disagrees with its source's is reopened by no path,
+and a supply move closes it so a new listing binds. Today VM compares the two first,
+before identity, and closes and never reopens on a mismatch; bare metal holds backing
+as a term field with no backing outcome and a derivation key that excludes it, so a
+pool re-created under the same identifier with the opposite backing would refresh its
+listings in place — unreachable only because bare metal refuses unbacked pools; API
+credits' availability reopen consults no source.
+
+Unified rule:
+
+- One shared comparison, `backing_changed(binding, source_backing)`, beside the
+  binding in `kit/capacity-publication`: whether the binding's delegate differs from
+  the delegate the source's pool now declares. It is label equality and holds no
+  category knowledge.
+- Every domain applies it first on every refresh, every reopen, and every source check
+  — VM's listing comparison, bare metal's, API credits' reopen, and all three source
+  checks. A mismatch closes an open listing and refuses any reopen or in-place refresh;
+  a source check reports it as a declared mismatch.
+- Backing is neither an identity field nor a term: bare metal removes it from its term
+  fields.
+- The published label only restates the binding's (see "Divergence: the published
+  label"); VM's refresh of a legacy listing published without the label is that rule,
+  not a backing comparison.
+- API credits compares against its pool's current declaration, which it reads under
+  "Divergence: admitting unbacked supply".
+
+The publication runtime's refusal of a supplied binding that differs from the persisted
+one, which now includes backing, stays as a backstop. It raises a fault; the shared
+comparison runs first so that a backing change is the ordinary close the requirement
+describes.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. a binding whose backing disagrees with its source's on refresh and reopen;
-   2. source-check availability;
-   3. reconciliation scope;
-   4. hold placement;
-   5. capacity-effect guard coverage;
-   6. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. source-check availability;
+   2. reconciliation scope;
+   3. hold placement;
+   4. capacity-effect guard coverage;
+   5. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).

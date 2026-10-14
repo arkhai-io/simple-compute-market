@@ -115,11 +115,11 @@ here as a decision.
    `capacity_backing: Literal["backed"]` and requires non-empty host fields, and
    `access_methods` defaults to `["ssh"]`, a commitment nothing delivers for unbacked
    supply. Decide the payload and every reader of host fields.
-2. **Backing on refresh and reopen.** Bare metal treats `capacity_backing` as a term
-   field and has no backing comparison, so a pool re-created under the same ID with
-   the opposite backing would refresh its listings in place, against
-   `storefront-publication`'s "A backing change closes and republishes". Expected to be
-   unified by the prerequisite; confirm and record.
+2. **Backing on refresh and reopen.** Settled by the prerequisite: every domain,
+   bare metal included, applies one shared backing comparison first on every refresh,
+   reopen, and source check, and backing is no longer a bare-metal term field
+   (`encapsulate-capacity-backing`, "Divergence: backing disagreement on refresh and
+   reopen"). Nothing further is owed here.
 3. **Settlement options for unbacked listings.** Bare metal already declares per
    seller stage whether a mechanism provisions through capacity (`SellerStage.physical`),
    but publication applies no filter and accepts an empty payload. Decide how the
