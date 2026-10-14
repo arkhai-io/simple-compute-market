@@ -27,7 +27,11 @@ What is missing is bare metal using that machinery.
 
 - Derive bare-metal listings from pools that declare themselves unbacked and
   advertise `bare_metal`, through the same kit publication runtime, declaration
-  reader, and source reconciliation VM uses.
+  reader, and source reconciliation VM uses, with every difference from backed supply
+  decided by the backing delegate `encapsulate-capacity-backing` introduces.
+- Have the site emit the bare-metal publication view for a resource in an unbacked
+  pool, including one whose declaration names no host, carrying what the pool's
+  backing delegate says stands behind it.
 - Bind each with the kit's `UnbackedBinding` and publish `capacity_backing: unbacked`.
 - Never reserve, hold, schedule, or fulfil an unbacked bare-metal listing.
 - Publish only settlement options bare metal does not fulfil through capacity, so an
@@ -65,6 +69,7 @@ None.
 ## Impact
 
 - `domains/bare_metal/src/arkhai_bare_metal/` listing schema and publication.
+- The bare-metal provisioning adapter's publication view.
 - The bare-metal storefront's publication, negotiation, and settlement composition.
 - `openspec/specs/storefront-publication/spec.md`.
 
@@ -85,10 +90,12 @@ None.
   listing is discoverable by the compute schema's dimension filters.
 - **Depends on `compose-contact-exchange-across-compute`** (complete), for the
   promoted introduction composition and the per-origin contact payload.
-- **Blocked on `bare-metal-mock-provisioned-deal`** for negotiation and settlement of
-  an unbacked bare-metal listing through the kit negotiation runtime, which that
-  change composes (moved there from `bare-metal-and-credits-domain-stacks` Section 4a
-  on 2026-10-01); its prerequisite, the negotiation runtime kit, is in place.
+- **Depends on `encapsulate-capacity-backing`** (design phase), which gathers every
+  decision that differs between backed and unbacked supply into one backing delegate
+  and moves VM and bare metal onto it. This change resolves bare metal's unbacked
+  pools through that delegate rather than adding bare-metal branches on backing.
+- **Depends on `bare-metal-mock-provisioned-deal`** (archived 2026-10-09), which
+  composed bare-metal negotiation and settlement onto the kit negotiation runtime.
 - **Carries** the bare-metal half of `publish-indicative-listing-rates`' unbacked
   supply system evidence, transferred here because this change creates the listing it
   needs.
