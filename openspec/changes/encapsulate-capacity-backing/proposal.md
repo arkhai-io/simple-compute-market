@@ -70,9 +70,12 @@ None.
 - Any new backing value, or any change to the label's wire, persistence, or published
   form.
 - Unbacked bare-metal listings, which are `unbacked-bare-metal-listings`'.
-- Unifying VM and bare-metal publication beyond backing: shape origin, cardinality,
-  listing codecs, and how each storefront obtains its site projections stay as they
-  are.
+- Unifying VM and bare-metal publication beyond backing. Shape origin, cardinality,
+  and listing codecs are genuine domain differences. How each storefront obtains its
+  site projections is owned by `kit-owned-listing-and-fulfillment-lifecycles` and
+  `resolve-compute-family-findings`. The duplicated publication pipeline — candidate
+  classification, holds, the identity and term comparison, and the shape of the
+  reconciliation passes — has no owner and is recorded as such in the change index.
 
 ## Impact
 

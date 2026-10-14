@@ -383,16 +383,43 @@ listing, which bare metal's live fetch would do. That is decided in
 API credits' move onto the runtime's listing-source check comes from
 `resolve-compute-family-findings`, whose item now names only the projection half.
 
+### Divergence: reconciliation scope (task 1.3)
+
+`storefront-publication` applies source reconciliation to every listing and
+capacity-availability reconciliation, with its close-before-reopen sequencing, only to
+capacity-backed listings. Today VM scopes its availability paths — capacity events, a
+release, a failed deal, an administrator resize, and availability reopen — with a
+`backed_only` filter on the durable binding; bare metal folds availability into one
+publication pass over per-resource classes and scopes nothing, every listing being
+backed; API credits closes and reopens every listing on availability.
+
+Unified rule: whether availability reconciliation may touch a listing is the
+delegate's decision, expressed according to how a domain selects listings.
+
+- Where listings are selected in a query (VM), the backed-only filter becomes the
+  delegate registry's `labels_reconciled_by_availability()`, and the boolean parameter
+  becomes the choice between availability and source reconciliation, only the former
+  applying the label set.
+- Where listings are judged one by one (bare metal, API credits), availability closes
+  and reopens come from the available half of `judge`: bare metal's resources cannot
+  classify as unavailable unless their delegate is bounded by availability, and API
+  credits judges each listing's quota through its binding's delegate. Source
+  reconciliation still applies to every listing.
+
+VM's separate availability paths and bare metal's single pass are structure, not
+backing: the requirement constrains which listings each reconciliation may touch, not
+how many passes a domain runs. Unifying that structure belongs to the shared
+publication pipeline this change leaves out, recorded as unowned in the change index.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. reconciliation scope;
-   2. hold placement;
-   3. capacity-effect guard coverage;
-   4. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. hold placement;
+   2. capacity-effect guard coverage;
+   3. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
