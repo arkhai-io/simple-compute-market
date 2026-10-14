@@ -183,6 +183,25 @@ into the kit (`kit-owned-listing-and-fulfillment-lifecycles`) and the projection
 in `resolve-compute-family-findings`. The scoped requirement holds unchanged once it
 lands, and the retryable refusal during a site outage goes away.
 
+### A deal settled by introduction has no fulfillment
+
+An unbacked binding keeps its Physical Resource as its source, so the bare-metal
+fulfillment routes load its context; they then answer 409 "settlement is not
+authoritatively verified" because introduction evidence carries no delivery — the same
+answer a backed listing settled by introduction gets today, wrong in meaning because
+the introduction is verified and there is simply no fulfillment. On a storefront
+composed for introductions only, building the fulfillment service fails first and the
+routes answer 500.
+
+Decided: the fulfillment routes resolve the deal's accepted seller stage first, the
+entry settlement uses, and when it does not fulfil through capacity they answer 404,
+naming that the deal settled by introduction and has no fulfillment, before building
+the fulfillment service or loading a fulfillment context. The deciding fact is the
+mechanism's, not the listing's backing, because an introduction has no fulfillment
+whatever its listing's backing; no unbacked deal reaches fulfillment, since contact
+exchange is the only option admissibility leaves an unbacked listing. Delivery routes
+for a stage that fulfils through capacity are unchanged.
+
 ### Negotiation and settlement compose the existing kit runtimes
 
 Negotiation and settlement for an unbacked bare-metal listing sit on the kit
@@ -229,11 +248,8 @@ here as a decision.
    settlement option yields no listing".
 4. **The opening source check.** Decided: "An unbacked listing's recheck reads
    declarations, never availability".
-5. **The fulfillment routes for an unbacked deal.** The prerequisite routes every
-   bare-metal capacity effect through `CapacityRuntime` and the delegate's admission
-   guard, so an unbacked binding is refused before any site call. What remains here:
-   the fulfillment routes load a context requiring a Physical Resource and host, and
-   answer a binding with no host with an unhandled error rather than a clean refusal.
+5. **The fulfillment routes for an unbacked deal.** Decided: "A deal settled by
+   introduction has no fulfillment".
 6. **The permanent documentation delta.** Besides the requirement this change
    removes, "A bare-metal listing sells one whole unit", "Bare-metal opening rechecks
    its listing against its source", the publication architecture companion, and the

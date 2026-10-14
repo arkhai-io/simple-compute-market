@@ -45,6 +45,10 @@ since 2026-10-14; not yet planned.
       declarations; held projections for bare metal remain the preferred end state and
       stay with the changes that own them ("An unbacked listing's recheck reads
       declarations, never availability").
+- [x] 1.9 **Decision gate.** Decide the fulfillment routes for an unbacked deal (review
+      question 5). Decided with the maintainer: the routes answer 404 for any deal
+      whose accepted stage does not fulfil through capacity, before building the
+      fulfillment service ("A deal settled by introduction has no fulfillment").
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 
