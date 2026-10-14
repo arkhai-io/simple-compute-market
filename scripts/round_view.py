@@ -47,8 +47,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from find_change import ChangeNotFound, change_directory  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
-CHANGES = "openspec/changes"
 STATE = "round-view.json"
 E2E_BASELINES = "round-view-e2e"
 _NUMBERED = re.compile(r"^(\d+)-validation\.md$")
@@ -129,10 +132,12 @@ def start(root: Path, change: str, base: str | None = None, e2e: bool = True,
     """Push and dispatch the pipeline if asked, then reset the branch to the base."""
     if open_view(root):
         raise RoundError("a round view is already open; close it with `make round-done`")
-    if not change or change == "archive" or not (root / CHANGES / change).is_dir():
-        raise RoundError(f"no active change '{change}' under {CHANGES}")
+    try:
+        reviews = change_directory(root, change) / "reviews"
+    except ChangeNotFound as exc:
+        raise RoundError(str(exc)) from exc
     if base is None:
-        base = triaged_base(root / CHANGES / change / "reviews")
+        base = triaged_base(reviews)
         if base is None:
             raise RoundError("no triaged validation record names the previous round's "
                              "commit; give the base explicitly (BASE=<commit>)")

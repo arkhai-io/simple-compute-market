@@ -33,10 +33,12 @@ Record `HEAD`: it is the base the fixes are made against.
 
 ## 1. Find the review and load the context
 
-The reviews to triage are the change's numbered records in
-`openspec/changes/<change>/reviews/` — `NN-<kind>.md` — that have no
-`NN-<kind>.triage.md` beside them. Never read `reviews/transcripts/`: those are raw
-reviewer sessions, not records.
+The change's directory is what `python3 scripts/find_change.py <change>` prints:
+`openspec/changes/<change>/`, or, once closeout has archived it, its dated
+directory under `openspec/changes/archive/` — a closeout review is always of an
+archived change. The reviews to triage are its numbered records in `reviews/` —
+`NN-<kind>.md` — that have no `NN-<kind>.triage.md` beside them. Never read
+`reviews/transcripts/`: those are raw reviewer sessions, not records.
 
 When the owner pastes a review from elsewhere, save it verbatim as the change's
 next numbered record, `NN-<kind>-external.md`, numbered after every file in
@@ -303,7 +305,7 @@ its status misleads every agent that reads the index:
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
-| `closeout` | `ready for archival` |
+| `closeout` | `archived` — written by `change-ship`, which ships the change in the same session once the gate passes |
 
 When the gate does not pass, leave the status, and say what must happen before the
 next review.

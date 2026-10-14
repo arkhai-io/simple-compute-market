@@ -798,26 +798,99 @@ and its review reads the archive"). One session implements 10.1–10.4 and stops
 10.5 is a session of its own; 10.6 waits for the pilot's closeout review and for
 12.10.
 
-- [ ] 10.1 Find a change by name in the archive: one lookup in `scripts/` that
+- [x] 10.1 Find a change by name in the archive: one lookup in `scripts/` that
       resolves `<change>` to `openspec/changes/<change>/` or, failing that, the one
       `openspec/changes/archive/<date>-<change>/`, refusing an ambiguous match.
       Use it wherever a change is taken by name — `make review`, `make triage`,
       `make validate` and its parts, `make round-view`, and
       `make check-doc-citations CHANGE=` — and test it against a temporary tree
       with an active, an archived, a missing, and a twice-archived name.
-- [ ] 10.2 Amend the guidance to match: `openspec/README.md`'s closeout part 10
+      Done: `scripts/find_change.py` (`change_directory`; run as a script it
+      prints the directory). `run_change_review.run_review`, `round_view.start`,
+      `check_doc_citations.documents`, the `design`, `implement`, `triage`, and
+      `validate` targets, and `change-validate`'s record path use it; an
+      archived change reaching design or implementation is refused by those
+      skills' status check. `validate-local` and `validate-helm` take no change. Unit (`test_find_change.py`, temporary
+      tree): active, archived, active preferred over archived, missing,
+      archived twice refused naming both, a name that only ends an archived
+      one not matched, non-names refused, and the command's output and failure.
+      Wiring: a closeout review of an archived change is recorded in the
+      archive's `reviews/` (unit, runner injected); an archived change's
+      triaged validation is the round view's base (integration, real temporary
+      Git repository); the citation check scopes to an archived change and
+      refuses an unknown one (unit, temporary tree). The Make targets were run
+      by hand only (`make triage CHANGE=nope` names both locations).
+      Found on the real tree: `make check-doc-citations CHANGE=bare-metal-buyer-domain`,
+      an archived change, reports six unresolved citations — one of the
+      change's own unarchived path, five of documents since moved or removed.
+      A scoped run on an archived change therefore fails on citations the
+      unscoped run deliberately lets move on. Closeout runs the check before
+      archiving, so closeout is unaffected; a fix made after the closeout
+      review, if it runs the check, would meet it. Left for the owner.
+- [x] 10.2 Amend the guidance to match: `openspec/README.md`'s closeout part 10
       ends with `openspec archive <change> -y` (`--skip-specs` where the specs
       were synchronized by hand), parts 5 and 6 lose "not at archival", and the
       contributor workflow's step 7 says the closeout review reads the archive;
       `openspec/changes/README.md`'s legend drops `ready for archival` and
       `Depends on` names `archived`; `change-triage`'s gate table, `change-review`'s
       closeout kind, and `change-design`'s dependency rule likewise.
-- [ ] 10.3 Write the `change-closeout` skill over the ten parts of
+      Done. `openspec/README.md`: the closeout task ends by archiving; part 10
+      is "Promotion and archival", naming `--skip-specs` and the lookup; parts
+      5 and 6 no longer contrast completion with archival, and part 6 moves the
+      row's link to the archive. The index legend has `deferred` and `archived`
+      outside the grid, and the landing rule fires when a dependency is closed
+      out. `change-review` and `change-triage` find the change through the
+      lookup; the closeout review reads the merged specifications and asks
+      whether the merge kept each delta's meaning and whether the change may
+      ship; the triage gate table's `closeout` row is `archived`, written by
+      `change-ship`. Text, proven when 10.4 follows it.
+- [x] 10.3 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
       and reporting the parts that need judgement, including
       `make check-agent-skills`; it moves the index row to `in closeout` when
       closeout starts, updates the row's link to the archived directory, archives
       the change last, and commits, so that the closeout review reads the archive.
+      Done at `.agents/skills/change-closeout/`, linked for both harnesses
+      (`make check-agent-skills` passes). It checks the pre-closeout gate in its
+      triage file, runs the citation check before archiving, puts any decision
+      the change left to closeout to the owner, and after the archive reads each
+      merged `spec.md` diff, then repoints the index row, all in one commit.
+      Beyond the plan: a change with no deltas archives with `--skip-specs`;
+      the row stays `in closeout` until shipping writes `archived`; when
+      closeout moves code, the report says the pipeline run no longer describes
+      `HEAD` and a validation is owed before shipping. No `make closeout`
+      target: none was planned. Text, proven by 10.4.
+      End-to-end coverage for 10.1–10.3: none. This is workflow tooling and
+      skill text, proven by its own suites and by the pilot.
+      Section checks: the four focused script suites, 95 passed;
+      `make check-packaging` passed; `make check-agent-skills`,
+      `make check-comment-hygiene`, and `openspec validate --strict` (1.14.0)
+      pass; the scoped citation check reports only the four closeout documents
+      the plan creates (the `change-workflow` spec and companion,
+      `docs/agents/change-workflow.md`). `make test`: every suite passed up to
+      `test-release-tooling`, where three compose-rendering tests
+      (`test_bare_metal_compose.py`, `test_multi_storefront_compose.py`) failed
+      because Docker was unreachable in the session's WSL distro; the section
+      touches no compose file. The aggregate stopped there, so the Helm render
+      checks did not run.
+      Fresh-context check: fixed a weakened test match, the overstated
+      citation count, `change-validate`'s record path, `make design` and
+      `make implement` against the spec's "every step", part 6 moving the
+      row's link before the archive exists (now in part 10), and the
+      checklist's "active change". Declined: a guard refusing a closeout
+      review of an active change (not asked for), and a ledger line for owner
+      overrides during closeout (the ledger's shape has no closeout kind;
+      design's to decide). Left for the owner, recorded below.
+      Handoff: (1) Closeout now releases dependents (part 6) before the
+      closeout gate, while `Depends on` gates until `archived`, written at
+      shipping; a failed closeout review leaves dependents released. Either
+      the release moves to `change-ship` or the gate becomes closeout.
+      (2) The permanent `planning-governance` spec's "Roadmap currency at
+      change closeout" still contrasts completion with archival and has a
+      "complete but not yet archived" scenario; the delta needs a MODIFIED
+      requirement, a spec change no task names. (3) The scoped citation check
+      on an archived change, above. (4) `change-triage`'s closeout row names
+      `change-ship`, written by 10.6.
 - [ ] 10.4 Pilot the closeout half: run `change-closeout` on
       `capacity-shape-envelope`, after amending its section 7 to the new closeout
       (7.10's `spec.md` entries are the archive's synchronization, and the archive

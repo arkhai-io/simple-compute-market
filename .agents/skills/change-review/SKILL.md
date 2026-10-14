@@ -28,9 +28,12 @@ Read all of this before forming a view:
   `openspec/README.md`.
 - `docs/development/ROADMAP.md`, the goal the change serves, and the change's row,
   campaign, and dependencies in `openspec/changes/README.md`.
-- Every file in `openspec/changes/<change>/`, including `specs/` and
-  `interventions.jsonl`.
-- Every earlier review and triage in `openspec/changes/<change>/reviews/`: the
+- Every file in the change's directory, including `specs/` and
+  `interventions.jsonl`. The directory is what `python3 scripts/find_change.py
+  <change>` prints: `openspec/changes/<change>/`, or for a closeout review, which
+  follows the archive, the change's dated directory under
+  `openspec/changes/archive/`.
+- Every earlier review and triage in the change's `reviews/`: the
   numbered `NN-*.md` files only. They are the history of this change's review; you
   did not write them and must not rely on remembering them. Never read
   `reviews/transcripts/`: those are raw sessions, not records, and reading them
@@ -148,11 +151,16 @@ checks your understanding here before reading anything that rests on it. Then:
 
 ### Closeout review
 
+Closeout has already archived the change: its spec deltas are merged into
+`openspec/specs/`, and the change is read under the archive. Review the
+specifications as they now stand, not the deltas.
+
 1. **`documentation`** — Does the change comply with the documentation guidance?
    Check each part of `openspec/README.md#plan-closeout-requirements` against the
    files and the closeout task's recorded evidence, and the design-promotion record
-   against the permanent documents it names.
-2. **`readiness`** — Is the change ready for archival?
+   against the permanent documents it names. Did the archive's merge leave each
+   permanent `spec.md` saying what the change's deltas meant?
+2. **`readiness`** — May the change ship?
 
 ## 3. Answer every question
 

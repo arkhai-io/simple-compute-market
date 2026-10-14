@@ -145,7 +145,9 @@ that a green pipeline is not evidence for this change.
 
 ## 7. Write the validation record
 
-Write `openspec/changes/<change>/reviews/NN-validation.md`, numbered after every
+Write `reviews/NN-validation.md` in the change's directory — what
+`python3 scripts/find_change.py <change>` prints, under the archive once closeout
+has archived the change — numbered after every
 file in `reviews/` and `reviews/transcripts/` at the moment you write it — a review
 started beside this validation may have taken a number since you began. Never
 overwrite a record: if the name exists, take the next number.

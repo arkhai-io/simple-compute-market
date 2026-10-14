@@ -711,8 +711,8 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # change runs this during its own closeout, while its citations are still
 # expected to hold.
 # ---------------------------------------------------------------------------
-# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
-# is what a closeout gates on: a change owes the citations it wrote, and
+# Pass CHANGE=<name> to scope to one change's own documents, active or archived,
+# which is what a closeout gates on: a change owes the citations it wrote, and
 # gating it on the whole repository's documentation debt would let one stale
 # runbook block everyone else's archival.
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
@@ -820,18 +820,15 @@ review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHAN
 	@python3 scripts/run_change_review.py --change "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change>)
-	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
-		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-design $(CHANGE)"
 
 implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>])
-	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
-		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))"
 
 triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change>)
-	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
-		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-triage $(CHANGE)"
 
 round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
@@ -864,8 +861,7 @@ push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current br
 	@python3 scripts/check_push_ready.py push
 
 validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1])
-	@if [ -z "$(CHANGE)" ] || [ ! -d "openspec/changes/$(CHANGE)" ] || [ "$(CHANGE)" = archive ]; then \
-		echo "ERROR: no active change '$(CHANGE)' under openspec/changes" >&2; exit 1; fi
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)"
 
 run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.

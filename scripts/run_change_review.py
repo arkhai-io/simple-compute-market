@@ -45,6 +45,10 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from find_change import ChangeNotFound, change_directory  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 CHANGES = Path("openspec/changes")
 KINDS = ("design", "implementation", "pre-closeout", "closeout")
@@ -322,10 +326,10 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                changed_since: ChangedSince = _changed_since) -> Path:
     if kind not in KINDS:
         raise ReviewError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
-    change_dir = root / CHANGES / change
-    if change in ("", "archive") or "/" in change or not change_dir.is_dir():
-        raise ReviewError(f"no active change {change!r} under {CHANGES}")
-    reviews = change_dir / "reviews"
+    try:
+        reviews = change_directory(root, change) / "reviews"
+    except ChangeNotFound as exc:
+        raise ReviewError(str(exc)) from exc
     reviewed = head(root)
     if kind == "pre-closeout" and not unvalidated:
         if problem := validation_problem(reviews, reviewed, root, changed_since):

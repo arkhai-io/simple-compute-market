@@ -159,6 +159,16 @@ def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: st
         reviewer.run_review(change, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
 
 
+def test_a_closeout_review_of_an_archived_change_is_recorded_in_the_archive(tmp_path: Path) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
+    archived.mkdir(parents=True)
+
+    path = reviewer.run_review(CHANGE, "closeout", root=tmp_path,
+                               runner=_writing(_review("closeout")), head=lambda _: HEAD)
+
+    assert path == archived / "reviews" / "01-closeout.md"
+
+
 def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
     root = _repository(tmp_path)
     reviewer.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)

@@ -14,11 +14,12 @@ pass on files the prune then deletes.
 
 Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
-archived, and their citations are allowed to have moved on. A change's own
-closeout runs this before it is archived, which is when its citations are
-still expected to hold. A change's `reviews/` are excluded too: review
-records are untracked working notes, never part of the branch, so a citation
-in one is not a citation the branch makes.
+archived, and their citations are allowed to have moved on. Scoped to one
+change by name, the check finds it active or archived, since closeout archives
+a change before its review; a citation of the change's own unarchived path no
+longer resolves once it is archived. A change's `reviews/` are excluded too:
+review records are untracked working notes, never part of the branch, so a
+citation in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from find_change import ChangeNotFound, change_directory  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
@@ -57,11 +59,11 @@ def _change_documents(directory: Path) -> list[Path]:
 def documents(root: Path, change: str | None = None) -> list[Path]:
     """Documents to check.
 
-    With ``change``, only that change's own documents. A change's closeout
-    owes the citations it wrote, and gating it on the whole repository's
-    documentation debt would make one team's stale runbook block everyone
-    else's archival -- which turns a useful check into one people route
-    around.
+    With ``change``, only that change's own documents, active or archived. A
+    change's closeout owes the citations it wrote, and gating it on the whole
+    repository's documentation debt would make one team's stale runbook block
+    everyone else's archival -- which turns a useful check into one people
+    route around.
 
     Without ``change``, every permanent document plus every unarchived
     change, which is the repository-wide view.
@@ -69,12 +71,10 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
     changes = root / "openspec" / "changes"
     if change is not None:
-        directory = changes / change
-        if not directory.is_dir():
-            raise SystemExit(
-                "no such unarchived change: %s" % directory.as_posix()
-            )
-        return _change_documents(directory)
+        try:
+            return _change_documents(change_directory(root, change))
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):

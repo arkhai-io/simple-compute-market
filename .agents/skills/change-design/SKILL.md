@@ -34,8 +34,8 @@ places that matter, so read all of this first, in full:
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
   `design.md`.
 
-If a dependency gates `design` and has not reached `ready for archival` or
-`archived`, stop and tell the owner: designing now risks designing work the
+If a dependency gates `design` and has not reached `archived`, stop and tell
+the owner: designing now risks designing work the
 dependency may make unnecessary.
 
 When the change has been through design before, find what has moved since:

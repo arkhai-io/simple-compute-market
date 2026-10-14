@@ -310,10 +310,26 @@ def test_a_detached_head_or_an_empty_round_is_refused(repo: Path) -> None:
 def test_an_unknown_change_is_refused(repo: Path, change: str) -> None:
     (repo / "openspec/changes/archive").mkdir()
     head = _git(repo, "rev-parse", "HEAD")
-    with pytest.raises(rounds.RoundError, match="no active change"):
+    with pytest.raises(rounds.RoundError, match="not a change name|no change"):
         rounds.start(repo, change, base="HEAD", e2e=False)
     assert _git(repo, "rev-parse", "HEAD") == head
     assert rounds.open_view(repo) is None
+
+
+def test_an_archived_change_takes_its_base_from_the_archive(repo: Path) -> None:
+    base, _ = _round(repo)
+    archived = repo / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
+    archived.parent.mkdir()
+    (repo / "openspec/changes" / CHANGE).rename(archived)
+    (archived / "reviews").mkdir()
+    (archived / "reviews/01-validation.md").write_text(
+        f"# Validation\n\n- **Commit:** {base}\n- **Result:** passed\n", "utf-8")
+    (archived / "reviews/01-validation.triage.md").write_text("# Triage\n", "utf-8")
+    head = _write(repo, {})  # commits the archive's move
+
+    view = rounds.start(repo, CHANGE, e2e=False)
+
+    assert (view.base, view.head) == (base, head)
 
 
 def test_start_pushes_and_dispatches_first_and_records_the_baseline(repo: Path) -> None:
