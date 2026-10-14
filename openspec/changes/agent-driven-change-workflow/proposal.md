@@ -54,6 +54,11 @@ directly in the repository is told to write tombstones instead of deleting files
   `Depends on` column naming which phase each dependency gates, and a `Notes`
   column; when a dependency lands, its dependents' designs are reverified before
   they proceed.
+- Make closeout and archival one phase: closeout archives the change, which
+  merges its spec deltas, and its one review reads the archived change and the
+  specifications as they will ship; the gate passing ships it. Every target and
+  skill that takes a change by name finds an archived one, and every active
+  change's closeout task is amended to match.
 - Remove the browser delivery rules from `AGENTS.md` and `openspec/README.md`.
   They remain, with the rule that no tombstone survives into the tree, in the
   browser session prompts under `docs/prompts/` for as long as that process is
@@ -127,8 +132,8 @@ directly in the repository is told to write tombstones instead of deleting files
   `openspec/specs/change-workflow/architecture.md`.
 - The index status vocabulary, phase-gating dependencies, and dependency-landing
   reverification — `openspec/specs/planning-governance/spec.md`.
-- The dependency-landing rule as a step of campaign index currency —
-  `openspec/README.md#plan-closeout-requirements`.
+- The dependency-landing rule as a step of campaign index currency, and archival
+  as the last step of promotion — `openspec/README.md#plan-closeout-requirements`.
 - How to invoke each leaf skill and `make review`, and where review files and the
   ledger live — `docs/agents/change-workflow.md`, linked from `AGENTS.md`.
 

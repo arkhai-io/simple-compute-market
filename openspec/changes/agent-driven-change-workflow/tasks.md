@@ -793,22 +793,49 @@ proven only when a session follows them:
 
 ## 10. Closeout and archival
 
-- [ ] 10.1 Write the `change-closeout` skill over the ten parts of
+Closeout and archival are one phase (`design.md`, "Closeout archives the change,
+and its review reads the archive"). One session implements 10.1–10.4 and stops;
+10.5 is a session of its own; 10.6 waits for the pilot's closeout review and for
+12.10.
+
+- [ ] 10.1 Find a change by name in the archive: one lookup in `scripts/` that
+      resolves `<change>` to `openspec/changes/<change>/` or, failing that, the one
+      `openspec/changes/archive/<date>-<change>/`, refusing an ambiguous match.
+      Use it wherever a change is taken by name — `make review`, `make triage`,
+      `make validate` and its parts, `make round-view`, and
+      `make check-doc-citations CHANGE=` — and test it against a temporary tree
+      with an active, an archived, a missing, and a twice-archived name.
+- [ ] 10.2 Amend the guidance to match: `openspec/README.md`'s closeout part 10
+      ends with `openspec archive <change> -y` (`--skip-specs` where the specs
+      were synchronized by hand), parts 5 and 6 lose "not at archival", and the
+      contributor workflow's step 7 says the closeout review reads the archive;
+      `openspec/changes/README.md`'s legend drops `ready for archival` and
+      `Depends on` names `archived`; `change-triage`'s gate table, `change-review`'s
+      closeout kind, and `change-design`'s dependency rule likewise.
+- [ ] 10.3 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
       and reporting the parts that need judgement, including
-      `make check-agent-skills`; it moves the index row to
-      `in closeout` when closeout starts.
-- [ ] 10.2 Write the `change-ship` skill: archival with the intervention ledger kept
-      and `reviews/` deleted, and drafting the commit message and pull request
-      description from the proposal, the promotion record, and the validation
-      evidence; it moves the index row to `archived`.
-- [ ] 10.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, one
-      session each, then
-      pre-closeout review and triage, closeout, closeout review and triage, and
-      archival.
+      `make check-agent-skills`; it moves the index row to `in closeout` when
+      closeout starts, updates the row's link to the archived directory, archives
+      the change last, and commits, so that the closeout review reads the archive.
+- [ ] 10.4 Pilot the closeout half: run `change-closeout` on
+      `capacity-shape-envelope`, after amending its section 7 to the new closeout
+      (7.10's `spec.md` entries are the archive's synchronization, and the archive
+      is its last step), then its closeout review and triage.
       At that closeout, decide where two questions from validating this pilot
       belong: a kube namespace per validation, and the chart's out-of-band
       Secrets made optional with the ordinary values overlays as fallback.
+- [ ] 10.5 Amend every other active change's closeout task the same way,
+      preserving completed tasks: unchecked promotion tasks say the archive
+      synchronizes the specs and is the last step; a change that already
+      synchronized its specs by hand archives with `--skip-specs`, recorded as a
+      note on its completed task. List the changes amended and any left as they
+      were, with the reason.
+- [ ] 10.6 Write the `change-ship` skill, run when the closeout gate is passed:
+      the export 12.10 settles, `reviews/` deleted with the ledger kept, and the
+      commit message and pull request description drafted from the proposal, the
+      promotion record, and the validation evidence; it sets the index row to
+      `archived`. Pilot it on `capacity-shape-envelope`.
 
 ## 11. Shared guidance
 

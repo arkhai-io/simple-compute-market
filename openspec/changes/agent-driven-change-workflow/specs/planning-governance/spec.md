@@ -5,8 +5,8 @@
 Every change row in the active-change index at `openspec/changes/README.md` MUST
 state its status in a column holding nothing else, as exactly one of: `ready for
 <phase>`, `in <phase>`, or `blocked in <phase>`, where `<phase>` is one of
-`design`, `planning`, `implementation`, or `closeout`; or `ready for archival`,
-`deferred`, or `archived`. `blocked in <phase>` MUST be used only for a reason that
+`design`, `planning`, `implementation`, or `closeout`; or `deferred` or
+`archived`. `blocked in <phase>` MUST be used only for a reason that
 is not another change, and `blocked in design` means the design cannot proceed
 without a decision from the repository owner. That reason, and a deferred change's
 activation condition, MUST be stated in a separate explanatory column.
@@ -28,7 +28,7 @@ activation condition, MUST be stated in a separate explanatory column.
 ### Requirement: Phase-gating change dependencies
 
 Each change row MUST list, in a `Depends on` column, every other change that must
-reach `ready for archival` or `archived` before it may proceed, each with the phase
+reach `archived` before it may proceed, each with the phase
 it gates. An entry naming no phase gates implementation. A dependency on another
 change MUST NOT be expressed through the status. A dependency gating only part of a
 change MUST be stated in the explanatory column rather than in `Depends on`.
@@ -42,7 +42,7 @@ change MUST be stated in the explanatory column rather than in `Depends on`.
 
 ### Requirement: Design reverification when a dependency lands
 
-When a change reaches `ready for archival`, its closeout MUST remove it from every
+When a change is closed out, its closeout MUST remove it from every
 dependent's `Depends on`, and MUST set each dependent whose status is `ready for` or
 `in` planning or implementation, and which has not begun implementing, to `ready
 for design`, so that its design is reverified against the codebase the dependency

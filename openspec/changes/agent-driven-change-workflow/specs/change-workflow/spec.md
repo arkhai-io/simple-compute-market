@@ -7,6 +7,11 @@ order. The design phase MUST end with a design review, the implementation phase
 with a pre-closeout review, and the closeout phase with a closeout review; a phase
 ending in a review MUST NOT be treated as finished until that review has been
 triaged and the repository owner has recorded, in triage, that its gate is passed.
+Closeout MUST archive the change, merging its specification deltas into the
+permanent specifications, before its closeout review, and that review MUST read the
+archived change and the permanent documents as archived; the change ships, and is
+`archived`, only once that review's gate is passed. Every step that takes a change
+by name MUST find an archived change by the same name.
 Planning MUST NOT begin before the design review's gate is passed. A design
 decision made after that gate, such as one planning exposes, MUST return the change
 to design; the owner MAY waive another design review for it, and a waiver MUST be
@@ -27,6 +32,13 @@ its own or another agent's agreement with a finding as a disposition.
   recorded in the design, and planning resumes only after another design review's
   gate passes or the owner's waiver of that review is recorded
 
+#### Scenario: The closeout review reads the synchronized specifications
+
+- **WHEN** a change's closeout review runs
+- **THEN** the change is already archived, its deltas merged into
+  `openspec/specs/`, and the review and its triage find the change and its records
+  by name under the archive
+
 #### Scenario: A design review accepts a blocking finding
 
 - **WHEN** the owner accepts a `blocking` finding in a design review
@@ -39,8 +51,14 @@ Each change of a change's phase or state MUST be written to its row in the
 active-change index by the skill that makes it, in the same step: design
 discussion starting, triage passing a phase-closing gate, planning starting and
 the owner accepting the plan, the first implementation section starting, closeout
-starting, and archival. An implementation review after a section MUST NOT change
+starting, and shipping. An implementation review after a section MUST NOT change
 the status.
+
+#### Scenario: A closeout gate is passed
+
+- **WHEN** the owner passes the gate of a change's closeout review
+- **THEN** the change ships in the same session and its index row is set to
+  `archived`
 
 #### Scenario: A pre-closeout gate is passed
 
@@ -61,7 +79,7 @@ wrote it, so the reviewer keeps the context behind its findings, but MUST still 
 the triage and dispositions from the records. The `reviews/` directory MUST NOT be
 tracked by version control and MUST NOT be cited by permanent documentation;
 anything durable in it MUST reach permanent documentation through the ordinary
-promotion path before archival.
+promotion path before the directory is deleted.
 
 #### Scenario: A pre-closeout review asks whether feedback was addressed
 
@@ -153,9 +171,9 @@ severity. A recommendation the owner accepts MUST NOT be logged.
 - **THEN** one ledger entry records the decision, the agent's recommendation, and
   what the owner chose and why
 
-#### Scenario: A reviewed change is archived
+#### Scenario: A reviewed change ships
 
-- **WHEN** a change whose findings were dispositioned is archived
+- **WHEN** a change whose findings were dispositioned ships after its closeout gate
 - **THEN** its `reviews/` directory is gone and its intervention ledger is in the
   archived change directory
 

@@ -28,8 +28,9 @@ reviewer session:
 - **Pre-closeout review** — did the implementation materially address all earlier
   feedback; what scope crept in, reviewed under the implementation questions; is
   the change ready for promotion and closeout.
-- **Closeout review** — does the change comply with the documentation guidance; is
-  it ready for archival.
+- **Closeout review** — read against the archived change and the permanent
+  documents it promoted, the specifications the archive synchronized included: does
+  the change comply with the documentation guidance; may it ship.
 
 ## Goals / Non-Goals
 
@@ -195,7 +196,8 @@ openspec/changes/<change>/interventions.jsonl   (tracked)
 
 Files are numbered in the order they were produced, so the directory reads as the
 change's review history. Closeout promotes whatever is durable through the ordinary
-promotion path; archival deletes the directory.
+promotion path, and the directory moves with the change into the archive; shipping
+deletes it once the closeout review's gate is passed.
 
 A review is one Markdown file, and it is the only record of its findings. The owner
 reads review files directly, so they are written to be read; a structured copy
@@ -659,14 +661,12 @@ phases, in order, are `design`, `planning`, `implementation`, and `closeout`:
 | `in <phase>` | The phase has started and is not finished |
 | `blocked in <phase>` | The phase cannot proceed for a reason that is not another change: an external input, real hardware, a pending owner decision. `Notes` names it |
 
-Three statuses fall outside the grid: `ready for archival` (closeout finished and
-its review gate passed),
-`deferred` (no work until a recorded activation condition holds, named in
-`Notes`), and `archived`.
+Two statuses fall outside the grid: `deferred` (no work until a recorded
+activation condition holds, named in `Notes`), and `archived` (closed out, its
+closeout review's gate passed, and shipped).
 
 A dependency on another change is not written into the status. Each row gets a
-`Depends on` column listing the changes that must reach `ready for archival` or
-`archived` first, each with the phase it gates. Most dependencies gate
+`Depends on` column listing the changes that must reach `archived` first, each with the phase it gates. Most dependencies gate
 implementation, and an entry naming no phase gates implementation. Some gate
 earlier: `retain-authenticated-request-outcomes` waits on a decision in
 `redesign-authenticated-replay-state` that settles whether it is superseded,
@@ -715,8 +715,33 @@ same step:
 | `ready for implementation` | `in implementation` | The first section starts | `change-implement` |
 | `in implementation` | `ready for closeout` | The pre-closeout review is triaged and the owner passes the gate | `change-triage` |
 | `ready for closeout` | `in closeout` | Closeout starts | `change-closeout` |
-| `in closeout` | `ready for archival` | The closeout review is triaged and the owner passes the gate | `change-triage` |
-| `ready for archival` | `archived` | The change is archived | `change-ship` |
+| `in closeout` | `archived` | The closeout review is triaged, the owner passes the gate, and the change ships | `change-ship` |
+
+### Closeout archives the change, and its review reads the archive
+
+Closeout and archival are one phase. Closeout writes the documents OpenSpec does
+not synchronize — architecture companions, `ARCHITECTURE.md`, the other
+repository documents, the roadmap, and the index — then runs `openspec archive`,
+which merges the change's spec deltas into `openspec/specs/` and moves the change
+under `openspec/changes/archive/`, and commits. The closeout review and its triage
+then read the archived change. The gate passing ships the change in the same
+session: the export the open question below settles, `reviews/` deleted, and the
+commit message and pull request description drafted. Shipping needs no review of
+its own, so it is not a phase.
+
+They were separate phases, each with a review, and both reviews were of
+documentation alone, the implementation having passed its pre-closeout gate. In
+use, agents archived during closeout unasked, three times: OpenSpec merges deltas
+only when it archives, so promoting `spec.md` by hand at closeout meant merging by
+hand what archival merges anyway. Archiving first also gives the review the
+specifications as they will ship, so a merge that went wrong is read, not
+inferred from the delta. The cost is that every target and skill that takes a
+change by name finds an archived one too, under its dated directory. Reviewing
+before archiving needed no such lookup, and was rejected because it reviews the
+delta rather than the specifications.
+
+A change that synchronized its specs by hand before this rule archives with
+`--skip-specs`.
 
 Implementation reviews after each section are not phase gates: the change stays
 `in implementation` through them. `blocked in <phase>` is entered and left by
@@ -792,8 +817,9 @@ outside this change. No skill names `docs/prompts/`.
   local paths, environment values, and credentials before anything is exported.
   Review logs stay untracked: the exported page is where they persist. Two
   consequences for this change remain to be settled at closeout:
-  - `change-ship` deletes `reviews/` at archival, so the export must run before
-    that deletion, and `change-ship` has to know whether it has.
+  - `change-ship` deletes `reviews/` once the closeout gate is passed, so the
+    export must run before that deletion, and `change-ship` has to know whether
+    it has.
   - Whether this change's own permanent documentation should say that sessions
     and review logs are exported, without naming where they go.
 
@@ -806,7 +832,7 @@ workflow uses it and proven on a pilot before the next is written.
 `capacity-shape-envelope` (Goal 2) runs the full sequence: design discussion of
 its open questions, design review, triage, planning against its existing plan of 24
 tasks, an implementation slice, validation, implementation review, triage, then
-pre-closeout review, closeout, closeout review, and archival.
+pre-closeout review, closeout and archival, closeout review, and shipping.
 `add-full-stack-ci-job` has only a proposal, so it proves design discussion, design
 review, and planning from nothing, which the first pilot cannot.
 
