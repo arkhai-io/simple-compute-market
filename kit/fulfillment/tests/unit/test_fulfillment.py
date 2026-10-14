@@ -19,6 +19,8 @@ from market_fulfillment import (
     SettlementRecordState,
 )
 from market_core import VersionedEnvelope
+from market_resource_pools import ResourcePoolService
+from market_resource_pools_contracts import PoolCreate
 from market_fulfillment.fulfillment_persistence import FulfillmentAcceptanceDecision
 
 
@@ -783,8 +785,6 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         SettlementRequirement,
         SettlementResource,
     )
-    from market_resource_pools import ResourcePoolService
-    from market_resource_pools_contracts import PoolCreate
     from market_resource_pools.db import Base as PoolsBase
 
     class _Handler:

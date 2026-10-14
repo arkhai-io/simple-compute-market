@@ -14,7 +14,6 @@ dependencies = [
     "pydantic>=2",
     "arkhai-kit-alkahest",
     "arkhai-kit-identity==0.4.0",
-    "arkhai-kit-settlement-runtime>=0.4.0",
 ]
 
 [project.optional-dependencies]

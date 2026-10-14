@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass
-from email import policy
-from email.parser import BytesParser
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -94,31 +91,6 @@ def _active_administrators(db_path: str, *, now: int) -> frozenset[Identity]:
             ).active_principals(now)
         )
     return frozenset(principals)
-
-
-def _resource_import_descriptor(request: Request, raw: bytes) -> dict[str, Any]:
-    content_type = request.headers.get("content-type", "")
-    if not content_type.lower().startswith("multipart/form-data"):
-        raise AuthError("resource import requires multipart/form-data", status_code=400)
-    message = BytesParser(policy=policy.default).parsebytes(
-        (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n").encode("ascii")
-        + raw
-    )
-    files = [
-        part
-        for part in message.iter_parts()
-        if part.get_param("name", header="content-disposition") == "file"
-    ]
-    if len(files) != 1:
-        raise AuthError("resource import requires exactly one file", status_code=400)
-    part = files[0]
-    payload = part.get_payload(decode=True) or b""
-    return {
-        "filename": part.get_filename() or "",
-        "media_type": part.get_content_type(),
-        "sha256": hashlib.sha256(payload).hexdigest(),
-        "size": len(payload),
-    }
 
 
 def _system_events_resource(request: Request) -> str:
@@ -287,9 +259,6 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
             "admin_refresh_site_projections", "capacity/projections", body
         )
 
-    if method == "POST" and path == "/api/v1/admin/portfolio/resources/import":
-        return AdminRouteContract("admin_import_resources", "portfolio/resources", body)
-
     prefix = "/api/v1/admin/introductions/"
     if method == "DELETE" and path.startswith(prefix) and path.endswith("/payloads"):
         return AdminRouteContract(
@@ -303,14 +272,6 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
         return AdminRouteContract(
             "admin_interrupt_deal", path[len(prefix) : -len("/interrupt")], body
         )
-
-    prefix = "/api/v1/admin/portfolio/resources/"
-    if path.startswith(prefix) and "/" not in path[len(prefix) :]:
-        resource = path[len(prefix) :]
-        if method == "GET":
-            return AdminRouteContract("admin_get_resource", resource, EMPTY_BODY)
-        if method == "PATCH":
-            return AdminRouteContract("admin_patch_resource", resource, body)
 
     prefix = "/api/v1/listings/"
     if method == "GET" and path.startswith(prefix):
@@ -500,18 +461,7 @@ async def administrator_identity_middleware(request: Request, call_next):
         return await call_next(request)
 
     raw = await request.body()
-    if (
-        request.method == "POST"
-        and request.url.path.rstrip("/") == "/api/v1/admin/portfolio/resources/import"
-    ):
-        try:
-            body = _resource_import_descriptor(request, raw)
-        except AuthError as exc:
-            return JSONResponse(
-                status_code=exc.status_code, content={"detail": exc.detail}
-            )
-    else:
-        body = _wire_body(raw)
+    body = _wire_body(raw)
     try:
         contract = _contract(request, body)
         if contract is None:

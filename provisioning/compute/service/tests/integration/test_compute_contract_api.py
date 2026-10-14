@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from compute_provisioning.leases import lease_view as _lease_view
 from httpx import ASGITransport
 
 from compute_provisioning_service import container as _container_module
@@ -8,6 +9,7 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
+from compute_provisioning_contracts import LeaseState
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 
 from compute_provisioning_service.main import app
@@ -97,8 +99,6 @@ async def test_a_lease_retains_its_action_target_alongside_the_mode(
 async def test_the_lease_view_serializes_every_reachable_reservation_state():
     """Every ``ReservationState`` member projects onto a ``LeaseState``, and a
     freshly registered lease, raw state ``"leased"``, reads as ``"active"``."""
-    from compute_provisioning.leases import lease_view as _lease_view
-    from compute_provisioning_contracts import LeaseState
     from market_site.db import ReservationState
 
     expected = {

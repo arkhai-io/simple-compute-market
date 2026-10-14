@@ -1,0 +1,334 @@
+# The package layer, scope, and kind rules of ARCHITECTURE.md, in the form
+# scripts/architecture.py reads. The prose is the contract; this file encodes
+# what no one package owns and records every known divergence with the change
+# that owns it. What a package owns about itself -- the distributions it may
+# depend on, and why it installs one it never imports -- is in its own
+# pyproject.toml, under [tool.arkhai.architecture].
+# See ARCHITECTURE.md, "Package and dependency layers".
+
+version = 1
+
+# Lowest first. A package may depend on its own layer or a lower one.
+[layers]
+order = ["core", "kit", "specialization", "composition"]
+
+[conventions]
+# A last path segment, or the word after its last hyphen, is read as a kind
+# only when it is one of these words. Role words make an executable, which is
+# a composition, and are not read under kit/: a kit composes nothing.
+kind_words = ["contracts", "client"]
+role_words = ["storefront", "buyer", "service", "app"]
+# Tooling and test harness projects outside the package architecture.
+skip = ["e2e-tests", "tools", "scripts", "dev-env"]
+
+[[families]]
+name = "compute"
+directory = "domains/compute"
+vocabulary = "arkhai-compute"
+tokens = []
+
+[[domains]]
+name = "vms"
+directory = "domains/vms"
+family = "compute"
+tokens = ["compute.v1"]
+
+[[domains]]
+name = "bare_metal"
+directory = "domains/bare_metal"
+family = "compute"
+tokens = ["bare_metal.v1"]
+
+# API credits has no shared vocabulary beneath it, so no family.
+[[domains]]
+name = "apicredits"
+directory = "domains/apicredits"
+tokens = ["api_credits.v1"]
+
+[[mechanisms]]
+name = "alkahest"
+kit = "arkhai-kit-alkahest"
+tokens = ["alkahest.v1"]
+
+[[mechanisms]]
+name = "arkhai-payments"
+kit = "arkhai-kit-arkhai-payments"
+tokens = ["arkhai.payments.v1"]
+
+[[mechanisms]]
+name = "contact-exchange"
+kit = "arkhai-kit-contact-exchange"
+tokens = ["contact-exchange.v1"]
+
+# Entry-point groups a host discovers at startup. A package registering into
+# one is a plugin and is imported by nobody. The owner discovers the group and
+# may register its own built-in members without becoming a plugin. Any group
+# not listed is an extension point libraries contribute to.
+[[plugin_groups]]
+name = "market.buyer_domains"
+
+[[plugin_groups]]
+name = "market.storefront_contributions"
+
+[[plugin_groups]]
+name = "market.delivery_sinks"
+owner = "arkhai-kit-delivery"
+
+# The kind allowlists: what a package of each light kind may depend on. A
+# dependency is on the allowlist when its layer, kind, or distribution is
+# listed, or, with family_vocabulary, when it is the vocabulary of a family in
+# the package's scope. enforce = false reports a breach as a warning.
+[kind_allowlists.contracts]
+layers = ["core"]
+distributions = [
+    "arkhai-kit-identity",
+    "arkhai-kit-capability-shape",
+    "arkhai-kit-capability-admissibility",
+]
+family_vocabulary = true
+enforce = true
+
+[kind_allowlists.client]
+layers = ["core"]
+kinds = ["contracts"]
+distributions = ["arkhai-kit-identity"]
+enforce = true
+
+[vocabulary]
+# Layers in which an out-of-scope identity literal fails; elsewhere it warns.
+fail_layers = ["core", "kit"]
+
+# Projects whose path does not yet say what they are. Each row states the
+# attributes the path should yield and the change that will make it so. A row
+# fails once the path yields the same, or once a mechanism it grants is known
+# by none of the project's dependencies.
+[[overrides]]
+project = "arkhai-core-buyer"
+layer = "composition"
+kind = "executable"
+scope = []
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The buyer role is a composition under the carrier directory."
+
+[[overrides]]
+project = "arkhai-core-storefront"
+layer = "composition"
+kind = "executable"
+scope = []
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The storefront role is a composition under the carrier directory."
+
+[[overrides]]
+project = "arkhai-core-registry"
+layer = "composition"
+kind = "executable"
+scope = []
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The registry is a deployed service under the carrier directory."
+
+[[overrides]]
+project = "arkhai-core-registry-client"
+layer = "kit"
+kind = "client"
+scope = []
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "A repository-wide client kit under the carrier directory."
+
+[[overrides]]
+project = "arkhai-core-storefront-client"
+layer = "kit"
+kind = "client"
+scope = []
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "A repository-wide client kit under the carrier directory."
+
+[[overrides]]
+project = "arkhai-compute-provisioning"
+layer = "specialization"
+kind = "library"
+scope = ["compute"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The compute family kit, outside the family's directory."
+
+[[overrides]]
+project = "arkhai-compute-provisioning-ansible"
+layer = "specialization"
+kind = "library"
+scope = ["compute"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The family kit's Ansible implementation, outside the family's directory."
+
+[[overrides]]
+project = "arkhai-compute-provisioning-contracts"
+layer = "specialization"
+kind = "contracts"
+scope = ["compute"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The family's provisioning contracts, outside the family's directory."
+
+[[overrides]]
+project = "arkhai-compute-provisioning-client"
+layer = "specialization"
+kind = "client"
+scope = ["compute"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The family's provisioning client, outside the family's directory."
+
+[[overrides]]
+project = "arkhai-compute-provisioning-service"
+layer = "composition"
+kind = "executable"
+scope = ["compute"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The family composition root, outside the family's directory."
+
+[[overrides]]
+project = "arkhai-vms-settlement"
+layer = "specialization"
+kind = "library"
+scope = ["compute", "vms", "alkahest"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The VM Alkahest settlement codec, whose name does not carry its mechanism."
+
+[[overrides]]
+project = "arkhai-apicredits-domain"
+layer = "specialization"
+kind = "library"
+scope = ["apicredits", "alkahest", "arkhai-payments"]
+owner = "align-package-paths-with-layers"
+since = 2026-10-13
+reason = "The API-credits domain holds both mechanisms' settlement codecs, and its name carries neither."
+
+# Divergences the check reports, each owned by the change that removes it. A
+# row excuses one finding of the rule it names and fails once it excuses
+# nothing; its owner may not be archived while the row stands.
+[[exceptions]]
+rule = "layer"
+project = "arkhai-kit-storefront"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-13
+reason = "The kit composes the storefront role's hook shapes, which move to a storefront contracts kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-kit-capacity-publication"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-13
+reason = "The kit uses the storefront role's capacity hook shapes, which move to a storefront contracts kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-vms"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-13
+reason = "The vocabulary's publication adapter uses PublicationSource, which moves to a storefront contracts kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-bare-metal"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-13
+reason = "The vocabulary's publication adapter uses PublicationSource, which moves to a storefront contracts kit."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-vms-storefront"
+target = "arkhai-bare-metal"
+owner = "kit-owned-storefront-shell"
+since = 2026-10-13
+reason = "The compute-family storefront shell lives under the VM domain and installs the bare-metal domain."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-vms-storefront"
+target = "arkhai-bare-metal-storefront"
+owner = "kit-owned-storefront-shell"
+since = 2026-10-13
+reason = "The compute-family storefront shell lives under the VM domain and installs the bare-metal contribution."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-kit-policy"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The escrow-kind half of scalar policies moves to the Alkahest kit."
+
+[[exceptions]]
+rule = "undeclared_import"
+project = "arkhai-kit-policy"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The same import; it leaves rather than being declared."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-kit-storefront"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The Alkahest client factory becomes the Alkahest registration's typed resource model."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-vms-listings"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "Escrow-shaped listing models reach Alkahest through its registration or the VM settlement codec."
+
+[[exceptions]]
+rule = "scope"
+project = "arkhai-vms-negotiation"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "Escrow proposal normalization reaches Alkahest through its registration or the VM settlement codec."
+
+[[exceptions]]
+rule = "undeclared_import"
+project = "arkhai-core-storefront"
+target = "arkhai-kit-alkahest"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The refund and token-transfer helpers move to the Alkahest kit."
+
+[[exceptions]]
+rule = "undeclared_import"
+project = "arkhai-kit-alkahest"
+target = "arkhai-kit-config"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The buyer resolves the best-price timeout and passes it; the kit stops reading configuration."
+
+[[exceptions]]
+rule = "vocabulary"
+project = "arkhai-core"
+target = "alkahest.v1"
+owner = "move-escrow-into-alkahest"
+since = 2026-10-13
+reason = "The legacy escrow wire coercions leave the core schemas with the escrow fields."
+
+[[exceptions]]
+rule = "vocabulary"
+project = "arkhai-kit-config"
+target = "alkahest.v1"
+owner = "deduplicate-dynaconf-bootstrap"
+since = 2026-10-13
+reason = "The settlement configuration migration moves to the settlement runtime."

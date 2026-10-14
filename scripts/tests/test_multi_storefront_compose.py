@@ -17,7 +17,8 @@ def test_storefront_authorities_are_isolated(tmp_path):
         )
     result = subprocess.run(
         ["docker", "compose", "--env-file", str(env_file),
-         "-f", "docker-compose.yml", "-f", "compose.local-identities.yml",
+         "-f", "docker-compose.yml", "-f", "compose.vms-local.yml",
+         "-f", "compose.apicredits-local.yml",
          "config", "--format", "json"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     )
@@ -48,7 +49,7 @@ def test_storefront_authorities_are_isolated(tmp_path):
         assert peer["site_id"] == env["PROVISIONING_STOREFRONT_SITE_ID"]
         assert profile["capacity"]["sites"]["default"] == f"http://{authority}:8081"
         assert profile["provisioning"]["service_url"] == f"http://{authority}:8081"
-        assert profile["capacity"].get("use_site_projection_for_listings", True)
+        assert "use_site_projection_for_listings" not in profile["capacity"]
         assert authority in services[f"{seller}-storefront"]["depends_on"]
         # Database paths are container-local; a shared mount would defeat that.
         assert all(v["target"] != "/app/data" for v in service.get("volumes", []))

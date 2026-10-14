@@ -28,3 +28,9 @@ testpaths = ["tests/unit"]
 dev = [
     "pytest>=8.3.4,<9.0.0",
 ]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["cryptography", "eth-account", "keyring", "pydantic", "rfc8785"]

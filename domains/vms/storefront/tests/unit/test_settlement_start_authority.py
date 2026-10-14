@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,7 @@ from starlette.requests import Request
 
 import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import SettleController
+from market_storefront.domain_runtime import build_vm_storefront_domain
 from market_storefront.middleware import buyer_auth
 from market_storefront.models.settle_models import VmSettleRequest
 
@@ -36,6 +38,9 @@ def _thread() -> dict:
     return {
         "negotiation_id": "neg-1",
         "terminal_state": "success",
+        "agreement_bytes": json.dumps(
+            {"settlement": {"mechanism": "alkahest.v1"}}
+        ).encode(),
         "buyer_principal": _BUYER.model_dump(mode="json"),
         "buyer_escrow_proposal": {
             "chain_name": "anvil",
@@ -127,6 +132,7 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
     )
     composition = SimpleNamespace(
         coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
         mechanism_clients={"alkahest.v1": object()},
         local_principal=_SELLER,
     )

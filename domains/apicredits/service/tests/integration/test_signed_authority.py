@@ -482,35 +482,27 @@ async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int
     )
 
 
-def _issuance_request(obligation_ref: str, quantity: int = 5):
-    """One issuance request, with its grant key derived rather than invented.
+def _issuance_request(negotiation_id: str, quantity: int = 5):
+    """One issuance authorization, with its grant key derived rather than invented.
 
-    `fulfillment_id` is a digest of the obligation reference, and the contract
-    refuses a pair that does not agree -- which is what makes an issuance
-    idempotent per obligation rather than per caller-chosen string.
+    `fulfillment_id` is a digest of the accepted negotiation ID, and the
+    contract refuses a pair that does not agree -- which is what makes an
+    issuance idempotent per accepted negotiation rather than per caller-chosen
+    string. `create` computes the digest over every bound field, so a literal
+    never becomes a second source of truth for what the request says.
     """
     from arkhai_apicredits.settlement.credits_client import (
         CreditIssuanceRequest,
         CreditKeyTarget,
-        credit_issuance_request_digest,
-        derive_credit_fulfillment_id,
     )
 
-    fields: dict[str, Any] = {
-        "fulfillment_id": derive_credit_fulfillment_id(obligation_ref),
-        "obligation_ref": obligation_ref,
-        "mechanism": "alkahest.v1",
-        "owner": STOREFRONT_SIGNER.identity,
-        "service": "weather-api",
-        "resource_id": "weather-quota",
-        "quantity": quantity,
-        "key": CreditKeyTarget(mode="new"),
-    }
-    # The digest binds every field above, so it is computed rather than
-    # supplied: a literal would be a second source of truth for what the
-    # request says, and the contract refuses the two disagreeing.
-    return CreditIssuanceRequest(
-        **fields, request_digest=credit_issuance_request_digest(**fields)
+    return CreditIssuanceRequest.create(
+        negotiation_id=negotiation_id,
+        owner=STOREFRONT_SIGNER.identity,
+        service="weather-api",
+        resource_id="weather-quota",
+        quantity=quantity,
+        key=CreditKeyTarget(mode="new"),
     )
 
 
@@ -527,7 +519,7 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
     """
     await _seed_quota(signed_app)
     seller = _seller_client(signed_app)
-    issued = await seller.submit_credit_issuance(_issuance_request("obl-1"))
+    issued = await seller.submit_credit_issuance(_issuance_request("neg-1"))
 
     assert issued.quantity == 5
     assert issued.balance == 5
@@ -558,7 +550,7 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     """`get_key` and `get_credit_issuance` over the same signed boundary."""
     await _seed_quota(signed_app)
     seller = _seller_client(signed_app)
-    issued = await seller.submit_credit_issuance(_issuance_request("obl-2", 7))
+    issued = await seller.submit_credit_issuance(_issuance_request("neg-2", 7))
 
     key = await seller.get_key(issued.key_id)
     assert key["balance"] == 7
@@ -568,7 +560,7 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     )
 
     grant = await seller.get_credit_issuance(
-        derive_credit_fulfillment_id("obl-2")
+        derive_credit_fulfillment_id("neg-2")
     )
     assert grant is not None
 
@@ -578,7 +570,7 @@ STRANGER = "0x9999000000000000000000000000000000000003"
 
 
 def _credit_request(
-    obligation_ref: str,
+    negotiation_id: str,
     quantity: int,
     *,
     owner: str = BUYER,
@@ -591,8 +583,6 @@ def _credit_request(
     from arkhai_apicredits.settlement.credits_client import (
         CreditIssuanceRequest,
         CreditKeyTarget,
-        credit_issuance_request_digest,
-        derive_credit_fulfillment_id,
     )
 
     key = (
@@ -600,18 +590,13 @@ def _credit_request(
         if existing_key
         else CreditKeyTarget(mode="new")
     )
-    fields: dict[str, Any] = {
-        "fulfillment_id": derive_credit_fulfillment_id(obligation_ref),
-        "obligation_ref": obligation_ref,
-        "mechanism": "alkahest.v1",
-        "owner": Identity(scheme="eip191", identifier=owner),
-        "service": "weather-api",
-        "resource_id": resource_id,
-        "quantity": quantity,
-        "key": key,
-    }
-    return CreditIssuanceRequest(
-        **fields, request_digest=credit_issuance_request_digest(**fields)
+    return CreditIssuanceRequest.create(
+        negotiation_id=negotiation_id,
+        owner=Identity(scheme="eip191", identifier=owner),
+        service="weather-api",
+        resource_id=resource_id,
+        quantity=quantity,
+        key=key,
     )
 
 
@@ -628,14 +613,24 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller, gated = _seller_client(signed_app), _gated_client(signed_app)
 
-    issued = await seller.submit_credit_issuance(_credit_request("0xdeal1", 3))
+    request = _credit_request("neg-deal1", 3)
+    issued = await seller.submit_credit_issuance(request)
     assert issued.secret and issued.balance == 3
+    assert "secret" not in issued.model_dump(mode="json")
+
+    # An exact retry converges on the committed grant; an unused key's secret
+    # is rotated so the retry can deliver it, and a read never returns one.
+    replay = await seller.submit_credit_issuance(request)
+    assert replay.key_id == issued.key_id and replay.already_issued
+    assert replay.balance == 3 and replay.secret and replay.secret != issued.secret
+    found = await seller.get_credit_issuance(request.fulfillment_id)
+    assert found is not None and found.key_id == issued.key_id and found.secret is None
 
     snapshot = await _capacity_client(signed_app, admin=False).snapshot()
     quota = next(r for r in snapshot if r["resource_id"] == "svc-quota")
     assert quota["available_units"] == 997
 
-    verified = await gated.verify(key_id=issued.key_id, secret=issued.secret)
+    verified = await gated.verify(key_id=issued.key_id, secret=replay.secret)
     assert verified.valid is True
 
     for i in range(3):
@@ -644,18 +639,41 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
     refused = await gated.consume(key_id=issued.key_id, amount=1)
     assert (refused.ok, refused.balance, refused.reason) == (False, 0, "insufficient_credits")
 
+    # A consumed key's secret is never rotated by a retry.
+    used_replay = await seller.submit_credit_issuance(request)
+    assert used_replay.secret is None and used_replay.balance == 3
+
     topped = await seller.submit_credit_issuance(
-        _credit_request("0xdeal2", 2, existing_key=issued.key_id)
+        _credit_request("neg-deal2", 2, existing_key=issued.key_id)
     )
     assert topped.balance == 2 and topped.secret is None
     spent = await gated.consume(key_id=issued.key_id, amount=1)
     assert spent.ok is True and spent.balance == 1
 
+    # Every accepted purchase uses the same authorization; nothing in it names
+    # the settlement mechanism that paid for it.
+    another = await seller.submit_credit_issuance(
+        _credit_request("neg-deal-payment", 2, existing_key=issued.key_id)
+    )
+    assert another.balance == 3 and another.secret is None
+
     with pytest.raises(CreditsServiceError) as refusal:
         await seller.submit_credit_issuance(
-            _credit_request("0xdeal3", 1, owner=STRANGER, existing_key=issued.key_id)
+            _credit_request("neg-deal3", 1, owner=STRANGER, existing_key=issued.key_id)
         )
     assert refusal.value.reason == "key_not_owned"
+
+    # Changed reuse of an accepted negotiation conflicts and mutates nothing.
+    with pytest.raises(CreditsServiceError) as conflict:
+        await seller.submit_credit_issuance(
+            _credit_request(request.negotiation_id, 4)
+        )
+    assert conflict.value.reason == "fulfillment_conflict"
+    assert (await seller.get_key(issued.key_id))["balance"] == 3
+    snapshot = await _capacity_client(signed_app, admin=False).snapshot()
+    quota = next(r for r in snapshot if r["resource_id"] == "svc-quota")
+    assert quota["available_units"] == 993
+    assert (await seller.list_key_grants(issued.key_id))["total"] == 3
 
     detail = await seller.get_key(issued.key_id)
     assert detail["owner_scheme"] == "eip191"
@@ -667,7 +685,7 @@ async def test_batch_consumption_and_the_key_administration_surface(signed_app):
     """Batch spending, then every key-administration read and write the seller holds."""
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller, gated = _seller_client(signed_app), _gated_client(signed_app)
-    issued = await seller.submit_credit_issuance(_credit_request("0xdeal4", 5))
+    issued = await seller.submit_credit_issuance(_credit_request("neg-deal4", 5))
 
     results = await gated.consume_batch(
         [
@@ -692,3 +710,26 @@ async def test_batch_consumption_and_the_key_administration_surface(signed_app):
     assert revoked["status"] == "revoked"
     refused = await gated.consume(key_id=issued.key_id, amount=1)
     assert (refused.ok, refused.reason) == (False, "key_revoked")
+
+
+@pytest.mark.asyncio
+async def test_issuance_refuses_mechanism_payloads_and_tampered_digests(client):
+    """Only the neutral authorization is accepted; its digest binds every field."""
+    payload = _credit_request("neg-rejected", 1).model_dump(mode="json")
+    mechanism_shaped = {**payload, "obligation_ref": "esc-old", "mechanism": "alkahest.v1"}
+    del mechanism_shaped["negotiation_id"]
+    tampered = {**payload, "quantity": 2}
+    for body in (mechanism_shaped, tampered):
+        response = await client.post(
+            "/api/v1/issuance",
+            json=body,
+            headers=_headers(
+                signer=STOREFRONT_SIGNER,
+                role="seller",
+                method="POST",
+                operation="credits_issue",
+                resource=str(body["fulfillment_id"]),
+                body=body,
+            ),
+        )
+        assert response.status_code == 422, response.text

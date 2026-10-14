@@ -238,7 +238,7 @@ def register(app: typer.Typer) -> None:
             resolve_chain_settings,
         )
         from .run_log import RunLog
-        from .settle_cli import _accepted_proposal_chain, _first_listing_chain
+        from .settlement_stages import _accepted_proposal_chain, _first_listing_chain
 
         identity = resolve_recovery_buyer_identity(run_id)
         signer = identity.signer

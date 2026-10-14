@@ -61,10 +61,12 @@ than register payments on the obligation worker.
 - Move the seller listing lifecycle into `kit/capacity-publication`, over the common
   binding it already owns: close, pause, reopen, and successor carry-over, with the
   domain supplying its payload codec and its successor-identity rule.
-- Move restart-safe fulfillment convergence into kit: obligation resumption after
-  restart, terminal-state driving, executor-result reconciliation, and teardown
-  independence, with the domain supplying the executor payload, result decoding, and
-  effects.
+- Move restart-safe fulfillment convergence into the compute family kit: obligation
+  resumption after restart, terminal-state driving, executor-result reconciliation,
+  and teardown independence, with the domain supplying the executor payload, result
+  decoding, and effects. It is compute-family code — only the VM and bare-metal
+  storefronts converge physical fulfillment, and it cannot be written without the
+  compute provisioning client — so it is not a repository-wide kit (`design.md`).
 - Proposed (see `design.md`): make the servicing worker's ready step the one way every
   domain starts fulfillment, composed from mechanism and domain contributions; one
   publisher port; a layered evidence envelope; a mechanism-neutral verification contract

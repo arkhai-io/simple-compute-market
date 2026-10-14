@@ -5,8 +5,8 @@ license = "MIT"
 description = "Core market wire models and orchestration-neutral helpers"
 requires-python = ">=3.10,<3.14"
 # Carriers only: the wheel must stay importable by every role package
-# without dragging in role or kit code (see schemas.py module docstring;
-# enforced by tests/unit/test_carrier_purity.py).
+# without dragging in role or kit code (see schemas.py module docstring).
+# make check-architecture holds it through the package allowlist below.
 dependencies = [
     "pydantic>=2",
 ]
@@ -36,3 +36,9 @@ dev = [
     "mypy>=1.15.0,<2.0.0",
     "pytest>=8.3.4,<9.0.0",
 ]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["pydantic"]

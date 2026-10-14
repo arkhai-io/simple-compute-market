@@ -2,6 +2,8 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from compute_provisioning.hosts.db import Base as HostsBase
+from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 from compute_provisioning_service.db.models import Base
 
@@ -56,11 +58,11 @@ def run_migrations(
     # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
     # resolution during create_all needs the referenced table to exist.
     from sqlalchemy import inspect
-    from compute_provisioning.hosts.db import Base as HostsBase
-    from compute_provisioning.jobs.db import Base as JobsBase
     from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
+    # The VM adapter is the service's optional `adapters` extra, so the module
+    # imports without it and only migrating requires it.
     from vm_provisioning_adapter.db import Base as VmBase
 
     PoolsBase.metadata.create_all(bind=engine)

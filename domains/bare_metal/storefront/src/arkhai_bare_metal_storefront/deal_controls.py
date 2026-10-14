@@ -14,7 +14,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService
+from market_identity import Identity
 from market_settlement_runtime import SettlementAdminRouteService
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
@@ -104,8 +106,33 @@ def settlement_admin_routes(
         lifecycle = await runtime.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=str(escrow["negotiation_id"])
         )
+        previous_state = str((lifecycle or {}).get("state") or "")
+        if lifecycle is not None and lifecycle.get("fulfillment_id"):
+            # The site's convergence can advance while servicing is held; a
+            # cached dispatch state cannot establish whether delivery is ready.
+            thread = await runtime.db.load_negotiation_thread_row(
+                negotiation_id=str(escrow["negotiation_id"])
+            )
+            if thread is None:
+                raise LookupError("settled negotiation not found")
+            lifecycle = await runtime.fulfillment_service().status(
+                negotiation_id=str(escrow["negotiation_id"]),
+                buyer_principal=Identity.model_validate(thread["buyer_principal"]),
+            )
         state = str((lifecycle or {}).get("state") or "")
         if state in _READY_STATES:
+            if (
+                previous_state not in _READY_STATES
+                and runtime.settlement_worker is not None
+            ):
+                # Delivery removes the reason servicing deferred this deal.
+                # Wake its adopted obligation without bypassing the worker.
+                aggregate = await runtime.settlement_runtime.get_status(
+                    str(escrow["negotiation_id"])
+                )
+                for obligation in aggregate.obligations:
+                    if obligation.mechanism_ref == escrow_uid:
+                        await runtime.settlement_worker.wake(obligation.obligation_ref)
             return {"status": "ready", "fulfillment_state": state}
         if state in _FAILED_STATES:
             return {"status": "failed", "fulfillment_state": state}
@@ -162,6 +189,16 @@ def capacity_admin_routes(
         )
         if runtime.capacity_client is not None:
             runtime.capacity_client.reservation_sites.pop(reservation_id, None)
+        # The release is observable in the stage-event log, as every storefront
+        # records it, so a caller watching a lease sees it end the same way.
+        stage_event(
+            "fulfillment",
+            "capacity_released",
+            negotiation_id=str(lifecycle["negotiation_id"]),
+            escrow_uid=lifecycle.get("settlement_ref"),
+            capacity_reservation_id=reservation_id,
+            site_id=lifecycle["site_id"],
+        )
         return {"capacity_reservation_id": reservation_id, "state": recorded["state"]}
 
     return CapacityAdminRouteService(reserve=reserve, released=released)

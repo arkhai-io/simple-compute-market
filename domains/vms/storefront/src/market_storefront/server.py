@@ -67,7 +67,7 @@ from market_storefront.utils.config import (
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
-from market_storefront.services.capacity_client import listing_source_projection
+from market_storefront.services.capacity_client import site_pool_projection
 from market_storefront.services.vm_pool_override_contribution import (
     VmPoolOverrideContribution,
 )
@@ -188,15 +188,9 @@ def build_pool_override_service(
     loop; status is judged against the source publication derives from. The
     lifespan and the publication test harness compose it identically.
     """
-    def home_site() -> str | None:
-        # The VM storefront's home site is its first configured capacity site.
-        sites = capacity_runtime.site_ids if capacity_runtime is not None else ()
-        return next(iter(sites), None)
-
     contribution = VmPoolOverrideContribution(
         db_path=sqlite_client.db_path,
         shape_feasible=vm_shape_feasibility(),
-        home_site=home_site,
         admissibility_default=admissibility_default,
     )
     return PoolOverrideService(
@@ -205,7 +199,7 @@ def build_pool_override_service(
         site_client=lambda site_id: capacity_runtime.site_client(site_id),
         contributions={contribution.offering_mode: contribution},
         compile_clauses=compile_publication_clauses,
-        projection_source=listing_source_projection,
+        projection_source=site_pool_projection,
         refresh_site=refresh_site_resource_pools,
         wake_publication=wake_publication_loop,
     )

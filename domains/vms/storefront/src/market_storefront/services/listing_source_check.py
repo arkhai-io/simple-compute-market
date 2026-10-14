@@ -3,10 +3,10 @@
 The check asks two questions about one listing: does its source still declare
 what it publishes, and — for a capacity-backed listing only — is the published
 quantity free at its own site. Both are answered from a fresh derivation of the
-listing's own site and pool or Physical Resource, never from capacity elsewhere,
-using the same derivation publication uses, so whether a published field came
-from site data or a local fallback is resolved exactly as it was when the
-listing was derived. An unbacked listing makes no site call.
+listing's own site and pool, never from capacity elsewhere, using the same
+derivation publication uses, so every published field resolves exactly as it
+did when the listing was derived. An unbacked listing makes no availability
+call.
 
 It answers with the policy kit's ``ListingSourceVerdict``, which the negotiation
 runtime enforces before every seller decision and every acceptance. A site whose
@@ -37,8 +37,8 @@ from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as container
 from market_storefront.services.capacity_client import (
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 
@@ -59,14 +59,14 @@ def stored_listing_resource(listing_record: Mapping[str, Any]) -> dict[str, Any]
 
 
 def _site_only(
-    projection: Mapping[str, list[dict[str, Any]]] | None, site_id: str
+    projection: Mapping[str, list[dict[str, Any]]], site_id: str
 ) -> dict[str, list[dict[str, Any]]] | None:
     """One site's slice of a projection, or ``None`` when that site's is unknown.
 
     A site whose projection has not loaded is unknown, not empty: reading it as
     an empty list would say the site declares nothing, or has nothing free.
     """
-    if projection is None or site_id not in projection:
+    if site_id not in projection:
         return None
     return {site_id: list(projection[site_id])}
 
@@ -141,16 +141,14 @@ async def _check_listing_source(
     key = stored_listing_key(
         recorded.source_envelope_json if recorded is not None else None, stored, site_id
     )
-    source_projection = listing_source_projection()
-    projection = _site_only(source_projection, site_id)
-    if source_projection is not None and projection is None:
-        # Listings derive from site projections, and this site's has not
-        # loaded: nothing can confirm the declaration, and the local tables are
-        # not this listing's source.
+    projection = _site_only(site_pool_projection(), site_id)
+    if projection is None:
+        # This site's projection has not loaded, so nothing can confirm the
+        # declaration the listing was derived from.
         return ListingSourceVerdict(
             "unverifiable", f"site {site_id!r} projection is not loaded"
         )
-    buckets = _site_only(site_capacity_buckets(), site_id) if projection else None
+    buckets = _site_only(site_capacity_buckets(), site_id)
     # Only the admissibility default affects which listings derive; the
     # terms these settings also carry are discarded by the comparison below.
     admissibility = PoolHintResolutionSettings(
@@ -159,7 +157,6 @@ async def _check_listing_source(
     declared = _slices_by_key(
         available_compute_slices(
             repository.db_path,
-            home_site=site_id,
             member_availability=None,
             site_pool_projection=projection,
             site_capacity_buckets=buckets,
@@ -197,7 +194,6 @@ async def _check_listing_source(
         )
     available_rows = available_compute_slices(
         repository.db_path,
-        home_site=site_id,
         member_availability=member_availability,
         site_pool_projection=projection,
         site_capacity_buckets=buckets,

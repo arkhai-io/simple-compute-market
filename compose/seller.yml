@@ -13,8 +13,6 @@
 #
 # Operator-provided files (paths overridable via env):
 #   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
-#   ./resources.csv          — inventory CSV. Starter:
-#                              domains/vms/storefront/src/market_storefront/data/resources.sample.csv
 #
 # Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront
@@ -31,7 +29,6 @@
 # Environment overrides (all optional):
 #   SELLER_CONFIG_PATH       — path to seller TOML (default: ../config.seller.toml,
 #                              i.e. ./config.seller.toml relative to the project root)
-#   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ../resources.csv)
 
 services:
   # One-shot init containers that chown the named volumes to the
@@ -84,7 +81,6 @@ services:
       - ${SELLER_IDENTITY_ENV_FILE:?set marketplace signer credential environment file}
     volumes:
       - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
-      - ${SELLER_RESOURCES_CSV:-../resources.csv}:/app/resources.csv:ro
       - seller-storefront-data:/app/src/market_storefront/data/storefront
       - zerotier-seller:/var/lib/zerotier-one
     restart: unless-stopped

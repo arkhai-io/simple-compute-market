@@ -23,14 +23,24 @@ from market_alkahest.alkahest import (
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import (
-    _signer,
-    capacity_source_for,
+from tests.e2e.roles.helpers.compute_deal import (
+    advance_storefront,
     delete_mock_rules_if_present,
     pause_storefront,
     wait_for_stage_event,
 )
-from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.helpers.escrow import ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.conftest import (
+    _signer,
+    capacity_source_for,
+    one_site,
+)
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_NON_ERC20_HOST,
+    E2E_NON_ERC20_POOL_ID,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +56,6 @@ pytestmark = [
 _CHAIN_NAME = "anvil"
 _ALKAHEST_ADDRESSES_PATH = str(anvil_address_book_path())
 _MOCK_ERC1155_A = "0x0165878a594ca255338adfa4d48449f69242eb8f"
-_MOCK_ERC20_A = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _ANVIL_GOD_PRIVATE_KEY = (
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 )
@@ -166,21 +175,6 @@ def _settlement_cases() -> list[SettlementCase]:
     ]
 
 
-def _resource_csv(cases: list[SettlementCase]) -> str:
-    lines = [
-        "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-        "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-        "attribute.vm_host"
-    ]
-    for index, case in enumerate(cases, start=1):
-        lines.append(
-            f'{case.resource_id},compute.gpu,rtx5080,count,1,available,'
-            f'{_SELLER_RATE},{_MOCK_ERC20_A},,RTX 5080,90.0,'
-            f'"California, US",kvm{index}'
-        )
-    return "\n".join(lines) + "\n"
-
-
 def _offer(case: SettlementCase) -> dict[str, Any]:
     return {
         # The storefront refuses a listing whose resource does not declare the
@@ -213,12 +207,15 @@ def _recipient_demands(seller_wallet: str) -> list[dict[str, Any]]:
     }]
 
 
-def _proposal(case: SettlementCase, amount: int) -> dict[str, Any]:
+def _proposal(case: SettlementCase, amount: int, seller_wallet: str) -> dict[str, Any]:
+    # A proposal against a listed escrow names the demand it selects from the
+    # listing's; the seller refuses one that names none.
     return {
         "chain_name": _CHAIN_NAME,
         "escrow_address": case.escrow_address,
         "fields": {"amount": amount},
         "literal_fields": dict(case.literal_fields),
+        "demand": _recipient_demands(seller_wallet)[0],
         "expiration_unix": 2_000_000_000,
     }
 
@@ -230,8 +227,9 @@ def _create_on_chain_escrow(
     buyer_address: str,
     seller_wallet_address: str,
     rpc_url: str,
+    expiration_unix: int,
 ) -> str:
-    rpc_url = _ensure_ws_rpc_url(rpc_url)
+    rpc_url = ensure_ws_rpc_url(rpc_url)
     prewarm_alkahest_address_config_cache(_ALKAHEST_ADDRESSES_PATH)
     network = get_alkahest_network(_CHAIN_NAME)
     address_config = resolve_alkahest_address_config(
@@ -248,7 +246,7 @@ def _create_on_chain_escrow(
         ),
         "demand": encode_recipient_demand(seller_wallet_address),
     }
-    expiration = int(time.time()) + 3600
+    expiration = expiration_unix
 
     async def _do_it() -> str:
         if case.token_id is None:
@@ -307,6 +305,8 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     storefront_admin_client, storefront_seller_client,
     provisioning_client,
     provisioning_test_client,
+    site_capacity_admin_client,
+    registry_client,
     buyer_config,
     seller_wallet,
 ):
@@ -316,11 +316,19 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     pause_storefront(storefront_admin_client)
     _assert_services_ready(storefront_admin_client, provisioning_client)
 
-    import_result = storefront_admin_client.admin_import_resources(
-        _resource_csv([case]).encode("utf-8"),
-        filename=f"{case.name}-settlement-resource.csv",
+    # Each case sells its own resource, declared at the site: the listing's
+    # source must be in the projection the storefront checks it against, and
+    # one executor carries one declaration.
+    provision_e2e_executor(
+        provisioning_client,
+        site_capacity_admin_client,
+        host=f"{E2E_NON_ERC20_HOST}-{case.name}",
+        pool_id=f"{E2E_NON_ERC20_POOL_ID}-{case.name}",
+        resource_id=case.resource_id,
+        sellable_units=1,
+        attributes={"gpu_model": "RTX 5080", "region": "California, US", "sla": "90.0"},
     )
-    assert import_result.failed_count == 0, import_result
+    refresh_storefront_projections(storefront_admin_client)
 
     listing_resp = storefront_seller_client.create_listing(
         listing_resource=_offer(case),
@@ -343,7 +351,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
 
     eval_result = storefront_admin_client.evaluate_negotiate(
         listing_id,
-        proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
+        proposal=_proposal(case, _BUYER_INITIAL_AMOUNT, seller_wallet),
         provision_terms={
             "kind": "compute.v1",
             "version": 1,
@@ -363,9 +371,27 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     assert eval_result.decision == "counter"
 
+    # Pin the escrow deadline once: the negotiated terms and the escrow
+    # created on chain must state the same one, and settlement refuses an
+    # escrow whose deadline differs.
+    expiration_unix = int(time.time()) + 3600
+    # The VM seller infers nothing from an escrow's shape, so the opening names
+    # the listing's Alkahest option explicitly, as the published copy lists it.
+    (alkahest_option,) = [
+        dict(option)
+        for option in registry_client.get_listing(listing_id).settlement_options
+        if dict(option)["mechanism"] == "alkahest.v1"
+    ]
     negotiate_resp = storefront_client.negotiate_new(
         listing_id=listing_id,
         initial_amount=_BUYER_INITIAL_AMOUNT,
+        settlement_selection={
+            "mechanism": "alkahest.v1",
+            "option_id": alkahest_option["option_id"],
+            "expiration_unix": expiration_unix,
+        },
+        escrow_expiration_unix=expiration_unix,
+        demands=_recipient_demands(seller_wallet),
         provision_terms={
             "kind": "compute.v1",
             "version": 1,
@@ -400,8 +426,10 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     escrow_uid = _create_on_chain_escrow(
         case=case,
         buyer_private_key=buyer_config["private_key"],
+        buyer_address=buyer_config["wallet_address"],
         seller_wallet_address=seller_wallet,
         rpc_url=buyer_config["rpc_url"],
+        expiration_unix=expiration_unix,
     )
     log.info("[%s] Created on-chain escrow %s", case.name, escrow_uid)
 
@@ -462,7 +490,9 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         timeout=15.0,
     )
-    assert event.data.get("resource_id") == case.resource_id
+    # The seller holds no physical resource identity: provisioning picks the
+    # host, so the event names the fulfillment rather than a resource.
+    assert event.data.get("fulfillment_id"), event.data
 
     status = storefront_client.get_settle_status(
         escrow_uid,
@@ -471,7 +501,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     # path; fulfillment_id is that path's durable identity. See
     # core_storefront.models.settle_models.SettleStatusResponse.
     fulfillment_id = status.fulfillment_id
-    assert fulfillment_id, status
+    assert fulfillment_id == event.data["fulfillment_id"], status
 
     provisioning_test_client.resume_rule(case.rule_id)
     provisioning_test_client.drain(timeout=30)
@@ -492,6 +522,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     assert final_status.status == "ready"
     assert final_status.tenant_credentials
 
+    # The storefront's loops are held, so the listing closes only when its
+    # capacity events are applied, and the close decides from the projection
+    # cache, which must already reflect the deal's reservation.
+    advance_storefront(storefront_admin_client, "site-projections")
+    for _ in range(5):
+        cycle = one_site(advance_storefront(storefront_admin_client, "capacity-events"))
+        assert cycle["error"] is None, cycle
+        if not cycle["truncated"]:
+            break
+    else:
+        raise AssertionError("capacity-event feed still truncated after five cycles")
     final_listing = storefront_admin_client.get_listing(listing_id)
     assert final_listing.status == "closed"
 

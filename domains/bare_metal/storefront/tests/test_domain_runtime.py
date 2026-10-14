@@ -12,15 +12,18 @@ from core_storefront import (
     StorefrontSettlementBuildContext,
     build_domain_settlement_artifacts,
 )
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.domain_runtime import (
     BARE_METAL_STOREFRONT_DOMAIN,
     get_market_domain_contract,
 )
+from arkhai_bare_metal_storefront.settlement_stages import ALKAHEST_MECHANISM
 
 
-def test_storefront_contract_validates_current_bare_metal_capabilities() -> None:
+def test_storefront_contract_validates() -> None:
     contract = get_market_domain_contract()
 
     assert contract is BARE_METAL_STOREFRONT_DOMAIN
@@ -34,8 +37,11 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
     assert callable(contract.storefront.run_negotiation_policy)
     assert contract.has_capability(DomainCapability.SETTLEMENT)
     assert contract.settlement is not None
-    assert callable(contract.settlement.verify)
-    assert callable(contract.settlement.build_plan)
+    assert set(contract.settlement.seller_stages) == {
+        ALKAHEST_MECHANISM,
+        ARKHAI_PAYMENTS_MECHANISM,
+        CONTACT_MECHANISM,
+    }
 
     assert contract.has_capability(DomainCapability.FULFILLMENT)
     assert contract.fulfillment is not None
@@ -104,7 +110,9 @@ def test_settlement_hook_consumes_common_context(monkeypatch) -> None:
         chain_config_paths={"base": "/config/base.json"},
     )
 
-    artifacts = build_domain_settlement_artifacts(contract, context)
+    artifacts = build_domain_settlement_artifacts(
+        contract, context, build_plan=domain_runtime._build_settlement_from_context
+    )
 
     assert artifacts.supplemental == {"accepted_escrow_terms": []}
     assert calls == [

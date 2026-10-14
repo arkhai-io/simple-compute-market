@@ -154,11 +154,8 @@ dependencies = [
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
-    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange" },
-    { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "typer" },
@@ -169,13 +166,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.14.2"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -213,6 +211,7 @@ requires-dist = [
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "arkhai-core-storefront", specifier = ">=0.11.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
     { name = "arkhai-kit-alkahest" },
@@ -335,7 +334,6 @@ dependencies = [
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-policy" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -409,7 +407,6 @@ name = "arkhai-kit-capacity-publication"
 version = "0.6.1"
 source = { registry = "../../../.dist" }
 dependencies = [
-    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-site-client" },
 ]
@@ -603,8 +600,10 @@ version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [

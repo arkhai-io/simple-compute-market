@@ -44,6 +44,7 @@ from fastapi.responses import JSONResponse
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
+    INTRODUCTION_ROUTE,
     AuthorizedIntroductionRequest,
     IntroductionRouteError,
     IntroductionStart,
@@ -102,6 +103,7 @@ from .models import (
 from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
+from .settlement_composition import ALKAHEST_MECHANISM
 from .settlement_service import PaymentSettleResult, SettlementRequestError
 
 router = APIRouter()
@@ -326,7 +328,7 @@ async def start_introduction(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/api/v1/introductions/{obligation_ref}")
+@router.get(INTRODUCTION_ROUTE)
 async def read_introduction(
     obligation_ref: str,
     request: Request,
@@ -733,7 +735,7 @@ async def settle(
     response_model=RefundSettlementResponse,
 )
 async def refund_settlement(negotiation_id: str, request: Request) -> JSONResponse:
-    """Reverse an accepted payment deal's held funds; only the seller may ask."""
+    """Refund an accepted deal through its seller entry; only the seller may ask."""
     runtime = _runtime(request)
     await _seller(
         request=request,
@@ -742,7 +744,7 @@ async def refund_settlement(negotiation_id: str, request: Request) -> JSONRespon
         resource=negotiation_id,
     )
     try:
-        result = await runtime.settlement_service().refund_payment(
+        result = await runtime.settlement_service().refund(
             negotiation_id=negotiation_id
         )
     except SettlementRequestError as exc:
@@ -760,14 +762,13 @@ async def settle_status(
 ) -> BareMetalSettleStatusResponse:
     runtime = _runtime(request)
     try:
-        escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
         record = await runtime.db.load_bare_metal_settlement_record_by_ref(
             settlement_ref=escrow_uid
         ) or await runtime.db.load_bare_metal_settlement_record(negotiation_id=escrow_uid)
-        if escrow is None and record is None:
-            raise SettlementRequestError("escrow not found", status_code=404)
+        if record is None:
+            raise SettlementRequestError("settlement not found", status_code=404)
         thread = await runtime.db.load_negotiation_thread_row(
-            negotiation_id=str((escrow or record)["negotiation_id"]),
+            negotiation_id=str(record["negotiation_id"]),
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
@@ -830,12 +831,40 @@ async def fulfillment_status(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        attestation = await _evidence_attestation(runtime, lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {
+                **lifecycle,
+                "escrow_uid": lifecycle["settlement_ref"],
+                "evidence_attestation_uid": attestation,
+            }
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail=exc.detail,
         ) from exc
+
+
+async def _evidence_attestation(
+    runtime: BareMetalStorefrontRuntime, lifecycle: Mapping[str, Any]
+) -> str | None:
+    """The attestation publishing the deal's evidence, once settlement recorded it.
+
+    Settlement records it as the escrow obligation's fulfillment only after the
+    chain accepted the submission, so a stored evidence digest alone never
+    reports one.
+    """
+
+    status = await runtime.settlement_runtime.get_status(str(lifecycle["negotiation_id"]))
+    for obligation in status.obligations:
+        if (
+            obligation.mechanism_ref == lifecycle.get("settlement_ref")
+            and obligation.obligation.get("mechanism") == ALKAHEST_MECHANISM
+            and obligation.fulfillment_ref
+        ):
+            return str(obligation.fulfillment_ref)
+    return None
 
 
 @router.get(
@@ -939,7 +968,9 @@ async def teardown_fulfillment(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -1011,20 +1042,42 @@ async def health(request: Request) -> BareMetalHealthResponse:
 
 @router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
 async def system_status(request: Request) -> BareMetalHealthResponse:
+    """The administrator's status, whose readiness a configured site may also read.
+
+    A site's authority reads it under the ``service`` role to check that it can
+    reach and authenticate to this storefront, the same trust its
+    capacity-released callback is authenticated against. It is answered with the
+    readiness checks alone: pool overrides and obligations waiting for an
+    operator are the administrator's.
+    """
     runtime = _runtime(request)
-    await _admin(
-        request=request,
-        runtime=runtime,
-        operation="admin_system_status",
-        resource="system/status",
-    )
-    status = await runtime.health()
-    overrides = runtime.pool_override_service()
-    if overrides is not None:
-        status["pool_overrides"] = await overrides.statuses()
-    status["settlement_manual_required"] = (
-        await runtime.settlement_runtime.manual_required_count()
-    )
+    as_site = request.headers.get("x-market-role") == "service"
+    if as_site:
+        await _principal(
+            request=request,
+            runtime=runtime,
+            operation="admin_system_status",
+            resource="system/status",
+            expected_role="service",
+            allowed_principals=tuple(
+                binding.authority_principal for binding in runtime.site_bindings
+            ),
+        )
+    else:
+        await _admin(
+            request=request,
+            runtime=runtime,
+            operation="admin_system_status",
+            resource="system/status",
+        )
+    status = await runtime.status()
+    if not as_site:
+        overrides = runtime.pool_override_service()
+        if overrides is not None:
+            status["pool_overrides"] = await overrides.statuses()
+        status["settlement_manual_required"] = (
+            await runtime.settlement_runtime.manual_required_count()
+        )
     return BareMetalHealthResponse.model_validate(status)
 
 

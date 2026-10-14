@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from arkhai_bare_metal import (
     BareMetalAcceptedAlkahestBinding,
@@ -41,8 +41,12 @@ from market_settlement_runtime import (
     SettlementRuntime,
 )
 
-from .fulfillment_service import BareMetalFulfillmentService
-from .sqlite_client import SQLiteClient
+if TYPE_CHECKING:
+    # Injected collaborators: importing them at run time would close a cycle
+    # through the domain runtime, which composes the seller entries that name
+    # this lifecycle.
+    from .fulfillment_service import BareMetalFulfillmentService
+    from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +83,7 @@ class BareMetalAlkahestLifecycle:
     fulfillment_service: Callable[[], BareMetalFulfillmentService]
     chain_clients: Mapping[str, Any]
 
-    async def fulfill(
+    async def ready(
         self, record: SettlementObligationRecord, worker_id: str
     ) -> SettlementObligationRecord:
         if record.obligation.get("mechanism") != ALKAHEST_MECHANISM:
@@ -185,7 +189,7 @@ class BareMetalAlkahestLifecycle:
         await self._retry(record, worker_id, error)
         raise error
 
-    async def end_service(
+    async def terminal(
         self, record: SettlementObligationRecord, state: str, reason: str | None
     ) -> None:
         """End the lease of a deal whose settlement ended without collection.
@@ -220,7 +224,7 @@ class BareMetalAlkahestLifecycle:
         service = self.fulfillment_service()
         await service.begin(
             negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
+            settlement_ref=escrow_uid,
             buyer_principal=record.payer_principal,
         )
         lifecycle = await service.status(
@@ -372,3 +376,22 @@ __all__ = [
     "REJECTED",
     "REJECTION_BOUND",
 ]
+
+
+def alkahest_servicing(runtime: Any) -> BareMetalAlkahestLifecycle | None:
+    """The Alkahest entry's obligation servicing over one storefront runtime.
+
+    A configured Alkahest section, enabled or not, owns the obligations accepted
+    under it, so its servicing exists whenever the section does.
+    """
+
+    composition = runtime.settlement_composition
+    if composition is None or not composition.configures(ALKAHEST_MECHANISM):
+        return None
+    return BareMetalAlkahestLifecycle(
+        db=runtime.db,
+        runtime=runtime.settlement_runtime,
+        local_principal=runtime.seller_principal,
+        fulfillment_service=runtime.fulfillment_service,
+        chain_clients=composition.resources.get("clients") or {},
+    )

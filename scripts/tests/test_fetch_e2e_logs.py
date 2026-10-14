@@ -24,6 +24,13 @@ fetcher = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = fetcher
 _SPEC.loader.exec_module(fetcher)
 
+# One compose-log artifact per end-to-end lane, as the workflow uploads them.
+LANE_LOGS = ("e2e-vm-logs", "e2e-bare-metal-logs", "e2e-apicredits-logs")
+
+
+def test_every_lane_log_is_fetched() -> None:
+    assert fetcher.LOG_ARTIFACTS == LANE_LOGS
+
 
 class FakeRunner:
     def __init__(
@@ -111,11 +118,11 @@ def test_the_head_commits_run_on_the_current_branch_is_waited_for_and_downloaded
 
     run_dir = tmp_path / "42"
     assert (run_dir / "actions.log").read_text("utf-8") == "actions log\n"
-    for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+    for artifact in LANE_LOGS:
         assert (run_dir / artifact / "compose-logs.txt").read_text("utf-8") == f"{artifact}\n"
     with ZipFile(tmp_path / "42.zip") as archive:
         assert archive.read("42/actions.log") == b"actions log\n"
-        for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+        for artifact in LANE_LOGS:
             assert archive.read(f"42/{artifact}/compose-logs.txt") == f"{artifact}\n".encode()
     assert ["gh", "run", "watch", "42"] in runner.commands
 
@@ -263,14 +270,14 @@ def test_make_target_delegates_to_python_helper() -> None:
     assert "gh run" not in target
 
 
-@pytest.mark.parametrize("missing", ["e2e-vm-logs", "e2e-bare-metal-logs"])
+@pytest.mark.parametrize("missing", LANE_LOGS)
 def test_one_missing_lane_preserves_other_lane_without_actions_log(
     tmp_path: Path, missing: str
 ) -> None:
     runner = FakeRunner(fail_actions_log=True, missing_artifacts=(missing,))
 
     assert fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77"], runner=runner) == 0
-    for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+    for artifact in LANE_LOGS:
         assert (tmp_path / "77" / artifact / "compose-logs.txt").is_file() == (artifact != missing)
 
 

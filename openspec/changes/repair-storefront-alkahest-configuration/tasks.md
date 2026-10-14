@@ -9,7 +9,8 @@ confirms settlement becomes ready has not happened yet.
 ## 1. Supply the EVM credential
 
 - [x] 1.1 Add `STOREFRONT_WALLET__PRIVATE_KEY` for `bob-storefront` and
-      `alice-storefront` to `compose.local-identities.yml`, `@str`-marked.
+      `alice-storefront` to `compose.local-identities.yml` (since split; the keys
+      are in `compose.vms-local.yml`), `@str`-marked.
       Anvil 2 for Bob and Anvil 4 for Alice, each derived and checked against
       the `Wallet.address` its own storefront config declares.
 - [x] 1.2 Record at the call site why the name differs from the `AGENT_PRIV_KEY`

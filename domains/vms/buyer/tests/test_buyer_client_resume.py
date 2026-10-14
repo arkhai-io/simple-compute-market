@@ -29,6 +29,7 @@ from unittest.mock import patch
 import pytest
 
 from market_core.schemas import Agreement
+from identity_helpers import alkahest_option
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
@@ -85,14 +86,19 @@ def _with_accepted_agreement(req, body):
     proposal = body.get("proposal")
     fields = proposal.get("fields") if isinstance(proposal, dict) else None
     amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+    body.setdefault("accepted_escrow_proposal", {
+        "chain_name": "anvil", "escrow_address": "0x" + "cd" * 20,
+        "fields": {}, "expiration_unix": 1_800_000_000,
+    })
     agreement = Agreement(
         negotiation_id=negotiation_id,
         listing_id=request_body.get("listing_id") or "L-1",
         listing_hash="0" * 64,
         buyer=buyer.model_dump(mode="json"),
         seller=seller.model_dump(mode="json"),
+        settlement=alkahest_option(),
         amount=amount,
-        asset=None,
+        asset="usd",
         duration_seconds=0,
         start_utc="2025-01-01T00:00:00Z",
         accepted_at="2025-01-01T00:00:00Z",

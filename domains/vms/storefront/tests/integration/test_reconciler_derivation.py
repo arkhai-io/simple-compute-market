@@ -3,8 +3,7 @@
 External boundary: a real sqlite3 file DB with a minimal hand-built schema
 (not the full SQLiteClient migration chain) -- reconciler.py is itself plain
 synchronous sqlite3 code with no async dependencies, so a minimal schema
-exercising exactly the tables it reads/writes is the right level, matching
-test_compute_allocations.py's precedent.
+exercising exactly the tables it reads/writes is the right level.
 """
 
 from __future__ import annotations
@@ -41,9 +40,8 @@ from tests._reconciler_cases import (
     _member,
     _override_rows,
     _rate,
-    _seed_fungible_pool,
+    _gpu_pool_projection,
     _seed_listing,
-    _seed_pool,
     _shape_slices,
     _shaped_pool,
     _site_report,
@@ -56,85 +54,81 @@ from tests._reconciler_cases import (
 
 
 class TestAvailableComputeSlices:
-    def test_every_slice_is_tagged_with_home_site(self, db_path):
-        _seed_pool(db_path)
-        slices = _available_vm_slices(db_path, home_site="site-a")
+    def test_every_slice_is_tagged_with_its_projections_site(self, db_path):
+        slices = _available_vm_slices(
+            db_path, site_pool_projection=_gpu_pool_projection(4, site_id="site-b")
+        )
         assert slices
-        assert all(row["site_id"] == "site-a" for row in slices)
+        assert all(row["site_id"] == "site-b" for row in slices)
 
     def test_resource_key_is_site_scoped(self, db_path):
-        _seed_pool(db_path, gpu_count=1)
-        slices = _available_vm_slices(db_path, home_site="site-a")
+        slices = _available_vm_slices(
+            db_path, site_pool_projection=_gpu_pool_projection(1)
+        )
         assert slices[0]["resource_key"] == _gpu_key(
-            "site-a", gpu_count=1, model="H100", resource_id="resource-1",
+            "site-a", gpu_count=1, model="H100", pool_id="gpu-pool",
         )
 
-    def test_different_home_site_produces_different_keys_for_identical_data(self, db_path):
-        _seed_pool(db_path, gpu_count=1)
-        keys_a = {r["resource_key"] for r in _available_vm_slices(db_path, home_site="site-a")}
-        keys_b = {r["resource_key"] for r in _available_vm_slices(db_path, home_site="site-b")}
+    def test_identical_pools_at_two_sites_produce_different_keys(self, db_path):
+        keys_a = {
+            r["resource_key"]
+            for r in _available_vm_slices(
+                db_path, site_pool_projection=_gpu_pool_projection(1, site_id="site-a")
+            )
+        }
+        keys_b = {
+            r["resource_key"]
+            for r in _available_vm_slices(
+                db_path, site_pool_projection=_gpu_pool_projection(1, site_id="site-b")
+            )
+        }
         assert keys_a and keys_b
         assert keys_a.isdisjoint(keys_b)
 
-    def test_a_site_mapped_to_an_authoritative_empty_projection_does_not_fall_back(
+    def test_a_site_mapped_to_an_authoritative_empty_projection_yields_nothing(
         self, db_path,
     ):
-        """The downstream half of the site_pool_projection() None-vs-[]
-        fix: {"site-a": []} is a non-empty mapping (one key), so it must
-        take the projection path and correctly contribute zero rows for
-        that site -- not be treated the same as {} (no site data at
-        all), which would incorrectly fall back to stale local data even
-        though the authoritative answer is "this site has zero pools
-        right now"."""
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)  # local data exists
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection={"site-a": []},)
+        """{"site-a": []} is an authoritative answer that the site has zero
+        pools right now, so the site contributes zero rows."""
+        slices = _available_vm_slices(db_path, site_pool_projection={"site-a": []},)
         assert slices == []
 
-    def test_projection_sourced_pool_uses_local_pricing_for_home_site(self, db_path):
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)  # local pricing row
+    def test_a_home_site_pool_without_an_override_ignores_a_retained_legacy_row(
+        self, db_path,
+    ):
+        """An upgraded database may still hold a pool-keyed legacy override row
+        for the storefront's first site. Nothing reads it: each commercial
+        field resolves from the pool's hint, then the configured default."""
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE compute_capacity_pools (
+                  pool_id TEXT PRIMARY KEY, resource_type TEXT, gpu_model TEXT,
+                  region TEXT, sla REAL, total_gpu_count INTEGER, status TEXT,
+                  min_price TEXT, token TEXT, max_duration_seconds INTEGER,
+                  accepted_escrows TEXT, settlements TEXT
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO compute_capacity_pools VALUES "
+                "('gpu-pool', 'compute.gpu', 'H100', 'legacy-region', 99.9, 4, "
+                "'active', '10', '0xtoken', 7200, '[]', NULL)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
         projection = {
             "site-a": [
                 {
                     "pool_id": "gpu-pool",
-                    "resources": [
-                        {
-                            "physical_resource_id": "res-1", "resource_type": "compute.gpu",
-                            "capacity": {"gpu_count": 8},
-                            # The local row publishes region us-east; a claim
-                            # matches it against the declaration.
-                            "attributes": {"gpu_model": "H100", "region": "us-east"},
-                            "enabled": True,
+                    "pool_metadata": {
+                        "policy_tags": {
+                            "pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}},
+                            "region": "pool-region",
                         },
-                    ],
-                },
-            ],
-        }
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
-        assert slices
-        assert all(row["site_id"] == "site-a" for row in slices)
-        # Structure/GPU model from the projection (8, not the local
-        # table's seeded 4), terms from the local table.
-        assert max(row["gpu_count"] for row in slices) == 8
-        assert all(row["gpu_model"] == "H100" for row in slices)
-        assert all(row["max_duration_seconds"] == 3600 for row in slices)  # _seed_pool's term
-        # min_price and token are not listing terms, from any tier.
-        assert all("min_price" not in row and "token" not in row for row in slices)
-
-    def test_projection_pool_for_non_home_site_never_uses_another_sites_local_row(
-        self, db_path,
-    ):
-        """The core safety property: a non-home-site pool must never pick
-        up another site's local pricing row, even when the pool_id
-        happens to match -- compute_capacity_pools is not site-scoped,
-        so this is the only thing preventing a cross-site mix-up. It
-        still publishes (priceless, since it has no hint/config default
-        of its own either) -- a missing storefront override is not a
-        reason to suppress the pool."""
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
-        projection = {
-            "site-b": [  # not home_site
-                {
-                    "pool_id": "gpu-pool",  # same pool_id as the local row
+                    },
                     "resources": [
                         {
                             "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -146,17 +140,23 @@ class TestAvailableComputeSlices:
                 },
             ],
         }
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
+        slices = _available_vm_slices(
+            db_path,
+            site_pool_projection=projection,
+            hint_resolution=PoolHintResolutionSettings(default_sla=12.5),
+        )
         assert slices
-        assert all(s.get("max_duration_seconds") is None for s in slices)
-        assert all(s.get("region") is None for s in slices)
+        assert all(row["max_duration_seconds"] == 1800 for row in slices)  # the hint
+        assert all(row["sla"] == 12.5 for row in slices)  # the configured default
+        assert all(row["region"] == "pool-region" for row in slices)  # the hint, never the row
+        assert all("min_price" not in row and "token" not in row for row in slices)
+        assert "legacy_overrides_in_effect" not in _site_report()
 
-    def test_projection_pool_with_no_local_pricing_row_publishes_priceless(
+    def test_a_pool_without_an_override_publishes_priceless(
         self, db_path,
     ):
-        """A home-site pool with no matching local compute_capacity_pools
-        row has no storefront-override price -- it still publishes,
-        priceless, rather than being excluded."""
+        """A pool with no storefront override and no priced hint still
+        publishes, priceless, rather than being excluded."""
         projection = {
             "site-a": [
                 {
@@ -172,12 +172,11 @@ class TestAvailableComputeSlices:
                 },
             ],
         }
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
+        slices = _available_vm_slices(db_path, site_pool_projection=projection,)
         assert slices
         assert all(s.get("max_duration_seconds") is None for s in slices)
 
     def test_projection_disabled_resource_excluded_from_capacity(self, db_path):
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-a": [
                 {
@@ -193,19 +192,10 @@ class TestAvailableComputeSlices:
                 },
             ],
         }
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
+        slices = _available_vm_slices(db_path, site_pool_projection=projection,)
         assert slices == []
 
-    def test_multiple_sites_both_publish_but_only_home_site_gets_local_pricing(
-        self, db_path,
-    ):
-        """Corrected from an earlier "only home_site pool is published"
-        expectation: both sites' pools now publish (a missing storefront
-        override is not a reason to suppress a pool), but only the
-        home-site pool's local `compute_capacity_pools` row is ever
-        consulted -- site-b's pool has no hint/config default either, so
-        it publishes priceless, not with site-a's price."""
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
+    def test_every_sites_pools_publish(self, db_path):
         projection = {
             "site-a": [{
                 "pool_id": "gpu-pool",
@@ -226,13 +216,8 @@ class TestAvailableComputeSlices:
                 }],
             }],
         }
-        slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
-        by_site = {}
-        for row in slices:
-            by_site.setdefault(row["site_id"], []).append(row)
-        assert set(by_site) == {"site-a", "site-b"}
-        assert all(row["max_duration_seconds"] == 3600 for row in by_site["site-a"])
-        assert all(row["max_duration_seconds"] is None for row in by_site["site-b"])
+        slices = _available_vm_slices(db_path, site_pool_projection=projection,)
+        assert {row["site_id"] for row in slices} == {"site-a", "site-b"}
 
     def test_resource_keys_are_identical_regardless_of_hint_resolution(self, db_path):
         """The invariant `current_available_resource_keys`/
@@ -243,10 +228,10 @@ class TestAvailableComputeSlices:
         those fields. Capacity-delta reconciliation compares structural
         derivation keys and availability; it never recomputes or
         republishes commercial listing terms -- this proves that holds,
-        rather than only asserting it in a comment. No local
-        `compute_capacity_pools` row on purpose -- a storefront override
-        would win regardless of `hint_resolution` and this test would
-        prove nothing about the tiers that actually vary."""
+        rather than only asserting it in a comment. No storefront override
+        on purpose -- an override would win regardless of `hint_resolution`
+        and this test would prove nothing about the tiers that actually
+        vary."""
         projection = {
             "site-a": [{
                 "pool_id": "gpu-pool",
@@ -258,8 +243,8 @@ class TestAvailableComputeSlices:
                 }],
             }],
         }
-        default_rows = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
-        varied_rows = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,
+        default_rows = _available_vm_slices(db_path, site_pool_projection=projection,)
+        varied_rows = _available_vm_slices(db_path, site_pool_projection=projection,
         hint_resolution=PoolHintResolutionSettings(
             accept_pool_declared_sla=True, default_sla=7.0,
             gpu_pricing_defaults_by_model={
@@ -344,9 +329,7 @@ class TestOpenListingResourceKeys:
             gpu_count=2,
             site_id="site-a",
         )
-        covered = open_listing_resource_keys(
-            db_path, home_site="site-a",
-        )
+        covered = open_listing_resource_keys(db_path)
         assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
     def test_unbound_listing_is_excluded_even_with_one_configured_site(
@@ -354,16 +337,12 @@ class TestOpenListingResourceKeys:
     ):
         """A single configured site never substitutes for durable ownership."""
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        covered = open_listing_resource_keys(
-            db_path, home_site="site-a",
-        )
+        covered = open_listing_resource_keys(db_path)
         assert covered == set()
 
     def test_unbound_listing_is_excluded_with_multiple_sites(self, db_path):
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        covered = open_listing_resource_keys(
-            db_path, home_site="site-a",
-        )
+        covered = open_listing_resource_keys(db_path)
         assert covered == set()
 
     def test_a_bound_listing_is_covered_at_whichever_site_it_names(
@@ -376,9 +355,7 @@ class TestOpenListingResourceKeys:
             gpu_count=2,
             site_id="site-b",
         )
-        covered = open_listing_resource_keys(
-            db_path, home_site="site-a",
-        )
+        covered = open_listing_resource_keys(db_path)
         assert _gpu_key("site-b", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
     def test_bound_listing_does_not_require_a_derived_row(self, db_path):
@@ -389,15 +366,13 @@ class TestOpenListingResourceKeys:
             gpu_count=2,
             site_id="site-a",
         )
-        covered = open_listing_resource_keys(
-            db_path, home_site="site-a",
-        )
+        covered = open_listing_resource_keys(db_path)
         assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
 
 class TestStaleOpenListingIds:
     def test_listing_that_still_fits_is_not_stale(self, db_path):
-        _seed_fungible_pool(db_path, member_gpu_counts=(4, 4))
+        projection = _gpu_pool_projection(4, 4)
         _seed_listing(
             db_path,
             listing_id="listing-1",
@@ -405,11 +380,11 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
         assert stale == []
 
     def test_listing_whose_slice_no_longer_fits_is_stale(self, db_path):
-        _seed_pool(db_path, gpu_count=1)  # only 1 GPU available
+        projection = _gpu_pool_projection(1)
         _seed_listing(
             db_path,
             listing_id="listing-1",
@@ -417,17 +392,17 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
         assert stale == ["listing-1"]
 
     def test_unbound_listing_is_skipped_even_with_one_configured_site(
         self, db_path,
     ):
-        _seed_pool(db_path, gpu_count=1)
+        projection = _gpu_pool_projection(1)
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
         stale = stale_open_listing_ids(
             db_path,
-            home_site="site-a",
+            site_pool_projection=projection,
             configured_sites=("site-a",),
             backed_only=False,
         )
@@ -435,13 +410,13 @@ class TestStaleOpenListingIds:
 
     def test_unbound_listing_is_skipped_with_multiple_sites(self, db_path):
         """Configured topology never supplies a missing durable binding."""
-        _seed_pool(db_path, gpu_count=1)
+        projection = _gpu_pool_projection(1)
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a", "site-b"), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b"), backed_only=False)
         assert stale == []
 
     def test_listing_bound_to_a_different_site_uses_that_site(self, db_path):
-        _seed_pool(db_path, gpu_count=4)
+        projection = _gpu_pool_projection(4)
         _seed_listing(
             db_path,
             listing_id="listing-1",
@@ -449,8 +424,8 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-b",
         )
-        # Only site-a has capacity data seeded.
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
+        # Only site-a's projection is held.
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a",), backed_only=False)
         # VM availability is scoped to site-a, so the site-b-bound listing
         # is stale rather than silently reassigned.
         assert stale == ["listing-1"]
@@ -459,7 +434,7 @@ class TestStaleOpenListingIds:
         self, db_path,
     ):
         """Configured site count cannot override the durable site binding."""
-        _seed_fungible_pool(db_path, member_gpu_counts=(4, 4))
+        projection = _gpu_pool_projection(4, 4)
         _seed_listing(
             db_path,
             listing_id="listing-1",
@@ -467,13 +442,13 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a", "site-b", "site-c", "site-d", "site-e"), backed_only=False)
+        stale = stale_open_listing_ids(db_path, site_pool_projection=projection, configured_sites=("site-a", "site-b", "site-c", "site-d", "site-e"), backed_only=False)
         assert stale == []
 
 
 class TestClosedAvailableListingIds:
     def test_closed_listing_that_now_fits_is_reopenable(self, db_path):
-        _seed_fungible_pool(db_path, member_gpu_counts=(4, 4))
+        projection = _gpu_pool_projection(4, 4)
         _seed_listing(
             db_path,
             listing_id="listing-1",
@@ -482,11 +457,11 @@ class TestClosedAvailableListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        reopenable = closed_available_listing_ids(db_path, home_site="site-a")
+        reopenable = closed_available_listing_ids(db_path, site_pool_projection=projection)
         assert reopenable == ["listing-1"]
 
     def test_empty_when_nothing_is_available(self, db_path):
-        assert closed_available_listing_ids(db_path, home_site="site-a") == []
+        assert closed_available_listing_ids(db_path, site_pool_projection={}) == []
 
 
 class TestSchema:
@@ -629,7 +604,6 @@ class TestHeldAndWithdrawnListings:
 
         stale = stale_open_listing_ids(
             db_path,
-            home_site="site-a",
             configured_sites=("site-a",),
             backed_only=False,
             site_pool_projection={"site-a": [declared, undeclared]},
@@ -643,7 +617,6 @@ class TestHeldAndWithdrawnListings:
 
         stale = stale_open_listing_ids(
             db_path,
-            home_site="site-a",
             configured_sites=("site-a",),
             backed_only=False,
             site_pool_projection={"site-a": [pool]},
@@ -665,8 +638,7 @@ class TestHeldAndWithdrawnListings:
         assert (
             closed_available_listing_ids(
                 db_path,
-                home_site="site-a",
-                site_pool_projection={"site-a": [pool]},
+                    site_pool_projection={"site-a": [pool]},
             )
             == []
         )
@@ -685,7 +657,6 @@ class TestHeldAndWithdrawnListings:
 
         assert closed_available_listing_ids(
             db_path,
-            home_site="site-a",
             site_pool_projection={"site-a": [pool]},
         ) == ["returns"]
 
@@ -721,8 +692,7 @@ class TestHeldAndWithdrawnListings:
         assert (
             closed_available_listing_ids(
                 db_path,
-                home_site="site-a",
-                site_pool_projection={"site-a": [pool]},
+                    site_pool_projection={"site-a": [pool]},
             )
             == []
         )
@@ -741,9 +711,7 @@ class TestHeldAndWithdrawnListings:
 
         # Flattening need not be invertible, so a key is never rebuilt from what
         # the listing publishes.
-        assert open_listing_resource_keys(
-            db_path, home_site="site-a"
-        ) == {_gpu_key("site-a", gpu_count=2, model="H100", pool_id="pool-b")}
+        assert open_listing_resource_keys(db_path) == {_gpu_key("site-a", gpu_count=2, model="H100", pool_id="pool-b")}
 
     def test_a_listing_bound_before_shapes_keeps_a_key_no_derivation_produces(
         self, db_path
@@ -752,9 +720,7 @@ class TestHeldAndWithdrawnListings:
             db_path, listing_id="v1", pool_id="pool-b", site_id="site-a", schema_version=1
         )
 
-        assert open_listing_resource_keys(
-            db_path, home_site="site-a"
-        ) == {listing_pool_key("site-a", "pool-b", 2)}
+        assert open_listing_resource_keys(db_path) == {listing_pool_key("site-a", "pool-b", 2)}
 
 
 class TestListingShapes:
@@ -931,8 +897,7 @@ class TestListingShapes:
 
 
 class TestFamilyRateDerivationThroughTheDatabase:
-    """Family rates on the projection path and none on the local-table path,
-    read through a real SQLite database."""
+    """Family rates read through a real SQLite database."""
 
     def test_candidates_carry_their_models_resolved_family_rates(self, db_path):
         pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
@@ -946,14 +911,6 @@ class TestFamilyRateDerivationThroughTheDatabase:
         assert row["family_rates"] == {"gpu": _rate("80"), "memory": _rate("0.05")}
         assert "min_price" not in row and "token" not in row
 
-    def test_the_local_table_path_resolves_no_family_rates(self, db_path):
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=2)
-
-        slices = _available_vm_slices(db_path, home_site="site-a")
-
-        assert slices
-        assert all(not row.get("family_rates") for row in slices)
-        assert all("min_price" not in row and "token" not in row for row in slices)
 
 
 def _admissibility_default(raw):
@@ -965,7 +922,6 @@ def _admissibility_default(raw):
 def _admitted_slices(db_path, pools, *, default=None, holds=None):
     return available_compute_slices(
         db_path,
-        home_site="site-a",
         site_pool_projection={"site-a": pools},
         hint_resolution=PoolHintResolutionSettings(admissibility_default=default),
         holds=holds,
@@ -1128,7 +1084,7 @@ class TestShapeAdmissibility:
         )
 
         assert stale_open_listing_ids(
-            db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            db_path, configured_sites=("site-a",), backed_only=False,
             site_pool_projection={"site-a": [pool]},
         ) == []
 
@@ -1138,7 +1094,7 @@ class TestShapeAdmissibility:
         _seed_listing(db_path, listing_id="shaped", pool_id="gpu", gpu_count=2, site_id="site-a")
         pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": 2}}])
         reconcile = dict(
-            home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            configured_sites=("site-a",), backed_only=False,
             site_pool_projection={"site-a": [pool]},
         )
 
@@ -1164,7 +1120,7 @@ class TestShapeAdmissibility:
         pool["pool_metadata"]["policy_tags"][tag] = unreadable
 
         assert stale_open_listing_ids(
-            db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False,
+            db_path, configured_sites=("site-a",), backed_only=False,
             site_pool_projection={"site-a": [pool]},
             admissibility_default=_admissibility_default({"gpu": {"count": {"max": 1}}}),
         ) == ["excluded"]
@@ -1174,30 +1130,12 @@ class TestShapeAdmissibility:
             db_path, listing_id="shaped", status="closed", pool_id="gpu", gpu_count=2, site_id="site-a",
         )
         pool = _shaped_pool("gpu", [_H100_MEMBER], shapes=[{"gpu": {"model": "H100", "count": 2}}])
-        reopen = dict(home_site="site-a", site_pool_projection={"site-a": [pool]})
+        reopen = dict(site_pool_projection={"site-a": [pool]})
 
         assert closed_available_listing_ids(db_path, **reopen) == ["shaped"]
         excluding = _admissibility_default({"gpu": {"count": {"max": 1}}})
         assert closed_available_listing_ids(db_path, admissibility_default=excluding, **reopen) == []
 
-    def test_local_table_derivation_meets_a_configured_default(self, db_path):
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=8)
-        default = _admissibility_default({"gpu": {"count": {"max": 4}}})
-
-        slices = _available_vm_slices(
-            db_path,
-            home_site="site-a",
-            hint_resolution=PoolHintResolutionSettings(admissibility_default=default),
-        )
-
-        assert sorted(row["gpu_count"] for row in slices) == [1, 2, 3, 4]
-
-    def test_local_table_derivation_without_a_default_is_unchanged(self, db_path):
-        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=3)
-
-        slices = _available_vm_slices(db_path, home_site="site-a")
-
-        assert sorted(row["gpu_count"] for row in slices) == [1, 2, 3]
 
 
 def test_override_feasibility_is_judged_on_each_shapes_base_shape(db_path):
@@ -1212,7 +1150,6 @@ def test_override_feasibility_is_judged_on_each_shapes_base_shape(db_path):
         [pool],
         site_id="site-a",
         pool_id="gpu",
-        home_site="site-a",
         override={"listing_shapes": shapes},
         shape_feasible=_FEASIBILITY,
     )

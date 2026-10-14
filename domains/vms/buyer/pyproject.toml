@@ -27,13 +27,15 @@ dependencies = [
   "arkhai-vms>=0.6.0",
   "arkhai-vms-listings>=0.4.1",
   "arkhai-vms-negotiation>=0.4.0",
-  "arkhai-vms-settlement>=0.2.0",
 ]
 
 [dependency-groups]
 dev = [
   "pytest>=8.3.4,<9.0.0",
   "pytest-asyncio>=0.23.8,<1.0.0",
+  # The settlement helper tests check the buyer's escrow selection against
+  # the VM settlement codec's proposal builder; the buyer never imports it.
+  "arkhai-vms-settlement>=0.2.0",
 ]
 
 [project.optional-dependencies]

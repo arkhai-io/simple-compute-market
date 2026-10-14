@@ -30,6 +30,7 @@ from identity_helpers import (
     seller_principals,
     signed_response_headers,
     with_accepted_agreement,
+    accepted_alkahest_agreement,
 )
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
@@ -380,6 +381,9 @@ def test_custom_policy_can_short_circuit():
         return (matches[1], NegotiationOutcome(
             status="agreed",
             negotiation_id="synthetic-1",
+            agreement=accepted_alkahest_agreement(
+                "synthetic-1", matches[1]["listing_id"], 42, _provision(), _escrow_proposal(),
+            ),
             agreed_amount=42,
             duration_seconds=3600,
             accepted_provision_terms=_provision(),

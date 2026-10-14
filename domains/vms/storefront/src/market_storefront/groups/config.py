@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
-import tomllib
 import typer
 from dynaconf import Dynaconf
 from market_config.config_loader import (
@@ -34,15 +33,34 @@ from market_config.settlement_migration import (
     migrate_settlement_config,
     reject_legacy_settlement_path,
 )
-from market_settlement_runtime import SettlementPublicationClause, SettlementRole
+from market_settlement_runtime import SettlementRole
 
 from market_storefront.publication_migration import (
     format_publication_migration_result,
     migrate_publication_config,
-    migrate_publication_csv,
 )
 
 config_app = typer.Typer(no_args_is_help=True)
+
+#: Settings the storefront no longer reads. Physical inventory, the pricing
+#: templates its rows referred to, and the switch that read listings from it are
+#: declared at provisioning now, so no command migrates them.
+_RETIRED_INVENTORY_KEYS = (
+    "resources_csv_path",
+    "resources_csv_inline",
+    "escrow_templates",
+    "capacity.use_site_projection_for_listings",
+)
+_INVENTORY_UPGRADE_GUIDE = 'docs/seller-quickstart.md, "Upgrading from CSV inventory"'
+
+
+def _retired_inventory_key(key: str) -> str | None:
+    """The retired setting ``key`` names or lies under, in any spelling."""
+    normalized = key.strip().lower()
+    for retired in _RETIRED_INVENTORY_KEYS:
+        if normalized == retired or normalized.startswith(f"{retired}."):
+            return retired
+    return None
 
 
 def _validate_settlement_candidate(
@@ -69,39 +87,6 @@ def _installed_settlement_mechanisms() -> dict[str, str]:
     from market_storefront.settlement_registry import installed_settlement_mechanisms
 
     return installed_settlement_mechanisms()
-
-
-def _seller_publication_clause_compiler(
-    document: Mapping[str, Any],
-) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
-    from market_settlement_runtime import compile_settlement_publication_clause
-
-    from market_storefront.settlement_registry import (
-        build_storefront_settlement_registry,
-    )
-
-    registry = build_storefront_settlement_registry()
-    settlement = document.get("Settlement", document.get("settlement", {}))
-    if not isinstance(settlement, Mapping):
-        raise SettlementMigrationError("Settlement must be a table")
-    try:
-        resolved = registry.resolve(settlement, role="seller")
-    except (TypeError, ValueError) as exc:
-        raise SettlementMigrationError(
-            f"invalid seller settlement configuration: {exc}"
-        ) from exc
-
-    def compile_clause(
-        raw: Mapping[str, Any],
-    ) -> SettlementPublicationClause:
-        return compile_settlement_publication_clause(
-            raw,
-            registry=registry,
-            config=resolved,
-            role="seller",
-        )
-
-    return compile_clause
 
 
 @config_app.command("path")
@@ -168,6 +153,15 @@ def config_set(
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(2) from exc
+    retired = _retired_inventory_key(key)
+    if retired is not None:
+        typer.secho(
+            f"{retired!r} was removed: the storefront reads inventory only from "
+            f"its sites' provisioning services. See {_INVENTORY_UPGRADE_GUIDE}.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
@@ -228,11 +222,6 @@ def config_migrate(
         "--backup",
         help="Create the required same-directory backup in write mode.",
     ),
-    inventory: str | None = typer.Option(
-        None,
-        "--inventory",
-        help="Resource CSV to migrate when --scope publication is selected.",
-    ),
     legacy_contribution: str | None = typer.Option(
         None,
         "--legacy-contribution",
@@ -282,10 +271,6 @@ def config_migrate(
             "--legacy-offering-mode, --legacy-domain, and "
             "--legacy-contract-version"
         )
-    if scope == "settlement" and inventory is not None:
-        raise typer.BadParameter("--inventory applies only to --scope publication")
-    if scope == "storefront-domains" and inventory is not None:
-        raise typer.BadParameter("--inventory applies only to --scope publication")
     try:
         if scope == "settlement":
             result = migrate_settlement_config(
@@ -300,27 +285,13 @@ def config_migrate(
             )
             lines = format_migration_result(result)
         elif scope == "publication":
-            if inventory is None:
-                result = migrate_publication_config(
-                    storefront_config_file(),
-                    check=check,
-                    write=write,
-                    backup=backup,
-                    validator=_validate_settlement_candidate,
-                )
-            else:
-                config_path = storefront_config_file()
-                config_document = tomllib.loads(config_path.read_text(encoding="utf-8"))
-                result = migrate_publication_csv(
-                    inventory,
-                    storefront_config=config_document,
-                    check=check,
-                    write=write,
-                    backup=backup,
-                    clause_compiler=_seller_publication_clause_compiler(
-                        config_document
-                    ),
-                )
+            result = migrate_publication_config(
+                storefront_config_file(),
+                check=check,
+                write=write,
+                backup=backup,
+                validator=_validate_settlement_candidate,
+            )
             lines = format_publication_migration_result(result)
         else:
             from market_core import ContractVersion, DomainIdentity
@@ -402,9 +373,6 @@ _INIT_USER_TEMPLATE = """\
 # db_path = "/var/lib/arkhai/agent.db"
 # log_level = "INFO"                           # DEBUG | INFO | WARNING | ERROR
 # log_file_path = "/var/log/arkhai/agent.log"
-
-# resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
-                                                # Mutually exclusive with resources_csv_inline.
 
 
 # ---------------------------------------------------------------------------

@@ -467,8 +467,6 @@ def test_reserve_after_hold_expiry_reserves_fresh_for_the_same_escrow_uid(
     HELD_RESERVATION_STATES by _expire_stale_holds) must not be treated
     as an idempotent hit -- a genuinely new attempt after expiry reserves
     fresh, exactly as it did before this idempotency check existed."""
-    from market_site.db import CapacityReservation
-
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xexpired"}, ttl_seconds=60,)
     with seeded._session_factory() as db:
         row = db.get(CapacityReservation, first["capacity_reservation_id"])
@@ -580,7 +578,6 @@ def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     assert seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={}) is None
 
     # Backdate the hold past its TTL; the next read lapses it.
-    from market_site.db import CapacityReservation
     with seeded._session_factory() as db:
         row = db.get(CapacityReservation, reserved["capacity_reservation_id"])
         row.hold_expires_at = (
@@ -602,7 +599,6 @@ def test_expire_due_holds_reclaims_without_another_ledger_call(
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 8}}, deal_ref={"escrow_uid": "0xwatchdog"}, ttl_seconds=60,)
     assert reserved["hold_expires_at"] is not None
 
-    from market_site.db import CapacityReservation
     with seeded._session_factory() as db:
         row = db.get(CapacityReservation, reserved["capacity_reservation_id"])
         row.hold_expires_at = (
@@ -2131,7 +2127,6 @@ def test_a_lapsed_hold_runs_the_effect():
         deal_ref={"market": "vms"},
         ttl_seconds=60,
     )["capacity_reservation_id"]
-    from market_site.db import CapacityReservation
 
     with ledger._session_factory() as db:
         row = db.get(CapacityReservation, reservation_id)

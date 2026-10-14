@@ -50,8 +50,7 @@ class CreditGrant(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     key_id = Column(String, ForeignKey("api_keys.key_id"), nullable=False, index=True)
     fulfillment_id = Column(String, nullable=True, unique=True)
-    obligation_ref = Column(String, nullable=True)
-    mechanism = Column(String, nullable=True)
+    negotiation_id = Column(String, nullable=True, unique=True)
     service = Column(String, nullable=True)
     resource_id = Column(String, nullable=True)
     key_mode = Column(String, nullable=True)
@@ -61,7 +60,6 @@ class CreditGrant(Base):
     request_digest = Column(String, nullable=True)
     capacity_reservation_id = Column(String, nullable=True)
     result_balance = Column(Integer, nullable=True)
-    escrow_uid = Column(String, nullable=True, unique=True)
     quantity = Column(Integer, nullable=False)
     reason = Column(
         String, nullable=False, default="issuance"

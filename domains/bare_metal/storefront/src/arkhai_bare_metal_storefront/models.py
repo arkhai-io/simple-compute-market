@@ -11,7 +11,7 @@ from arkhai_bare_metal import (
 )
 from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 PhysicalState = Literal[
     "accepted",
@@ -58,7 +58,6 @@ class BareMetalHealthResponse(BaseModel):
     paused: bool | None = None
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
-    resource_count: int | None = None
     # Reported per site and outside ``checks``: one site's projection being
     # unavailable is not a storefront-wide degradation.
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
@@ -71,6 +70,10 @@ class BareMetalHealthResponse(BaseModel):
     # Settlement obligations waiting for an operator, each counted once;
     # administrator status only.
     settlement_manual_required: int | None = None
+    # The storefront-to-provisioning contract version this storefront speaks,
+    # from its installed contract wheel; on the status an administrator or a
+    # configured site's authority reads.
+    provisioning_contract_version: str | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):
@@ -82,6 +85,17 @@ class BareMetalFulfillmentResponse(BaseModel):
     fulfillment_id: str | None = None
     state: str
     failure_reason: str | None = None
+    # The digest of the deal's lease-ready evidence once it is stored, which
+    # is what an Alkahest delivery publishes on chain; the buyer resolves the
+    # evidence by it through the evidence route.
+    evidence_digest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("evidence_digest", "lease_ready_evidence_digest"),
+    )
+    # The on-chain attestation that published the digest, once settlement has
+    # recorded it as the escrow's fulfillment; never reported before the chain
+    # accepted the submission.
+    evidence_attestation_uid: str | None = None
 
 
 class BareMetalFulfillmentResultResponse(BaseModel):
@@ -128,7 +142,7 @@ class BareMetalSettleStatusResponse(BaseModel):
     buyer_principal: Identity
     seller_principal: Identity
     obligation_ref: str | None = None
-    fulfillment_available: Literal[True] = True
+    fulfillment_available: bool = True
 
 
 class BareMetalVerifyEscrowRequest(BaseModel):

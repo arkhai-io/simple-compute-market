@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.16.0"
+version = "0.16.1"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -31,7 +31,7 @@ dependencies = [
     "arkhai-kit-site>=0.10.0",
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
-    "arkhai-bare-metal-storefront==0.14.2",
+    "arkhai-bare-metal-storefront==0.15.0",
     "arkhai-vms>=0.6.0",
     "arkhai-vms-listings[pools,overrides]>=0.4.0",
     "arkhai-vms-negotiation>=0.4.0",
@@ -47,8 +47,6 @@ dependencies = [
     "fastapi-utils[all]>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-    # Required by FastAPI routes that accept UploadFile/File form data.
-    "python-multipart>=0.0.20",
     "alkahest-py==1.1.2",
     "web3>=7.14.0",
     "websockets>=15.0.1",
@@ -184,3 +182,8 @@ allow-direct-references=true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_storefront"]
+
+# Internal distributions declared without an import, each with the runtime
+# reason it is installed. make check-architecture warns on one without a reason.
+[tool.arkhai.architecture.runtime-dependencies]
+arkhai-bare-metal = "Registers the bare-metal storefront domain, which the compute-family shell discovers through market.storefront_domains."

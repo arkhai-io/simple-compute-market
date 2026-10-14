@@ -16,6 +16,7 @@ from market_core import (
     ImmutablePublicationCapability,
     ImmutableSettlementCapability,
     ImmutableStorefrontCapability,
+    SettlementStageTable,
     ImmutableBuyerCapability,
     MARKET_DOMAIN_CONTRACT_VERSION,
     MarketDomainContract,
@@ -77,8 +78,8 @@ def _domain(identity: str = "external.example") -> MarketDomainContract:
             run_negotiation_policy=lambda *args, **kwargs: None,
         ),
         settlement=ImmutableSettlementCapability(
-            verify=lambda *args, **kwargs: None,
-            build_plan=lambda *args, **kwargs: None,
+            buyer_stages=SettlementStageTable({"example.settlement.v1": object()}),
+            seller_stages=SettlementStageTable({"example.settlement.v1": object()}),
         ),
         fulfillment=ImmutableFulfillmentCapability(
             fulfill=lambda *args, **kwargs: None,

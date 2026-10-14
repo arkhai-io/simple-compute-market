@@ -244,20 +244,48 @@ authorities:
   gated sample service, and API-credit storefront.
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
+- `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`
+  and `domains/apicredits/compose.yml`, so the dev chain enters once.
+
+Each base file composes topology only. The development bindings are per-market
+overlays layered with `-f`: `compose.vms-local.yml` (the VM services' signer,
+wallet, and buyer-path bindings, and the VM buyer service),
+`compose.apicredits-local.yml` (the API-credit services' bindings, the
+storefront's EVM key, and the credits buyer service), and
+`compose.bare-metal-local.yml` (the bare-metal storefront's dev-chain wait,
+Alkahest address book, and seller chain). The bare-metal stack also layers
+`compose.dev.yml` for its dev chain. The API-credit end-to-end lane adds
+`compose.apicredits-lane.yml`, a compute-schema registry of its own that the
+credits scenario routes discovery away from; the full local stack never layers
+it, because VM's registry already fills that role there. Each stack takes its
+values from a generated environment file printed by the root `Makefile`
+(`e2e-vms-dev-env`, `e2e-bare-metal-dev-env`, `e2e-apicredits-dev-env`, and
+`e2e-dev-identities-env` for the full stack), so every required binding
+resolves to a committed development identity.
+
+Whether a compute stack provisions through its provisioning service's `mock`
+profile is chosen per run, not per stack file and never by a storefront.
+`PROVISIONING_MODE` (`mock` or `real`, default `mock`) is mapped by the root
+`Makefile`'s compute environment targets, which refuse any other value, to
+`VMS_PROVISIONING_ACTIVE_PROFILES` and `BARE_METAL_PROVISIONING_ACTIVE_PROFILES`:
+`mock` under mock, `docker` under real. The provisioning services read
+`ACTIVE_PROFILES` from those variables, and the base compose files default them
+to `docker`, real provisioning, as the provisioning Helm chart's `mockMode`
+defaults to false. The API-credit stack has no provisioning service and ignores
+the setting.
 
 The VM development stack runs Bob and Alice as separate storefronts with
 separate provisioning authorities. Each authority has its own service signer,
 storefront trust pin, callback destination, database, and process-local job
 queue. Both storefronts use the local site alias `default`, resolved against
-their respective authorities. The local identity overlay supplies deterministic
+their respective authorities. `compose.vms-local.yml` supplies deterministic
 development credentials.
 
 The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
 to merge role bindings with the domain topology, and declares the named volumes
 those services use. Service extension preserves the domain file's relative mount
 paths. An `include` cannot be used to import a service and redefine it in the same
-wrapper. The e2e lane adds `compose.dev.yml` and `compose.bare-metal-local.yml`
-with `-f` for its dev chain and provisioning mock profile.
+wrapper.
 
 Storefront images install their distributions from the staged `.dist`
 wheelhouse; runtime images do not resolve editable sibling source. API-credit
@@ -271,12 +299,13 @@ inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
 guessed domain, direct executor, or provider simulator.
 
-The bare-metal image currently exposes the signed publication command seam but
-does not autonomously publish to the registry, and a public settlement address
-alone does not compose a settlement authority. Its stack may be brought up for
-operator integration, but it is not release-qualified or discoverable-deal
-evidence until accepted publication and settlement lifecycles are ready and
-the installed buyer completes real access and revocation.
+The bare-metal storefront has no publication timer: it publishes when a pass is
+invoked, through the `bare-metal-storefront publish` command or the publication
+loop's step. A public settlement address alone does not compose a settlement
+authority (see "Bare-metal role configuration"). Its end-to-end lane completes
+a discoverable deal with mock-provisioned delivery, which is not
+release-qualified evidence: that needs the installed buyer to complete real
+access and revocation on a real host.
 
 ## Stateful service persistence
 
@@ -500,7 +529,9 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
   its declarations, which reservations match.** A VM listing's claim requests the
   region and model it publishes, so a pool whose listings claim a region or model
   no member declares publishes nothing and is reported per pool; a region stated
-  only on the pool publishes nothing.
+  only on the pool publishes nothing, and a pool stating no region is held by
+  publication: nothing new publishes, its listings are neither refreshed nor
+  closed except for availability, and system status names it.
 - **A bare-metal declaration describes one whole machine.** Set
   `capacity.units` to `1`, and state its hardware under the compute family's
   capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and
@@ -548,6 +579,28 @@ deployment topology:
 
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
+
+A frozen storefront table is never dropped. Fresh databases stop creating
+it, existing databases keep it as it is, and no code writes to it. A
+migration whose only effect is on a frozen table leaves the storefront's
+migration chain rather than staying as a function that does nothing. Its ID
+stays recorded wherever it was applied, because the migration engine skips
+recorded IDs it no longer lists. The ID is never reused. A database that had
+not yet applied it never does, so the frozen table keeps whichever shape it
+already had. The VM storefront's `compute_allocations` table is frozen this
+way, as are its retired inventory tables: `resources`, `hosts`,
+`resource_transition_events`, `compute_pool_members`, and
+`compute_capacity_pools` (or `compute_inventory_pools`, on a database that
+never applied the rename). Their rows stay as an operator's input for
+declaring the same inventory at provisioning; the storefront neither reads nor
+writes them.
+
+Upgrading a VM storefront past storefront-held inventory is fail-forward:
+there is no supported downgrade, because the release that drops local
+inventory also stops creating and migrating its tables. The retained tables
+stay, unread, as an operator's extraction input until a later change drops
+them; `docs/seller-quickstart.md`'s "Upgrading from CSV inventory" describes
+declaring their contents at provisioning.
 
 Identity-bearing database migrations validate the complete service-owned
 population and commit canonical principals, replay state, and ownership
@@ -640,10 +693,8 @@ system status names the retired keys.
 
   For each field's `min` and `max`, a stated shape's own bound wins, including a
   wider one, and a bound it does not state is the default's. An override's shapes
-  replace the hint's whole and do not inherit its constraints. Generated shapes,
-  and listings derived from local tables
-  (`capacity.use_site_projection_for_listings = false`), take the default alone, so
-  the default generator and local-table derivation yield only the GPU counts it
+  replace the hint's whole and do not inherit its constraints. Generated shapes
+  take the default alone, so the default generator yields only the GPU counts it
   admits. `settings.toml` ships none, and absent and an empty table both mean no
   default. A malformed table — an unknown key, `min` above `max`, an `offer`, or a
   constraint on a field that is not a quantity or is undefined — stops the
@@ -678,19 +729,17 @@ system status names the retired keys.
   unverifiable site is refused as retryable, and a shape no member is feasible for
   is accepted and reported, because it then publishes nothing.
 - **System status reports each override's state:** `applied`, `orphaned` while
-  its pool is absent, `unknown` while its site's projection is not loaded,
-  `site_unconfigured`, or `inactive`. Overrides are stored but have no effect
-  while listings derive from local tables
-  (`capacity.use_site_projection_for_listings = false`).
-- **The legacy per-pool terms** written by the local resource import remain the
-  tier below overrides, for the home site only. System status names each field a
-  legacy row still supplies; an override of that field supersedes it.
+  its pool is absent, `unknown` while its site's projection is not loaded, or
+  `site_unconfigured`.
+- **An override is the only storefront tier.** Each term it states replaces the
+  pool's own hint for that term; a term it omits resolves from the hint, then
+  from the storefront's configured defaults. The storefront holds no other
+  per-pool record.
 - **A site whose projection is not loaded holds its listings.** They are neither
   closed nor refreshed until it loads, so a storefront restarting while a site is
-  unreachable does not delist that site. A storefront configured to derive from
-  projections never derives from its local tables instead. A site decommissioned
-  without closing its listings leaves them advertised until an operator closes
-  them.
+  unreachable does not delist that site. Listings derive only from site
+  projections; nothing local stands in for one. A site decommissioned without
+  closing its listings leaves them advertised until an operator closes them.
 
 Constraints are additive: every shape stated without them is valid, and with no
 constraint and no configured default publication is unchanged. Sites and storefronts
@@ -754,7 +803,9 @@ either only where that disclosure to the payments service is intended.
 
 Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
-Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
+Publication config migrates separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses per-model legacy pricing, which needs manual clauses.
+
+The VM storefront's retired inventory settings — `resources_csv_path`, `resources_csv_inline`, `[escrow_templates]`, and `capacity.use_site_projection_for_listings`, with the chart's `secret.resourcesCsvInline` value — are refused the same way as retired settlement settings: the chart's values schemas refuse them in any spelling, and `market-storefront config set` refuses to write them, naming the seller quickstart's "Upgrading from CSV inventory". No command migrates them, because inventory moves to provisioning by operator action, and startup does not refuse them.
 
 The API-credit storefront and the credits service each own their own state: the
 credits service owns keys, request-digested grants, balances, quota, credentials,
@@ -787,17 +838,13 @@ sequence:
      --scope settlement --write --backup
    ```
 
-   Preview and migrate storefront publication defaults and every inventory:
+   Preview and migrate storefront publication defaults:
 
    ```console
    market-storefront --config /path/storefront.toml config migrate \
      --scope publication --check
    market-storefront --config /path/storefront.toml config migrate \
      --scope publication --write --backup
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --inventory /path/resources.csv --check
-   market-storefront --config /path/storefront.toml config migrate \
-     --scope publication --inventory /path/resources.csv --write --backup
    ```
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.

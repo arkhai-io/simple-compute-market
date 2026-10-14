@@ -21,15 +21,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
 from apicredits_service.db.models import ApiKey, ConsumptionEvent, CreditGrant
 from apicredits_service.models.keys_model import (
-    LEGACY_ISSUANCE_RESOURCE_ID,
-    LEGACY_ISSUANCE_SERVICE,
+    IssuanceRequest,
     KeyDisposition,
-    derive_credit_fulfillment_id,
-    issuance_request_digest,
-    legacy_issuance_request_digest,
 )
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
 
 KEY_NOT_FOUND = "key_not_found"
 KEY_NOT_OWNED = "key_not_owned"
@@ -113,8 +107,7 @@ class KeysService:
         self,
         *,
         fulfillment_id: str,
-        obligation_ref: str,
-        mechanism: str,
+        negotiation_id: str,
         owner_scheme: str,
         owner_id: str,
         service: str,
@@ -131,22 +124,17 @@ class KeysService:
         if owner is None:
             raise ValueError("owner is required")
         key_target = KeyDisposition(mode=key_mode, key_id=key_id)
-        if mechanism not in {"alkahest.v1", "arkhai.payments.v1"}:
-            raise ValueError(f"unsupported settlement mechanism {mechanism!r}")
-        if fulfillment_id != derive_credit_fulfillment_id(obligation_ref):
-            raise ValueError("fulfillment_id does not match obligation_ref")
-        expected_digest = issuance_request_digest(
+        IssuanceRequest(
+            negotiation_id=negotiation_id,
             fulfillment_id=fulfillment_id,
-            obligation_ref=obligation_ref,
-            mechanism=mechanism,
             owner=owner,
             service=service,
             resource_id=resource_id,
             quantity=quantity,
             key=key_target,
+            request_digest=request_digest,
+            capacity_reservation_id=capacity_reservation_id,
         )
-        if request_digest != expected_digest:
-            raise ValueError("request_digest does not match issuance request")
 
         with self._lock, self._session_factory() as db:
             prior = (
@@ -155,11 +143,9 @@ class KeysService:
                 .first()
             )
             if prior is not None:
-                self._assert_or_adopt_legacy_replay(
-                    db,
+                self._assert_replay(
                     prior,
-                    obligation_ref=obligation_ref,
-                    mechanism=mechanism,
+                    negotiation_id=negotiation_id,
                     owner=owner,
                     service=service,
                     resource_id=resource_id,
@@ -220,6 +206,7 @@ class KeysService:
 
             committed_reservation = self._commit_quota(
                 fulfillment_id=fulfillment_id,
+                negotiation_id=negotiation_id,
                 quantity=quantity,
                 capacity_reservation_id=capacity_reservation_id,
                 resource_id=resource_id,
@@ -228,8 +215,7 @@ class KeysService:
             grant = CreditGrant(
                 key_id=key.key_id,
                 fulfillment_id=fulfillment_id,
-                obligation_ref=obligation_ref,
-                mechanism=mechanism,
+                negotiation_id=negotiation_id,
                 service=service,
                 resource_id=resource_id,
                 key_mode=key_target.mode,
@@ -239,7 +225,6 @@ class KeysService:
                 request_digest=request_digest,
                 capacity_reservation_id=committed_reservation,
                 result_balance=new_balance,
-                escrow_uid=obligation_ref if mechanism == "alkahest.v1" else None,
                 quantity=int(quantity),
                 reason="issuance",
             )
@@ -256,11 +241,9 @@ class KeysService:
                 )
                 if prior is None:
                     raise
-                self._assert_or_adopt_legacy_replay(
-                    db,
+                self._assert_replay(
                     prior,
-                    obligation_ref=obligation_ref,
-                    mechanism=mechanism,
+                    negotiation_id=negotiation_id,
                     owner=owner,
                     service=service,
                     resource_id=resource_id,
@@ -277,13 +260,11 @@ class KeysService:
                 already_issued=False,
             )
 
-    def _assert_or_adopt_legacy_replay(
-        self,
-        db: Session,
+    @staticmethod
+    def _assert_replay(
         prior: CreditGrant,
         *,
-        obligation_ref: str,
-        mechanism: str,
+        negotiation_id: str,
         owner: Identity,
         service: str,
         resource_id: str,
@@ -292,8 +273,7 @@ class KeysService:
         request_digest: str,
     ) -> None:
         expected = (
-            obligation_ref,
-            mechanism,
+            negotiation_id,
             owner.scheme.value,
             owner.identifier,
             service,
@@ -304,8 +284,7 @@ class KeysService:
             request_digest,
         )
         stored = (
-            prior.obligation_ref,
-            prior.mechanism,
+            prior.negotiation_id,
             prior.owner_scheme,
             prior.owner_id,
             prior.service,
@@ -315,58 +294,11 @@ class KeysService:
             prior.key_target_id,
             prior.request_digest,
         )
-        if stored == expected:
-            return
-        stored_owner = _principal(
-            prior.owner_scheme,
-            prior.owner_id,
-            field="legacy grant owner",
-        )
-        legacy_digest = (
-            legacy_issuance_request_digest(
-                fulfillment_id=str(prior.fulfillment_id),
-                obligation_ref=str(prior.obligation_ref),
-                key_id=prior.key_id,
-                key_mode=str(prior.key_mode),
-                owner=stored_owner,
-                quantity=int(prior.quantity),
-            )
-            if prior.fulfillment_id is not None
-            and prior.obligation_ref is not None
-            and prior.key_mode in {"new", "existing"}
-            else None
-        )
-        reconstructable = (
-            prior.obligation_ref,
-            prior.mechanism,
-            stored_owner,
-            int(prior.quantity),
-            prior.key_mode,
-            prior.key_target_id,
-        )
-        requested = (
-            obligation_ref,
-            mechanism,
-            owner,
-            int(quantity),
-            key.mode,
-            key.key_id,
-        )
-        if not (
-            mechanism == "alkahest.v1"
-            and reconstructable == requested
-            and prior.service == LEGACY_ISSUANCE_SERVICE
-            and prior.resource_id == LEGACY_ISSUANCE_RESOURCE_ID
-            and prior.request_digest == legacy_digest
-        ):
+        if stored != expected:
             raise IssuanceError(
                 FULFILLMENT_CONFLICT,
                 "fulfillment_id is already bound to a different issuance request",
             )
-        prior.service = service
-        prior.resource_id = resource_id
-        prior.request_digest = request_digest
-        db.commit()
 
     def _reissue(self, db: Session, prior: CreditGrant) -> dict[str, Any]:
         """Return the committed grant and rotate only an unused new-key secret."""
@@ -374,6 +306,10 @@ class KeysService:
         key = db.get(ApiKey, prior.key_id)
         if key is None:
             raise RuntimeError("committed grant references a missing API key")
+        owner = _principal(prior.owner_scheme, prior.owner_id, field="grant owner")
+        admitted, why = _owner_admits(key, owner)
+        if not admitted:
+            raise IssuanceError(KEY_NOT_OWNED, why)
         secret: str | None = None
         if prior.key_mode == "new" and key.status == "active":
             consumed = (
@@ -408,8 +344,7 @@ class KeysService:
             "schema": "arkhai.api-credits.issuance-result.v1",
             "fulfillment_id": grant.fulfillment_id,
             "grant_id": grant.fulfillment_id,
-            "obligation_ref": grant.obligation_ref,
-            "mechanism": grant.mechanism,
+            "negotiation_id": grant.negotiation_id,
             "owner": owner.model_dump(mode="json") if owner else None,
             "service": grant.service,
             "resource_id": grant.resource_id,
@@ -432,49 +367,69 @@ class KeysService:
         self,
         *,
         fulfillment_id: str,
+        negotiation_id: str,
         quantity: int,
         capacity_reservation_id: str | None,
         resource_id: str,
-    ) -> str | None:
-        reservation = None
-        if capacity_reservation_id:
+    ) -> str:
+        self._ledger.expire_due_holds()
+        reservation = self._ledger.get_reservation_by_escrow(fulfillment_id)
+        if reservation is None and capacity_reservation_id:
             reservation = self._ledger.get_reservation(capacity_reservation_id)
-        if reservation is None:
-            reservation = self._ledger.get_reservation_by_escrow(fulfillment_id)
-        if reservation is not None:
-            try:
-                committed = self._ledger.commit(
-                    resource_id=None,
-                    capacity_reservation_id=reservation["capacity_reservation_id"],
-                    lease_end_utc=None,
-                    idempotency_ref=fulfillment_id,
+        if reservation is not None and reservation["state"] in {
+            "reserved", "provisioning", "leased",
+        }:
+            backing_resource = self._ledger.get_reservation_backing_resource_id(
+                reservation["capacity_reservation_id"]
+            )
+            if (
+                reservation["offering_mode"] != "api_credits"
+                or int(reservation["units"]) != quantity
+                or backing_resource != resource_id
+                or reservation["deal_ref"].get("negotiation_id") != negotiation_id
+            ):
+                raise IssuanceError(
+                    FULFILLMENT_CONFLICT,
+                    "quota hold does not match the authorized purchase",
                 )
-            except CapacityConflictError:
-                committed = None
+            committed = self._ledger.commit(
+                capacity_reservation_id=reservation["capacity_reservation_id"],
+                lease_end_utc=None,
+                idempotency_ref=fulfillment_id,
+            )
             if committed is not None:
                 return str(committed["capacity_reservation_id"])
 
         claim: dict[str, Any] = {
             "offering_mode": "api_credits",
             "resource_id": resource_id,
-            "units": int(quantity),
+            "units": quantity,
         }
+        # The quota ledger's correlation field is named escrow_uid; its value
+        # here is the neutral fulfillment ID, not a settlement reference.
         reserved = self._ledger.reserve(
             claim=claim,
-            deal_ref={"escrow_uid": fulfillment_id},
+            deal_ref={
+                "escrow_uid": fulfillment_id,
+                "negotiation_id": negotiation_id,
+            },
         )
         if reserved is None:
             raise IssuanceError(
                 QUOTA_EXHAUSTED,
                 f"no quota resource can cover {quantity} units",
             )
-        committed = self._ledger.commit(
-            resource_id=None,
-            capacity_reservation_id=reserved["capacity_reservation_id"],
-            lease_end_utc=None,
-            idempotency_ref=fulfillment_id,
-        )
-        return str(committed["capacity_reservation_id"]) if committed else None
+        try:
+            committed = self._ledger.commit(
+                capacity_reservation_id=reserved["capacity_reservation_id"],
+                lease_end_utc=None,
+                idempotency_ref=fulfillment_id,
+            )
+        except CapacityConflictError as exc:
+            raise IssuanceError(QUOTA_EXHAUSTED, str(exc)) from exc
+        if committed is None:
+            raise IssuanceError(QUOTA_EXHAUSTED, "quota commitment disappeared")
+        return str(committed["capacity_reservation_id"])
 
     def get_credit_issuance(self, fulfillment_id: str) -> dict[str, Any] | None:
         """Return a committed grant projection without bearer material."""
@@ -647,7 +602,6 @@ class KeysService:
             db.add(
                 CreditGrant(
                     key_id=key_id,
-                    escrow_uid=None,
                     quantity=int(delta),
                     reason=reason or "admin_adjustment",
                 )
@@ -668,10 +622,8 @@ class KeysService:
                 {
                     "id": row.id,
                     "key_id": row.key_id,
-                    "escrow_uid": row.escrow_uid,
                     "fulfillment_id": row.fulfillment_id,
-                    "obligation_ref": row.obligation_ref,
-                    "mechanism": row.mechanism,
+                    "negotiation_id": row.negotiation_id,
                     "service": row.service,
                     "resource_id": row.resource_id,
                     "key_mode": row.key_mode,

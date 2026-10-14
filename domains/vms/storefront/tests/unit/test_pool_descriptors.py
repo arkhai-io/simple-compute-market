@@ -6,23 +6,18 @@ from arkhai_vms_listings.pool_descriptors import resolve_region, resolve_sla
 
 
 class TestResolveRegion:
-    def test_hint_present_wins(self):
-        assert resolve_region(
-            {"region": "California, US"}, fallback="Texas, US",
-        ) == "California, US"
+    def test_the_hint_is_the_region(self):
+        assert resolve_region({"region": "California, US"}) == "California, US"
 
-    def test_absent_hint_falls_back(self):
-        assert resolve_region({}, fallback="Texas, US") == "Texas, US"
+    def test_absent_hint_is_none(self):
+        assert resolve_region({}) is None
 
-    def test_fallback_can_be_none(self):
-        assert resolve_region({}, fallback=None) is None
-
-    def test_non_string_hint_falls_back(self):
+    def test_non_string_hint_is_none(self):
         """A malformed hint value must not propagate as-is."""
-        assert resolve_region({"region": 12345}, fallback="Texas, US") == "Texas, US"
+        assert resolve_region({"region": 12345}) is None
 
-    def test_empty_string_hint_falls_back(self):
-        assert resolve_region({"region": ""}, fallback="Texas, US") == "Texas, US"
+    def test_empty_string_hint_is_none(self):
+        assert resolve_region({"region": ""}) is None
 
 
 class TestResolveSla:

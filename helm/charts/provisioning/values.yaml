@@ -122,11 +122,11 @@ adminIdentity:
       identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
 
 # ---------------------------------------------------------------------------
-# Storefront callback target for the lease watchdog.
+# Storefront callback target for deal-scoped events.
 #
-# The provisioning service owns the vm_leases table. When a lease expires, its
-# watchdog patches the seller storefront resource back to available. The
-# callback credential is supplied inside the operator-managed runtime Secret.
+# When a lease's capacity is released, the provisioning service sends the
+# owning storefront a signed `capacity_released` event. It signs with
+# `identity` and verifies the response against `storefrontIdentity`.
 storefront:
   url: ""
   agentName: "bob"

@@ -30,6 +30,7 @@ from tests.e2e.roles.helpers.domain_deal import (
     ordered_events,
     require_state,
 )
+from tests.e2e.roles.scenarios.apicredits.conftest import lane_setting
 
 log = logging.getLogger(__name__)
 
@@ -51,13 +52,17 @@ def _payments(name: str, default: object = "") -> object:
 
 @pytest.fixture(scope="module")
 def payments_config() -> ArkhaiPaymentsConfig:
-    """The trusted payments target, or a blocked scenario when it is not ready."""
+    """The trusted payments target, or a blocked scenario when it is not ready.
 
+    The lane's own settings are checked first and fail when absent; only the
+    payments target, an authority the lane does not supply, blocks the scenario.
+    """
+
+    lane_setting("API_CREDITS.REGISTRY_URL")
+    lane_setting("API_CREDITS.STOREFRONT_URL")
     missing = [key for key in _PAYMENTS_KEYS if not _payments(key)]
     if missing:
         pytest.skip(f"blocked: PAYMENTS.{', PAYMENTS.'.join(missing)} not configured")
-    if not settings.get("API_CREDITS.REGISTRY_URL") or not settings.get("API_CREDITS.STOREFRONT_URL"):
-        pytest.skip("blocked: API_CREDITS.REGISTRY_URL / STOREFRONT_URL not configured")
     url = str(_payments("SERVICE_URL")).rstrip("/")
     try:
         health = httpx.get(url + "/health", timeout=5.0, trust_env=False)
@@ -106,7 +111,7 @@ def payment_buyer_cli(payments_config, buyer_cli_binary, tmp_path_factory) -> Bu
         domain_identity="api_credits.v1",
         marketplace_scheme=IdentityScheme.ED25519,
         marketplace_credential=str(_payments("BUYER_MARKETPLACE_CREDENTIAL")),
-        registries=(str(settings.get("API_CREDITS.REGISTRY_URL")),),
+        registries=(lane_setting("API_CREDITS.REGISTRY_URL"),),
         credential_variable="ARKHAI_E2E_PAYMENT_BUYER_MARKETPLACE_CREDENTIAL",
         toml_sections=tuple(section),
     )
@@ -199,7 +204,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     require_state(payment_deal_state, "negotiation_id", "settlement_id")
     seller = Ed25519Signer(bytes.fromhex(str(_payments("SELLER_MARKETPLACE_CREDENTIAL"))))
     with SyncStorefrontClient(
-        str(settings.get("API_CREDITS.STOREFRONT_URL")),
+        lane_setting("API_CREDITS.STOREFRONT_URL"),
         signer=seller,
         caller_role="seller",
         expected_publishers=TrustedIdentitySet(identities=(seller.identity,)),

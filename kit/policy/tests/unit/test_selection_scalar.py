@@ -258,3 +258,41 @@ def test_bisection_alone_never_accepts_an_unpriced_selection() -> None:
     )
     assert decision.action == "counter"
 
+
+
+def _buyer_opening_context(selected: dict[str, Any]) -> NegotiationContext:
+    """A buyer's round-0 context: the selection and the option it selected."""
+    return NegotiationContext(
+        direction="minimize",
+        our_reference_amount=500,
+        our_opening_amount=200,
+        listing={"settlement_options": [selected]},
+        our_escrow_proposal=_selection_proposal(selected),
+    )
+
+
+def test_a_buyer_opening_selecting_a_scalar_option_carries_the_amount() -> None:
+    decision, _ = bisection_middleware([], _buyer_opening_context(_SCALAR_OPTION))
+
+    assert decision.action == "counter"
+    assert decision.proposal["fields"] == {"amount": "200"}
+    assert decision.proposal["settlement_selection"]["option_id"] == _SCALAR_OPTION[
+        "option_id"
+    ]
+    # The seller reads the same proposal as bargaining through the amount.
+    assert proposal_uses_scalar_amount(_LISTING, decision.proposal) is True
+
+
+def test_a_buyer_opening_selecting_an_unpriced_option_carries_no_amount() -> None:
+    decision, _ = bisection_middleware([], _buyer_opening_context(_NON_SCALAR_OPTION))
+
+    assert decision.proposal["fields"] == {}
+
+
+def test_a_buyer_opening_whose_option_is_unknown_carries_no_amount() -> None:
+    context = _buyer_opening_context(_SCALAR_OPTION)
+    context.listing = {}
+
+    decision, _ = bisection_middleware([], context)
+
+    assert decision.proposal["fields"] == {}

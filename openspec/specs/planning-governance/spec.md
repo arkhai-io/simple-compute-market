@@ -179,7 +179,8 @@ step.
 Every change's closeout task MUST run the repository packaging check and resolve every
 failure it reports before implementation is considered complete. Passing test suites do
 not satisfy it: a suite can pass against an environment a hand-maintained or missing
-refresh left stale, and the next environment to rebuild then fails instead.
+refresh left stale, and the next environment to rebuild then fails instead. A change
+MUST own no architecture exception row when it is archived.
 
 #### Scenario: A change adds an internal dependency
 
@@ -194,6 +195,13 @@ refresh left stale, and the next environment to rebuild then fails instead.
   check
 - **THEN** the plan does not satisfy the plan-closeout requirements
 
+#### Scenario: A change owns an architecture exception at closeout
+
+- **WHEN** a change that owns an architecture exception row runs its closeout
+- **THEN** the change-scoped architecture check fails until the row is gone, either
+  because the change removed its edge and deleted the row, or because the row was
+  reassigned to another open change that now owns the divergence
+
 ## Evidence
 
 - Canonical contributor workflow and capability index: `openspec/README.md`.
@@ -203,6 +211,6 @@ refresh left stale, and the next environment to rebuild then fails instead.
 - The single permitted directional roadmap and its no-tasks/no-acceptance-criteria/no-status constraints: `docs/development/ROADMAP.md`.
 - Roadmap currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 5.
 - Campaign index currency owed at change completion: `openspec/README.md#plan-closeout-requirements`, part 6.
-- Packaging check at change closeout: `openspec/README.md#plan-closeout-requirements`, part 8; `make check-packaging`.
+- Packaging check at change closeout: `openspec/README.md#plan-closeout-requirements`, part 8; `make check-packaging`, which runs `make check-architecture`; a change's own exception rows: `make check-architecture-change CHANGE=<name>`.
 
 Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.

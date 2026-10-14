@@ -4,16 +4,13 @@ import ast
 import re
 from pathlib import Path
 
+from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 SERVICE_PACKAGE = SERVICE_ROOT / "src" / "compute_provisioning_service"
 REPOSITORY = SERVICE_ROOT.parents[2]
-ADAPTER_PACKAGES = (
-    REPOSITORY
-    / "domains/vms/provisioning/adapter/src/vm_provisioning_adapter",
-    REPOSITORY
-    / "domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter",
-)
 DOMAIN_MODULES = (
     "vm_provisioning_adapter",
     "bare_metal_provisioning_adapter",
@@ -107,7 +104,6 @@ def _violations(package_root: Path, package: str, forbidden: tuple[str, ...]) ->
     ]
 
 
-VM_ADAPTER, BARE_METAL_ADAPTER = ADAPTER_PACKAGES
 FAMILY_KIT = REPOSITORY / "provisioning/compute/src/compute_provisioning"
 NEUTRAL_PACKAGES = {
     "compute_provisioning": FAMILY_KIT,
@@ -119,34 +115,6 @@ NEUTRAL_PACKAGES = {
     / "provisioning/compute/client/src/compute_provisioning_client",
     "compute_provisioning_service": SERVICE_PACKAGE,
 }
-
-
-def test_neither_adapter_imports_the_service_or_the_other_adapter():
-    """Adapters receive their collaborators from composition; neither depends on
-    the deployed service or on a sibling domain's adapter, at any depth."""
-    violations = _violations(
-        VM_ADAPTER,
-        "vm_provisioning_adapter",
-        ("compute_provisioning_service", "bare_metal_provisioning_adapter"),
-    ) + _violations(
-        BARE_METAL_ADAPTER,
-        "bare_metal_provisioning_adapter",
-        ("compute_provisioning_service", "vm_provisioning_adapter"),
-    )
-
-    assert violations == []
-
-
-def test_no_neutral_provisioning_module_imports_a_domain_operator_client():
-    """Compatibility flows from a domain's client to the neutral contract,
-    never the other way."""
-    violations = [
-        violation
-        for package, root in NEUTRAL_PACKAGES.items()
-        for violation in _violations(root, package, ("vm_provisioning_operator",))
-    ]
-
-    assert violations == []
 
 
 def test_the_job_and_host_authorities_name_no_execution_implementation():
@@ -208,9 +176,6 @@ def test_no_domain_s_deployment_configuration_names_another_domain_s_tree():
 def test_the_ansible_distribution_names_no_domain_s_inventory_group_or_playbook():
     """The distribution runs whichever playbooks and inventory groups the
     domains' codecs and configuration name; it knows none of them."""
-    from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-    from vm_provisioning_adapter.codec import VmAnsibleCodec
-
     names = {VmAnsibleCodec.inventory_group, BareMetalAnsibleCodec.inventory_group}
     names.update(
         path.name

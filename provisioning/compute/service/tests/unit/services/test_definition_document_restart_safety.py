@@ -30,6 +30,7 @@ from sqlalchemy.orm import sessionmaker
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.db.database import run_migrations
+from vm_provisioning_adapter.db import Relay
 from vm_provisioning_adapter.runtime import VmProvisioningRuntime
 from vm_provisioning_adapter.services.relay_service import RelayService
 
@@ -151,8 +152,6 @@ class TestARestartDoesNotRevertAdministration:
         relays = deployment.restart(monkeypatch)
 
         with deployment.session_factory() as db:
-            from vm_provisioning_adapter.db import Relay
-
             stored = db.get(Relay, "site-a").relay_token_encrypted
         assert (
             Fernet(_KEY.encode()).decrypt(stored.encode()).decode()
@@ -223,8 +222,6 @@ class TestAnEditedDocumentStillReconciles:
         deployment.restart(monkeypatch)
 
         with deployment.session_factory() as db:
-            from vm_provisioning_adapter.db import Relay
-
             stored = db.get(Relay, "site-a").relay_token_encrypted
         assert (
             Fernet(_KEY.encode()).decrypt(stored.encode()).decode()

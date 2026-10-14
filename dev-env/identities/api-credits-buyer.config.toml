@@ -1,0 +1,24 @@
+# Public buyer configuration for the API-credit compose stack's buyer service.
+#
+# Well-known deterministic development values. Nothing here is secret; the
+# buyer's signing credential is supplied separately through
+# APICREDITS_BUYER_CREDENTIAL_FILE and never appears in this file. MUST NOT be
+# used against a public network. See README.md in this directory.
+#
+# The registry pinned below is the API-credit registry, which signs ed25519 as
+# the identity compose.apicredits-local.yml binds it to; buyer.config.toml pins
+# the VM stack's registries instead, which this stack does not run.
+
+[BuyerProfile]
+store_path = "/var/lib/arkhai-buyer/arkhai/buyer/profiles.json"
+
+[registry]
+urls = ["http://api-credits-registry:8080"]
+
+[registry.authorities."http://api-credits-registry:8080"]
+authority = "api-credits-registry"
+principals = [{ scheme = "ed25519", identifier = "_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho" }]
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+chain_id = 31337

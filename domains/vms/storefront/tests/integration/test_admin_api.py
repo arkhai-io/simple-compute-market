@@ -13,6 +13,7 @@ directly (same as production).
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import patch
 from typing import AsyncIterator
 
@@ -24,6 +25,7 @@ from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
 
 import market_storefront.container as _container
+from market_storefront.controllers import admin_controller
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
@@ -42,6 +44,7 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import site_capacity
 
 
 _TEST_SELLER_PRINCIPAL = Identity(
@@ -206,6 +209,10 @@ class TestHealthEndpoint:
     async def test_system_status_includes_paused(self, admin_client):
         result = await admin_client.get_system_status()
         assert result.paused is False
+
+    async def test_system_status_reports_no_resource_count(self, admin_client):
+        result = await admin_client.get_system_status()
+        assert "resource_count" not in result.extra
 
     async def test_system_status_readable_by_service_peer(self, service_client):
         """A service peer reads status to confirm its own signing path works.
@@ -374,98 +381,11 @@ class TestAdminResume:
         status = await admin_client.get_system_status()
         assert status.paused is False
 
-# ---------------------------------------------------------------------------
-# Policy seed, status, and evaluate
-# ---------------------------------------------------------------------------
-
-class TestAdminImportResources:
-    """Tests for POST /api/v1/admin/portfolio/resources/import."""
-
-    _VALID_CSV = (
-        "resource_id,resource_type,resource_subtype,unit,value,state,"
-        "min_price,token,max_duration_seconds,"
-        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-        'compute-import-001,compute.gpu,rtx5080,count,1,available,'
-        '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-        'RTX 5080,90.0,"California, US",kvm1\n'
-    )
-
-    async def test_rejects_untrusted_principal(self, client_untrusted):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_untrusted.admin_import_resources(self._VALID_CSV.encode())
-        assert exc_info.value.status_code == 403
-
-    async def test_imports_valid_csv(self, client):
-        c, db = client
-        result = await c.admin_import_resources(self._VALID_CSV.encode())
-        assert result.imported_count == 1
-        assert result.failed_count == 0
-        assert result.total_rows == 1
-        resources = await db.list_resources()
-        assert len(resources) == 1
-        assert resources[0]["resource_id"] == "compute-import-001"
-
-    async def test_upserts_when_table_already_populated(self, client):
-        """Import always upserts regardless of existing rows (clobber path)."""
-        c, db = client
-        # Pre-seed one row via the normal DB path.
-        await db.upsert_resource(
-            resource_id="pre-existing-001",
-            resource_type="compute.gpu",
-            state="available",
-        )
-        # Import a different row — both should be present (append-only upsert).
-        result = await c.admin_import_resources(self._VALID_CSV.encode())
-        assert result.imported_count == 1
-        resources = await db.list_resources()
-        assert len(resources) == 2
-
-    async def test_rejects_csv_missing_required_column(self, client):
-        c, _ = client
-        bad_csv = b"resource_id,state\ncompute-bad-001,available\n"
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.admin_import_resources(bad_csv)
-        assert "400" in str(exc_info.value)
-
-    async def test_partial_import_counts_failures(self, client):
-        """Rows with invalid data are counted in failed_count; valid rows still import."""
-        c, _ = client
-        # One valid row + one row with a type that will fail schema validation.
-        mixed_csv = (
-            "resource_id,resource_type,resource_subtype,unit,value,state,"
-            "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-            'compute-good-001,compute.gpu,rtx5080,count,1,available,'
-            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
-            # Row with missing resource_id will fail.
-            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1\n'
-        ).encode()
-        result = await c.admin_import_resources(mixed_csv)
-        assert result.total_rows == 2
-        # The good row should import even if one fails.
-        assert result.imported_count >= 1
-
-
 async def _seed_dynamic_listing_pool_rows(
     db: SQLiteClient,
     *,
     site_id: str = "default",
 ) -> None:
-    await db.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=4,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-            "offering_mode": "vm",
-        },
-    )
     for gpu_count in range(1, 5):
         listing_id = f"listing-{gpu_count}x"
         await db.upsert_listing(
@@ -538,18 +458,6 @@ async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     return str(reserved["capacity_reservation_id"])
 
 
-@pytest.fixture
-def local_table_derivation():
-    """Listings derive from the storefront's local tables, as these tests seed them.
-
-    Reconciliation reads the same source publication does; a test that seeds
-    local-table listings therefore configures local-table derivation rather than
-    relying on a projection-configured storefront reading its local tables.
-    """
-    with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
-        yield
-
-
 class TestFulfillmentEvents:
     """Deal-scoped event endpoints over the site-authority ledger.
 
@@ -559,10 +467,7 @@ class TestFulfillmentEvents:
     through the capacity client.
     """
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -603,8 +508,6 @@ class TestFulfillmentEvents:
         """A durably bound listing must reserve at its exact site rather than
         re-running placement for an already-derived candidate.
         """
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -690,10 +593,7 @@ class TestFulfillmentEvents:
 
         assert "409" in str(exc_info.value)
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
@@ -734,8 +634,6 @@ class TestFulfillmentEvents:
         ]
 
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
 
@@ -759,8 +657,6 @@ class TestFulfillmentEvents:
         """A listing mapped to a site that isn't currently configured is
         a data-integrity problem, not a capacity answer -- must not be
         collapsed into the same 409 a genuine refusal returns."""
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db, site_id="ghost-site")
 
@@ -783,8 +679,6 @@ class TestFulfillmentEvents:
         """The mapped site itself failing to respond is also distinct
         from a genuine "no capacity" refusal -- must surface as an
         upstream-communication failure, not a 409."""
-        from tests.fake_site import site_capacity
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
@@ -813,11 +707,9 @@ class TestFulfillmentEvents:
 
         assert "502" in str(exc_info.value)
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_usage_started_closes_oversized_listings(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -842,11 +734,9 @@ class TestFulfillmentEvents:
         # provisioning service's to advance.
         assert fake.reservations[capacity_reservation_id]["state"] == "reserved"
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_capacity_released_releases_and_reopens(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -884,11 +774,9 @@ class TestFulfillmentEvents:
         assert fake.reservations[capacity_reservation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
 
-    @pytest.mark.usefixtures("local_table_derivation")
     async def test_manual_compute_listings_reopen_after_release(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -927,7 +815,6 @@ class TestFulfillmentEvents:
     async def test_fulfillment_failed_releases_with_failure_metadata(
         self, db, service_client
     ):
-        from tests.fake_site import site_capacity
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
@@ -958,11 +845,6 @@ class TestFulfillmentEvents:
         """A hold placed before the deal had an escrow learns it at commit, on
         the reservation itself; a failure callback naming none still reaches the
         failure policy with that escrow."""
-        from types import SimpleNamespace
-
-        from market_storefront.controllers import admin_controller
-        from tests.fake_site import site_capacity
-
         received = []
 
         async def failure_policy(_db, context, *, capacity):
@@ -1057,7 +939,7 @@ class TestRealOrchestrationCacheToReconciliation:
         resource_pools_cache._value = [{
             "pool_id": "pool-h200-1",
             "pool_metadata": {
-                "policy_tags": {"deliverable_modes": ["vm"]},
+                "policy_tags": {"deliverable_modes": ["vm"], "region": "California, US"},
             },
             "resources": [{
                 "physical_resource_id": "pool-h200-1", "resource_type": "compute.gpu",
@@ -1101,7 +983,6 @@ class TestRealOrchestrationCacheToReconciliation:
             settings_overrides(
                 enable_registry_discovery=False,
                 registry__urls=[],
-                **{"capacity.use_site_projection_for_listings": True},
             ),
         ):
             # Aggregate subscription is the public capacity-publication hook:
@@ -1291,78 +1172,65 @@ class TestStreamEvents:
 
 
 
-class TestPatchResource:
-    """Tests for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
+class TestReleaseReservations:
+    """POST /api/v1/admin/portfolio/release-reservations, through the typed client.
 
-    async def _seed_leased_resource(self, db: SQLiteClient, resource_id: str = "compute-patch-001") -> None:
-        # Use resource_type other than compute.gpu or omit vm_host to skip capacity gate
-        await db.upsert_resource(
-            resource_id=resource_id,
-            resource_type="compute.gpu",
-            state="leased",
-            # No attributes.vm_host → capacity gate skipped
+    The route releases held reservations in each configured site's ledger and
+    touches no storefront table, including an allocation ledger an older
+    database still holds.
+    """
+
+    async def test_releases_every_held_site_reservation(self, client):
+        c, _db = client
+        from tests.fake_site import site_capacity
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            first = await _ledger_hold(capacity, gpu_count=1)
+            second = await _ledger_hold(capacity, gpu_count=2)
+
+            result = await c.admin_release_reservations()
+
+        assert sorted(result.resource_ids) == sorted(
+            [f"ledger:default:{first}", f"ledger:default:{second}"]
         )
+        assert result.released_count == 2
 
-    async def test_rejects_untrusted_principal(self, client_untrusted):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_untrusted.patch_resource(
-                "compute-patch-001", state="available"
+    async def test_a_second_call_releases_nothing_new(self, client):
+        c, _db = client
+        from tests.fake_site import site_capacity
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            await _ledger_hold(capacity)
+            await c.admin_release_reservations()
+
+            again = await c.admin_release_reservations()
+
+        assert again.released_count == 0
+        assert again.resource_ids == []
+
+    async def test_leaves_an_existing_allocation_ledger_untouched(self, client):
+        c, db = client
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE compute_allocations ("
+                " allocation_id TEXT PRIMARY KEY, resource_id TEXT NOT NULL,"
+                " gpu_count INTEGER NOT NULL, state TEXT NOT NULL,"
+                " released_at TEXT)"
             )
-        assert exc_info.value.status_code == 403
+            conn.execute(
+                "INSERT INTO compute_allocations VALUES ('alloc-1', 'held', 1, 'leased', NULL)"
+            )
+        before = self._allocations(db)
 
-    async def test_patch_state_to_available(self, client):
-        c, db = client
-        await self._seed_leased_resource(db)
-        result = await c.patch_resource("compute-patch-001", state="available")
-        assert result["state"] == "available"
-        assert result["updated"] is True
+        result = await c.admin_release_reservations()
 
-    async def test_patch_is_idempotent_when_state_unchanged(self, client):
-        c, db = client
-        await self._seed_leased_resource(db)
-        await c.patch_resource("compute-patch-001", state="available")
-        result = await c.patch_resource("compute-patch-001", state="available")
-        assert result["updated"] is False
+        assert result.released_count == 0
+        assert self._allocations(db) == before == [("alloc-1", "held", 1, "leased", None)]
 
-    async def test_patch_clears_attribute(self, client):
-        c, db = client
-        await db.upsert_resource(
-            resource_id="compute-patch-002",
-            resource_type="compute.gpu",
-            state="leased",
-            attributes={"lease_end_utc": "2025-01-01 00:00"},
-        )
-        result = await c.patch_resource(
-            "compute-patch-002",
-            state="available",
-            attributes={"lease_end_utc": None},
-        )
-        assert result["state"] == "available"
-        assert result["attributes"].get("lease_end_utc") is None
-
-    async def test_patch_nonexistent_returns_404(self, client):
-        c, db = client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.patch_resource("no-such-resource", state="available")
-        assert exc_info.value.status_code == 404
-
-    async def test_patch_preserves_unspecified_fields(self, client):
-        c, db = client
-        await db.upsert_resource(
-            resource_id="compute-patch-003",
-            resource_type="compute.gpu",
-            state="leased",
-            attributes={"gpu_model": "RTX 5080", "lease_end_utc": "2025-01-01 00:00"},
-        )
-        result = await c.patch_resource(
-            "compute-patch-003",
-            attributes={"lease_end_utc": None},
-        )
-        # state not specified → should remain leased
-        assert result["state"] == "leased"
-        # gpu_model not in patch → should be preserved
-        assert result["attributes"].get("gpu_model") == "RTX 5080"
-        assert result["attributes"].get("lease_end_utc") is None
+    @staticmethod
+    def _allocations(db: SQLiteClient) -> list[tuple]:
+        with sqlite3.connect(db.db_path) as conn:
+            return conn.execute("SELECT * FROM compute_allocations").fetchall()
 
 
 # ---------------------------------------------------------------------------

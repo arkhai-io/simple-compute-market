@@ -64,16 +64,16 @@ def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
     funded escrow ("must carry ... a recipient fallback"). Regression
     guard: the assembly once passed seller_wallet_address=None.
     """
-    import apicredits_storefront.negotiation_runtime as sn
+    import apicredits_storefront.settlement_stages as sn
 
     captured: dict = {}
 
     def _fake_artifacts(**kwargs):
         captured.update(kwargs)
-        return {"proposal": {}, "accepted_escrow_proposal": {}}
+        return {"proposal": {}}
 
     monkeypatch.setattr(sn, "accepted_escrow_artifacts_from_proposal", _fake_artifacts)
-    monkeypatch.setattr(sn, "_seller_wallet_address", lambda: "0xSeLLeR0000")
+    monkeypatch.setattr(sn.settings.wallet, "address", "0xSeLLeR0000")
 
     sn.build_api_credit_accepted_artifacts(
         buyer_principal=_BUYER_PRINCIPAL,

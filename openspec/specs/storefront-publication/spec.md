@@ -19,16 +19,100 @@ A settlement request MUST name the accepted negotiation and carry only what nego
 - **WHEN** a buyer's settlement request carries an SSH public key or a chain name, matching the accepted terms or not
 - **THEN** the storefront refuses it before any settlement lookup
 
-### Requirement: Operator-visible acceptance state
-The storefront MUST expose enough operator state to distinguish global negotiation pause from listing state and an empty resource projection from an inventory import failure.
+### Requirement: Storefront holds no physical-resource authority
+
+A storefront MUST NOT actively maintain physical-resource inventory, host
+inventory, or physical-allocation state. Authoritative physical state belongs to the site
+authority and the provisioning service, and a storefront obtains it only through
+projections. A storefront MAY persist commercial state — pricing, accepted
+settlement terms, seller policy, and listing derivation records — including
+per-pool commercial values keyed by a projected pool identity.
+
+Fresh storefront databases MUST NOT create the retired local inventory or
+physical-allocation tables, columns, triggers, or indexes. An upgraded database
+MAY retain pre-existing schema and rows as inert historical data an operator
+can extract into provisioning. The retirement MUST NOT drop that schema or
+delete or rewrite its retained rows. Current storefront
+code MUST NOT read or write the retired data, including during startup,
+publication, negotiation, diagnostics, or reservation cleanup.
+
+Retained rows MUST NOT be treated as current physical truth. An operator MAY
+use them to prepare host inventory, pool definitions, and capacity declarations
+for provisioning's supported administration surfaces; that use MUST NOT restore
+a storefront inventory read path or overwrite live site state automatically.
+
+#### Scenario: A fresh storefront database is initialized
+
+- **WHEN** a storefront bootstraps a new database
+- **THEN** it creates no retired local physical-inventory or allocation schema,
+  while commercial and listing-derivation persistence remains
+
+#### Scenario: A populated legacy database is upgraded
+
+- **WHEN** retirement is applied to a database containing retired local schema
+  and rows, including resource-transition history
+- **THEN** that schema and those rows are retained unchanged and current
+  storefront code neither reads nor writes them
+
+#### Scenario: An operator uses retained inventory to seed provisioning
+
+- **WHEN** an operator prepares provisioning inventory from retained legacy rows
+- **THEN** authoritative declarations enter through provisioning's supported
+  administration surfaces, without automatic overwrite of live site state or
+  reactivating storefront-local inventory
+
+#### Scenario: Physical state changes after the cutover
+
+- **WHEN** provisioning's physical state changes while historical storefront
+  rows remain in the database
+- **THEN** the historical rows remain unchanged and cannot be used as evidence
+  of current availability when seeding provisioning
+
+#### Scenario: Provisioning reports a physical lifecycle transition
+
+- **WHEN** a physical resource is released or its lifecycle state changes
+- **THEN** the authoritative record changes at the site authority and the
+  storefront does not maintain a parallel physical state record to be updated
+
+#### Scenario: Publication needs physical facts
+
+- **WHEN** a storefront derives publishable listing candidates
+- **THEN** the physical facts come from site projections, and no local physical
+  inventory is consulted or retained as an alternative source
+
+### Requirement: Operator-visible acceptance and projection state
+
+The storefront MUST expose enough operator state to distinguish global
+negotiation pause from listing state, and a site projection the storefront holds
+from one it does not hold, per site and projection family as "Per-site projection
+load-state visibility" in the site-capacity specification requires.
+
+System status MUST NOT report a storefront-wide count, such as `resource_count`,
+in place of per-site projection state or publication outcome. Whether a site
+declares inventory is observed through that site's projection and provisioning's
+inventory administration; whether that inventory became sellable is observed
+through the storefront's listings and publication diagnostics; an
+inventory-import failure is reported by provisioning, which owns the import.
+Liveness health MUST remain independent of per-site projection state.
 
 #### Scenario: Storefront is globally paused
-- **WHEN** a buyer starts a negotiation while global pause is active
-- **THEN** the storefront rejects it with HTTP 503 and a global-pause reason until an authenticated operator resumes the process
 
-#### Scenario: Storefront has no imported resources
-- **WHEN** the active storefront database contains no resource rows
-- **THEN** system status reports `resource_count` as zero and new negotiations cannot match inventory
+- **WHEN** a buyer starts a negotiation while global pause is active
+- **THEN** the storefront rejects it with HTTP 503 and a global-pause reason
+  until an authenticated operator resumes the process
+
+#### Scenario: A site's projection has not loaded
+
+- **WHEN** a configured site's projection family holds no generation, even if
+  another family or site has loaded
+- **THEN** system status reports that family's own load state for that site,
+  without treating the site as empty
+
+#### Scenario: An operator checks inventory readiness
+
+- **WHEN** an operator reads a storefront's system status
+- **THEN** it reports each configured site's projection-family state and
+  carries no `resource_count` field
 
 ### Requirement: Registry publication ownership
 A storefront MUST publish, update, close, and reconcile its listings against one or more configured registries using its publisher identity.
@@ -168,15 +252,66 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
+
+#### Scenario: Administrator waits while settlement servicing is held
+- **WHEN** an accepted bare-metal deal has begun fulfillment and its selected site converges it to active while the storefront's settlement-servicing loop is held
+- **THEN** the administrator's settlement wait refreshes that fulfillment through the accepted thread's buyer principal and durable site binding, reports ready, and records its buyer-safe delivery
+- **AND** observing the transition to active wakes only the obligation adopted for that escrow, so its next servicing pass can publish evidence without waiting for the pending-fulfillment retry deadline; repeated ready reads do not wake it again
+- **AND** the wait starts no fulfillment, creates no reservation, and publishes no settlement evidence
 
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
-- **THEN** the thread persists the canonical buyer and seller principals, exact listing/site/domain binding, agreement payloads, and settlement plan atomically
+- **THEN** the thread records the canonical buyer and seller principals and the exact listing/site/domain binding, and it is recorded as successful only after its agreement payloads and settlement plan are recorded
+- **AND** no capacity is reserved or held until settlement starts fulfillment
+
+#### Scenario: An opening leaves its escrow contract unpinned
+- **WHEN** a buyer opens, or an administrator previews an opening, with an escrow proposal naming no escrow contract (no address, or the zero address)
+- **THEN** the seller negotiates from the listed rate of the listing's first accepted escrow, as VM's seller does, so its floor holds for every opening, and the preview reports the decision the opening makes
+- **AND** a proposal naming a contract the listing does not accept is refused
+
+#### Scenario: Acceptance is interrupted
+- **WHEN** the storefront stops after an acceptance began but before the thread was recorded as successful
+- **THEN** the thread is never settled, and it cannot be countered, accepted, or force-accepted again; the negotiation watchdog abandons it
+
+#### Scenario: Settlement verifies the accepted plan
+- **WHEN** a buyer settles an accepted bare-metal agreement
+- **THEN** the storefront verifies and registers the settlement plan committed at acceptance, which the buyer funded, never a plan rebuilt from current configuration
 
 #### Scenario: Accepted bare-metal agreement is fulfilled
-- **WHEN** settlement is verified and the buyer starts fulfillment
-- **THEN** the storefront reserves at the recorded site, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
+- **WHEN** settlement verifies the escrow
+- **THEN** the storefront wakes the settlement-servicing worker for that obligation, whose ready hook resolves its continuation from the seller entry the accepted Agreement selected and reaches the bare-metal fulfillment, which reserves at the recorded site, commits the reservation with the agreed lease window, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
+- **AND** the commit begins the lease with the window the site records, which the materialization and the delivered evidence state, and provisioning records the lease's target when the fulfillment becomes active, so lease expiry and termination find it
+
+#### Scenario: Fulfillment start is interrupted
+- **WHEN** settlement was verified but fulfillment did not start
+- **THEN** the settlement-servicing worker's next cycle for that obligation starts it, without a second reservation or a buyer request
+
+#### Scenario: An Alkahest fulfillment is evidenced and collected
+- **WHEN** an Alkahest fulfillment's lease becomes active
+- **THEN** the storefront stores the lease-ready evidence, bound to the accepted thread, the committed plan, and the escrow, and submits its digest on chain as a string obligation referencing the escrow, never its body
+- **AND** it binds the attestation as the obligation's fulfillment, after which the worker checks the condition and collects the escrow
+
+#### Scenario: An evidence submission's outcome is unknown
+- **WHEN** an Alkahest evidence submission may have reached the chain but its attestation was not recorded
+- **THEN** no later attempt submits again; the obligation waits for an operator with a reason, and the administrator's system status counts it
+
+#### Scenario: The chain refuses an evidence submission
+- **WHEN** the chain rejects an Alkahest evidence submission
+- **THEN** the storefront retries it with backoff, and after a bounded number of rejections the obligation waits for an operator with a reason, which the administrator's system status counts
+
+#### Scenario: Evidence is resolved
+- **WHEN** a caller requests lease-ready evidence by its digest
+- **THEN** the storefront serves it only on a signed request from a principal the evidence names as buyer or claimant, the seller's administrator
+- **AND** the buyer's fulfillment status names the evidence digest once the evidence is stored, and the attestation that published it only once settlement has recorded the chain's acceptance of the submission, so a stored digest awaiting a retry never reads as published
+
+#### Scenario: A settlement ends uncollected after delivery started
+- **WHEN** an Alkahest obligation reaches a terminal state other than collected after its fulfillment started
+- **THEN** the storefront terminates the lease at the recorded site
+
+#### Scenario: The storefront starts without its settlement configuration
+- **WHEN** the bare-metal storefront starts with no settlement configuration, with a configured Alkahest section, enabled or not, that lacks its seller address, chains, or wallet key, or with any of those supplied and no Alkahest section
+- **THEN** startup refuses with a clear error, and no mechanism is enabled implicitly
 
 #### Scenario: Buyer supplies conflicting routing material
 - **WHEN** a request or domain artifact asserts a provisioning URL, credential, different site, Physical Resource, machine, or physical-host identity
@@ -188,11 +323,12 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 
 #### Scenario: Bare-metal result is returned
 - **WHEN** the recorded fulfillment succeeds
-- **THEN** the storefront normalizes one buyer-safe `BareMetalReceipt` and `BareMetalAccessResult` without returning a private key, provider payload, authority URL, or credential
+- **THEN** the storefront records one buyer-safe `BareMetalReceipt` and `BareMetalResult` (the tenant account, when access became ready, and the lease end) without an endpoint, a private key, provider payload, authority URL, or credential
+- **AND** where to connect is served only live, through the access route, while the lease is active
 
 #### Scenario: Bare-metal lease is torn down
 - **WHEN** the buyer requests teardown for the completed fulfillment
-- **THEN** the storefront converges teardown through the recorded fulfillment and releases the recorded capacity reservation exactly once only after authoritative teardown success
+- **THEN** the storefront terminates the lease at the recorded site, the site's lease lifecycle converges teardown through the recorded fulfillment and releases the capacity reservation exactly once after authoritative teardown success, and the storefront records the release only on the site's capacity-released callback
 
 ### Requirement: Storefronts hold an exact principal per site authority
 A storefront MUST resolve each site authority's site identifier, URL, and scheme-tagged principal through a registry interface. It MUST verify authority-originated version 2 requests and responses against the exact principal selected by site and route context. The registry MUST NOT use an address-only field, derive a principal from private material, or accept a caller-selected expected principal. Routing and ownership MUST come from the trusted registry binding rather than a counterparty-provided site identity.
@@ -249,20 +385,29 @@ A storefront MUST require proofs from both the active and replacement principals
 - **WHEN** the old principal signs after overlap expiry or retirement
 - **THEN** the storefront rejects it
 
-### Requirement: Storefronts cache independent site projections
+### Requirement: Projection-backed listing candidate derivation
+
 Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains resource-granular inside the provisioning site authority, which applies each pool provider's host requirement.
 
 A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
 
-A storefront implementation MAY additionally support deriving publishable listing candidates from local, non-projection tables as a compatibility or staged-rollout path. Once that implementation's projection-backed candidate derivation has parity with its local-table path, the projection path SHALL be the default; a local-table path, if one still exists, is an explicit opt-in for rollback rather than the default behavior.
+Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation.
 
 #### Scenario: One projection refresh fails
 - **WHEN** a storefront cannot refresh one site projection after previously loading a complete generation
 - **THEN** it retains that generation as stale without replacing the other independently versioned projection
 
-#### Scenario: Projection-backed derivation has reached parity
-- **WHEN** a storefront's projection-backed listing-candidate derivation has parity with any local-table path it retains
-- **THEN** the projection path is that storefront's default, with the local-table path available only as an explicit, non-default rollback option
+#### Scenario: Listing candidates are derived
+- **WHEN** a storefront derives publishable listing candidates
+- **THEN** they come from the site projections, with no local-table path available and no configuration option to select one
+
+#### Scenario: Operator seeks to derive from local inventory
+- **WHEN** an operator wants a storefront to derive candidates from local inventory
+- **THEN** no configuration value produces that behavior
+
+#### Scenario: Grouped capacity is used for publication
+- **WHEN** a storefront publishes from the capacity-bucket projection
+- **THEN** it treats grouped capacity as advisory publication input and never as an allocation target
 
 ### Requirement: Scheme-neutral storefront authorization
 
@@ -406,38 +551,38 @@ Every priced settlement publication clause MUST carry one asset-scoped decimal r
 - **WHEN** a shape-priced listing has a clause in an asset in which only some of the families its shape names have rates
 - **THEN** that clause's rate is composed from those families alone, and no rate is taken from another asset's family rates
 
-### Requirement: Per-resource settlement input uses the common clause contract
+### Requirement: Settlement input uses the common clause contract
 
-Configured defaults, pool-declared hints, storefront pool overrides, imported resource records, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
+Configured defaults, pool-declared hints, storefront pool overrides, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
 
-#### Scenario: Imported resource overrides settlement defaults
+#### Scenario: A pool override's clauses replace settlement defaults
 
-- **WHEN** one resource record supplies its own complete settlement clauses
-- **THEN** those clauses replace the configured defaults for that resource and are validated through the same grammar and registrations
+- **WHEN** a storefront pool override for one site's pool supplies complete settlement clauses
+- **THEN** those clauses replace the configured defaults for that pool's listings and are validated through the same grammar and registrations
 
 ### Requirement: Publication pricing migration is preview-first and atomic
 
-Storefront publication migration MUST support TOML configuration and resource
-CSV inputs through explicit check and write modes. Check mode MUST produce a
-deterministic preview without changing the source or creating a backup. Write
-mode MUST require a backup, preserve an exact pre-migration copy, validate the
-complete proposed document through the current structured clause model and
-every selected mechanism's typed publication-input validator, and replace the
-source atomically with restrictive permissions. A failed validation or write
-MUST leave the source unchanged. Rechecking an already migrated input MUST be
+Storefront publication migration MUST support TOML configuration input through
+explicit check and write modes. Check mode MUST produce a deterministic preview
+without changing the source or creating a backup. Write mode MUST require a
+backup, preserve an exact pre-migration copy, validate the complete proposed
+document through the current structured clause model and every selected
+mechanism's typed publication-input validator, and replace the source
+atomically with restrictive permissions. A failed validation or write MUST
+leave the source unchanged. Rechecking an already migrated input MUST be
 idempotent.
 
 Automatic conversion MUST occur only when one enabled mechanism, its asset
 scale, and every legacy pricing input have one complete interpretation.
-Dual-mechanism pricing, hidden reserves, per-row legacy pricing, a missing asset
-scale, conflicting config and row values, malformed legacy values, and any
-other ambiguous population MUST be reported as conflicts without mutation.
-Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
-`min_price` or `default_token_address` as a settlement rate or asset.
+Dual-mechanism pricing, hidden reserves, per-model legacy pricing, a missing
+asset scale, malformed legacy values, and any other ambiguous population MUST
+be reported as conflicts without mutation. Migration MUST NOT guess units,
+synthesize partial clauses, or reinterpret `min_price` or
+`default_token_address` as a settlement rate or asset.
 
 #### Scenario: Operator previews publication migration
 
-- **WHEN** the operator runs check mode against a storefront TOML file or resource CSV
+- **WHEN** the operator runs check mode against a storefront TOML file
 - **THEN** the tool reports the deterministic proposed changes and conflicts while the input bytes and backup set remain unchanged
 
 #### Scenario: Unambiguous publication input is written
@@ -447,7 +592,7 @@ Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
 
 #### Scenario: Legacy pricing has competing interpretations
 
-- **WHEN** dual mechanisms, hidden reserve pricing, per-row legacy pricing, a missing scale, or conflicting values could produce different clauses
+- **WHEN** dual mechanisms, hidden reserve pricing, per-model legacy pricing, or a missing scale could produce different clauses
 - **THEN** check and write modes report the conflict and neither the source nor any existing backup is changed
 
 #### Scenario: Generated clause fails typed mechanism validation
@@ -751,10 +896,10 @@ what its source declares, never by availability, which is what its inexhaustibil
 means; it is not an exemption from having its published state follow its
 declaration.
 
-An unbacked listing MUST be derived only from the site projection. No
-storefront-local table may source its shape or capacity; its storefront-local records
-are its listing row and its immutable binding. That prohibition does not exempt it
-from source-publication reconciliation.
+An unbacked listing, like every listing, MUST be derived only from the site
+projection. No storefront-local table may source its shape or capacity; its
+storefront-local records are its listing row and its immutable binding. That
+prohibition does not exempt it from source-publication reconciliation.
 
 #### Scenario: An unbacked listing's source declaration is removed
 
@@ -789,19 +934,23 @@ from source-publication reconciliation.
 
 ### Requirement: The seller's inventory guard checks a listing against its own source
 
-Before a seller agrees terms, seller negotiation policy MUST recheck every published
-field of the listing that is sourced from its declaration or pool against that
-source: the listing's own site and pool or Physical Resource, never a resource
-elsewhere. A categorical field MUST equal its source and a quantity MUST fit the
-declared capacity. Fields whose authority is the storefront are not rechecked.
+Before every seller decision in a negotiation round, and before a buyer's or an
+administrator's acceptance, the storefront MUST recheck every published field of the
+listing that is sourced from its declaration or pool against that source: the listing's
+own site and pool or Physical Resource, never a resource elsewhere. A categorical field
+MUST equal its source and a quantity MUST fit the declared capacity. Fields whose
+authority is the storefront are not rechecked. A buyer's exit MUST NOT be rechecked.
 
-Seller policy MUST additionally check that the listing's published quantity is
+The storefront MUST additionally check that the listing's published quantity is
 available only for a capacity-backed listing. For an unbacked listing it MUST NOT
 consult availability or contact a site authority.
 
 A declared-match failure MUST be reported with a reason distinct from an availability
 failure, so a buyer and an operator can tell a shape the seller no longer declares
-from capacity that is temporarily taken.
+from capacity that is temporarily taken. A source the storefront cannot confirm MUST be
+refused as retryable, distinct from both, for a seller decision that would counter or
+accept and for any acceptance; a seller decision that independently rejects or exits
+keeps its own reason.
 
 #### Scenario: An unbacked listing matches its declaration
 
@@ -832,6 +981,21 @@ from capacity that is temporarily taken.
 
 - **WHEN** a seller evaluates a proposal against a listing without opening a negotiation
 - **THEN** the evaluation applies the same declared match and, for a capacity-backed listing only, the same availability check as a negotiation round
+
+#### Scenario: An acceptance follows a change at the source
+
+- **WHEN** a buyer accepts a seller's counter, or an administrator force-accepts, after the listing's source stopped supporting it or its capacity was taken
+- **THEN** the acceptance is refused with the declared-match or availability reason and nothing is recorded
+
+#### Scenario: The source cannot be confirmed
+
+- **WHEN** the listing's site cannot be reached, does not verify, or has not supplied the projection the storefront reads
+- **THEN** an opening or round the seller would counter or accept, and any acceptance, is refused as retryable and nothing is recorded
+
+#### Scenario: A buyer exits while the source cannot be confirmed
+
+- **WHEN** a buyer exits a negotiation whose listing's site cannot be reached
+- **THEN** the exit is recorded without a site call
 
 ### Requirement: A listing's published shape comes from its source declaration
 
@@ -1241,6 +1405,35 @@ match.
 - **THEN** no new listing is derived from the pool, its existing listings are held, the pool
   does not fall back to the default generator, and system status reports the problem
 
+### Requirement: A VM pool that states no region holds its listings
+
+Every VM listing MUST publish `region` from its pool's `region` hint, which is the only
+source: no storefront override states it and nothing stands in for an absent hint. A
+pool whose `region` hint is absent or is not a non-empty string MUST be held by
+publication: it yields no new listing, publication neither refreshes nor closes its
+existing listings, and both the publication run and system status report the pool. A
+missing region is a declaration to repair, not a withdrawn source. Region does not bear
+on capacity, so availability reconciliation MUST continue to close such a pool's
+capacity-backed listing when its slice is no longer available.
+
+#### Scenario: A pool states no region
+
+- **WHEN** a pool advertising the VM mode carries no region hint
+- **THEN** no VM listing is derived from it, and the publication run and system status name
+  the pool
+
+#### Scenario: A pool with published listings loses its region
+
+- **GIVEN** an open VM listing derived from a pool
+- **WHEN** a later projection generation carries no region hint for that pool
+- **THEN** publication neither closes nor refreshes the listing until the pool states a region
+
+#### Scenario: A regionless pool's capacity is taken
+
+- **GIVEN** an open capacity-backed VM listing whose pool carries no region hint
+- **WHEN** its slice is no longer available
+- **THEN** availability reconciliation closes the listing
+
 ### Requirement: A VM listing's derivation identity includes its shape
 
 **Identity.**
@@ -1296,7 +1489,7 @@ The carry-over MUST be idempotent.
 - **THEN** after upgrade the listing for its equivalent default shape is paused and withheld
   from registries until the seller resumes it
 
-### Requirement: Storefront pool overrides are site-scoped and durable
+### Requirement: Storefront pool overrides are the only override tier
 
 A storefront's per-pool overrides MUST be stored durably, keyed by site, pool, and offering
 mode. Each override belongs to exactly one offering mode and MUST be validated by the market
@@ -1307,10 +1500,10 @@ through to the next precedence tier. Listing shapes and settlement clauses MUST 
 the lower tier's list as a whole, and an empty shape list or an empty settlement-clause list
 MUST be refused.
 
-Within the storefront-override tier, a value in the site-scoped store MUST take precedence
-over the home-site legacy override record. While a legacy value is in effect for a pool, the
-storefront's system status MUST report it, naming each field whose value came from the legacy
-record.
+The site-scoped store is the storefront's only override tier: a storefront MUST NOT hold a
+second, pool-keyed commercial override record beneath it, and a value the store does not
+state resolves from the pool's own projected hint and then the storefront's configured
+default.
 
 Every listing-derivation path that computes a listing's derivation identity, including
 source reconciliation and the inventory guard, MUST resolve the override tier, so that
@@ -1320,7 +1513,6 @@ An override MUST outlive the projection of its pool. The storefront's system sta
 report every stored override in exactly one state, judged against the projection its
 listings are derived from:
 
-- `inactive` when listings derive from local tables, where no override applies;
 - `site_unconfigured` when the storefront does not configure the override's site;
 - `unknown` when the site is configured but no projection of it is held;
 - `orphaned` when the projection derived from holds no such pool;
@@ -1352,13 +1544,6 @@ override MUST apply again.
   configured site
 - **THEN** listings derived from that pool publish the overridden SLA
 
-#### Scenario: An override is deleted over a legacy value
-
-- **WHEN** an override's SLA is deleted for a home-site pool whose legacy override record
-  also states an SLA
-- **THEN** the legacy SLA applies and system status reports that a legacy value is in effect
-  for the pool
-
 #### Scenario: A pool disappears and returns
 
 - **WHEN** a pool with an override leaves its site's projection and later reappears
@@ -1372,17 +1557,17 @@ override MUST apply again.
 - **THEN** system status reports the override as unknown rather than orphaned, and nothing
   is closed or published for it
 
-#### Scenario: Listings derive from local tables
-
-- **WHEN** a storefront deriving listings from its local tables accepts an override write
-  whose pool its site's live projection contains
-- **THEN** the override is stored, no listing changes, and system status reports it as
-  inactive
-
 #### Scenario: An override shapes a pool's listings
 
 - **WHEN** an override states a shape for a pool and a publication cycle has published it
 - **THEN** a later capacity reconciliation derives the same listing and does not close it
+
+#### Scenario: A home-site pool has no override
+
+- **WHEN** a home-site pool has no site-scoped override and the storefront was upgraded from a
+  version that held a pool-keyed legacy override record for it
+- **THEN** each commercial field resolves from the pool's hint and then the configured
+  default, no legacy value is applied, and system status reports no legacy value in effect
 
 ### Requirement: Storefront pool overrides are written against the site's live projection
 
@@ -1456,11 +1641,10 @@ an accepted write at its next publication run.
 
 ### Requirement: A site whose projection is not held holds its listings
 
-A storefront that derives listings from site projections MUST treat a configured site whose
-resource-pool projection holds no value as unknown, not empty: every listing derived from
-that site MUST be held, neither closed nor refreshed, until the site's projection holds a
-value. Such a storefront MUST NOT derive listings from its local tables because no site's
-projection is held.
+A storefront MUST treat a configured site whose resource-pool projection holds no value as
+unknown, not empty: every listing derived from that site MUST be held, neither closed nor
+refreshed, until the site's projection holds a value. A site whose projection is not held
+MUST NOT yield listings from any other source in its place.
 
 #### Scenario: The storefront starts while a site is unreachable
 
@@ -1471,8 +1655,7 @@ projection is held.
 #### Scenario: No site's projection is held
 
 - **WHEN** no configured site's projection holds a value and a publication cycle runs
-- **THEN** no listing is derived from the storefront's local tables and no listing is
-  closed
+- **THEN** no listing is derived and no listing is closed
 
 #### Scenario: The site returns
 
@@ -1492,9 +1675,8 @@ projection is held.
 A storefront operation that changes a site's capacity and reconciles listings inline (an
 administrator reservation, a fulfillment event, or a failure action that releases capacity)
 MUST refresh its cached projection of that site before reconciling. It MUST reconcile
-against the same projection publication derives from, never against local tables where
-listings derive from projections. Its response MUST report the listings its own change
-closed or reopened.
+against the same projection publication derives from. Its response MUST report the
+listings its own change closed or reopened.
 
 The refresh belongs to the operation: it MUST NOT start or advance any background loop. A
 failed refresh MUST NOT fail the operation; reconciliation then uses the last generation
@@ -1635,21 +1817,30 @@ listing, never from buyer input.
 
 ### Requirement: Bare-metal opening rechecks its listing against its source
 
-Before a bare-metal seller agrees terms, the storefront MUST re-derive the listing's shape
-and region from its own site's live resource-pool projection, at its bound pool and
-Physical Resource. It MUST refuse with a declared-match reason when any of these hold:
+Whenever a bare-metal storefront rechecks a listing against its source, it MUST
+re-derive the listing's shape and region from its own site's live resource-pool
+projection, at its bound pool and Physical Resource. It MUST refuse with a declared-match
+reason when any of these hold:
 
 - the shape digest differs from the binding's;
 - the region differs from the published region;
 - the Physical Resource is absent or disabled.
 
-It MUST refuse as retryable when the site cannot be reached or does not verify.
+It MUST refuse with the availability reason when the site's capacity snapshot shows the
+Physical Resource taken, and as retryable when the site cannot be reached or does not
+verify, or no site authority is configured.
 
 #### Scenario: A declaration shrinks beneath its listing
 
 - **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource now
   declares fewer GPUs than it published
 - **THEN** the opening is refused with a declared-match reason
+
+#### Scenario: The Physical Resource is taken
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource is
+  reserved by another deal
+- **THEN** the opening is refused with the availability reason
 
 ### Requirement: A listing's asking rate is declared per shape
 
@@ -2083,9 +2274,7 @@ schema, labelling each tier, and SHALL NOT read a constraint itself. Under the `
 merge a listing MAY replace a configured default's value, including with a wider one, and
 SHALL NOT remove it. A generated shape's policy SHALL be the configured default alone. A
 field no tier constrains SHALL NOT be constrained by admissibility. An override's shapes
-SHALL NOT merge with the hint's constraints. A listing derived from the storefront's local
-tables SHALL take the configured default alone as its policy, and SHALL be derived only for
-GPU counts that policy admits, chosen from the admissibility kit's admissible values. The resolved policy is the storefront's own;
+SHALL NOT merge with the hint's constraints. The resolved policy is the storefront's own;
 site admission is not changed by it. A malformed configured default SHALL prevent the
 storefront from starting. The storefront SHALL parse the configured default once and
 supply the same declaration to publication, the default generator, and the override
@@ -2112,12 +2301,6 @@ write check.
 - **WHEN** the pool's hint constrains `gpu.count` on its shapes and the storefront's
   override states a shape that constrains nothing
 - **THEN** the override's listing is constrained only by the configured default
-
-#### Scenario: Local-table derivation meets a configured default
-
-- **WHEN** the storefront derives listings from its local tables, a pool's members hold 8
-  GPUs, and the configured default bounds `gpu.count` to at most 4
-- **THEN** listings are derived for 1 to 4 GPUs only, and nothing is reported
 
 #### Scenario: No tier constrains a field
 
@@ -2237,34 +2420,55 @@ default or leaves its offer inadmissible.
   `gpu.model`
 - **THEN** the write is refused naming the path, and the stored override is unchanged
 
+### Requirement: The bare-metal storefront reports its deal readiness
+
+The bare-metal storefront's administrator status MUST report its registry's reachability, its seller chain's viability, its configured Alkahest chains, and the provisioning contract version it speaks, and MUST admit a configured site authority under the `service` role. When it records a site's capacity release, it MUST record a `fulfillment/capacity_released` stage event.
+
+#### Scenario: A site checks its link to the storefront
+
+- **WHEN** a configured site authority reads the storefront's status under the `service` role
+- **THEN** the storefront answers, signed, with its readiness checks and provisioning contract version, and without its pool overrides or the count of obligations waiting for an operator, which only an administrator reads; any other service principal is refused
+
+#### Scenario: Readiness is read before a deal
+
+- **WHEN** an administrator reads the storefront's status
+- **THEN** it reports `registry`, `negotiation_strategy`, and `alkahest` checks, judged per key as VM's are, and `provisioning_contract_version`, while the `/health` probe makes no registry call
+
+#### Scenario: A site releases a deal's capacity
+
+- **WHEN** the storefront records a capacity release from the reservation's site
+- **THEN** its stage-event log carries a `fulfillment/capacity_released` event for the deal
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
 - Version 2 body binding, durable replay classification, exact-retry outcome recovery, and signed responses: `core/storefront/tests/unit/test_auth.py`, `domains/vms/storefront/tests/unit/test_service_peer_identity.py`, and `domains/vms/storefront/tests/integration/test_admin_api.py`.
 - Durable administrator/service-peer ownership and two-proof rotation lifecycle: `core/storefront/tests/unit/test_identity_authority.py`, `test_identity_lifecycle.py`, and `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
 - Transactional storefront principal migration, conflict rejection, and legacy-column retirement: `core/storefront/tests/unit/test_identity_migrations.py`.
-- Projection-backed candidate derivation defaults on once at parity with a retained local-table path: `domains/vms/storefront/tests/unit/test_config_loader.py::test_settings_toml_provides_baseline_defaults` and `test_use_site_projection_for_listings_can_still_be_disabled_explicitly`.
+- Projection-backed candidate derivation is the only path, with no setting that selects another: `domains/vms/storefront/tests/unit/test_config_loader.py::test_settings_toml_provides_baseline_defaults`, `domains/vms/storefront/tests/integration/test_reconciler_projection.py`, and `test_reconciler_derivation.py`.
+- The storefront holds no physical-resource authority — no physical-resource route, no local inventory read by status or publication, fresh databases without the retired schema, and retained inventory left unchanged across every initialization, including a pending core timestamp migration: `domains/vms/storefront/tests/unit/test_server_app_composition.py::test_the_storefront_mounts_no_physical_resource_route`, `domains/vms/storefront/tests/unit/test_migrations.py`, `domains/vms/storefront/tests/integration/test_inventory_freeze.py`, and `test_compute_allocations_freeze.py`; retired settings refused at render and edit: `helm/charts/storefront/tests/test_render.py` and `domains/vms/storefront/tests/unit/cli/test_config.py`.
 - Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
 - Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.
 - Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_runtime.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
 - Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
-- Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
+- Status reports per-site projection state and no resource count: `domains/vms/storefront/tests/unit/services/test_system_service.py`, `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/bare_metal/storefront/tests/test_http_system.py`, and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 - Site-scoped derivation keys and collision resistance (VM and bare-metal): `domains/vms/storefront/tests/unit/test_reconciler.py`; a bare-metal listing is keyed by the common binding's derivation key, whose source identity includes the pool: `domains/bare_metal/tests/test_storefront_publication.py` and `domains/bare_metal/storefront/tests/test_publication_cycle.py`.
 - Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin, negotiation-hold, and settlement/fulfillment entry points: `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, and `domains/vms/storefront/tests/unit/test_settlement_jobs.py`.
 - Domain-owned listing-cardinality resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_cardinality_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
-- Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
+- Structured publication defaults and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py` and `test_publication_migration.py`.
 - Complete bare-metal seller composition, immutable listing/thread binding, selected-site lifecycle, result redaction, restart, and contribution wiring: `domains/bare_metal/storefront/tests/test_http_negotiation.py`, `test_persistence.py`, `test_fulfillment_service.py`, `test_site_clients.py`, `test_domain_runtime.py`, and `test_app_composition.py`.
 - Every VM listing is a listing shape — the override, hint, and default-generator sources, per-model default shapes, and publishing exactly the declared quantities: `domains/vms/storefront/tests/unit/test_reconciler.py` (`TestListingShapes`, `TestStorefrontOverrideTier`), `domains/vms/domain/tests/test_shape_generation.py`, `test_storefront_adapter.py`, and `domains/vms/storefront/tests/integration/test_publication_loop.py`. A shape's declared quantities, not pool defaults, size the VM: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`).
 - Shape feasibility agrees with the site ledger on declared and available capacity, members, and buckets: `domains/vms/storefront/tests/integration/test_shape_feasibility.py`.
 - Shape-bearing derivation identity and the seller-state carry-over across it, reported through system status: `domains/vms/storefront/tests/integration/test_listing_identity_carryover.py` and `test_publication_loop.py`.
-- Storefront pool overrides — the kit's store, reader, write check, status, and signed-resource contract: `kit/pool-overrides/tests/unit/` and `kit/pool-overrides/tests/integration/`; through the storefront app and its typed clients, including a non-home site, refused writes, commercial terms reaching a listing, and the legacy tier: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`; the VM vocabulary: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; the administrator contract: `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
+- Storefront pool overrides — the kit's store, reader, write check, status, and signed-resource contract: `kit/pool-overrides/tests/unit/` and `kit/pool-overrides/tests/integration/`; through the storefront app and its typed clients, including a non-home site, refused writes, and commercial terms reaching a listing: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`; a home-site pool ignoring a retained legacy record: `domains/vms/storefront/tests/integration/test_reconciler_derivation.py`; the VM vocabulary: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; the administrator contract: `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
 - A site whose projection is not held holds its listings, and an empty projection derives nothing: `domains/vms/storefront/tests/integration/test_reconciler_projection.py` and `test_pool_overrides_api.py`.
+- A VM pool that states no region is held by publication and reported, its published listings stay open, and availability reconciliation still closes a sold-out one: `domains/vms/storefront/tests/integration/test_publication_loop.py` and `test_reconciler_projection.py`.
 - An operation that changes a site's capacity refreshes that site before reconciling inline: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py` and `e2e-tests/tests/e2e/roles/scenarios/vms/test_compute_dynamic_listings.py`.
 - Asking rates through each storefront app and its typed clients — declared and override rates reaching the listing a buyer reads, an empty override withholding a rate, in-place refresh, independence from settlement rates, each seller site's rate reaching only its own listing, and holds on an unreadable declaration or a bound conflict: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py` and `domains/bare_metal/storefront/tests/test_http_publication_rates.py`; resolution and the edge matrix: `kit/resource-pools/tests/unit/test_asking_rates.py`, `domains/vms/storefront/tests/integration/test_reconciler_projection.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`; across running services: `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py` (stages 05b–05d).
 - Bare metal's pool overrides — the route service, the administrator routes and their refusals, override status against the durable accepted-generation record, effective lease bounds, and the command: `kit/pool-overrides/tests/unit/test_route_service.py`, `domains/bare_metal/storefront/tests/test_pool_overrides_api.py`, `test_pool_override_terms.py`, `test_publication_cycle.py`, `test_pool_override_cli.py`, and `test_runtime_environment.py`.
 - Listing shapes end to end — a stated shape discovered by a memory query, reserved at its declared quantities, and replaced through a storefront override; and a pool stating a constrained shape publishing its base shape, with no constraint reaching the storefront's or the registry's listing: `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py` (stage 08 for constraints).
-- A VM listing's admissibility per listing — splitting stated shapes, resolving each against the configured default with labelled tiers, an override not inheriting the hint's constraints, and identity over the base shape: `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py`; the generator bounded by the configured default: `domains/vms/domain/tests/test_shape_generation.py`. Withholding an inadmissible offer, closing a listing whose policy cannot be computed while the pool's others publish, holding an unreadable base shape, the reports, rate holds not reopening an excluded listing, and local-table derivation under a configured default: `domains/vms/storefront/tests/integration/test_reconciler_derivation.py` (`TestShapeAdmissibility`, cases in `tests/_reconciler_cases.py`) and `test_reconciler_projection.py`.
+- A VM listing's admissibility per listing — splitting stated shapes, resolving each against the configured default with labelled tiers, an override not inheriting the hint's constraints, and identity over the base shape: `domains/vms/storefront/tests/unit/test_listing_shape_resolution.py`; the generator bounded by the configured default: `domains/vms/domain/tests/test_shape_generation.py`. Withholding an inadmissible offer, closing a listing whose policy cannot be computed while the pool's others publish, holding an unreadable base shape, the reports, and rate holds not reopening an excluded listing: `domains/vms/storefront/tests/integration/test_reconciler_derivation.py` (`TestShapeAdmissibility`, cases in `tests/_reconciler_cases.py`) and `test_reconciler_projection.py`.
 - The configured default parsed once and refused at startup when malformed: `domains/vms/storefront/tests/unit/test_startup_admissibility_default.py` and `test_admissibility_default_composition.py`; reaching a publication cycle, withholding and closing listings, and its reports in system status, through the storefront app: `domains/vms/storefront/tests/integration/test_publication_loop.py`.
 - The VM override write check: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; refusals and a constrained override stored and publishing its base shape, through the typed client: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`.
 

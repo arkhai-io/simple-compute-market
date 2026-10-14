@@ -29,7 +29,12 @@ from market_capacity_publication import (
     PublicationRuntime,
 )
 from market_identity import Identity, Signer, TrustedIdentitySet
-from registry_client import ListingRequest, UpdateListingRequest
+from registry_client import (
+    ListingRequest,
+    RegistryClient,
+    RegistryClientError,
+    UpdateListingRequest,
+)
 
 from .sqlite_client import SQLiteClient
 
@@ -170,6 +175,36 @@ class BareMetalRegistryConfiguration:
             )
 
         return factory
+
+    async def reachability(
+        self,
+        signer: Signer,
+        *,
+        timeout: float = 2.0,
+        transport: Any | None = None,
+    ) -> str:
+        """``ok`` when the registry answers a signed health read, else why not.
+
+        Read for the administrator's status, never the ``/health`` probe: it
+        makes a network call, and the timeout keeps the status route fast while
+        the registry is down.
+        """
+        try:
+            async with RegistryClient(
+                self.url,
+                signer=signer,
+                caller_role="seller",
+                expected_registries=self.trust.principals,
+                registry_authority=self.trust.authority,
+                timeout=timeout,
+                transport=transport,
+            ) as client:
+                await client.get_health()
+        except RegistryClientError as exc:
+            return f"http_{exc.status_code}"
+        except Exception as exc:
+            return f"error: {type(exc).__name__}"
+        return "ok"
 
 
 __all__ = [

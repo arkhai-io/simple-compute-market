@@ -21,7 +21,6 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_source_check import check_listing_source
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests._settings_overrides import settings_overrides
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
 pytestmark = pytest.mark.asyncio
@@ -129,7 +128,7 @@ async def _bind(repository, binding, listing):
 async def _check(repository, projections, binding, listing, capacity):
     if await repository.load_listing_binding(listing_id=listing["listing_id"]) is None:
         await _bind(repository, binding, listing)
-    with settings_overrides(**{"capacity.use_site_projection_for_listings": True}), patch.dict(
+    with patch.dict(
         site_projection_cache._caches,
         {site: _caches(pools) for site, pools in projections.items()},
         clear=True,

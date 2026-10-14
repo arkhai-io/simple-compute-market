@@ -14,7 +14,7 @@ from typing import Any
 
 import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
-from market_core.schemas import SettlementPlan
+from market_core.schemas import Agreement, SettlementPlan
 
 from .run_log import RunLog, read_run, read_run_identity
 
@@ -65,10 +65,17 @@ def accepted_settlement_mechanism(deal: DealContext) -> str:
     """Return the mechanism pinned by accepted Terms, never current config."""
 
     selected: str | None = None
+    if deal.agreement is not None:
+        agreement = Agreement.model_validate(deal.agreement)
+        if agreement.settlement is None:
+            raise ValueError("accepted Agreement has no settlement option")
+        selected = agreement.settlement.mechanism
     if deal.settlement_selection is not None:
         value = deal.settlement_selection.get("mechanism")
         if not isinstance(value, str) or not value:
             raise ValueError("accepted settlement selection has no mechanism")
+        if selected is not None and value != selected:
+            raise ValueError("accepted selection conflicts with the Agreement")
         selected = value
 
     planned: set[str] = set()
@@ -413,6 +420,13 @@ def load_deal_context(
 
     for ev in events:
         ev_type = ev.get("event")
+        if ev.get("settlement_ref") is not None:
+            ref = ev["settlement_ref"]
+            if not isinstance(ref, str) or not ref or ref != ref.strip():
+                raise typer.BadParameter("Run-log has a malformed settlement reference.")
+            if settlement_ref is not None and ref != settlement_ref:
+                raise typer.BadParameter("Run-log has conflicting settlement references.")
+            settlement_ref = ref
         _capture_publisher_binding(ev)
         if ev_type == "publisher_trust_refreshed":
             try:
@@ -473,10 +487,6 @@ def load_deal_context(
             uid = ev.get("escrow_uid")
             if isinstance(uid, str) and uid:
                 escrow_uid = uid
-        if ev_type == "settlement_started":
-            ref = ev.get("settlement_ref")
-            if isinstance(ref, str) and ref:
-                settlement_ref = ref
         if ev_type == "escrow_create_start":
             terms = ev.get("terms", {})
             if isinstance(terms, dict):

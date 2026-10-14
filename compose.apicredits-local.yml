@@ -1,0 +1,66 @@
+# Development overlay for the API-credit market: the signer, wallet, and
+# buyer-path bindings of the API-credit services.
+#
+# Layered over compose.apicredits.yml, which includes compose.dev.yml for the
+# dev chain. The API-credit end-to-end lane adds compose.apicredits-lane.yml,
+# the compute registry its scenario routes discovery across:
+#
+#     docker compose -p simple-market-apicredits --env-file <file> \
+#       -f compose.apicredits.yml -f compose.apicredits-local.yml \
+#       -f compose.apicredits-lane.yml up -d
+#
+# `make -C e2e-tests test-e2e-apicredits` does exactly this, with the values
+# `make e2e-apicredits-dev-env` prints. The full local stack layers this file
+# and compose.vms-local.yml over docker-compose.yml instead; see that file.
+#
+# An overlay, applied with `-f`, for the reason compose.vms-local.yml gives.
+# Every value it binds is a well-known development value that must never be
+# used on a public network; see dev-env/identities/README.md.
+
+services:
+  api-credits-registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=api-credits-registry
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_IDENTIFIER=_NUDENxVX6u4cMd0xzoYyQAt10QDI47bfnYnu2lTVho
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+      - REGISTRY_DESCRIPTOR_BASE_URL=http://localhost:8090
+      - REGISTRY_DESCRIPTOR_DISPLAY_NAME=Local API Credits Registry
+      - REGISTRY_DESCRIPTOR_OPERATOR_IDENTITY=Arkhai local development
+    volumes:
+      - ${APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set API-credits registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  credits-storefront:
+    env_file:
+      - ${APICREDITS_IDENTITY_ENV_FILE:?set API-credits signer credential environment file}
+      - ${APICREDITS_EVM_WALLET_ENV_FILE:?set API-credits EVM wallet environment file}
+    environment:
+    # The wallet env file carries `AGENT_PRIV_KEY`, which the buyer-side
+    # loader in `kit/config` understands; this service resolves its EVM
+    # credential through Dynaconf under the `APICREDITS_STOREFRONT` prefix,
+    # so that name never reaches it and the Alkahest mechanism builds no
+    # clients. The symptom is not a startup failure: the storefront
+    # publishes, negotiates and accepts, then refuses
+    # `POST /api/v1/settle/...` with
+    # `chain 'anvil' not configured — available chains: []`.
+    #
+    # Anvil account 3, matching `AGENT_WALLET_ADDRESS` in that env file and
+    # `[wallet].address` in `storefront.credits.toml`. `@str` is Dynaconf's
+    # marker for "take this verbatim": it parses each environment value as
+    # TOML, and a bare `0x...` is a valid TOML integer literal that would
+    # arrive as a decimal.
+      - APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY=@str 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+  credits-buyer-cli:
+    image: ${APICREDITS_BUYER_IMAGE:-arkhai:e2e-tests}
+    profiles: [buyer]
+    user: "${APICREDITS_BUYER_UID:-1000}:${APICREDITS_BUYER_GID:-1000}"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ${APICREDITS_BUYER_CONFIG_PATH:?set buyer public config path}:/etc/arkhai/config.toml:ro
+      - ${APICREDITS_BUYER_PROFILE_DIR:?set persistent buyer profile directory}:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ${APICREDITS_BUYER_STATE_DIR:?set persistent buyer run-state directory}:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ${APICREDITS_BUYER_CREDENTIAL_FILE:?set strict buyer credential file}:/run/secrets/arkhai/buyer-credential:ro

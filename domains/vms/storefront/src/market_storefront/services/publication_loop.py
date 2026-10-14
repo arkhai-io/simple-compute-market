@@ -37,6 +37,7 @@ from arkhai_vms_listings.listing_comparison import (
 from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
+    derivation_reports,
     open_listing_resource_keys,
     stale_open_listing_ids,
 )
@@ -59,8 +60,8 @@ from market_storefront.publication_wiring import (
 )
 from market_storefront.services.capacity_client import (
     capacity_binding_for_listing,
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.publication_service import (
     _candidate,
@@ -142,10 +143,9 @@ class VmPublicationCycle:
         self._wallet_address = wallet_address
         self.report = PublicationCycleReport(dry_run=dry_run)
         self._driver = PublicationCycleDriver()
-        self._projection: Mapping[str, list[dict[str, Any]]] | None = None
+        self._projection: Mapping[str, list[dict[str, Any]]] = {}
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
-        self._home_site: str | None = None
         self._sites: tuple[str, ...] = ()
         self._derived: dict[int, Any] = {}
 
@@ -159,16 +159,12 @@ class VmPublicationCycle:
     # -- cycle -----------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
-        sites = list(self._capacity.site_ids)
-        self._home_site = sites[0] if sites else None
-        self._sites = tuple(sites)
-        if self._home_site is None:
+        self._sites = tuple(self._capacity.site_ids)
+        if not self._sites:
             await self._converge_registries()
             return self._report()
-        self._projection = listing_source_projection()
-        self._buckets = (
-            site_capacity_buckets() if self._projection is not None else None
-        )
+        self._projection = site_pool_projection()
+        self._buckets = site_capacity_buckets()
         try:
             self._availability = dict(await self._capacity.availability())
         except Exception as exc:
@@ -215,16 +211,12 @@ class VmPublicationCycle:
     # -- source callbacks (worker thread) --------------------------------
 
     def _open_keys(self, db_path: str) -> set[str]:
-        return open_listing_resource_keys(
-            db_path,
-            home_site=self._home_site or "",
-        )
+        return open_listing_resource_keys(db_path)
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
         candidates = available_compute_slices(
             db_path,
-            home_site=self._home_site or "",
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
@@ -241,12 +233,24 @@ class VmPublicationCycle:
                 self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
             else:
                 self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
-        return candidates
+        # Every VM listing publishes a region, which only its pool states. A
+        # pool stating none publishes and refreshes nothing; its candidates
+        # still count as present, so source reconciliation does not close the
+        # listings it already published. The hold is reported from the
+        # derivation's own report rather than from the candidates, because a
+        # pool with no available slice yields no candidate and is held all
+        # the same.
+        reports = derivation_reports()
+        for site_id in sorted(self._projection):
+            for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
+                self.report.record(
+                    "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
+                )
+        return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
         stale = stale_open_listing_ids(
             db_path,
-            home_site=self._home_site or "",
             configured_sites=self._sites,
             member_availability=self._availability,
             site_pool_projection=self._projection,

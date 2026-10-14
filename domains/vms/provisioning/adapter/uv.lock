@@ -52,7 +52,6 @@ dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-fulfillment" },
-    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
     { name = "pydantic" },

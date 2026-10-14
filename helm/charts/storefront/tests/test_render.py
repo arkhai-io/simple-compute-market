@@ -347,6 +347,16 @@ def test_retired_and_secret_keys_are_refused_in_any_spelling() -> None:
     _refused(_render(agent=_with_config(registry={"AUTH": {"http://x": "t"}})), "AUTH")
 
 
+def test_retired_inventory_settings_are_refused_in_any_spelling() -> None:
+    """Inventory is declared at provisioning; the storefront's CSV seeding,
+    escrow templates, and local-table listing switch no longer exist."""
+    for key in ("Resources_CSV_Path", "RESOURCES_CSV_INLINE", "Escrow_Templates"):
+        _refused(_render(agent=_with_config(**{key: {}})), key)
+    flag = "Use_Site_Projection_For_Listings"
+    _refused(_render(agent=_with_config(Capacity={flag: False})), flag)
+    _ok(_render(agent=_with_config(capacity={"sites": {}})))
+
+
 def test_a_stated_port_must_be_a_number_equal_to_the_agents() -> None:
     _refused(_render(agent=_with_config(port="8001")), "must be a number")
     _refused(_render(agent=_with_config(port=8001.5)), "differs from the agent's port")
@@ -366,6 +376,9 @@ def test_retired_values_are_refused_naming_the_key() -> None:
         "autoRegister": _agent(autoRegister=True),
         "rootPath": _agent(rootPath="/x"),
         "principal": _agent(identity={"credentialSecret": BASE_AGENT["identity"]["credentialSecret"], "principal": {}}),
+        "resourcesCsvInline": _agent(
+            secret={**BASE_AGENT["secret"], "resourcesCsvInline": "resource_id\n"}
+        ),
     }
     for key, agent in cases.items():
         _refused(_render(agent=agent), key)

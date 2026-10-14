@@ -18,7 +18,11 @@ from apicredits_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
-from market_arkhai_payments import PaymentApproval, PaymentSellerStage
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_MECHANISM,
+    PaymentApproval,
+    PaymentSellerStage,
+)
 from market_core import ImmutableFulfillmentCapability
 from market_settlement_runtime import compile_settlement_publication_clause
 from smoke_common import (
@@ -130,7 +134,9 @@ async def main(directory, phase, authority):
     composition = SimpleNamespace(domain=domain)
     container.resolved_settlement_composition = composition
     stage = PaymentSellerStage(settings)
-    service = ApiCreditPaymentSettlementService(db=db, composition=composition, stage=stage)
+    service = ApiCreditPaymentSettlementService(
+        db=db, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
+    )
 
     async def settle():
         return await service.settle(

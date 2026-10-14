@@ -5,12 +5,10 @@ include:
   - compose.dev.yml
   - domains/vms/compose.yml
 
-# This file composes base topologies only. The development signer, wallet, and
-# buyer-path bindings live in `compose.local-identities.yml` and are layered on
-# with `-f`, because `include` refuses to let an including file redefine a
-# service it imported. A bare `docker compose up` here therefore starts the
-# stack *without* those bindings, and services that need a signing credential
-# will fail at runtime rather than at interpolation. Use
-# `make -C e2e-tests test-e2e`, or pass both files:
+# This file composes base topology only. The development signer, wallet, and
+# buyer-path bindings live in compose.vms-local.yml, layered with `-f` because
+# an including file cannot redefine a service it imported:
 #
-#     docker compose -f docker-compose.yml -f compose.local-identities.yml up -d
+#     make -s --no-print-directory e2e-vms-dev-env > .e2e-vms.env
+#     docker compose --env-file .e2e-vms.env \
+#       -f compose.vms.yml -f compose.vms-local.yml up -d

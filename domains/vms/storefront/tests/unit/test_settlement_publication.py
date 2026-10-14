@@ -14,6 +14,13 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict
 
 from market_storefront.settlement_composition import VmSettlementComposition
+from market_core import SettlementStageTable
+from market_storefront.settlement_stages import VmAlkahestSellerStage, VmPaymentsSellerStage
+
+_STAGES = SettlementStageTable({
+    "alkahest.v1": VmAlkahestSellerStage(lambda **kwargs: {}),
+    "example.payment.v1": VmPaymentsSellerStage(mechanism="example.payment.v1"),
+})
 
 
 class _Section(BaseModel):
@@ -124,6 +131,7 @@ def _composition(
             configuration_registry=registry,
             settlement_config=config,
             mechanism_resources={},
+            seller_stages=_STAGES,
         ),
         calls,
     )
@@ -327,6 +335,7 @@ async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
         configuration_registry=registry,
         settlement_config=config,
         mechanism_resources={},
+        seller_stages=_STAGES,
     )
 
     accepted, _options, readiness = await VmSettlementComposition.publication_artifacts(

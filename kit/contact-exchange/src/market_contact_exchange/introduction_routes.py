@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 from market_identity import Identity
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .seller_client import INTRODUCTION_READ_OPERATION
 from .settlement_config import MECHANISM, validate_contact_payload
 
 
@@ -412,7 +413,7 @@ class IntroductionRouteService:
         agreement = await self._prepare(None, obligation_ref)
         auth = await self._callbacks.authorize(
             request_context,
-            "introduction_read",
+            INTRODUCTION_READ_OPERATION,
             agreement.obligation_ref,
             (agreement.buyer_principal, agreement.seller_principal),
             None,

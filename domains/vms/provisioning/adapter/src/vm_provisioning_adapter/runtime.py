@@ -18,7 +18,7 @@ from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedE
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.submission import JobSubmissionService
-from compute_provisioning_ansible import AnsibleJobExecutor
+from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleRunner
 from vm_provisioning_adapter.services.relay_rebinding import (
     RelayRebindingRefused,
@@ -37,6 +37,7 @@ from vm_provisioning_adapter.services.relay_service import RelayService
 from vm_provisioning_adapter.services.relay_execution import (
     RelayExecutionResolver,
 )
+from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.vm_fulfillment_plan import VmFulfillmentPlan
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
@@ -174,9 +175,6 @@ def build_vm_runtime(
         if profile.strip()
     ]
     if "mock" in active:
-        from compute_provisioning_ansible import MockAnsibleRunner
-        from vm_provisioning_adapter.services.mock_output import vm_mock_output
-
         ansible_service = MockAnsibleRunner(default_output=vm_mock_output)
     else:
         ansible_service = AnsibleRunner(config)

@@ -32,7 +32,6 @@ def _problems(*, admissibility_default=None, **fields) -> list[str]:
     contribution = VmPoolOverrideContribution(
         db_path=":memory:",
         shape_feasible=vm_shape_feasibility(),
-        home_site=lambda: "a",
         admissibility_default=admissibility_default,
     )
     return list(contribution.vocabulary_problems(record))

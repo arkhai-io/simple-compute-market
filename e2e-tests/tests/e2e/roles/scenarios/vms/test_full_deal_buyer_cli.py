@@ -8,8 +8,8 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
   00e  Provisioning mock mode:  GET /api/v1/system/status → execution.mocked
-  00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
-                                upserts the compute row this test needs
+  00f1 Executor and capacity:  register the executor host and declare its
+                                capacity at provisioning; refresh projections
   00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
                                 gates Phase 7b (on-chain escrow verification)
   00h  Provisioning→storefront: GET provisioning /api/v1/system/status →
@@ -103,17 +103,21 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import (
+from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
-    DealState,
-    _signer,
+    advance_fulfillment_to,
     advance_storefront,
-    capacity_site_id,
-    capacity_source_for,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    one_site,
     pause_storefront,
+    wait_for_stage_event,
+)
+from tests.e2e.roles.scenarios.vms.conftest import (
+    DealState,
+    _signer,
+    capacity_site_id,
+    capacity_source_for,
+    one_site,
     require_state,
     signed_listing_read_headers,
 )
@@ -138,8 +142,7 @@ OFFER_RESOURCE = {
     # offering mode its domain binding selected.
     "offering_mode": "vm",
     "interruptible": True,
-    # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
-    # storefront admin API so it does not depend on a mounted resource file.
+    # The resource stage 00f1 declares at the site for this scenario.
     "resource_id": "compute-e2e-deal-cli-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
@@ -221,10 +224,6 @@ REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
 #: so two scenarios advertising one resource on one site derive the same key
 #: and the second listing create is refused outright.
 E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
-E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
-"""
-
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
@@ -362,42 +361,6 @@ class TestStage00e_ProvisioningMockMode:
         log.info("[00e] Provisioning mock mode confirmed: %s", execution.executors)
 
 
-class TestStage00f_ResourceSeed:
-    def test_00f_imports_e2e_resource_inventory(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Import the compute resource row required by this scenario.
-
-        The e2e deal should not depend on a container-mounted CSV. Importing
-        an inline fixture through the admin API keeps this scenario
-        self-contained while exercising the same upsert path operators use.
-        """
-        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
-
-        result = storefront_admin_client.admin_import_resources(
-            E2E_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-deal-resources.csv",
-        )
-        assert result.failed_count == 0, (
-            f"E2E resource import failed for {result.failed_count} row(s): {result}"
-        )
-        assert result.imported_count >= 1, (
-            f"Expected at least one imported resource row, got: {result}"
-        )
-
-        status = storefront_admin_client.get_system_status()
-        assert (status.resource_count or 0) >= 1, (
-            f"Storefront still reports no resources after import: {status}"
-        )
-
-        deal_state._resources_seeded = True
-        log.info(
-            "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
-            E2E_RESOURCE_ID,
-            status.resource_count,
-        )
-
-
 class TestStage00f1_ExecutorHostRegistry:
     def test_00f1_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
@@ -424,14 +387,14 @@ class TestStage00f1_ExecutorHostRegistry:
         projections immediately and the pull is asserted, rather than sleeping
         out the poller interval.
         """
-        require_state(deal_state, "_resources_seeded")
+        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
 
         host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
             host=E2E_DEAL_CLI_HOST,
             pool_id=E2E_DEAL_CLI_POOL_ID,
-            resource_id="compute-e2e-deal-cli-001",
+            resource_id=E2E_RESOURCE_ID,
             sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
@@ -481,33 +444,39 @@ class TestStage00h_ProvisioningStorefrontLink:
     ):
         """GET /api/v1/system/status → checks.storefront=ok, checks.storefront_auth=ok.
 
-        Validates that the provisioning service's lease watchdog can reach and
-        authenticate to the storefront admin API. This is the connectivity path
-        the watchdog uses when it releases leases at expiry:
+        Validates that the provisioning service can reach and authenticate to
+        the storefront. This is the path a released lease's capacity takes back
+        to the storefront that sold it:
 
-            provisioning LeaseWatchdog
-              → PATCH {storefront_url}/api/v1/admin/portfolio/resources/{id}
+            provisioning lease lifecycle
+              → signed service-peer `capacity_released` event
+              → POST {storefront_url}/api/v1/admin/fulfillment/events/capacity-released
 
         Two sub-checks from the provisioning health endpoint:
           - storefront      — GET {storefront_url}/health responded 200
-          - storefront_auth — GET {storefront_url}/api/v1/system/status with
-                              a signed request responded 200
+          - storefront_auth — GET {storefront_url}/api/v1/system/status, signed
+                              under the `service` role, responded 200 with a
+                              response signed by the pinned storefront principal
 
         If this fails with storefront='unconfigured':
-          - For deploy-docker: ensure storefront_url and the service-peer identity
-            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
+          - For deploy-docker: ensure storefront_url is set in
+            provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
-            bob storefront Service; provisioning.storefront.adminKey defaults
-            to global.adminApiKey.
+            bob storefront Service.
 
         If this fails with storefront='unreachable':
           - Both services must be on the same Docker network.
           - Check that the storefront container is running and healthy (00a/00c).
 
-        If this fails with storefront_auth='unauthorized':
-          - The admin key in config-docker.yml / provisioning-secrets must
-            match the principal pinned in storefront.bob.toml.
+        If this fails with storefront_auth='unauthorized' or
+        'configuration_error':
+          - The provisioning service's signing identity must be the principal
+            storefront.bob.toml pins under
+            [Identity.service_peers.provisioning_default].
+          - The storefront principal provisioning pins
+            (PROVISIONING_STOREFRONT_IDENTITY__*, or the chart's
+            storefrontIdentity) must be the storefront's own signer.
         """
         require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
 
@@ -517,7 +486,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         sf_check = checks.get("storefront", "absent")
         assert sf_check == "ok", (
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
-            "The lease watchdog will not be able to release resources when leases expire.\n"
+            "Provisioning will not be able to tell the storefront when a lease's capacity is released.\n"
             "For deploy-docker: verify storefront_url in "
             "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
@@ -528,7 +497,7 @@ class TestStage00h_ProvisioningStorefrontLink:
         auth_check = checks.get("storefront_auth", "absent")
         assert auth_check == "ok", (
             f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
-            "The lease watchdog signs as the provisioning service; 'unauthorized'\n"
+            "Provisioning signs as its own service identity; 'unauthorized'\n"
             "means its principal is not the one storefront.bob.toml pins as a\n"
             "service peer.\n"
             f"Full health response: {health}"
@@ -559,7 +528,7 @@ class TestStage02b_CreateListingPaused:
           2. local GET shows status=open, paused=True
           3. registry GET does NOT contain the listing
         """
-        require_state(deal_state, "_resources_seeded", "_registry_reachable")
+        require_state(deal_state, "_executor_host_registered", "_registry_reachable")
 
         resp = storefront_seller_client.create_listing(
             listing_resource=OFFER_RESOURCE,
@@ -1108,9 +1077,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             "[08b] settle_submitted event body: %s", {k: submitted.get(k) for k in ("ts", "body")}
         )
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(
+        wait_for_stage_event(
             storefront_admin_client,
             "provision",
             "job_submitted",
@@ -1219,8 +1186,7 @@ class TestStage09a2_CapacityEventCycle:
             f"head={pending['feed_head']!r})"
         )
 
-        # Projections before deltas. With `use_site_projection_for_listings`
-        # on (the shipped default) the close path decides from the
+        # Projections before deltas. The close path decides from the
         # storefront's own projection cache, and only the site-projections
         # loop refills it -- held here like every other loop. Applying the
         # deltas against a pre-deal projection closes nothing however many of
@@ -1353,7 +1319,9 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
 
 
 class TestStage09c_LeaseRecorded:
-    def test_09c_provisioning_lease_recorded(self, provisioning_client, deal_state: DealState):
+    def test_09c_provisioning_lease_recorded(
+        self, provisioning_client, site_capacity, deal_state: DealState
+    ):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Placement is confirmed here, not at stage 08b -- see
@@ -1367,6 +1335,7 @@ class TestStage09c_LeaseRecorded:
         """
         require_state(
             deal_state,
+            "negotiation_id",
             "real_escrow_uid",
             "settlement_status",
             "fulfillment_id",
@@ -1374,9 +1343,11 @@ class TestStage09c_LeaseRecorded:
 
         # DealLease resolves where this deal's lease lives: a site-ledger
         # reservation (remote-capacity mode) or a vm_leases row (embedded).
-        lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
+        lease_view = DealLease(
+            provisioning_client, site_capacity, negotiation_id=deal_state.negotiation_id
+        )
         lease = lease_view.refresh()
-        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get("negotiation_id") == deal_state.negotiation_id
         host_id = lease.get("host_id")
         assert host_id == E2E_DEAL_CLI_HOST, (
             f"lease bound to executor {host_id!r}; this scenario's deal was "
@@ -1391,9 +1362,8 @@ class TestStage09c_LeaseRecorded:
 
         deal_state.deal_lease = lease_view
         # This scenario's own constant, not the lease's null field. The later
-        # stages that consume this address the *storefront's* resource row by
-        # id, so the value they need is the one 00f imported -- the lease never
-        # reported it.
+        # stages that consume this address the resource stage 00f1 declared at
+        # the site by id, and the lease never reported it.
         deal_state.reserved_resource_id = E2E_RESOURCE_ID
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
@@ -1541,10 +1511,7 @@ class TestStage11b_TeardownCompletion:
         # Convergence-driven, not one-shot: `drain` returns when the provider
         # job is no longer gated, which is not the same instant its outcome is
         # durably readable by `converge_teardowns`.
-        from tests.e2e.roles.scenarios.vms.conftest import (
-            advance_fulfillment_to as _advance_to,
-        )
-        fulfillment = _advance_to(
+        fulfillment = advance_fulfillment_to(
             provisioning_client, deal_state.fulfillment_id, "torn_down",
         )
 
@@ -1553,9 +1520,9 @@ class TestStage11b_TeardownCompletion:
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 
-        from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-
-        _wait(storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0)
+        wait_for_stage_event(
+            storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0
+        )
         assert not deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
         )

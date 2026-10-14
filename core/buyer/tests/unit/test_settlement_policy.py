@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from core_buyer.settlement import BuyerSettlementPolicy
+from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
     ComparisonOperator,
@@ -120,6 +122,10 @@ def _policy(
     return BuyerSettlementPolicy(
         config=config,
         registry=registry,
+        stages=SettlementStageTable({
+            "example.payment.v1": object(),
+            "alkahest.v1": object(),
+        }),
         public_context={"currency": "usd"},
     )
 
@@ -181,6 +187,26 @@ def test_policy_compatibility_never_receives_wallet_or_chain_resources() -> None
 
     assert selected is not None
     assert calls == ["example.payment.v1"]
+
+
+def test_unsupported_preferred_option_cannot_win_a_fresh_clause() -> None:
+    calls: list[str] = []
+    policy = replace(
+        _policy(("example.payment.v1", "alkahest.v1"), calls=calls),
+        stages=SettlementStageTable({"alkahest.v1": object()}),
+    )
+    hosted = _option("example.payment.v1", "usd")
+    alkahest = _option("alkahest.v1", "usdc")
+    selected = policy.select(
+        {"settlement_options": [hosted.model_dump(), alkahest.model_dump()]},
+        expiration_unix=2_000_000_000,
+        clauses=("mechanism=example", "mechanism=alkahest"),
+    )
+    assert selected is not None
+    assert selected.option == alkahest
+    assert selected.clause_index == 1
+    assert calls == ["alkahest.v1"]
+    assert policy.public_run_metadata()["settlement_public_mechanisms"] == ["alkahest.v1"]
 
 
 def test_run_metadata_contains_only_public_schema_set_and_fingerprint() -> None:

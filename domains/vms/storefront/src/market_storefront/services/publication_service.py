@@ -144,10 +144,9 @@ async def close_stale_compute_listings_after_capacity_change(
     db_path: str,
     *,
     sqlite_client: Any,
-    home_site: str,
     configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
-    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_pool_projection: dict[str, list[dict]],
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Let VM semantics choose stale candidates; kit executes each close.
@@ -156,7 +155,6 @@ async def close_stale_compute_listings_after_capacity_change(
     """
     ids = stale_open_listing_ids(
         db_path,
-        home_site=home_site,
         configured_sites=configured_sites,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
@@ -185,10 +183,9 @@ async def reopen_available_compute_listings_after_capacity_change(
     db_path: str,
     *,
     sqlite_client: Any,
-    home_site: str,
     configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
-    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_pool_projection: dict[str, list[dict]],
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Let VM semantics choose available candidates; kit executes reopen/publish."""
@@ -196,7 +193,6 @@ async def reopen_available_compute_listings_after_capacity_change(
         return []
     ids = closed_available_listing_ids(
         db_path,
-        home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,

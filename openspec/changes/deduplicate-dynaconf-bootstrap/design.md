@@ -107,6 +107,33 @@ The accepted disposition is behavior preservation rather than feature expansion:
 - **[Merge precedence changes subtly]** → Compare nested values and source order across profile/env/secrets/include fixtures.
 - **[Dependency inversion]** → Kit remains lower-level and imports no provisioning/e2e modules.
 
+## Open question: `kit/config`'s upward edge
+
+- **A foundation kit importing settlement.** *Gates the "extract into `kit/config`"
+  step, because it decides what `kit/config` may know.*
+  `kit/config/src/market_config/settlement_migration.py` imports
+  `SETTLEMENT_CONFIG_SCHEMA_VERSION` and `SettlementRole` from
+  `market_settlement_runtime` and carries mechanism identifiers: `alkahest.v1` as a
+  known mechanism and `fiat.stripe.v1` in a `RETIRED_MECHANISMS` map that migrates
+  it to `arkhai.payments.v1`. A shared-configuration helper now holds the history of
+  every mechanism the marketplace has had, and the import is the only reason
+  `kit/config` declares `arkhai-kit-settlement-runtime`. The architecture check's
+  vocabulary rule already fails on a mechanism literal at the kit layer, and the
+  `alkahest.v1` literal is excused only by a `vocabulary` exception row in
+  `docs/development/ARCHITECTURE.toml` that this change owns and must delete: the
+  row fails once the literal leaves `kit/config`, and this change cannot archive
+  while it owns the row (`make check-architecture-change
+  CHANGE=deduplicate-dynaconf-bootstrap`). Suggested resolution: move the module to
+  `market_settlement_runtime.migration` beside `configuration.py`, which already
+  owns typed settlement configuration and registration; the `config migrate
+  --scope settlement` commands call it from there, the known set is derived from
+  the registry, and the retired map stays with the runtime that defines mechanism
+  identity. One behaviour-preserving task, whose plan names the `tomlkit`
+  dependency, the two CLI call sites, and the migration tests that move with it. The alternative — recording
+  `kit/config` → `kit/settlement-runtime` as a sanctioned foundation edge — would
+  have to be stated in the kit-areas text and would leave the literals where the
+  vocabulary rule finds them.
+
 ## Permanent Documentation Promotion
 
 Shared construction and preserved precedence belong in `deployment-state` spec/architecture. Repository configuration-resolution conventions also belong in `docs/development/DEPLOYMENT_AND_CONFIG.md`: shared `arkhai-kit-config` mechanics are distinct from composition-root ownership of resolver environment variables and consumer-specific settings/secrets/dotenv, prefixes, and missing-file policy. Consumer-specific operational profile details remain with each role.

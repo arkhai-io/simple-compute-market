@@ -141,6 +141,7 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "eth-account" },
@@ -184,14 +185,36 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-bare-metal-buyer"
+version = "0.5.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-buyer" },
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments" },
+    { name = "arkhai-kit-contact-exchange" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+wheels = [
+    { path = "arkhai_bare_metal_buyer-0.5.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.14.2"
+version = "0.15.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -214,7 +237,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.14.2-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -308,7 +331,6 @@ dependencies = [
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-policy" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -330,12 +352,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-e2e-tests"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-apicredits-buyer" },
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-bare-metal-buyer" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core-registry-client" },
@@ -378,7 +401,8 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
-    { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.11.0" },
+    { name = "arkhai-bare-metal-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
@@ -479,7 +503,6 @@ name = "arkhai-kit-capacity-publication"
 version = "0.6.1"
 source = { registry = "../.dist" }
 dependencies = [
-    { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-site-client" },
 ]
@@ -701,8 +724,10 @@ version = "0.3.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
@@ -743,7 +768,6 @@ dependencies = [
     { name = "arkhai-vms" },
     { name = "arkhai-vms-listings" },
     { name = "arkhai-vms-negotiation" },
-    { name = "arkhai-vms-settlement" },
     { name = "eth-account" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
@@ -762,7 +786,6 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-vms" },
     { name = "pydantic" },
 ]
@@ -818,7 +841,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.16.0"
+version = "0.16.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -861,7 +884,6 @@ dependencies = [
     { name = "httpx" },
     { name = "opentelemetry-exporter-gcp-trace" },
     { name = "psycopg2-binary" },
-    { name = "python-multipart" },
     { name = "rich" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -869,7 +891,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.16.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.16.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -2352,15 +2374,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
-]
-
-[[package]]
-name = "python-multipart"
-version = "0.0.27"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/69/9b/f23807317a113dc36e74e75eb265a02dd1a4d9082abc3c1064acd22997c4/python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602", size = 44043, upload-time = "2026-04-27T10:51:26.649Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/78/4126abcbdbd3c559d43e0db7f7b9173fc6befe45d39a2856cc0b8ec2a5a6/python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645", size = 29254, upload-time = "2026-04-27T10:51:24.997Z" },
 ]
 
 [[package]]

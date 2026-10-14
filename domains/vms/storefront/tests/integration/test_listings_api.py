@@ -38,6 +38,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+import market_storefront.negotiation_runtime as _negotiation_runtime
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -470,8 +471,6 @@ async def admin_client(
     _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
     # Evaluate-negotiate previews the opening through the negotiation runtime,
     # so the fixture composes the same runtime negotiate/new uses.
-    import market_storefront.negotiation_runtime as _negotiation_runtime
-
     registration = db.domain_registry.resolve_mode("vm")
 
     async def source_matches(_repository, _resolved):

@@ -13,6 +13,7 @@ from market_core import (
     ImmutableSettlementCapability,
     ImmutableStorefrontCapability,
     MarketDomainContract,
+    SettlementStageTable,
 )
 
 from core_storefront.domain_registry import (
@@ -60,7 +61,9 @@ def _domain(identity: str, source_factory) -> MarketDomainContract:
         ),
         publication=ImmutablePublicationCapability(source_factory=source_factory),
         storefront=ImmutableStorefrontCapability(run_negotiation_policy=normalize),
-        settlement=ImmutableSettlementCapability(verify=normalize, build_plan=normalize),
+        settlement=ImmutableSettlementCapability(
+            seller_stages=SettlementStageTable({"example.settlement.v1": object()})
+        ),
         fulfillment=ImmutableFulfillmentCapability(fulfill=normalize),
     )
 

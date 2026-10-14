@@ -16,6 +16,7 @@ from market_contact_exchange import (
     create_contact_exchange_registration,
 )
 from market_config.config_loader import load_user_config
+from market_core import SettlementStageTable
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -23,12 +24,43 @@ from market_settlement_runtime import (
 )
 
 from .chain_cli import chain_app
-from .common import (
-    buyer_chains,
-    resolve_buyer_wallet,
-)
 from .escrow_cli import escrow_app
-from .introduction_cli import IntroductionContext
+from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
+
+
+_BUYER_STAGES = SettlementStageTable({
+    "alkahest.v1": AlkahestBuyerStage(),
+    "arkhai.payments.v1": PaymentsBuyerStage(),
+})
+
+
+def buyer_settlement_stages() -> SettlementStageTable:
+    """Support for fresh admission and accepted recovery, independent of priority."""
+    return _BUYER_STAGES
+
+
+def buyer_stage(mechanism: str):
+    try:
+        return _BUYER_STAGES[mechanism]
+    except KeyError as exc:
+        raise ValueError(
+            f"accepted settlement mechanism {mechanism!r} is not installed; "
+            "recovery will not fall back to another mechanism"
+        ) from exc
+
+
+def advertised_plan_validator(match: Mapping[str, Any]):
+    """The selected entry's check of a plan it materializes, for one match."""
+    selected = match.get("_selected_settlement")
+    if not isinstance(selected, SelectedSettlementOption):
+        return None
+    return buyer_stage(selected.selection.mechanism).plan_validator(match, selected)
+
+
+def validate_buyer_acceptance(outcome) -> None:
+    if outcome.agreement is None or outcome.agreement.settlement is None:
+        raise RuntimeError("accepted work has no Agreement settlement option")
+    buyer_stage(outcome.agreement.settlement.mechanism).validate_acceptance(outcome)
 
 
 def _alkahest_command_group():
@@ -59,14 +91,8 @@ async def buyer_settlement_readiness() -> tuple[
     config = policy.config
     resources: dict[str, Any] = {}
 
-    alkahest = config.mechanism_config("alkahest")
-    if alkahest is not None and getattr(alkahest, "enabled", False):
-        chains = buyer_chains()
-        address, _private_key = resolve_buyer_wallet()
-        resources["chains"] = chains
-        resources["wallet"] = {"address": address}
-        if len(chains) == 1:
-            resources["default_chain"] = next(iter(chains))
+    for registration in policy.ordered_registrations():
+        resources.update(buyer_stage(registration.mechanism_id).readiness_resources())
 
     statuses = await policy.registry.ordered_readiness(
         config,
@@ -77,6 +103,10 @@ async def buyer_settlement_readiness() -> tuple[
 
 
 def _introduction_context() -> Any:
+    # The introduction commands negotiate and recover through the buyer
+    # client, which imports this composition for acceptance validation.
+    from .introduction_cli import IntroductionContext
+
     return IntroductionContext()
 
 
@@ -119,6 +149,7 @@ def resolve_buyer_settlement_policy(
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
+        stages=buyer_settlement_stages(),
         public_context={},
     )
 
@@ -128,12 +159,7 @@ def alkahest_entry_from_selection(
 ) -> dict[str, Any] | None:
     """Decode the mechanism-owned accepted escrow only after selection."""
 
-    if selected.registration.config_key != "alkahest":
-        return None
-    value = selected.option.params.get("accepted_escrow")
-    if not isinstance(value, Mapping):
-        raise ValueError("selected Alkahest option has no accepted escrow payload")
-    return dict(value)
+    return buyer_stage(selected.selection.mechanism).accepted_entry(selected)
 
 
 def resolve_alkahest_address_config_path(

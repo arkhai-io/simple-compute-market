@@ -223,6 +223,74 @@ async def test_an_unresolvable_pool_is_held_not_closed(world):
     }
 
 
+def _without_region(projected: dict) -> dict:
+    del projected["pool_metadata"]["policy_tags"]["region"]
+    return projected
+
+
+async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world):
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+
+    result = await _cycle(world)
+
+    assert await _listings(world) == {}
+    assert [
+        (action["pool_id"], action["reason"])
+        for action in result["actions"]
+        if action["action"] == "hold"
+    ] == [("broker-a", "pool_region_missing")]
+    report = (await world.client.get_system_status()).publication_derivation[SITE]
+    assert report["regionless_pools"] == ["broker-a"]
+
+
+async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
+    """A backed pool with nothing available yields no candidate; publication
+    still reports it as held for its missing region."""
+    world.pools.append(
+        _without_region(pool("pool-b", backing="backed", available={"gpu_count": 0}))
+    )
+
+    result = await _cycle(world)
+
+    assert await _listings(world) == {}
+    assert [
+        (action["pool_id"], action["reason"])
+        for action in result["actions"]
+        if action["action"] == "hold"
+    ] == [("pool-b", "pool_region_missing")]
+
+
+async def test_a_pool_losing_its_region_holds_its_listings_open(world):
+    world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
+    await _cycle(world)
+    published = await _listings(world)
+
+    world.pools[0] = _without_region(pool("broker-a", backing="unbacked", gpu_count=2))
+    world.set_settlement_clauses([settlement_clause(rate="250")])
+    result = await _cycle(world)
+
+    # Neither closed nor refreshed: the changed rate, which would refresh a
+    # listing whose pool states a region, does not reach them.
+    assert await _listings(world) == published
+    assert result["counts"] == {"hold": 1}
+
+
+async def test_a_regionless_pools_sold_out_listing_still_closes(world):
+    """Region does not bear on capacity, so availability reconciliation still
+    closes a backed listing whose pool has stopped stating a region."""
+    world.pools.append(pool("pool-b", backing="backed"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+
+    world.pools[0] = _without_region(pool("pool-b", backing="backed"))
+    world.pools[0]["resources"][0]["available"]["gpu_count"] = 0
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+
+    row = await _listing(world, listing_id)
+    assert (row["status"], row["closed_by"]) == ("closed", "reconciliation")
+
+
 async def test_a_backed_listing_without_disclosed_backing_is_refreshed(world):
     world.pools.append(pool("pool-b", backing="backed"))
     await _cycle(world)
@@ -424,6 +492,19 @@ def _vm_provision(duration_seconds: int = 3600) -> dict:
     }
 
 
+def _alkahest_selection(listing) -> dict:
+    """Fresh acceptance names its settlement option explicitly."""
+    (option,) = [
+        option for option in listing["settlement_options"]
+        if option["mechanism"] == "alkahest.v1"
+    ]
+    return {
+        "mechanism": "alkahest.v1",
+        "option_id": option["option_id"],
+        "expiration_unix": 1_800_000_000,
+    }
+
+
 async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_path):
     """Publication and negotiation in one app: the loop publishes an unbacked
     listing, and a buyer negotiates that listing to acceptance with no capacity
@@ -458,6 +539,7 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
                 rates=escrow["rates"],
                 demands=listing["demands"],
                 escrow_expiration_unix=1_800_000_000,
+                settlement_selection=_alkahest_selection(listing),
             )
 
         assert result["action"] == "accept"
@@ -524,6 +606,7 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
         "rates": escrow["rates"],
         "demands": listing["demands"],
         "expiration_unix": 2_000_000_000,
+        "settlement_selection": _alkahest_selection(listing),
     }
 
     async def evaluate():
@@ -813,6 +896,7 @@ async def test_a_stated_shape_negotiates_and_reserves_every_declared_dimension(t
                 rates=escrow["rates"],
                 demands=listing["demands"],
                 escrow_expiration_unix=1_800_000_000,
+                settlement_selection=_alkahest_selection(listing),
             )
 
         assert result["action"] == "accept"

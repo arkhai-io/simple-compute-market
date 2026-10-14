@@ -83,6 +83,16 @@ def test_server_uses_shared_storefront_app_shell() -> None:
     assert "/api/v1/settle/{escrow_uid}" in paths
 
 
+def test_the_storefront_mounts_no_physical_resource_route() -> None:
+    """Physical resources are declared at provisioning; the storefront offers
+    no route that creates, imports, or edits one."""
+    paths = [getattr(route, "path", "") for route in server.app.routes]
+
+    assert [
+        path for path in paths if path.startswith("/api/v1/admin/portfolio/resources")
+    ] == []
+
+
 def test_app_factory_retains_each_distinct_compatible_contract() -> None:
     first = build_vm_storefront_domain()
     second = build_vm_storefront_domain()

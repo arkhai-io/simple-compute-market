@@ -33,11 +33,8 @@ from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.buyer_cli import _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.scenarios.vms.conftest import (
-    advance_storefront,
-    capacity_site_id,
-    pause_storefront,
-)
+from tests.e2e.roles.helpers.compute_deal import advance_storefront, pause_storefront
+from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id
 from tests.e2e.roles.scenarios.vms.host_registry import (
     declare_e2e_capacity,
     provision_e2e_executor,

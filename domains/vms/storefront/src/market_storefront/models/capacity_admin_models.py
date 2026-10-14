@@ -11,7 +11,12 @@ class ReleaseReservationsResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/release-reservations."""
 
     released_count: int
-    resource_ids: list[str]
+    resource_ids: list[str] = Field(
+        description=(
+            "The released site reservations, each as "
+            "``ledger:<site>:<capacity_reservation_id>``."
+        ),
+    )
 
 
 class ReserveCapacityRequest(BaseModel):
@@ -42,53 +47,6 @@ class ReserveCapacityResponse(BaseModel):
     gpu_count: int
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
-
-
-class ImportRowError(BaseModel):
-    """One failed CSV row in an /admin/portfolio/resources/import response."""
-
-    row_number: int
-    resource_id: str | None = None
-    resource_type: str | None = None
-    errors: list[str]
-
-
-class ImportResourcesResponse(BaseModel):
-    """Response for POST /api/v1/admin/portfolio/resources/import."""
-
-    imported_count: int
-    failed_count: int
-    total_rows: int
-    errors: list[ImportRowError] = []
-
-
-class ResourcePatchRequest(BaseModel):
-    """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    state: str | None = Field(
-        default=None,
-        description="New resource state. Only written if provided.",
-    )
-    attributes: dict | None = Field(
-        default=None,
-        description=(
-            "Partial attribute patch. Keys present in this dict are merged "
-            "into the existing attributes JSON; absent keys are untouched. "
-            "Pass null values to clear individual attribute keys."
-        ),
-    )
-
-
-class ResourcePatchResponse(BaseModel):
-    """Response from PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
-
-    resource_id: str
-    state: str | None = None
-    attributes: dict | None = None
-    updated: bool = Field(
-        description="True if any field was actually changed; False if the "
-        "row was already in the requested state (idempotent call)."
-    )
 
 
 class FulfillmentStartedEventRequest(BaseModel):

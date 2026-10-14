@@ -8,10 +8,29 @@ from types import MappingProxyType
 from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
-from market_alkahest import create_alkahest_registration
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
-from market_contact_exchange import create_contact_exchange_registration
+from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption
+from .alkahest_lifecycle import alkahest_servicing
+from .settlement_stages import (
+    ALKAHEST_MECHANISM,
+    ContactStage,
+    PaymentStage,
+    SellerStage,
+    declined_servicing,
+    refund_payment,
+    revalidate_alkahest,
+    revalidate_contact,
+    revalidate_payment,
+    settle_payment,
+    verify_alkahest,
+    verify_contact,
+    verify_payment,
+)
+from market_alkahest import create_alkahest_registration
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+    create_contact_exchange_registration,
+)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -28,46 +47,38 @@ from market_arkhai_payments import (
     servicing_stage,
 )
 
-ALKAHEST_MECHANISM = "alkahest.v1"
-
-# Whether each mechanism's deal is fulfilled through site capacity, that is,
-# provisions the listed machine. The same declaration the VM storefront makes.
-BARE_METAL_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
+SELLER_STAGES = SettlementStageTable(
     {
-        ALKAHEST_MECHANISM: True,
-        ARKHAI_PAYMENTS_MECHANISM: True,
-        # An introduction settles by revealing contacts; no machine is provisioned.
-        CONTACT_MECHANISM: False,
+        ALKAHEST_MECHANISM: SellerStage(
+            create_alkahest_registration,
+            verify_alkahest,
+            revalidate_alkahest,
+            True,
+            servicing=alkahest_servicing,
+        ),
+        ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
+            create_arkhai_payments_registration,
+            verify_payment,
+            revalidate_payment,
+            True,
+            refund=refund_payment,
+            reconcile=settle_payment,
+        ),
+        CONTACT_MECHANISM: ContactStage(
+            create_contact_exchange_registration,
+            verify_contact,
+            revalidate_contact,
+            False,
+            servicing=declined_servicing,
+        ),
     }
 )
-
-
-class UndeclaredMechanismFulfillmentError(ValueError):
-    """A composed mechanism has no declaration of how it is fulfilled."""
-
-
-def mechanism_fulfills_through_capacity(
-    mechanism: str, declarations: Mapping[str, bool]
-) -> bool:
-    """Look up a mechanism's declaration, refusing one the composition lacks."""
-    try:
-        return bool(declarations[mechanism])
-    except KeyError as exc:
-        raise UndeclaredMechanismFulfillmentError(
-            f"settlement mechanism {mechanism!r} has no declaration of whether it "
-            "is fulfilled through bare-metal capacity"
-        ) from exc
-
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
 
     return SettlementConfigurationRegistry(
-        (
-            create_alkahest_registration(),
-            create_contact_exchange_registration(),
-            create_arkhai_payments_registration(),
-        )
+        tuple(stage.registration_factory() for stage in SELLER_STAGES.values())
     )
 
 
@@ -81,7 +92,13 @@ class BareMetalStorefrontSettlementComposition:
     payments_client_for_owner: ClientForOwner | None = field(default=None, repr=False)
     payments_stage: PaymentSellerStage | None = field(default=None, init=False, repr=False)
 
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+
     def __post_init__(self) -> None:
+        if any(
+            mechanism not in self.seller_stages for mechanism in self.config.priority
+        ):
+            raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
@@ -117,11 +134,14 @@ class BareMetalStorefrontSettlementComposition:
 
     def settlement_data_dispatch(
         self,
-    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]]:
-        stage = self.payments_stage
-        if stage is None:
-            return {}
-        return {ARKHAI_PAYMENTS_MECHANISM: lambda agreement: stage.settlement_data(agreement).to_wire()}
+    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
+        payment_stage = self.payments_stage
+        return {
+            mechanism: lambda agreement, entry=entry: entry.accepted_data(
+                agreement, payment_stage
+            )
+            for mechanism, entry in self.seller_stages.items()
+        }
 
     def configures(self, mechanism_id: str) -> bool:
         """Whether the settlement root has a section for ``mechanism_id``.
@@ -234,7 +254,8 @@ class BareMetalStorefrontSettlementComposition:
             str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
         ] = {}
         for mechanism_id in self.config.priority:
-            registration = self.registry.registration(mechanism_id)
+            entry = self.seller_stages[mechanism_id]
+            registration = entry.registration_factory()
             if registration.accepted_obligation_builder is None:
                 dispatch[mechanism_id] = None
                 continue

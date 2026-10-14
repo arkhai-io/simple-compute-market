@@ -31,6 +31,12 @@ publication running for longer than necessary.
   literally, and publish every entry rather than three.
 - [x] 1.3 Make `publish-pypi.yml` read the manifest instead of heredocing its
   own table.
+  - Not reflected on `dev` as of 2026-10-09: `publish-pypi.yml` still builds its
+    matrix from its own `PACKAGES` table. `bare-metal-mock-provisioned-deal`
+    added its newly published packages to both that table and the manifest, and
+    `scripts/tests/test_publish_matrix.py` now checks each list is closed under
+    repository dependencies; nothing keeps the two lists equal until this task's
+    workflow change is restored.
 - [x] 1.4 Update `scripts/tests/test_publish_matrix.py`. It currently parses the
   heredoc by regex and asserts the workflow states its table that way; that
   assertion is about to be false. Keep what it actually protects — that a

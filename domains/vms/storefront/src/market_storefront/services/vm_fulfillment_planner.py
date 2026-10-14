@@ -1,75 +1,46 @@
-"""VM fulfillment planning from a listing/order payload."""
+"""VM fulfillment planning from verified settlement delivery facts."""
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from arkhai_vms_listings import extract_compute_from_order
-from arkhai_vms_settlement import (
-    encode_compute_lease,
-    token_resource_from_accepted_escrow,
-)
+from arkhai_vms import normalize_vm_provision_terms
+from market_core import SettlementEvidence
 
 from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
-from market_storefront.services.vm_job_spec_service import (
-    compute_capacity_claim_from_order,
-)
+
+# Evidence statuses whose payload carries verified delivery facts. A seller
+# refund moves the status from ``verified`` through ``refunding`` to
+# ``refunded`` but never changes the facts, so a delivery that started before
+# the refund can still complete from them. Only ``verified`` admits a new
+# delivery start; the delivery-record insert enforces that.
+VERIFIED_EVIDENCE_STATUSES = frozenset({"verified", "refunding", "refunded"})
 
 
-def build_vm_fulfillment_plan(
-    *,
-    order: str | dict[str, Any] | None,
-    duration_seconds: int,
-    settlement_mechanism: str = "alkahest.v1",
-    chain_configs: dict[str, Any] | None = None,
-) -> VmFulfillmentPlan:
-    """Materialize VM fulfillment inputs from a settlement order payload."""
-    order_dict: dict[str, Any] | None = None
-    order_bytes = b""
-
-    if order:
-        if isinstance(order, str):
-            try:
-                parsed = json.loads(order)
-            except json.JSONDecodeError:
-                parsed = None
-            order_dict = parsed if isinstance(parsed, dict) else None
-            order_bytes = order.encode("utf-8")
-        elif isinstance(order, dict):
-            order_dict = order
-
-    if not order_dict:
+def build_vm_fulfillment_plan(*, evidence: SettlementEvidence) -> VmFulfillmentPlan:
+    if evidence.status not in VERIFIED_EVIDENCE_STATUSES or not evidence.settlement_ref:
+        raise ValueError("VM delivery requires verified settlement evidence")
+    payload = evidence.evidence
+    delivery = payload.get("delivery") or {}
+    if (
+        payload.get("schema") != "vm.settlement-evidence.v1"
+        or delivery.get("kind") != "vm.delivery-facts"
+        or delivery.get("schema_version") != 1
+    ):
+        raise ValueError("VM delivery requires supported delivery facts")
+    facts = delivery.get("payload") or {}
+    order = facts.get("order")
+    if not isinstance(order, dict) or not order:
         raise ValueError(
             "VM fulfillment requires a valid, non-empty settlement order object."
         )
-
-    order_id = order_dict.get("listing_id") or order_dict.get("order_id")
-    compute_resource = extract_compute_from_order(order_dict)
-    required_attributes = compute_capacity_claim_from_order(order_dict)
-    if settlement_mechanism == "alkahest.v1":
-        accepted_escrows = order_dict.get("accepted_escrows") or []
-        first_escrow = accepted_escrows[0] if accepted_escrows else None
-        token_resource = token_resource_from_accepted_escrow(
-            first_escrow,
-            chain_configs=chain_configs,
-        )
-        if token_resource is None:
-            raise ValueError(
-                f"Cannot encode compute lease for listing {order_id!r}: "
-                "accepted_escrows[0] is neither token-backed nor native-token"
-            )
-        order_bytes = encode_compute_lease(
-            compute_resource=compute_resource,
-            token_resource=token_resource,
-            duration_seconds=duration_seconds,
-        )
-    elif settlement_mechanism != "arkhai.payments.v1":
-        raise ValueError(f"Unsupported settlement mechanism: {settlement_mechanism}")
-
     return VmFulfillmentPlan(
-        order_dict=order_dict,
-        order_id=order_id,
-        order_bytes=order_bytes,
-        required_attributes=required_attributes,
+        order_dict=dict(order),
+        order_id=facts["listing_id"],
+        order_bytes=bytes.fromhex(facts["lease_bytes_hex"]),
+        required_attributes=dict(facts["required_attributes"]),
+        provision_terms=normalize_vm_provision_terms(facts["provision_terms"]),
+        duration_seconds=int(facts["duration_seconds"]),
+        start_utc=facts["start_utc"],
+        lease_end_utc=facts["lease_end_utc"],
+        funding_expiration_unix=facts.get("funding_expiration_unix"),
+        condition_anchor=facts.get("condition_anchor"),
     )

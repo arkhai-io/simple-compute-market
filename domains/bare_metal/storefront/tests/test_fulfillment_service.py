@@ -14,6 +14,11 @@ from core_storefront import (
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
+from market_core import SettlementEvidence
+from arkhai_bare_metal_storefront.settlement_evidence import (
+    EvidencePayload,
+    DeliveryInput,
+)
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.fulfillment_service import (
@@ -73,12 +78,26 @@ class FakeDb:
         assert negotiation_id == "neg-a"
         return dict(self.context)
 
-    async def load_escrow(self, *, escrow_uid):
-        return {
-            "escrow_uid": escrow_uid,
-            "negotiation_id": "neg-a",
-            "status": "settlement_verified",
-        }
+    async def verified_evidence(
+        self, *, negotiation_id, buyer_principal, include_refunds=False,
+        delivery_started=False,
+    ):
+        assert negotiation_id == "neg-a" and buyer_principal == BUYER
+        return SettlementEvidence(
+            negotiation_id="neg-a",
+            mechanism="alkahest.v1",
+            settlement_ref="escrow-a",
+            status="settlement_verified",
+            evidence=EvidencePayload(
+                agreement_sha256="a" * 64,
+                source={"obligation_ref": "test-obligation"},
+                delivery=DeliveryInput(
+                    site_id="site-a",
+                    physical_resource_id="resource-a",
+                    terms=self.terms,
+                ),
+            ).model_dump(mode="json"),
+        )
 
     async def load_bare_metal_terms(self, *, negotiation_id):
         return self.terms
@@ -86,10 +105,6 @@ class FakeDb:
     async def load_bare_metal_listing_payload(self, *, listing_id):
         assert listing_id == "listing-a"
         return self.listing
-
-    async def load_bare_metal_settlement_record(self, *, negotiation_id):
-        # These deals settle through escrow, so they carry no payment record.
-        return None
 
     async def ensure_bare_metal_fulfillment_lifecycle(self, **identity):
         if self.lifecycle is None:
@@ -279,6 +294,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
     begun_projection = await fulfill_domain(
         get_market_domain_contract(),
@@ -294,7 +310,10 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
                     contract_minor=0,
                 ),
             ),
-            escrow_uid="escrow-a",
+            settlement_evidence=await db.verified_evidence(
+                negotiation_id="neg-a", buyer_principal=BUYER
+            ),
+            domain_input={"read_verified_evidence": db.verified_evidence},
             buyer_principal=BUYER,
             ports=StorefrontFulfillmentPorts(
                 repository=db,
@@ -306,7 +325,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_ends_its_lease() -> Non
     begun = dict(db.lifecycle)
     repeated = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -369,19 +388,20 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
 
     with pytest.raises(RuntimeError, match="controlled failure"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
     recorded = db.materialization
 
     retried = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -413,12 +433,13 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
         db=db,
         capacity_client=capacity,
         fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
     )
 
     with pytest.raises(BareMetalFulfillmentError, match="conflicting site"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
 
@@ -436,12 +457,13 @@ async def test_a_listing_naming_no_attributes_reserves_nothing() -> None:
         db=db,
         capacity_client=capacity,
         fulfillment_client=FakeFulfillment(),
+        read_verified_evidence=db.verified_evidence,
     )
 
     with pytest.raises(BareMetalFulfillmentError, match="no attributes to claim"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
 
