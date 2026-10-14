@@ -455,7 +455,11 @@ This runs after code review, to reduce churn.
       `kit/capacity-publication` and `core/storefront` to the contracts.
 - [ ] 8.4 `openspec/specs/api-credits/spec.md`: sync the delta. `architecture.md`,
       "Explicit database reset": the listing-binding refusal; "Implementation
-      composition": the durable binding keyed by listing and the source check.
+      composition": the durable binding keyed by listing and the source check; the
+      bound pool as the listing's provenance, which the source check, reopen, and the
+      reconciliation source pass enforce; that pass running on every reconcile, and
+      why an in-place declaration edit closes its listings only on the next pass; and
+      negotiation's quota snapshot read from the bound site alone.
 - [ ] 8.5 `docs/development/ARCHITECTURE.md`: "Kit areas" — the delegate in
       `kit/resource-pools-contracts` and the markets it serves; "Capacity publication
       and multi-domain storefront composition" — `PublicationBinding` with its delegate
