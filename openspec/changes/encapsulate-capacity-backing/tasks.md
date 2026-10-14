@@ -299,13 +299,15 @@ move each domain's behaviour onto the delegate and can land in any order.
       candidate through the stage table; no listing it publishes changes, since every
       candidate is backed.
       *Done.* Admissibility runs in `publication_payload_builder`.
-- [x] 5.6 **Effects.** `storefront/.../site_clients.py` builds a `CapacityEffects` over
-      the aggregate it already builds; `runtime.py` holds it. `fulfillment_service.py`'s
-      settlement reserve and commit, and `deal_controls.py`'s administrator reserve,
-      call it with the listing's binding; nothing reserves or commits through the
-      aggregate. Recovery's reservation listing and the map write, and the release
-      callback's map removal, stay: they are not effects.
-      *Done.* `CapacityEffects` is built over the runtime's aggregate where each effect runs; fulfillment maps the kit's refusals to its own 409.
+- [x] 5.6 **Effects.** `fulfillment_service.py`'s settlement reserve and commit, through
+      its `_effect` helper, and `deal_controls.py`'s administrator reserve each build a
+      `CapacityEffects` over the runtime's aggregate where the effect runs and call it
+      with the listing's binding; nothing reserves or commits through the aggregate.
+      Recovery's site read and reservation-map write, and the release callback's map
+      removal, stay on the aggregate: they are not effects.
+      *Done.* Planned as one `CapacityEffects` built in `site_clients.py` and held by
+      `runtime.py`; composed at each effect instead, for the reason in design.md's
+      Implementation notes. Fulfillment maps the kit's refusals to its own 409.
 - [x] 5.7 Tests (under `domains/bare_metal/`): `tests/test_storefront_publication.py`
       (backing is not a term; a changed backing refuses refresh; the classification
       halves); `tests/test_inventory_guard.py` (a changed backing is a declared

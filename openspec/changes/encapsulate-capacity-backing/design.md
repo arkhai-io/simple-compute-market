@@ -651,6 +651,15 @@ Decided or learned while implementing, each within a decision above:
   publishable satisfies "An unbacked listing publishes only settlement options its
   domain does not fulfil through capacity" without one. A backed VM listing with no
   option would have published unbuyable before; no VM suite exercises one.
+- **Bare metal composes `CapacityEffects` where each effect runs.** Fulfillment
+  and deal controls need the raw aggregate whatever holds the effects: recovery
+  reads a site and writes the reservation-site map, and release removes from it.
+  A runtime-held effects object would leave each holding both, with the aggregate
+  no further from a future effect than now, and `CapacityEffects` keeps no state,
+  so one built per effect applies the same guard. Holding the effects at the
+  runtime boundary belongs with moving bare metal onto a `CapacityRuntime`, which
+  this change does not do ("Bare metal's effects go through `CapacityEffects`, not
+  a runtime").
 - **Bare metal's binding builder has its own module.** Fulfillment and deal
   controls build the binding the way publication does, and importing it from
   `publication_service.py` closed an import cycle through `sqlite_client.py`, so
