@@ -514,6 +514,17 @@ def main() -> int:
                 print(f"FAIL  {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
     return 1 if failures else 0
 
+def test_payments_fixture_injects_its_bearer_from_a_secret() -> None:
+    deployment = _source(_ok(_render(files=("payments-ed25519-values.yaml",))), "deployment.yaml")
+    assert "name: \"ARKHAI_PAYMENTS_API_KEY\"" in deployment
+    assert "name: \"payments-bob-payments-api-key\"" in deployment
+    assert "key: \"api-key\"" in deployment
+
+
+def test_secret_env_cannot_shadow_the_identity_credential() -> None:
+    agent = _agent(secretEnv=[{"name": "ARKHAI_IDENTITY_CREDENTIAL", "secretKeyRef": {"name": "s", "key": "k"}}])
+    assert _render(agent=agent).returncode != 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

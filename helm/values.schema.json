@@ -541,6 +541,48 @@
               }
             }
           ]
+        },
+        "secretEnv": {
+          "type": "array",
+          "description": "Environment variables injected from existing Kubernetes Secrets, e.g. the arkhai.payments.v1 bearer named by Settlement.arkhai_payments.api_key_env. Values never pass through Helm values.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "secretKeyRef"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Z_][A-Z0-9_]*$",
+                "not": {
+                  "enum": [
+                    "XDG_CONFIG_HOME",
+                    "ARKHAI_IDENTITY_CREDENTIAL"
+                  ]
+                }
+              },
+              "secretKeyRef": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "key"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
