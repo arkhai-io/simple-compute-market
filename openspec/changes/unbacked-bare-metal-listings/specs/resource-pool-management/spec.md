@@ -10,9 +10,12 @@ option admissibility, whether a listing carries its delivery terms, the backing 
 older producer's pools resolve to, and the backing an admitted reservation implies. No
 consumer MAY compare the label or test a binding's type to make one of these decisions.
 
-The label MUST remain the value pool declarations, listing bindings, the resource-pool
-projection, and published listings carry. A label with no delegate MUST be
-unresolvable, as an unrecognized value is.
+The label MUST remain the value pool declarations, listing bindings, and the
+resource-pool projection carry, and the value a published listing carries wherever its
+market's registry schema publishes backing; no surface MAY carry a representation of
+the delegate in its place. Whether a market's listings publish backing is its registry
+schema's decision. A label with no delegate MUST be unresolvable, as an unrecognized
+value is.
 
 A listing's delivery terms are the fields that commit the marketplace to delivering
 something, such as a host identity or access methods: a capacity-backed listing stands
@@ -42,7 +45,7 @@ commitment nothing stands behind.
 
 #### Scenario: The label is carried unchanged
 
-- **WHEN** a pool is projected, a listing is bound, or a listing is published
+- **WHEN** a pool is projected, a listing is bound, or a listing is published under a registry schema that carries backing
 - **THEN** each carries the declared `capacity_backing` label, not a representation of the delegate
 
 #### Scenario: An unbacked view is built

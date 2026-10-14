@@ -53,8 +53,11 @@ across.
 What backing means lives in one delegate, `CapacityBacking` in
 `kit/resource-pools-contracts`, beside the label it interprets. The declared label
 selects it — `capacity_backing(label)` returns `BACKED` or `UNBACKED` and refuses a
-label with no delegate — and the label stays what declarations, bindings, the
-projection, and published listings carry. Every decision that differs between backed
+label with no delegate — and the label stays what declarations, bindings, and the
+projection carry, and what a published listing carries where its market's registry
+schema publishes backing. Whether a market publishes backing at all is that schema's
+decision, not the delegate's: the compute schema does, so a buyer can filter on it, and
+the API-credit schema does not, since every credit listing is backed. Every decision that differs between backed
 and unbacked supply is one of the delegate's operations: the declaration rules above,
 admitting a capacity effect, placing a hold, judging supply against its declaration
 and then, where availability bounds it, against availability, which labels
