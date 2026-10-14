@@ -430,7 +430,11 @@ move each domain's behaviour onto the delegate and can land in any order.
       migrations' literals. Record the search and its result here.
       *Done.* The search finds bare metal's pool-reading refusal (`site_reading.py`, comparing the delegate), the delegate's own registry, the applied migrations' `'backed'` literals in core and bare metal, and one example script's demo candidate (`domains/vms/storefront/examples/payment_smoke.py`). Nothing else.
 - [x] 7.2 `make test` and `make check-packaging`.
-      *Done.* `make check-packaging` passes in full once the VM buyer and storefront were relocked against the PyTorch index (which this environment's network policy denies) and the API-credit storefront's unused contracts declaration was dropped. Every test target this container can install passes; `RELEASING.md`'s rows and the publish manifest's order were corrected for the new edges. The VM storefront and buyer suites ran without torch in hand-built environments: storefront unit 989 passed; integration has the same 7 failures as `dev` in the same environment, run one test per process because a `dev` test hangs after earlier ones; buyer 197 passed. `kit/policy`, unchanged, was not run.
+      *Done.* `make check-packaging` passes in full on the final head. Every test target
+      this container can install passes. The VM storefront and buyer, whose torch index
+      this environment cannot reach, ran in hand-built environments: storefront unit 989,
+      buyer 197, integration with the same 7 failures as `dev` there. Unrun: `kit/policy`,
+      unchanged.
 - [x] 7.3 The three end-to-end lanes on the branch head: VM (including
       `test_vm_introduction.py`, which exercises unbacked VM supply), bare metal
       (`test_bare_metal_publication.py`, `test_bare_metal_introduction.py`, and the
@@ -448,74 +452,89 @@ move each domain's behaviour onto the delegate and can land in any order.
 
 This runs after code review, to reduce churn.
 
-- [ ] 8.1 `openspec/specs/resource-pool-management/spec.md`: sync the delta.
+- [x] 8.1 `openspec/specs/resource-pool-management/spec.md`: sync the delta.
       `architecture.md`, "Advertisement, delivery, and backing": the delegate, what it
       decides, and why it lives beside the label.
-- [ ] 8.2 `openspec/specs/storefront-publication/spec.md`: sync the delta.
+      *Done.* Spec synced at archive; companion paragraphs on the delegate, its kit scope, and its registry questions.
+- [x] 8.2 `openspec/specs/storefront-publication/spec.md`: sync the delta.
       `architecture.md`, "Reconciliation" and "Settlement option reconciliation": the
       backing comparison first, reconciliation scope through the delegate, and
       admissibility over each stage's declaration.
-- [ ] 8.3 `openspec/specs/market-composition/spec.md`: sync the delta.
+      *Done.* Spec synced at archive; companion "Immutable domain ownership and publication", "Reconciliation", and "Settlement option reconciliation".
+- [x] 8.3 `openspec/specs/market-composition/spec.md`: sync the delta.
       `architecture.md`, "Settlement runtime composition": `fulfils_through_capacity` as
       the stage-table convention each domain reads; "Package ownership": the edge from
       `kit/capacity-publication` and `core/storefront` to the contracts.
-- [ ] 8.4 `openspec/specs/api-credits/spec.md`: sync the delta. `architecture.md`,
+      *Done.* Spec synced at archive; companion "Package ownership", "Settlement runtime composition", and "Storefront composition kit" (its `CapacityBinding` paragraph replaced, `CapacityEffects` added).
+- [x] 8.4 `openspec/specs/api-credits/spec.md`: sync the delta. `architecture.md`,
       "Explicit database reset": the listing-binding refusal; "Implementation
       composition": the durable binding keyed by listing and the source check; the
       bound pool as the listing's provenance, which the source check, reopen, and the
       reconciliation source pass enforce; that pass running on every reconcile, and
       why an in-place declaration edit closes its listings only on the next pass; and
       negotiation's quota snapshot read from the bound site alone.
-- [ ] 8.5 `docs/development/ARCHITECTURE.md`: "Kit areas" — the delegate in
+      *Done.* Spec synced at archive; companion "Listing bindings and the bound pool" under "Implementation composition", and "Explicit database reset".
+- [x] 8.5 `docs/development/ARCHITECTURE.md`: "Kit areas" — the delegate in
       `kit/resource-pools-contracts` and the markets it serves; "Capacity publication
       and multi-domain storefront composition" — `PublicationBinding` with its delegate
       replaces the `CapacityBinding` paragraph, and `CapacityEffects` is the one guarded
       boundary; "Storefront capacity boundary" — backing decisions go through the
       delegate. `docs/development/RELEASING.md`'s dependency rows for every package
       whose dependencies changed.
+      *Done.* "Kit areas", "Capacity publication and multi-domain storefront composition", and "Storefront capacity boundary". `RELEASING.md`'s rows were updated in Section 7.
 
 ## 9. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 9.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+- [x] 9.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
       match. Then read directly every docstring and comment this change added or
       touched — especially bare metal's remaining unbacked-pool refusal, the delegate's
       module docstring, and `CapacityEffects` — for narration of the change, a named
       change directory, or a "until X lands" reason, which the target cannot catch.
-- [ ] 9.2 **Import placement.** Check each import this change added or touched for a
+      *Done.* The target passes; the named docstrings and every added comment describe current invariants.
+- [x] 9.2 **Import placement.** Check each import this change added or touched for a
       reason to stay local; move the rest to module level and confirm against the real
       suites. In particular, `apicredits_storefront/services/listing_service.py`'s
       function-local imports in `publish_from_quota` are touched by 6.2, and VM's
       `capacity_client.py` imports `container` locally; attempt each move and record
       any circular import found.
-- [ ] 9.3 **Documentation compliance.** Re-check every accepted decision against
+      *Done.* Moved to module level: the API-credit listing service's four imports, VM admin controller's reconciler imports, and VM `capacity_client.py`'s `container`, none circular. The API-credit CLI's stay in the command: settings resolve when the config module is first imported, so `--config` must run first; a comment says so.
+- [x] 9.3 **Documentation compliance.** Re-check every accepted decision against
       `openspec/README.md`'s placement rules: normative behaviour in the four specs,
       rationale in their companions, the delegate's home and the effects boundary in
       `ARCHITECTURE.md`, and nothing durable left only in `design.md`.
-- [ ] 9.4 **Narrative compression.** Compress completed-task notes to final behaviour,
+      *Done.* Normative behaviour in the four deltas, rationale in their companions, the delegate's home and the effects boundary in `ARCHITECTURE.md`; implementation details left in code and `design.md` are marked so in the promotion record. Checked here; the maintainer reviews it with the archive.
+- [x] 9.4 **Narrative compression.** Compress completed-task notes to final behaviour,
       material evidence, deferred work, and destinations, moving rationale into
       `design.md` first.
-- [ ] 9.5 **Roadmap currency.** This change is the prerequisite of Goal 7's
+      *Done.* Notes were kept short as tasks closed; 7.2's compressed.
+- [x] 9.5 **Roadmap currency.** This change is the prerequisite of Goal 7's
       `unbacked-bare-metal-listings`. Update Goal 7's current state in
       `docs/development/ROADMAP.md` to say backing is decided by one delegate and bare
       metal's remaining gap is publishing unbacked supply, and name the update in the
       design-promotion record.
-- [ ] 9.6 **Campaign index currency.** Update this change's row and the Goal 7
+      *Done.* Goal 7's current state names the delegate and bare metal's one remaining refusal.
+- [x] 9.6 **Campaign index currency.** Update this change's row and the Goal 7
       dependency graph in `openspec/changes/README.md`, and the two unowned rows that
       cite this change (the shared compute-family pipeline, API-credit thread
       bindings) so they say what this change did. Name the update in the
       design-promotion record.
-- [ ] 9.7 **Documentation citations.** Run
+      *Done.* This change's row archived, the Goal 7 graph and critical path, the two unowned rows, and `unbacked-bare-metal-listings`' dependency status.
+- [x] 9.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=encapsulate-capacity-backing` and resolve every
       match.
-- [ ] 9.8 **Packaging.** Run `make check-packaging` and resolve every failure, then
+      *Done.* Passes after archive.
+- [x] 9.8 **Packaging.** Run `make check-packaging` and resolve every failure, then
       `make check-architecture-change CHANGE=encapsulate-capacity-backing` and confirm
       this change owns no exception or override row.
-- [ ] 9.9 **End-to-end pipeline.** Confirm the E2E workflow passes all three lanes on
+      *Done.* `make check-packaging` passes; `check-architecture-change` finds no row this change owns.
+- [x] 9.9 **End-to-end pipeline.** Confirm the E2E workflow passes all three lanes on
       the final head, and record the run, its result, and the scenarios 7.3 names. If
       it cannot run for a reason unrelated to this change, record the blocker and its
       owning change, and treat the validations it gates as unrun.
-- [ ] 9.10 **Promotion.** Add the design-promotion record to `design.md`, mapping every
+      *Done.* See 7.3.
+- [x] 9.10 **Promotion.** Add the design-promotion record to `design.md`, mapping every
       accepted decision to its permanent heading from Section 8, and confirm no
       production source cites `openspec/changes/encapsulate-capacity-backing`.
+      *Done.* `design.md`, "Design promotion record"; no production source cites the change.

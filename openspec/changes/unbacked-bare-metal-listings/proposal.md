@@ -130,7 +130,7 @@ Also: the bare-metal seller quickstart, `docs/development/TESTING.md`,
   listing is discoverable by the compute schema's dimension filters.
 - **Depends on `compose-contact-exchange-across-compute`** (complete), for the
   promoted introduction composition and the per-origin contact payload.
-- **Depends on `encapsulate-capacity-backing`** (planned; not yet implemented), which
+- **Depends on `encapsulate-capacity-backing`** (archived 2026-10-14), which
   gathers every decision that differs between backed and unbacked supply into one
   backing delegate and moves VM and bare metal onto it. This change resolves bare
   metal's unbacked pools through that delegate and adds its delivery-term operations,
