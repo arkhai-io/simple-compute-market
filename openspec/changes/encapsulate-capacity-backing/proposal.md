@@ -48,14 +48,19 @@ publishes no unbacked listing when it lands; `unbacked-bare-metal-listings` lift
 
 ### Modified Capabilities
 
-- `resource-pool-management`: the pool declaration rules ask the backing delegate
-  rather than branching on the label.
-- `storefront-publication`: one backing comparison and one reconciliation scope for
-  every domain, through the delegate.
-
-Further affected capabilities — among them the API-credit capabilities, which move
-onto the delegate in full — are decided with the delegate's operations and the
-divergences (tasks 1.2, 1.3, and 1.5).
+- `resource-pool-management`: one backing delegate, selected by the declared label,
+  makes every decision that differs by backing; the shared resolver returns it.
+- `storefront-publication`: every capacity effect passes the binding delegate's
+  admission guard and a refused admission is a conflict; one backing comparison runs
+  first on every refresh, reopen, and source check; every domain declares, per
+  settlement stage, whether it delivers through capacity.
+- `market-composition`: the kit's one `PublicationBinding` carries the delegate, every
+  domain builds it from the durable listing binding, and every capacity effect goes
+  through the kit's capacity runtime.
+- `api-credits`: listings record a durable binding and read their pool's declared
+  backing, a listing-source check joins the negotiation runtime, the quota guard
+  applies only where availability bounds the listing, and a database without listing
+  bindings is refused.
 
 ### New Capabilities
 
