@@ -21,7 +21,8 @@ Reservation, commit, release, lease truncation, close, reopen, and restart recov
 MUST reload and compare the same binding and MUST NOT infer a home site, default an
 offering mode, choose an authority from response data, or fan out after a binding
 is recorded. Every storefront capacity effect MUST go through the kit's capacity
-runtime, whose guard is the binding's backing delegate.
+effects, whose guard is the binding's backing delegate, whether a domain composes the
+kit's capacity runtime or its own aggregate capacity client.
 
 #### Scenario: A domain publishes a capacity-backed candidate
 
@@ -58,7 +59,7 @@ runtime, whose guard is the binding's backing delegate.
 
 - **WHEN** commit, release, or fulfillment resumes after restart
 - **THEN** the effect is sent only to the site in the persisted binding, through
-  the kit's capacity runtime, and a missing or unconfigured binding fails closed
+  the kit's capacity effects, and a missing or unconfigured binding fails closed
   without authority fan-out
 
 #### Scenario: A pool cannot deliver the advertised mode

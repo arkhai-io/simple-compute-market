@@ -28,7 +28,7 @@ buyer's exit MUST NOT be rechecked.
 ## MODIFIED Requirements
 
 ### Requirement: Quota-backed publication
-An API-credits listing MUST identify a named service and an authoritative quota resource. Publication from quota MUST require that resource to exist with available capacity, and MUST resolve the backing the resource's pool declares from the credits service's resource-pool projection, which carries each pool's declarations. Listing creation MUST record the listing's immutable durable binding — site, offering mode, quota resource, pool, domain identity and version, and backing — and every capacity effect, reconciliation, and recheck MUST build the listing's binding from that record, never from the published listing. A pool whose backing leaves no settlement option the domain may publish MUST yield no listing. Reconciliation MUST close an open capacity-backed listing when authoritative availability reaches zero and MAY reopen it when availability later becomes positive; an unavailable authority MUST preserve the last complete listing state rather than be interpreted as zero. The storefront MUST refuse to start against a database holding a listing with no durable binding, naming that a fresh database is required.
+An API-credits listing MUST identify a named service and an authoritative quota resource. Publication from quota MUST require that resource to exist with available capacity, and MUST resolve the backing the resource's pool declares from the credits service's resource-pool projection, which carries each pool's declarations. Listing creation MUST record the listing's immutable durable binding — site, offering mode, quota resource, pool, domain identity and version, and backing — and every capacity effect, reconciliation, and recheck MUST build the listing's binding from that record, never from the published listing. Listing creation MUST resolve the listing's settlement options from the settlement clauses the operator submits, or from the storefront's configured defaults when none are submitted, and a pool whose backing leaves none of them for the domain to publish MUST yield no listing. Reconciliation MUST close an open capacity-backed listing when authoritative availability reaches zero and MAY reopen it when availability later becomes positive; an unavailable authority MUST preserve the last complete listing state rather than be interpreted as zero. The storefront MUST refuse to start against a database holding a listing with no durable binding, naming that a fresh database is required.
 
 #### Scenario: Quota is exhausted and later replenished
 - **WHEN** reconciliation observes zero available units for an open capacity-backed listing and later observes at least one available unit
@@ -41,6 +41,14 @@ An API-credits listing MUST identify a named service and an authoritative quota 
 #### Scenario: A listing is created
 - **WHEN** an operator creates a listing for a quota resource in a backed pool
 - **THEN** the listing and its durable binding, recording the pool's declared backing, are stored together before registry publication
+
+#### Scenario: Two listings share a quota resource
+- **WHEN** an operator creates a second listing over a quota resource that already has an open listing
+- **THEN** each listing records its own durable binding, both naming that quota resource as their source
+
+#### Scenario: A listing is created with settlement clauses
+- **WHEN** an operator creates a listing and names its settlement clauses
+- **THEN** the listing's settlement options are resolved from those clauses rather than the configured defaults
 
 #### Scenario: A database predates listing bindings
 - **WHEN** the storefront starts against a database holding a listing with no durable binding

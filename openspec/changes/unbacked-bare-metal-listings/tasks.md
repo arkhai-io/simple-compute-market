@@ -1,6 +1,6 @@
 # Tasks — unbacked bare-metal listings
 
-Depends on `encapsulate-capacity-backing` (designed; not yet planned).
+Depends on `encapsulate-capacity-backing` (planned; not yet implemented).
 `bare-metal-mock-provisioned-deal`, `bare-metal-listing-shapes`,
 `compose-contact-exchange-across-compute`, and
 `bare-metal-publication-reads-pool-declarations` are archived. Design reviewed

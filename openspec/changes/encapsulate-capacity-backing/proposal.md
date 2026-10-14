@@ -85,11 +85,19 @@ None.
 ## Impact
 
 - `kit/resource-pools-contracts`: the delegate and its selection from the label.
-- `kit/capacity-publication`: bindings and reconciliation scope through the delegate.
+- `kit/capacity-publication`: one `PublicationBinding` carrying the delegate, the shared
+  backing comparison, and `CapacityEffects`, the guarded reserve, commit, release, and
+  lease truncation that `CapacityRuntime` composes and bare metal composes over its own
+  aggregate client.
 - `kit/resource-pools` and the compute provisioning service: declaration validation
   and publication views through the delegate.
 - The VM storefront and `domains/vms/listings`; the bare-metal domain and storefront;
-  the API-credit storefront and service, which move onto the delegate in full.
+  the API-credit domain, storefront, and service, which move onto the delegate in full.
+  API credits records a durable listing binding per listing, keyed by the listing, and
+  two of its defects in the files this change rewrites are fixed: the CLI's listing
+  service construction and the publish route dropping submitted settlement clauses.
+- `kit/site-client`'s resource-pool fixture, which validates its label through the
+  delegate registry.
 - `core/storefront`'s listing binding, which validates its label through the delegate
   rather than its own copy of the vocabulary.
 - No wire, database, or deployment break is intended. Each unified divergence is a
@@ -100,9 +108,26 @@ None.
 - [x] `docs/development/ARCHITECTURE.md` — kit areas: the backing delegate's home and
       the scope it serves.
 - [x] Existing subsystem specification — `resource-pool-management`,
-      `storefront-publication`, and their architecture companions.
+      `storefront-publication`, `market-composition`, and `api-credits`, and their
+      architecture companions.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- The backing delegate, its home beside the label, and the scope of markets it serves →
+  `ARCHITECTURE.md`, "Kit areas", and `resource-pool-management`'s companion,
+  "Advertisement, delivery, and backing".
+- One `PublicationBinding` carrying the delegate, and `CapacityEffects` as the one
+  guarded boundary for capacity effects → `ARCHITECTURE.md`, "Capacity publication and
+  multi-domain storefront composition", and `market-composition`'s spec.
+- The backing comparison, reconciliation scope, and settlement admissibility rules →
+  `storefront-publication`'s spec and its companion, "Reconciliation".
+- `fulfils_through_capacity` as the stage-table convention each domain reads →
+  `market-composition`'s companion, "Settlement runtime composition".
+- API credits' durable binding, keyed by listing, its source check, and its
+  fresh-database refusal → `api-credits`' spec and its companion, "Explicit database
+  reset".
 
 ## Dependencies
 

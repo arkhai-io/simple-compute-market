@@ -443,14 +443,17 @@ reserve and commit. VM's administrator reserve also synthesizes a backed binding
 reservation that has no listing.
 
 Unified rule: every storefront capacity effect — reserve, commit, release, lease
-truncation — goes through `CapacityRuntime` with the listing's `PublicationBinding`,
-whose guard is the delegate's `require_admission`. Nothing reserves, commits, releases,
-or truncates through the aggregate client.
+truncation — goes through the kit's capacity effects with the listing's
+`PublicationBinding`, whose guard is the delegate's `require_admission`. Nothing
+reserves, commits, releases, or truncates through the aggregate client. (Amended in
+planning: the effects are `CapacityEffects`, which `CapacityRuntime` composes, because
+bare metal has no runtime to move onto — see "Bare metal's effects go through
+`CapacityEffects`, not a runtime".)
 
-- The five paths move onto `CapacityRuntime`'s binding-taking methods, with the binding
-  built from the durable listing binding. `CapacityRuntime` acts at the binding's site,
-  so bare metal's durable reservation-to-site map no longer routes a commit; planning
-  confirms which of its other uses remain.
+- The five paths move onto the binding-taking effects, with the binding built from the
+  durable listing binding. The effects act at the binding's site. Bare metal's durable
+  reservation-to-site map stays: it never routed a commit, and it routes every
+  fulfillment verb.
 - A reservation exists only because a site admitted it, so a binding synthesized for a
   reservation with no listing takes its backing from a registry-level
   `admitted_backing()`, beside `legacy_producer_backing()`, rather than naming a
@@ -498,6 +501,134 @@ pool's delegate here would add behaviour with no existing switch to replace, who
 only consumer is the unbacked bare-metal view. It moves to
 `unbacked-bare-metal-listings`, which publishes that view, together with the delegate
 operation the view needs.
+
+## Planning decisions (task 1.6)
+
+Planning read every site the inventory named on 2026-10-14. Two findings changed or
+completed a decision and were decided with the maintainer; the rest refine an
+operation's contract or record what planning confirmed.
+
+### Bare metal's effects go through `CapacityEffects`, not a runtime
+
+"Divergence: capacity-effect guard coverage" moved the five bypassing paths onto
+`CapacityRuntime`. Bare metal composes no runtime. It builds a core
+`AggregateCapacityClient` over a `DurableReservationSiteMap` that the aggregate writes on
+every reserve and that its `SelectedSiteFulfillmentClient` reads to route every
+fulfillment verb, and it runs no capacity-event poller: its publication cycle is its
+reconciliation. `CapacityRuntime` builds its own aggregate with no reservation map, so
+reserving through it would stop writing the map and break fulfillment routing.
+
+Decided with the maintainer: the guarded effects — `reserve`, `commit`, `release`,
+`truncate_lease`, and the guard they share — move out of `CapacityRuntime` into one
+class in `kit/capacity-publication`, `CapacityEffects`, composed over any aggregate
+client and acting only at the sites that aggregate names. `CapacityRuntime` builds one
+over its own aggregate and delegates to it, so VM's and API credits' calls are
+unchanged. Bare metal builds one over the aggregate it already has, so the map keeps
+being written. The guard still lives in one place.
+
+Rejected: putting bare metal on a full `CapacityRuntime`, which needs an injected
+aggregate and a reconcile hook bare metal would never use and pulls its capacity
+transport into the runtime's lifecycle, overlapping
+`kit-owned-listing-and-fulfillment-lifecycles`; and the design's fallback, a
+`require_admission` call before each of bare metal's three aggregate calls.
+
+VM's two resume paths need no such seam: VM already composes the runtime, and the
+aggregate its resume runtime calls is `runtime.client()`.
+
+### An API-credit listing's derivation identity is its listing ID
+
+The durable listing binding needs a `derivation_key`, built by
+`build_storefront_derivation_key` from site, mode, domain identity, and a source
+identity, and the column is unique. VM and bare metal use it to find the listing a
+candidate already published. API credits derives nothing: an operator creates each
+listing through `publish-from-quota`, and may create several over one quota resource.
+
+Decided with the maintainer: an API-credit listing's source identity in its derivation
+key is its listing ID, so every listing binds under its own key. The binding records the
+quota resource as `source_id`, with its pool and backing, and those are what every
+backing decision reads. Rejected: keying on the quota resource and refusing a second
+open listing over it, which would turn a storage constraint into an undecided product
+rule. The demo seed's own scan for an existing listing is unrelated and stays.
+
+### Two API-credit defects are fixed where this change already edits
+
+Found while planning; decided with the maintainer to fix in this change rather than
+record as unowned, because both sit in code this change rewrites:
+
+- `apicredits_storefront/cli.py` constructs `ListingService` without its required
+  `settlement_composition`, so the command fails at construction.
+- `POST /api/v1/listings/publish-from-quota` accepts `settlement_clauses` and drops
+  them before `publish_from_quota`.
+
+### Operation contracts
+
+Refinements of "The delegate's operations", decided in planning:
+
+- **`judge(declared, available)`.** `declared()` returns the caller's refusal, or
+  `None` when the declaration fits. The delegate returns that refusal; otherwise,
+  where availability bounds the supply, `available()`'s result, and where it does not,
+  `None`. `None` always means the listing stands. An async form, `judge_async`, takes
+  coroutine functions and decides identically, because the source checks and the quota
+  guard read availability over the network.
+- **`place_hold(place)`** is a coroutine: `place` is a coroutine function, and an
+  unbacked delegate returns `None` without calling it.
+- **`require_admission(effect)`** takes the effect's name for the refusal message and
+  returns nothing; `CapacityEffects` calls it before its site check.
+- **`labels_reconciled_by_availability()`** returns a frozenset of labels, so a SQL
+  filter binds it as parameters rather than naming a label.
+
+### What planning confirmed
+
+- **VM's listing-creation site check.** VM's `listing_service.py` refuses a backed
+  listing whose site is not a configured capacity site, and computes unbacked
+  settlement terms otherwise. Both become delegate operations: the site check is the
+  available half of `judge` — whether an admission authority stands at the site — and
+  the settlement terms are `admissible_settlement` for every listing, which keeps every
+  clause of a backed one.
+- **The quota guard.** The round hook supplies the snapshot as `judge_async`'s
+  available half, with a declared half that always fits. For a listing availability
+  does not bound, no snapshot is supplied, and `credit_quota_guard` reports itself not
+  applicable on an absent snapshot rather than rejecting.
+- **Legacy writes.** VM's `domain_migration.py` binds a legacy single-domain listing as
+  backed; it takes `legacy_producer_backing()`, since such a listing predates the
+  declarations. The applied migrations that backfill `'backed'` — core's and bare
+  metal's — stay as written, for the reason core's does.
+- **The VM buyer stays light.** `arkhai-vms-listings` gains
+  `arkhai-kit-resource-pools-contracts` as a base dependency, which installs only
+  pydantic and the shape kit. The buyer's guard test forbids `market_resource_pools`,
+  the authority, and still passes.
+- **The site-client fixture.** `kit/site-client`, a `client` kind, may depend on a
+  `contracts` package, so its resource-pool fixture validates the label through the
+  registry. Its default deliverable set — what the pool advertises when that is a
+  valid declaration for the backing, otherwise nothing — asks the delegate's
+  `declaration_problems` rather than branching on the label.
+- **API credits reads its pool.** The credits ledger already projects each resource's
+  `pool_id`; with the pool directory passed to `make_capacity_router`, the storefront
+  reads the quota resource's pool from the site's resource-pool projection through
+  `CapacityRuntime.site_client(site_id)`. The storefront gains `arkhai-kit-resource-pools`
+  for `read_site_declarations`, as VM's and bare metal's do, and its `SQLiteClient`
+  sets the domain registry core's binding write needs, as bare metal's does.
+
+### Bordering changes, reconciled
+
+- **`inject-site-pool-authority`** moves `site_declarations.py` into
+  `kit/resource-pools-contracts`. This change edits that module in place; its move stays
+  mechanical, and the delegate is already where the module would move to.
+- **`kit-owned-listing-and-fulfillment-lifecycles`** moves the listing lifecycle into
+  `kit/capacity-publication` and retires VM's resume pass. It inherits
+  `CapacityEffects` and `PublicationBinding`; this change moves the resume pass's two
+  effects onto the effects and leaves its structure.
+- **`kit-owned-storefront-auth-and-persistence`** moves `domain_registry.py` into
+  `kit/storefront-contracts`, which inherits the edge to `kit/resource-pools-contracts`
+  that `StorefrontListingBinding` gains here.
+- **`align-package-paths-with-layers`** touches no file this change does.
+- **`default-no-pre-settlement-capacity-hold`** has open validation tasks over
+  `test_two_phase_reserve.py`, whose binding imports this change rewrites; they still
+  apply to the rewritten file.
+- **`negotiation-time-capacity-hold`** names `_place_capacity_hold`, which keeps its name
+  and now places its hold through `place_hold`.
+- **`resolve-compute-family-findings`** was reconciled in design ("Divergence:
+  source-check availability").
 
 ## Open questions
 
