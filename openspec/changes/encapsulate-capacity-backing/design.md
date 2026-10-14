@@ -146,12 +146,49 @@ What this change owns is the duplication. Decided with the maintainer:
   and never reused, and on a fresh database it updates nothing.
 - The insert and update triggers know only that the column exists, and need nothing.
 
+### The delegate's operations (task 1.2)
+
+The delegate lives in `kit/resource-pools-contracts`, whose allowlist admits only
+`arkhai-kit-capability-shape` and `pydantic`, so it can import no binding type, client,
+or effect. Each operation therefore takes the caller's work as an argument and decides
+whether and how it runs; the caller never learns the category. Feasibility and the
+source check's availability are one decision — judge against the declaration, then
+against availability only where availability bounds the supply — so they are one
+operation.
+
+| Operation | Shape | Backed | Unbacked | Callers |
+|---|---|---|---|---|
+| Declaration rules | `declaration_problems(advertisable, deliverable)` returning `PoolDeclarationProblem`s | advertisable within deliverable | deliverable empty | `pool_declaration_problems` |
+| Capacity guard | `require_admission(effect)`, raising `CapacityNotAdmittedError` (defined beside the delegate) | passes | refuses | `require_binding`, VM fulfilment, every path that reserves or commits outside it |
+| Hold | `place_hold(place)` returning `place()`'s result or `None` | runs `place` | returns `None` | VM and API-credit acceptance; the caller reports a hold not placed |
+| Supply judgement | `judge(declared, available)`, both callables returning the caller's verdict | the declared verdict, then the availability verdict when the declaration fits | the declared verdict | VM member feasibility, bare-metal classification, both source checks |
+| Reconciliation scope | registry-level `labels_reconciled_by_availability()` | included | excluded | VM's binding query, bare-metal and API-credit reconciliation |
+| Settlement admissibility | `admissible_settlement(clauses, fulfils_through_capacity)` returning kept clauses and dropped mechanisms | keeps all | drops clauses whose mechanism delivers through capacity | VM and bare-metal publication |
+| Legacy producer | registry-level `legacy_producer_backing()` | is it | | `read_site_declarations` |
+| Binding construction | decided by task 1.4 | | | `kit/capacity-publication` |
+
+A caller that judges declared capacity alone for every backing — VM's override
+feasibility and the declared half of its source check — keeps doing so by calling only
+the declared judgement; that is a caller's choice, not a backing decision. The
+per-mechanism fact settlement admissibility takes stays the domain's.
+
+The delegate is `CapacityBacking`, one class with private configuration and two
+module-level instances, `BACKED` and `UNBACKED`, each carrying its `label`. The current
+`CapacityBacking` literal alias is renamed `CapacityBackingLabel`. A registry function,
+`capacity_backing(label)`, returns the delegate for a label and refuses an unknown one,
+as the resolver does today. `PoolDeclarations` and `ResolvedPool` carry the delegate.
+Any branching stays inside the one class, so a later interface is a subclassing of it
+with no caller change.
+
+Rejected: flags on the delegate for callers to branch on, which moves the switches
+rather than encapsulating them; and effects performed by the delegate, which the
+contracts allowlist forbids and which belong to the storefront and site layers.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
-1. The delegate's operations, their signatures, and the delegate's name (task 1.2).
-2. The unified behaviour for each divergence between VM, bare metal, and API credits
+1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
    1. admitting unbacked supply — VM derives it, bare metal refuses it, API credits
       reads no declarations;
@@ -165,10 +202,10 @@ Each is a decision gate in `tasks.md`.
    8. capacity-effect guard coverage;
    9. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
-3. How the sibling `CapacityBinding` and `UnbackedBinding` classes relate to the
+2. How the sibling `CapacityBinding` and `UnbackedBinding` classes relate to the
    delegate: whether the binding carries the delegate, or the class stays the type
    that capacity effects require (task 1.4).
-4. How the site's resource publication views receive the pool's delegate, given that
+3. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).
-5. Where bare metal's refusal of unbacked pools is expressed while this change keeps
+4. Where bare metal's refusal of unbacked pools is expressed while this change keeps
    it (task 1.3).

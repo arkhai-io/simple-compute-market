@@ -14,9 +14,12 @@ Design phase; not yet planned. Prerequisite of `unbacked-bare-metal-listings`.
       through the delegate while its database check stays ("What the delegate
       decides", "API credits moves onto the delegate in this change", "The
       storefront's copy of the vocabulary goes; its database check stays").
-- [ ] 1.2 **Decision gate.** Derive the delegate's operations from the inventory, so
+- [x] 1.2 **Decision gate.** Derive the delegate's operations from the inventory, so
       that no caller compares the label or tests the binding class, and name the
-      delegate. Record it in `design.md`.
+      delegate. Record it in `design.md`. Decided with the maintainer:
+      `CapacityBacking` in `kit/resource-pools-contracts`, one class with `BACKED` and
+      `UNBACKED` instances, whose operations take the caller's work as callables
+      ("The delegate's operations").
 - [ ] 1.3 **Decision gate.** Decide the unified behaviour for each divergence between
       VM, bare metal, and API credits, and where bare metal's refusal of unbacked
       pools is expressed while this change keeps it. Record each as its own decision.
