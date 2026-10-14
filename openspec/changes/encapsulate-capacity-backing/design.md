@@ -343,17 +343,56 @@ one, which now includes backing, stays as a backstop. It raises a fault; the sha
 comparison runs first so that a backing change is the ordinary close the requirement
 describes.
 
+### Divergence: source-check availability (task 1.3)
+
+Today VM's listing-source check compares the listing with a re-derivation over
+declared capacity, then reads its site's availability only when the binding's class is
+`CapacityBinding`; bare metal's runs publication's classification over the site's live
+projection, which folds declaration and availability together and always consults
+availability; API credits contributes no listing-source check, and its per-proposal
+`credit_quota_guard` always compares the requested quantity with a quota snapshot.
+
+Unified rule: wherever availability gates a seller decision, it goes through
+`binding.backing.judge(declared, available)`. Each domain supplies only the two halves'
+content, which is domain-specific because a listing's shape originates differently in
+each.
+
+- VM: the declared half is today's comparison over declared capacity; the available
+  half is today's read at the pinned site. The class test goes.
+- Bare metal: its classification splits into a declared half — enablement, shape
+  digest, region, pool admission — and an available half, the view's whole-machine
+  availability. Publication's classification uses the same split, so publication and
+  the guard keep one code path. A backed listing's outcome is unchanged.
+- API credits contributes a listing-source check to the negotiation runtime, as VM and
+  bare metal do: the declared half confirms that the binding's quota resource is still
+  declared in its pool, that the pool is enabled and advertises `api_credits`, and that
+  the backing is unchanged; the available half requires at least one available unit,
+  the condition listing creation already requires.
+- `credit_quota_guard` stays a seller policy, because the runtime's source check sees a
+  listing, not a proposal's requested quantity. The round hook supplies its quota
+  snapshot through `binding.backing.judge`, so for a listing availability does not
+  bound, the guard reports itself not applicable rather than assuming backed.
+
+The domains still obtain projections differently — VM from the projection its
+storefront holds, bare metal by fetching the site's live — but that is not a backing
+decision, and extracting VM's held per-site projection state into the kit belongs to
+`kit-owned-listing-and-fulfillment-lifecycles`. It bears on backing in one place:
+`storefront-publication` forbids contacting a site authority when checking an unbacked
+listing, which bare metal's live fetch would do. That is decided in
+`unbacked-bare-metal-listings`, which publishes the first unbacked bare-metal listing.
+API credits' move onto the runtime's listing-source check comes from
+`resolve-compute-family-findings`, whose item now names only the projection half.
+
 ## Open questions
 
 Each is a decision gate in `tasks.md`.
 
 1. The unified behaviour for each divergence between VM, bare metal, and API credits
    (task 1.3):
-   1. source-check availability;
-   2. reconciliation scope;
-   3. hold placement;
-   4. capacity-effect guard coverage;
-   5. the mechanism fulfilment declaration — VM's separate map, bare metal's
+   1. reconciliation scope;
+   2. hold placement;
+   3. capacity-effect guard coverage;
+   4. the mechanism fulfilment declaration — VM's separate map, bare metal's
       `physical` on each seller stage.
 2. How the site's resource publication views receive the pool's delegate, given that
    `InventoryViewProjection.resource_views` receives no pool today (task 1.5).

@@ -80,8 +80,9 @@ Placement and test reliability:
 - The site ledger keys reservation idempotency and release-by-escrow on the escrow,
   which hosted deals lack, while jobs correlate on the capacity reservation.
 - Bare metal's listing recheck and publication read each site's projection live,
-  where VM reads the projections its storefront holds; API credits'
-  `credit_quota_guard` could move onto the kit's listing-source verdict.
+  where VM reads the projections its storefront holds. (API credits' move onto the
+  kit's listing-source verdict is `encapsulate-capacity-backing`'s; for unbacked bare
+  metal the live read is decided in `unbacked-bare-metal-listings`.)
 - The provisioning service's `db/database.py` and `db/migrations.py` import
   `vm_provisioning_adapter.db` (`AnsiblePoolConfig`, `Base`) and
   `vm_provisioning_adapter.legacy_backfill`. VM table metadata and the legacy VM

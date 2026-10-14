@@ -128,7 +128,12 @@ here as a decision.
 4. **The opening source check.** It refuses every unbacked bare-metal listing today,
    and `storefront-publication`'s inventory guard forbids contacting a site authority
    for an unbacked listing, while bare metal's recheck reads the site's live
-   projection.
+   projection. The prerequisite routes the check through the backing delegate, so an
+   unbacked listing's availability is never consulted; what remains is the live read
+   of declarations. Either bare metal reads a projection its storefront holds — which
+   needs VM's held per-site projection state extracted into the kit, owned by
+   `kit-owned-listing-and-fulfillment-lifecycles` — or the requirement is scoped to
+   availability. Decide which.
 5. **Capacity effects the backed-only guard does not reach.** Bare-metal fulfillment
    and the administrator's reserve call the site directly rather than through
    `require_binding`, and the fulfillment routes answer an unbacked deal with an
