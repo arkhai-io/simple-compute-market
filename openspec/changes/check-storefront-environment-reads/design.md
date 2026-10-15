@@ -22,7 +22,18 @@ configuration):
 
 Every other setting reaches each storefront through its Dynaconf loader, whose environment
 prefix is the documented override layer. Once bare metal complies, the tree passes a check
-allowing exactly these four kinds.
+allowing exactly these reads.
+
+The rule the check enforces is `deployment-state`'s "A storefront's configuration reaches it
+through its configuration system", as `share-site-projection-state` states it: every
+configuration value is supplied through the configuration files and the loader's override
+layer, and a value is supplied outside that system only when it controls which configuration
+is loaded (the configuration directory, the profiles to layer) or must be kept from the loader
+(the signing credential). Platform facts such as `K_SERVICE`, an environment passed whole to a
+subprocess, and legacy names quoted by a migration diagnostic are not configuration values. A
+storefront never refuses to start because a value reached it through its environment: the check
+is a compliance check of source and charts, and the loader's override layer stays available to
+an operator.
 
 ## Questions to settle before planning
 
@@ -37,3 +48,16 @@ allowing exactly these four kinds.
   settings (the registry, the provisioning service, the API-credits service).
 - **Enforcement point.** Its own target run by `make check-packaging`, or a rule inside
   `make check-architecture`.
+- **Signing material.** Raised in `share-site-projection-state`'s design review 03 (F4). The
+  marketplace credential is correctly kept from the loader, but it travels in
+  `ARKHAI_IDENTITY_CREDENTIAL`, the weakest of `market_identity.credentials`' providers: an
+  environment variable is inherited by every subprocess (VM's `run_step` copies the environment
+  into the subprocesses it launches), readable from `/proc/<pid>/environ` by the same user, and
+  prone to appear in dumps; the identity kit's strict owner-only file provider would keep it out
+  of the environment as well, with only its path in configuration. Meanwhile the EVM wallet's
+  private key, which signs fund-moving transactions, travels through the loader in
+  `storefront.secrets.toml`, reachable by `config show` and `config migrate`. Decide whether this
+  change's rule, written as a check, accepts both as they stand, or whether resolving storefront
+  signing material through the identity kit's providers must precede it; as stated, the rule
+  expects a value kept from the loader to have a reason, and the wallet key's inclusion has
+  none on record.
