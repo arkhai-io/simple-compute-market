@@ -197,11 +197,16 @@ class BareMetalStorefrontRuntime:
     publication_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, repr=False, compare=False
     )
+    # Builds the process's one loop controller. A factory rather than the
+    # controller itself, so a runtime copied with `dataclasses.replace` builds
+    # its own controller and registers its steps there once, instead of
+    # sharing the original's.
+    loop_controller_factory: Callable[[], StorefrontLoopController] = field(
+        default=StorefrontLoopController, repr=False, compare=False
+    )
     # The process's one loop controller: it holds this storefront's timer loops
     # under one pause and steps each loop's cycle on request.
-    loops: StorefrontLoopController = field(
-        default_factory=StorefrontLoopController, init=False, repr=False, compare=False
-    )
+    loops: StorefrontLoopController = field(init=False, repr=False, compare=False)
     # Whether this process opens new negotiations; separate from the loops' pause.
     trading_pause: TradingPause = field(
         default_factory=TradingPause, init=False, repr=False, compare=False
@@ -213,6 +218,7 @@ class BareMetalStorefrontRuntime:
     contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "loops", self.loop_controller_factory())
         repository = SettlementSQLiteRepository(
             self.db.db_path,
             apply_migrations=False,

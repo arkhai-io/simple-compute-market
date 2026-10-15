@@ -1,4 +1,5 @@
-"""The aggregate capacity-event loop holds while gated and surfaces a failed fan-out.
+"""The aggregate capacity-event loop holds while gated and surfaces a failed fan-out,
+and each site's cycle is serialized with that site's step.
 
 The aggregate's cadence is the injected wait, which the test drives: each wait
 parks until the test ticks it or a pause is requested. Nothing here waits on time.
@@ -10,7 +11,13 @@ import asyncio
 
 import pytest
 
-from market_capacity_publication import run_capacity_event_pollers
+from core_storefront.aggregation import fill_first
+from market_capacity_publication import CapacityRuntime, CapacitySite, run_capacity_event_pollers
+from market_capacity_publication.capacity_remote import (
+    reset_site_event_cursors,
+    site_event_cursor,
+    site_events_poller,
+)
 
 
 class _Control:
@@ -183,3 +190,161 @@ async def test_a_pause_reaches_the_aggregate_through_its_wait():
         await asyncio.wait_for(control.acknowledged.wait(), timeout=1)
     finally:
         await _stop(task)
+
+
+class _ParkedFeed:
+    """One site's event feed, whose first read parks until the test releases it.
+
+    Every read is logged as it starts and as it returns, so the log shows
+    whether two cycles of this site ever read the feed at once.
+    """
+
+    def __init__(self, site_id: str, log: list[tuple[str, str]]) -> None:
+        self.base_url = f"http://{site_id}.invalid"
+        self.site_id = site_id
+        self.log = log
+        self.reads = 0
+        self.first_read_started = asyncio.Event()
+        self.release_first_read = asyncio.Event()
+
+    async def events_after(self, after: int, limit: int | None = None):
+        index = self.reads
+        self.reads += 1
+        self.log.append((self.site_id, "start"))
+        if index == 0:
+            self.first_read_started.set()
+            await self.release_first_read.wait()
+        self.log.append((self.site_id, "end"))
+        return [], after
+
+
+async def _no_reconcile(context) -> None:
+    return None
+
+
+class _ObservedLock(asyncio.Lock):
+    """A site's cursor lock, reporting each attempt to acquire it.
+
+    Lets a test wait until a cycle is actually waiting on the lock, rather than
+    yielding and hoping it got there.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+        self._attempted = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        self.attempts += 1
+        self._attempted.set()
+        return await super().acquire()
+
+    async def attempts_reach(self, count: int) -> None:
+        while self.attempts < count:
+            self._attempted.clear()
+            await asyncio.wait_for(self._attempted.wait(), timeout=1)
+
+
+@pytest.fixture
+def _fresh_cursors():
+    reset_site_event_cursors()
+    yield
+    reset_site_event_cursors()
+
+
+def _runtime_over(feeds: dict[str, _ParkedFeed]) -> CapacityRuntime:
+    runtime = CapacityRuntime(
+        sites=[CapacitySite(site, f"http://{site}.invalid", None) for site in feeds],
+        signer=object(),
+        placement=fill_first,
+        reconcile=_no_reconcile,
+        site_client_factory=lambda site, signer: feeds[site.site_id],
+    )
+    # Positioned, so a cycle reads the feed once and runs no full reconcile.
+    for site in feeds:
+        site_event_cursor(site).last_applied = 1
+    return runtime
+
+
+async def _park(seconds: float) -> None:
+    await asyncio.Event().wait()
+
+
+async def test_a_sites_step_waits_for_that_sites_poll_and_not_for_another_sites(
+    _fresh_cursors,
+):
+    log: list[tuple[str, str]] = []
+    feeds = {site: _ParkedFeed(site, log) for site in ("east", "west")}
+    runtime = _runtime_over(feeds)
+    east_lock = site_event_cursor("east").lock = _ObservedLock()
+
+    pollers = asyncio.create_task(
+        runtime.poll_events(interval_seconds=60, paused=None, wait=_park)
+    )
+    try:
+        await asyncio.wait_for(feeds["east"].first_read_started.wait(), timeout=1)
+        await asyncio.wait_for(feeds["west"].first_read_started.wait(), timeout=1)
+        feeds["west"].release_first_read.set()
+
+        # West's poll has finished, so west's step runs while east's poll is
+        # still parked in its read.
+        west = await asyncio.wait_for(runtime.drain_events_once("west"), timeout=1)
+        assert west.error is None
+
+        east_step = asyncio.create_task(runtime.drain_events_once("east"))
+        await east_lock.attempts_reach(2)
+        assert feeds["east"].reads == 1, "east's step read the feed during east's poll"
+
+        feeds["east"].release_first_read.set()
+        east = await asyncio.wait_for(east_step, timeout=1)
+        assert east.error is None
+        east_log = [entry for site, entry in log if site == "east"]
+        assert east_log == ["start", "end", "start", "end"]
+    finally:
+        pollers.cancel()
+        await asyncio.gather(pollers, return_exceptions=True)
+
+
+async def test_a_poller_held_while_it_waited_on_a_step_runs_no_cycle(_fresh_cursors):
+    """The poller reads its gate again under the site's lock, immediately before
+    any request, so a pause requested while it waited for a step holds it."""
+    log: list[tuple[str, str]] = []
+    feed = _ParkedFeed("east", log)
+    runtime = _runtime_over({"east": feed})
+    lock = site_event_cursor("east").lock = _ObservedLock()
+    held = {"value": False}
+    gate_reads: list[bool] = []
+    read_held = asyncio.Event()
+
+    def _gate() -> bool:
+        gate_reads.append(held["value"])
+        if held["value"]:
+            read_held.set()
+        return held["value"]
+
+    step = asyncio.create_task(runtime.drain_events_once("east"))
+    await asyncio.wait_for(feed.first_read_started.wait(), timeout=1)
+    poller = asyncio.create_task(
+        site_events_poller(
+            runtime.client(),
+            "east",
+            feed,
+            60,
+            full_reconcile=runtime.reconcile_now,
+            paused=_gate,
+            wait=_park,
+        )
+    )
+    try:
+        await lock.attempts_reach(2)
+        assert gate_reads == [False]
+
+        held["value"] = True
+        feed.release_first_read.set()
+        await asyncio.wait_for(step, timeout=1)
+        await asyncio.wait_for(read_held.wait(), timeout=1)
+
+        assert feed.reads == 1, "the held poller read the feed after the step"
+    finally:
+        poller.cancel()
+        await asyncio.gather(poller, return_exceptions=True)

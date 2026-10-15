@@ -461,9 +461,9 @@ class CapacityRuntime:
         """Run exactly one event cycle for one site and report what it did.
 
         Addresses the same cursor the running poller holds, because a second
-        position would replay or skip. Intended to be called while the loop is
-        held: the pause guarantees a cycle either runs completely or never
-        starts, so an advance has the feed to itself.
+        position would replay or skip, and takes that cursor's lock, so a step
+        requested while the site's poller is mid-cycle runs after that cycle.
+        Another site's poller never delays it.
         """
         # `site_client` already fails closed on an unconfigured site, so
         # there is no second guard here saying the same thing differently.

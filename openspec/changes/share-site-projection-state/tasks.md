@@ -199,27 +199,73 @@ Touches `kit/storefront` and `kit/capacity-publication`. The existing `start_loo
 step-only `register_step` stay until Section 15 removes them, once every storefront has
 moved.
 
-- [ ] 3.1 `kit/storefront/src/market_storefront_kit/lifecycle.py`: `register_loop(name, *,
+- [x] 3.1 `kit/storefront/src/market_storefront_kit/lifecycle.py`: `register_loop(name, *,
       step, interval_seconds, route=None, preview=None, wake=None)` registers a loop's step
       and interval; the controller starts its timer, a gate, `run_cycle`, `idle` loop over
       the same operation. `run_cycle(name)` holds that loop's lock, runs the step, and
       records exactly one terminal outcome in a `finally`; a held loop runs no timer cycle,
       so a step while held never waits on one. `dry_run` takes no lock and records nothing.
-- [ ] 3.2 Same module: outcome recording. Each outcome carries when the cycle finished,
+      Done. **Differed:** `register_loop` registers only; `start_loops()` starts the timer
+      of every registered loop that has none, returning the handles, because VM registers
+      its steps at import and starts its loops at startup, and bare metal registers in its
+      runtime's constructor: a registration that started a task would need a running event
+      loop at registration. A loop whose timer ended keeps its handle and is not restarted;
+      `clear_loops` keeps registrations and drops handles, outcomes, and locks, so
+      `start_loops` after it starts afresh. `register_loop` also takes
+      `initial_delay_seconds` (default 0), because every kit runner but VM's publication
+      makes its first cycle due one interval after start (watchdog, servicing, payment
+      reconciliation, retention); the gate is read throughout the delay and a wake brings
+      the cycle forward. `run_cycle` keeps its route-name key, as the lifecycle routes call
+      it; the lock and the outcome are the loop name's. Every step goes through the locked,
+      recorded cycle, a step-only `register_step` loop's included, so bare metal's stepped
+      publication is serialized and recorded now. The timer re-reads the gate under the
+      lock immediately before the step, so a timer that waited on an operator's step does
+      not start a cycle a pause requested meanwhile holds; it clears its wake only there,
+      when the cycle actually runs, so a wake a held timer did not act on still runs the
+      loop promptly once resumed (D4). A failed timer cycle is recorded and the timer
+      carries on to its interval; a failure before the step could start (the lock
+      unobtainable) is logged with its traceback and the timer carries on too.
+- [x] 3.2 Same module: outcome recording. Each outcome carries when the cycle finished,
       whether it completed, and for a failure the stage (`compose`, `run`, or `converge`)
       and the error. The step names its current stage through an operation the controller
       gives it. The controller takes, at construction, the exception types whose messages
       may be shown — each storefront's own configuration and publication errors — and
       records any other exception by type only; the full exception is logged.
-- [ ] 3.3 Same module: `snapshot()` returning every loop's state and last outcome; an
+      Done: `CycleOutcome(finished_at, trigger, completed, stage, error)` with
+      `CycleError(type, message)`; `trigger` (`timer` or `step`) is added so status can say
+      which ran it. The operation is `controller.enter_stage(stage)`, a plain
+      `Callable[[str], None]` a domain can inject into a kit cycle driver; it finds its
+      cycle through a context variable `run_cycle` sets, so `LoopStep` keeps its
+      no-argument shape, and outside a cycle (a preview, a direct call) it records nothing.
+      A cycle starts in `run`, so a loop naming no stages fails in `run`. The constructor
+      takes `disclosed_errors` and an injectable `clock` (UTC by default). A cancelled cycle
+      records `completed=False` with error type `CancelledError`. A step cancelled while it
+      waits for the running cycle also records a cancelled outcome, naming no stage: the
+      delta says each invocation records exactly one terminal outcome, and an operator's
+      step request is an invocation even when it never reached its step. A timer that
+      queued on the lock and was cancelled records nothing, as it had not passed its
+      re-read gate. The full exception is logged at ERROR with its traceback when the
+      cycle records it, for timer and step alike.
+- [x] 3.3 Same module: `snapshot()` returning every loop's state and last outcome; an
       `exited` or `cancelled` loop stays distinct from a `running` one whose last cycle
       failed. Export the outcome and snapshot types from `__init__.py`.
-- [ ] 3.4 `kit/capacity-publication/src/market_capacity_publication/capacity.py` and
+      Done: `snapshot()` maps every loop name — every loop with a state, a registered
+      step, or a recorded outcome — to `LoopSnapshot(name, state, last_outcome)`; `state`
+      is `None` for a step-only loop. `last_outcome(name)` reads one. The three types have
+      `to_dict()` for a status model to adopt; `CYCLE_STAGES`, `DEFAULT_CYCLE_STAGE`,
+      `TIMER_TRIGGER`, and `STEP_TRIGGER` are exported beside them.
+- [x] 3.4 `kit/capacity-publication/src/market_capacity_publication/capacity.py` and
       `capacity_remote.py`: each per-site capacity-event cursor has its own lock, taken by
       that site's poller cycle and by the capacity-events step for that site, the one
       exception in shape D6 names (`market-composition`: "A kit runtime that fans one loop
       out into independent per-site cycles MUST serialize each site's cycle").
-- [ ] 3.5 Tests (unit). `kit/storefront/tests/unit/test_lifecycle_controller.py`: a step
+      Done: `SiteEventCursor` carries an `asyncio.Lock`. The step
+      (`CapacityRuntime.drain_events_once` → `drain_site_events_once`) holds it for the
+      whole cycle; the site poller takes it and reads its gate again under it, immediately
+      before any request, skipping the cycle when held, as the controller's timer does
+      (`market-composition`: a loop reads its gate immediately before any work). The
+      preview takes none. `capacity.py` changes only the step's docstring.
+- [x] 3.5 Tests (unit). `kit/storefront/tests/unit/test_lifecycle_controller.py`: a step
       requested during a timer cycle runs after it, never alongside, each recording its
       own outcome; a raising step records one failed outcome naming its stage; a
       non-disclosed exception's message is absent from the outcome; a preview records
@@ -228,10 +274,115 @@ moved.
       within the quiescence bound with a long interval and the real loop body.
       `kit/capacity-publication/tests/unit/test_capacity_event_pollers.py`: a site's step
       waits for that site's running poll and not for another site's.
-- [ ] 3.6 Bump both packages' versions and refresh the locks. Validation:
+      Done (unit). `make -C kit test-storefront`: 98 passed, 31 of them new in
+      `test_lifecycle_controller.py` — the cases named above (the held step finding the
+      lock free, one acquisition and no wait), plus: two steps of one loop serialized; a
+      timer that queued behind a step while a pause landed running no cycle; a wake that
+      held timer did not act on staying set and running the loop once resumed; a step
+      cancelled while queued recording a cancelled outcome with no stage; a timer unable
+      to start a cycle logging it and carrying on; the timer running the registered step;
+      a wake ending the wait; a wake set while held running once resumed; the initial
+      delay idling through the controller; a failing timer cycle not ending the timer; a
+      cancelled cycle recorded; a completed cycle naming no stage; a failure naming no
+      stage being in `run`; a disclosed exception keeping its message; the clock stamping
+      outcomes; `enter_stage` outside a cycle and an unknown stage; a cancelled timer
+      keeping its last outcome; a step-only loop with no state; and `clear_loops`
+      dropping outcomes before `start_loops` restarts. The tests reach the controller only
+      through public seams: waiting on and for a cycle through an observed lock injected
+      with `cycle_lock_factory` (a constructor parameter, as `disclosed_errors` and `clock`
+      are) that counts acquisitions, a timer's first gate read through the controller's
+      injected logger, and timer handles from `start_loops`; none yields and hopes.
+      `make -C kit test-capacity-publication`: 93 passed, two new over `CapacityRuntime`
+      and parked fake feeds with an observed cursor lock: a site's step waits for that
+      site's poll and not another's; a poller that queued behind a step while a pause
+      landed reads no feed. Each mutation was checked by swapping the module and
+      restoring it: with the controller's lock removed the two serialization tests fail;
+      with its gate re-read removed the queued-timer and kept-wake tests fail; with the
+      wake cleared before the lock (the first version) the kept-wake test fails; with the
+      cursor lock removed the per-site test fails; with the poller's re-read removed the
+      queued-poller test fails.
+      **Also changed:** bare metal's
+      `tests/test_http_system.py::test_concurrent_publication_steps_run_one_after_the_other`
+      observed the second step on `publication_lock`; the controller's lock now stops it
+      first, so the test observes that lock instead. To inject it, bare metal's runtime
+      gains a `loop_controller_factory` init field (default `StorefrontLoopController`)
+      from which `__post_init__` builds `loops`, still `init=False`: a factory rather than
+      the controller, so a runtime copied with `dataclasses.replace` builds its own
+      controller and registers its steps there exactly once instead of sharing the
+      original's. The test passes `loop_controller_factory=lambda:
+      StorefrontLoopController(cycle_lock_factory=...)`. Application integration, through
+      `StorefrontClient`: `make test-bare-metal` 311 + 134 passed.
+- [x] 3.6 Bump both packages' versions and refresh the locks. Validation:
       `make -C kit test-storefront test-capacity-publication`, `make check-architecture`,
       `make check-packaging`, `make test`. End-to-end: none until a storefront registers
       a loop this way (Sections 9, 13, 15).
+      Done: `arkhai-kit-storefront` 0.4.0, `arkhai-kit-capacity-publication` 0.8.1; the
+      three storefronts' exact pins follow. `make lock` relocked every project except
+      `domains/vms/storefront`, `domains/vms/buyer`, and `kit/policy` (the PyTorch index is
+      refused here, as in 2.6); neither the VM buyer nor `kit/policy` names either package.
+      VM storefront's lock was edited by hand with exactly the six version, specifier, and
+      wheel-name substitutions uv wrote into bare metal's lock for the same two packages;
+      `make check-packaging` passes with it. Relock it with `make lock
+      PROJECTS=domains/vms/storefront` where the index is reachable (16.6); it should produce
+      no diff. `make check-architecture`, `make check-packaging`, `make check-comment-hygiene`
+      pass; `make check-doc-citations CHANGE=share-site-projection-state` reports nothing.
+      `make -k test`: every suite that ran passed except the bare-metal test 3.5 adapts,
+      which passes after it; the three PyTorch-index projects cannot reinit here and were
+      run in their frozen environments with the rebuilt wheels reinstalled: VM storefront
+      unit 1036 passed, 1 skipped, integration 411 passed (`test_alkahest` against Anvil
+      included); `kit/policy` 63 passed; VM buyer 197 passed. API-credit storefront
+      (`make test-apicredits`) passes.
+      **Correction (end-to-end):** the pipeline was not run for this section; the
+      scenarios below are the ones that will exercise it. No storefront registers a loop
+      with `register_loop` yet, but every registered step now runs through the locked,
+      recorded `run_cycle`, so each scenario that steps a loop through `run-cycle`
+      exercises it: VM `e2e_deal`,
+      `e2e_deal_buyer_cli`, `e2e_buy`, `e2e_non_erc20_settlement`, `e2e_vm_introduction`,
+      `e2e_listing_shapes`; bare metal `e2e_bare_metal_publication`,
+      `e2e_bare_metal_mock_deal`, `e2e_bare_metal_introduction`. The per-site cursor lock
+      is on every capacity-event poller's cycle, so every VM-lane and API-credit-lane
+      scenario runs through it (`e2e_credits_deal`, `e2e_credits_payment_deal` among them).
+      No scenario reads an outcome yet; status gains `lifecycle` in Sections 9 and 14.
+      **Interim:** loops still started with `start_loop` (every VM, bare-metal, and
+      API-credit loop until Sections 9, 13, and 15 move them) gate and run their timer
+      cycles themselves, so they record outcomes only for steps, and their timer cycles
+      take no controller lock.
+
+Section 3 handoff:
+
+- `register_loop` registers; `start_loops()` starts every registered loop's timer. VM
+  (module-level controller, steps registered at import in `lifecycle_steps.py`) can call
+  `register_loop` where it now calls `register_step` and `start_loops()` in `startup.py`;
+  bare metal registers in the runtime's constructor and starts in `server._start_runtime`.
+  Pass `initial_delay_seconds=interval` for loops whose kit runner made the first cycle due
+  one interval after start (watchdog, servicing, payment reconciliation, retention), and no
+  delay for VM's publication and the site-projection poller.
+- `SiteProjectionState.run` (Section 2) is redundant for storefronts once Section 8
+  registers the poller with `register_loop(SITE_PROJECTION_POLLER, step=…poll_once…,
+  interval_seconds=poll_interval)`: the controller's timer is the gate, cycle, and wait
+  `run` reimplements. It was left in place here; Section 8 (or 17's review) should remove
+  it and its tests if nothing else calls it.
+- The step names its stages with `controller.enter_stage("compose" | "run" | "converge")`;
+  a kit cycle driver can take it as an injected `Callable[[str], None]`. Construct each
+  storefront's controller with `disclosed_errors=(its configuration and publication
+  errors,)` (Sections 9, 13, 15); VM's controller is the module-level one in
+  `market_storefront/lifecycle.py`.
+- `wake` is the caller's `asyncio.Event`; an Event binds to the event loop that first waits
+  on it, so a process (or test) that clears and restarts its loops on another event loop
+  should register a fresh one. The controller's own pause signal and cycle locks are
+  recreated by `clear_loops`.
+- Bare metal's `publication_lock` is now redundant beside the controller's lock for steps
+  in this process (13.2 removes it). Its runtime builds `loops` from
+  `loop_controller_factory`, an init field: 13.2 can pass a factory building the controller
+  with bare metal's `disclosed_errors` there.
+- `LifecycleRouteError` raised from a step (bare metal's 503 on a compose failure) is
+  recorded as a failed cycle; it is disclosed only if a storefront lists it.
+- Known test hazard: each `SiteEventCursor` lives in the module-global cursor table, and
+  its `asyncio.Lock` binds to the first event loop that waits on it (only when contended).
+  A test that contends a cursor's lock and a later test that contends the same site's
+  cursor on another event loop would fail with a bound-to-a-different-loop error unless
+  `reset_site_event_cursors()` runs between them, as the capacity-publication tests'
+  fixture does. Production runs one event loop.
 
 ## 4. Site trust from the site's service peer
 
@@ -767,6 +918,11 @@ storefront's configuration reaches it through its configuration system"; `design
       bare-metal storefront enabled from the example values, confirm it starts, reports
       its loops and both projection families in status, and publishes; record the
       evidence or the blocker here. Not runnable in a cloud session.
+- [ ] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
+      `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
+      there unrefreshed; the hand-edited locks should produce no diff. This container's
+      network policy blocks that index, so Sections 2 onward edited those locks by hand and
+      ran their suites in frozen environments.
 
 ## 17. Closeout
 

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from core_storefront.aggregation import AggregateCapacityClient
@@ -51,19 +51,24 @@ class SiteEventCursor:
     ``last_applied`` of ``None`` means unpositioned: the next cycle reads the
     feed head and runs a full reconcile to converge with anything that
     happened while this process was down, rather than replaying the feed.
+
+    ``lock`` is held for the whole of every cycle that moves this position,
+    the site's poller's and an operator's step alike, so a step requested
+    while the poller is mid-cycle runs after it rather than reading the same
+    page and applying it twice. One lock per site: a step for one site never
+    waits on another site's poller.
     """
 
     site_name: str
     last_applied: int | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
-#: One position per site per process. The position used to live in the
-#: poller's closure, which is why a single cycle was not callable from
-#: anywhere else: an advance with its own cursor would either replay events
-#: the poller had applied or skip past ones it had not. The poller and the
-#: admin advance address the same cursor, and the pause is what makes that
-#: safe -- a cycle either runs completely or never starts, so an advance
-#: while the loop is held has the feed to itself.
+#: One position per site per process: an advance with its own cursor would
+#: either replay events the poller had applied or skip past ones it had not.
+#: The poller and the admin advance address the same cursor, and its lock
+#: serializes their cycles, so an advance never overlaps a poller cycle,
+#: held or not.
 _CURSORS: dict[str, SiteEventCursor] = {}
 
 
@@ -208,10 +213,23 @@ async def drain_site_events_once(
 ) -> SiteEventCycle:
     """Run exactly one cycle of one site's feed and report what it did.
 
-    The body the poller used to run inline. Extracted so a single cycle is
-    callable -- a held loop that cannot be stepped can only be waited on, and
-    waiting on a poller is the sleep this suite forbids.
+    The poller's cycle and the capacity-events step both run through here, so
+    a held loop can be stepped rather than waited on. The cycle holds the
+    cursor's lock throughout.
     """
+    async with cursor.lock:
+        return await _drain_site_events_locked(
+            aggregate, client, cursor, full_reconcile=full_reconcile
+        )
+
+
+async def _drain_site_events_locked(
+    aggregate: AggregateCapacityClient,
+    client: SiteCapacityClient,
+    cursor: SiteEventCursor,
+    *,
+    full_reconcile: Callable[[], Awaitable[None]],
+) -> SiteEventCycle:
     positioned = False
     resynced = False
     applied: list[dict[str, Any]] = []
@@ -294,9 +312,10 @@ async def site_events_poller(
     listing-reconciliation reaction — core never interprets listings.
     Only ``events_after`` and ``base_url`` are used of ``client``.
 
-    ``paused`` is consulted once per cycle before any request, so a cycle
-    either runs completely or never starts: the feed position is loop-local,
-    and a poller interrupted mid-cycle would either replay or skip events.
+    ``paused`` is consulted before each cycle, and again under the site's
+    cursor lock immediately before any request, so a cycle either runs
+    completely or never starts: the feed position is per site, and a poller
+    interrupted mid-cycle would either replay or skip events.
     Core supplies no gate of its own -- the caller owns the pause, because only
     it knows what the loop is registered as.
 
@@ -316,12 +335,24 @@ async def site_events_poller(
         if paused is not None and paused():
             await asyncio.sleep(_PAUSED_POLL_SECONDS)
             continue
-        cycle = await drain_site_events_once(
-            aggregate,
-            client,
-            cursor,
-            full_reconcile=full_reconcile,
-        )
+        async with cursor.lock:
+            # Read again under the lock, immediately before the work: a poller
+            # that passed its gate and then waited for an operator's step for
+            # this site must not start a cycle a pause requested meanwhile holds.
+            held = paused is not None and paused()
+            cycle = (
+                None
+                if held
+                else await _drain_site_events_locked(
+                    aggregate,
+                    client,
+                    cursor,
+                    full_reconcile=full_reconcile,
+                )
+            )
+        if cycle is None:
+            await asyncio.sleep(_PAUSED_POLL_SECONDS)
+            continue
         if cycle.truncated:
             continue  # truncated page — keep draining before waiting
         await (wait(interval) if wait is not None else asyncio.sleep(interval))

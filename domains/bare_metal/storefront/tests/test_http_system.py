@@ -9,12 +9,14 @@ from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
+from market_storefront_kit import StorefrontLoopController
 
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.lifecycle_steps import PUBLICATION
 from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
 from arkhai_bare_metal_storefront.runtime import (
     BareMetalStorefrontRuntime,
@@ -357,7 +359,7 @@ async def test_a_loop_the_storefront_does_not_run_is_not_found(tmp_path) -> None
 
 
 class _ObservedLock(asyncio.Lock):
-    """The runtime's publication lock, reporting each attempt to acquire it.
+    """A lock a publication step takes, reporting each attempt to acquire it.
 
     Lets a test wait until a second request is actually blocked on the lock,
     rather than yielding and hoping it got there.
@@ -380,12 +382,16 @@ class _ObservedLock(asyncio.Lock):
 
 
 async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) -> None:
+    """The loop controller's cycle lock serializes the steps: the second request
+    waits on it while the first pass runs."""
     log: list[str] = []
     gate = asyncio.Event()
     lock = _ObservedLock()
     runtime = dataclasses.replace(
         _stepped_runtime(str(tmp_path / "storefront.db"), log, gate),
-        publication_lock=lock,
+        loop_controller_factory=lambda: StorefrontLoopController(
+            cycle_lock_factory=lambda name: lock if name == PUBLICATION else asyncio.Lock()
+        ),
     )
     app = _app(runtime)
 
