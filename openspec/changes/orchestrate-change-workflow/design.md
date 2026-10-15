@@ -90,8 +90,10 @@ remove.
 
 The wrapper appends one JSON line per run to `reviews/workflow.jsonl` in the change's
 directory: the step's schema-validated final answer, with the session id, the
-commit, the time, and, for a run that crashed or was refused tools, a `stopped`
-line the wrapper writes itself with the exit status and the denials. `reviews/` is
+commit, the time, and, for a run that crashed or ended without an outcome, a
+`stopped` line the wrapper writes itself with the exit status. A `stopped` line's
+`denials` always come from the run's own `permission_denials`, never from the
+step's account of them. `reviews/` is
 untracked and moves with the change when it is archived, like the transcripts.
 
 Outcomes: `finished` (with `next`), `question` (with `awaiting`), `returned` (a
@@ -138,10 +140,20 @@ about them.
 ### D14 — A script computes the next step; the orchestrator is its backstop
 
 `scripts/change_next_step.py <change>` reads the change's index row and status, its
-`Depends on`, `reviews/` and their triage gates, `tasks.md`, and the log, and prints
-the next step as data — for example
+`Depends on`, `reviews/` and their triage gates, `tasks.md`, the log, and the open
+round view's state that `scripts/round_view.py` keeps in Git, and prints the next
+step as data — for example
 `{"step":"triage","reason":"05-validation.md and 06-implementation.md have no triage"}`
-or `{"step":"owner","reason":"round agreement needed before implementation"}`. The
+or `{"step":"owner","reason":"round agreement needed before implementation"}`. Among
+the results that wait for the owner:
+
+- a round view is open: `owner`, awaiting the owner's notes on the round, then
+  `make round-done` (D9);
+- a prerequisite named in `Depends on` has no directory on this branch: `owner`,
+  merging dev once the prerequisite's proposal lands (D5);
+- a prerequisite gating `design` is not archived: `owner`, design waits on it (D5);
+- a prerequisite gating `design` is archived on this branch: `owner`, proposing the
+  release (D5a). The
 orchestrator runs that step and never routes on its own reading. The transitions
 are already fixed by each skill's entry check and handoff; in code they are
 testable under `scripts/tests`, and the owner can run the same command by hand.
@@ -161,34 +173,48 @@ into the skill — still read by the model, and untestable.
 ### D5 — A design blocked on a prerequisite shapes it and halts
 
 When a design cannot proceed without another change, the design step, with the
-owner, defines the prerequisite's requirements and initial proposal, writes its
-directory and its `ready for design` index row, sets this change to
-`blocked in design` with the prerequisite in `Depends on`, and ends with a `blocked`
-outcome. The workflow halts there. The prerequisite's proposal and row land on dev
-first, as their own small pull request, and the blocked branch merges dev, so the
-proposal exists once. The owner starts the prerequisite's workflow on its own branch
-from dev; once it is archived and merged to dev, and dev is merged into the blocked
-branch, the original workflow restarts with its prerequisite met.
+owner, defines the prerequisite's requirements and initial proposal and ends with a
+`blocked` outcome. The workflow halts there. The proposal is never written on the
+blocked branch:
 
-`make check-change-index` requires the prerequisite to exist on the blocked branch:
-a `Depends on` entry must name a listed change, and a row must link a directory. A
-proposal kept only in the blocked change's `design.md` would fail it.
+1. The design step creates a worktree on a new branch from dev,
+   `git worktree add ../<prereq>-proposal -b propose-<prereq> dev`, and writes the
+   prerequisite's directory and its `ready for design` index row there.
+2. The owner commits in that worktree and opens its pull request.
+3. Once it merges, the blocked branch merges dev, so the proposal reaches the
+   blocked branch only through dev's history.
+4. The blocked change then stays `in design`, with the prerequisite in `Depends on`
+   gating `design` and `Notes` naming it. `change-design`'s entry check already
+   stops while a dependency gating `design` is unarchived, so no status of its own
+   is needed; `blocked in design` is reserved for reasons that are not another
+   change.
+5. The owner starts the prerequisite's workflow on its own branch from dev; once it
+   is archived and merged to dev, and dev is merged into the blocked branch, the
+   original workflow restarts with its prerequisite met (D5a).
+
+`make check-change-index` requires a `Depends on` entry to name a listed change, so
+the dependency is recorded only after step 3, when the prerequisite's row is on the
+blocked branch.
 
 Rejected: the orchestrator creating the prerequisite's branch and starting its
 workflow — choosing to start other work is the owner's. Stacking the prerequisite
 on the blocked branch — two changes in one pull request, and a prerequisite another
-change needs could not land alone. Cherry-picking the proposal onto the
-prerequisite's branch — after the prerequisite is archived, merging dev back leaves
-the blocked branch's unarchived copy beside dev's archived one without a conflict.
+change needs could not land alone. Writing the proposal on the blocked branch and
+cherry-picking it to a proposal branch — it works only if the blocked branch merges
+dev before the prerequisite is archived; otherwise the merge base lacks the
+proposal, and merging dev back leaves the blocked branch's unarchived copy beside
+dev's archived one without a conflict. The worktree makes that duplicate impossible
+rather than relying on an ordering rule. The owner copying the files by hand — the
+same hazard, and no single commit to point at.
 
-#### D13a — The restart releases the dependency on the owner's word
+#### D5a — The restart releases the dependency on the owner's word
 
 Archive cleanup releases a change's dependents by editing their rows, but the
-blocked change's status and dependency exist only on its branch. After dev is
-merged in, the blocked row depends on an archived change, which
-`make check-change-index` rejects. `change_next_step.py` recognizes that state; the
-orchestrator proposes the release, and on the owner's word drops the dependency, sets
-the status back to `in design`, runs `make check-change-index`, and resumes design.
+blocked change's dependency exists only on its branch. After dev is merged in, the
+blocked row depends on an archived change, which `make check-change-index` rejects.
+`change_next_step.py` recognizes that state; the orchestrator proposes the release,
+and on the owner's word drops the dependency, leaving the status `in design`, runs
+`make check-change-index`, and resumes design.
 
 ### D6 — A run through the wrapper is held to its step's allow-list
 
@@ -201,7 +227,7 @@ with prompts.
 
 | Step | Allowed | Denied |
 |---|---|---|
-| design, plan | read; edit `openspec/`, `docs/`; the pinned OpenSpec validator; `make check-*` | commits of code, any push |
+| design, plan | read; edit `openspec/`, `docs/`; the pinned OpenSpec validator; `make check-*`; for a prerequisite (D5), `git worktree add` on a new branch from dev and edits under that worktree's `openspec/` | commits of code, any push |
 | triage | design's, and implement's, since it fixes what the owner accepts and commits | any push |
 | implement | edit the repository; `make` test, lock, and check targets; `uv run`; `git add`, `git commit`; the Agent tool | any push, `make push-branch`, `make run-e2e` |
 | validate | read; write `reviews/NN-validation.md` only; `make validate-*`, `push-branch`, `run-e2e`, `round-e2e-baseline`, `fetch-e2e-logs`; `gh run list`, `gh auth status`; `docker`, `kubectl`, `helm` | editing tracked files, `make lock`, commits, any other push |
@@ -210,7 +236,8 @@ with prompts.
 
 The allow-lists turn each skill's "never" lines into rules the harness enforces:
 validation's "never changes the commit" stops being an instruction only. A run that
-needed a denied tool ends `stopped` with its denials. The orchestrator reads each
+needed a denied tool ends `stopped` with its reason; the wrapper records the
+denials from the run's `permission_denials` (D3). The orchestrator reads each
 against the step's row and the skill: a gap in the list gets a proposed rule — grant
 once by resuming with it, or add it to the table as a tracked change for the owner
 to commit; an action the skill forbids is a finding, and the denial stands; anything
@@ -249,40 +276,54 @@ Archive cleanup drafts the pull request; the owner creates it.
 
 After a round's sections are committed, the orchestrator runs `make round-view` in
 its own session, under the owner's permissions, which pushes the round and
-dispatches the pipeline. It waits for the owner's word — the owner's notes on the
-round go to triage as the owner's findings — then runs `make round-done`, and starts
-validation and the implementation review side by side, validation adopting the
-running pipeline through `make round-e2e-baseline`. This is `change-implement`'s
-existing order.
+dispatches the pipeline. It waits for the owner's word. When the owner gives notes
+on the round, the orchestrator saves them verbatim as the change's next numbered
+record, `reviews/NN-implementation-owner.md`, which triage already takes as the
+owner's findings, so a restart cannot lose them. It then runs `make round-done`, and
+starts validation and the implementation review side by side, validation adopting
+the running pipeline through `make round-e2e-baseline`. This is
+`change-implement`'s existing order.
+
+A restart recovers from Git and the files alone. While the view is open,
+`round_view.py`'s state names the round's head and `change_next_step.py` waits for
+the owner's notes and the close (D14); the branch then sits at the round's base, so
+nothing else about the change is read until the view is closed. After
+`round-done`, the round's commits are on the branch with no validation naming
+`HEAD`, so validation and review are next, and the baseline the view recorded for
+that head lets validation adopt the pipeline already running.
 
 ### D10 — The orchestrator holds no state of its own
 
 `make orchestrate CHANGE=<change>` opens `claude "/change-orchestrate <change>"`,
 after `make design`. On every start, and after compaction, the orchestrator runs
-`change_next_step.py` and reads the log's last lines; it keeps nothing else. It
-commits nothing: steps commit as their skills say, and the owner commits
-design-phase work, creates branches, and opens pull requests, including a
-prerequisite proposal's.
+`change_next_step.py`, which reads the open round view's state among its inputs, and
+reads the log's last lines; it keeps nothing else. It commits nothing: steps commit
+as their skills say, and the owner commits design-phase work, creates branches, and
+opens pull requests, including a prerequisite proposal's. The one branch a step
+creates is a prerequisite proposal's, from dev, in its own worktree (D5).
 
 ### D11 — Reviews keep Codex, under the same wrapper
 
 The wrapper takes over what `run_change_review.py` does — the reviewer-session
-marker, resuming the reviewer's session, the transcript. A review's outcome is
-deterministic: the review file exists, and triage is next; otherwise, or on a
-non-zero exit, `stopped`. Codex needs no output schema for this.
+marker, resuming the reviewer's session, the transcript, and claiming a new
+numbered record for the run, removed when the reviewer fails or its review is
+invalid. A review's outcome is deterministic: when the run published its claimed
+record, `finished`, naming that record and the reviewed commit, and triage is next;
+otherwise `stopped`, with the runner's reason. An earlier review file never counts.
+Codex needs no output schema for this.
 
 ### D12 — The skills change how they ask and report, not what they check
 
 When a skill runs through the wrapper, every "stop and ask the owner" ends its turn
-with a `question` outcome; a denied tool ends it with a question, never a
-workaround; and its last turn ends with an outcome matching
+with a `question` outcome; a denied tool ends it `stopped` with its reason, never
+a question or a workaround; and its last turn ends with an outcome matching
 `scripts/change_outcome.schema.json`. Interactive use is unchanged. Beyond that:
 
 - `change-plan` sizes a section as a coherent, verifiable slice rather than to one
   session, and drops "one section per session" from its handoff (D13).
 - `change-implement` implements the sections it was given, drops §8's question,
   and keeps the warning about a growing session as advice (D13).
-- `change-design` gains the blocked-on-prerequisite path (D5).
+- `change-design` gains the blocked-on-prerequisite path (D5, D5a).
 
 ### D15 — The pilot runs on this change's branch
 

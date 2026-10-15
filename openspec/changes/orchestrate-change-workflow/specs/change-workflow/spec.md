@@ -16,6 +16,13 @@ question, or commit. It MUST advance only the change it was started for.
 - **THEN** it determines the next step from the change's files and workflow log, and
   continues from there
 
+#### Scenario: The orchestrating session restarts during a round view
+
+- **WHEN** an orchestrating session is started while a round view of the change is
+  open
+- **THEN** it waits for the owner's notes on the round, saves them as the change's
+  next owner-notes record, and closes that view before computing any other step
+
 #### Scenario: A step reaches a gate
 
 - **WHEN** a step's outcome is a review ready for its gate
@@ -31,6 +38,10 @@ prerequisite; or stopped, with its reason and any tools it was denied. The wrapp
 MUST append each outcome, with the run's session and commit, to the change's
 workflow log, and MUST record a stopped outcome itself for a run that ends without
 one. Where the workflow log and the change's files disagree, the files MUST prevail.
+A stopped outcome's denials MUST be taken from the run's own record of denied tools.
+A review run's outcome MUST name the review record that run published; a review run
+that published none MUST be recorded as stopped, and an earlier record MUST NOT count
+as its result.
 A question MUST be answered by resuming the same session with the owner's answer.
 A proposed return MUST NOT change the change's status until the owner confirms it.
 An interactive run of a step MUST behave as it does without the wrapper.
@@ -56,7 +67,8 @@ An interactive run of a step MUST behave as it does without the wrapper.
 ### Requirement: The next step is computed from the files
 
 The next step of a change MUST be computed by a script from the change's index row,
-its reviews and their triage, its tasks, and its workflow log, and the same
+its reviews and their triage, its tasks, its workflow log, and the state of any open
+round view, and the same
 computation MUST be available to the owner by hand. When the computation fails or
 cannot classify the change's state, the orchestrating session MUST determine what
 happened and either resolve it, when it concerns only routing or recovery, or bring
@@ -89,7 +101,8 @@ owner in the orchestrating session, with the owner's reply resuming that session
 
 An unattended run MUST be limited to the tools its step's permission table allows,
 and MUST NOT be granted a push other than validation's guarded push. A run denied a
-tool MUST end with an outcome naming the denial rather than working around it. A
+tool MUST end with a stopped outcome naming the denial, rather than asking a question
+or working around it. A
 change to a step's permissions MUST be made by the owner, as a tracked change, or
 granted by the owner for one resumed run. Interactive runs MUST NOT be restricted by
 the table.
@@ -97,24 +110,35 @@ the table.
 #### Scenario: Validation attempts to relock
 
 - **WHEN** an unattended validation run attempts `make lock`
-- **THEN** the call is denied, and the run's outcome names the denial
+- **THEN** the call is denied, and the run ends stopped, its outcome naming the
+  denial
 
 ### Requirement: A design blocked on a prerequisite halts
 
 When a design cannot proceed without another change, the design step MUST, with the
-owner, define the prerequisite's requirements and initial proposal, record it in the
-change index, set the blocked change to `blocked in design` with the prerequisite in
-its dependencies, and end with a blocked outcome. The prerequisite's proposal MUST
-reach the development branch before the prerequisite's own workflow starts. Once the
-prerequisite is archived and its result is merged into the blocked change's branch,
-the blocked change's dependency MUST be released, on the owner's word, before design
-resumes.
+owner, define the prerequisite's requirements and initial proposal and end with a
+blocked outcome. The prerequisite's proposal and index row MUST be written on a
+branch from the development branch, never on the blocked change's branch, and MUST
+reach the development branch before the prerequisite's own workflow starts; the
+blocked change's branch MUST receive them only by merging the development branch.
+The blocked change MUST then remain `in design`, with the prerequisite in its
+dependencies gating design. Once the prerequisite is archived and its result is
+merged into the blocked change's branch, the blocked change's dependency MUST be
+released, on the owner's word, before design resumes.
+
+#### Scenario: A prerequisite has not landed
+
+- **WHEN** a change `in design` depends, for its design, on a change that is not
+  archived
+- **THEN** the next-step computation names no step for it and reports that design
+  waits on the prerequisite
 
 #### Scenario: A prerequisite has landed
 
-- **WHEN** a change `blocked in design` depends on a change now archived on its branch
+- **WHEN** a change `in design` depends, for its design, on a change now archived on
+  its branch
 - **THEN** the next-step computation names the release, and on the owner's word the
-  dependency is dropped and the change returns to `in design`
+  dependency is dropped and the change stays `in design`
 
 ## RENAMED Requirements
 
