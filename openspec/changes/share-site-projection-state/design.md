@@ -130,10 +130,13 @@ to `view` or `refresh_site` raises the kit's `CapacityBindingError`, as
 never raises for a failed fetch: the cache keeps its last generation as `stale` with its
 error and does not advance its last confirmation.
 
-The state runs one operation at a time on a site's family, its version check included: a
-caller arriving while one is in flight — the poller, the admin route, a drift check, an inline
-refresh — waits for it and returns its result rather than polling again, so a failed operation
-never replaces a confirmation that completed after it began (03 F3). The fix belongs in core's
+The state runs one operation at a time on a site's family, its version check included (03 F3).
+A poll arriving while one is in flight — the poller, the `site-projections` step, the admin
+refresh route, a drift check — joins it and returns its result rather than polling again. A
+refresh-and-reconcile caller (an inline refresh, D4) waits for the operation in flight and then
+fetches, because it reconciles a change it has just made and needs a snapshot taken after that
+change; adopting an earlier-started poll's result could miss it. Either way a failed operation
+never replaces a confirmation that completed after it began. The fix belongs in core's
 `ProjectionCache`, whose `poll_once` today checks the version outside its refresh lock, so
 every user of the primitive gains it. Rejected: a kit module-level registry, a process
 global that contradicts the instance-scoped loop controller and keeps the module patching

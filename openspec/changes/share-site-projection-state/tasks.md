@@ -41,7 +41,7 @@ Delivers `SiteProjectionState` over a primitive that serializes each family's op
 process"; `storefront-publication` "Projection-backed listing candidate derivation"). Touches
 `core/storefront` and `kit/capacity-publication`; composes into no storefront yet.
 
-- [ ] 2.1 `core/storefront/src/core_storefront/site_projections.py`: `ProjectionCache` runs
+- [x] 2.1 `core/storefront/src/core_storefront/site_projections.py`: `ProjectionCache` runs
       `poll_once`, `refresh`, and `refresh_after_topology_error` under one per-cache lock,
       the version check included. A caller arriving while an operation runs waits for it
       and returns its result rather than polling again, and a failed operation never
@@ -51,7 +51,37 @@ process"; `storefront-publication` "Projection-backed listing candidate derivati
       and a refresh started together run once each in order; a failing version check that
       began before a successful refresh completed leaves the view `loaded` with the later
       `fetched_at`; the existing coalescing test still passes.
-- [ ] 2.2 `kit/capacity-publication/src/market_capacity_publication/site_projections.py`
+      Done: every operation runs through one lock and records the running operation. A
+      *poll* (`poll_once`, `refresh()` unforced, `refresh_after_topology_error`) arriving
+      while any operation runs joins it and returns its view; a *forced refresh* waits for
+      it and then fetches. The split follows D4's refresh-and-reconcile category: an inline
+      refresh reconciles a change its caller has just made, so it needs a snapshot taken
+      after that change and must not adopt an earlier-started poll's result. `design.md` D2
+      is amended to state this rule, which its first wording ("an inline refresh … waits
+      for it and returns its result") contradicted. The "started together" test does not
+      distinguish the readings (it passes on the old cache too, since its two operations
+      never overlap there); "a refresh requested during a poll waits for it before
+      fetching" does. A joined poll whose operation is cancelled polls for itself, unless
+      its own task is being cancelled too, when it re-raises. Unforced `refresh()` no
+      longer re-enters the lock: it deadlocked on a remote identity change before. The
+      private `_identity`/`_value`/`_state` fields VM's tests set are unchanged. Unit
+      (`make test-core`, core storefront 202 passed, 2 skipped): ten new cases — the two
+      named above, a refresh requested during a poll waiting for it, a poll during a
+      refresh returning its result with no version call, three concurrent polls making one
+      version call, a drift check sharing a running poll's check, a poll joined to a
+      cancelled operation polling for itself, a cancelled caller joined to a cancelled
+      operation not polling, unforced refresh as a poll, and unforced refresh after a
+      remote change. Against the cache before this section (module swapped in, then
+      restored), five fail and the unforced-refresh-after-change case hangs until its
+      one-second timeout; the cancelled-caller case also fails against the first version
+      of this fix. The existing coalescing test is renamed
+      `test_concurrent_forced_refreshes_never_overlap`, since forced refreshes no longer
+      coalesce. The tests synchronize on events the fake client sets when a call starts
+      and gates it parks on; the one point no fake can observe — a caller parked on the
+      cache's lock or joined to its running operation, which calls nothing — is reached
+      through a single documented yield, `_let_new_tasks_reach_their_wait`, rather than a
+      production hook. A missed join shows as an extra recorded call, so it fails the test.
+- [x] 2.2 `kit/capacity-publication/src/market_capacity_publication/site_projections.py`
       (new): `SiteProjectionState` with the interface `design.md` D2 records, over a
       `core_storefront.aggregation.AggregateCapacityClient`. Move VM's
       `_RemoteProjectionClient` (`domains/vms/storefront/src/services/site_projection_cache.py`)
@@ -63,15 +93,33 @@ process"; `storefront-publication` "Projection-backed listing candidate derivati
       `run(*, interval, gate, wait)`. An unconfigured site raises `CapacityBindingError`;
       an unknown family raises `ValueError`; `refresh_site` never raises for a failed
       fetch. Export `RESOURCE_POOL` and `CAPACITY_BUCKET` and the class from `__init__.py`.
-- [ ] 2.3 Same module: the refresh categories of D4. `poll_once` and the topology drift
+      Done as planned; `freshly_confirmed` is exported too. The constructor refuses a
+      client that is not an `AggregateCapacityClient` (`CapacityConfigurationError`),
+      since only an aggregate names its sites. `run` gates, polls, and waits through the
+      injected wait, re-reading a held gate every 50 ms as the kit's other gated runners
+      do; a failing poll is logged and the loop continues. **Differed:** VM's
+      `_RemoteProjectionClient` is copied, not yet removed, because its only caller is
+      VM's loader, which 8.5 deletes; Section 8 removes VM's copy with it.
+      **Correction:** 8.5's text now names `_RemoteProjectionClient` among what goes.
+      `run` re-reads a held gate on the kit's held-poll interval rather than through the
+      injected `wait`, as every kit runner and the controller's own `HELD_POLL_SECONDS`
+      do: the controller's wait returns at once while a pause is requested, so waiting
+      through it while held would spin. Its test observes each gate read and no longer
+      depends on that interval.
+- [x] 2.3 Same module: the refresh categories of D4. `poll_once` and the topology drift
       check (one coalesced check of every family of the site, never retrying the request)
       call `on_resource_pool_change` when a resource-pool identity changed;
       `refresh_site` never does. A failed operation in any category keeps the site's last
       generation `stale` with its error and does not advance its confirmation.
-- [ ] 2.4 Same module: `freshly_confirmed(view, *, now, window_seconds)`, the source-check
+      Done: `poll_once` and each site's drift check compare every site's resource-pool
+      identity before and after and wake on a difference (the first load is a change,
+      as VM's poller treats it); the drift check runs `refresh_after_topology_error` on
+      both of the site's families, so it shares a check already running on either.
+- [x] 2.4 Same module: `freshly_confirmed(view, *, now, window_seconds)`, the source-check
       rule both domains apply (D5): `loaded`, a `fetched_at`, and an age within the window.
       The window itself is each storefront's configuration, resolved in Sections 9 and 13.
-- [ ] 2.5 Tests in `kit/capacity-publication/tests/unit/test_site_projection_state.py`
+      Done; an age equal to the window still confirms.
+- [x] 2.5 Tests in `kit/capacity-publication/tests/unit/test_site_projection_state.py`
       (new, unit, over a fake aggregate injected through the constructor): both families
       loaded per site; `values` omits a site holding nothing and maps a loaded empty site to
       `[]`; a failed poll keeps the last generation `stale` and omits nothing from
@@ -79,12 +127,69 @@ process"; `storefront-publication` "Projection-backed listing candidate derivati
       wakes; a topology error checks both families once and wakes on a resource-pool change;
       unknown site and family errors; `freshly_confirmed` at, inside, and past the window,
       and for each non-`loaded` state.
-- [ ] 2.6 `kit/capacity-publication/pyproject.toml`: bump the version; pin the
+      Done (unit, `make -C kit test-capacity-publication`: 91 passed, 22 of them this
+      file), plus refresh-site family selection, a failed refresh and a failed drift
+      check confirming nothing, status reporting without rows, the non-aggregate
+      refusal, and `run` polling per cycle and not while held, with a test-driven gate
+      and wait.
+- [x] 2.6 `kit/capacity-publication/pyproject.toml`: bump the version; pin the
       `arkhai-core-storefront` release carrying 2.1. Refresh the locks the repository's
       tooling names (`make lock`).
-- [ ] 2.7 Validation: `make test-core`, `make -C kit test-capacity-publication`,
+      Done: `arkhai-core-storefront` 0.12.1, `arkhai-kit-capacity-publication` 0.8.0
+      pinning it; the three storefronts' exact `==0.7.0` pins of the kit move to
+      `==0.8.0` so their locks resolve the wheel the tree builds. `make lock` relocked
+      every project except `domains/vms/storefront`, `domains/vms/buyer`, and
+      `kit/policy`: this session's egress policy refuses `download.pytorch.org` (403 on
+      CONNECT), which those three declare as an index. Neither `kit/policy` nor the VM
+      buyer names either bumped package, so their locks need no change (`check-locks`
+      agrees). VM storefront's lock was updated by hand with exactly the five version
+      and wheel-name substitutions uv wrote into bare metal's lock for the same two
+      packages; `make check-packaging` passes with it (every lock matches its project
+      and the wheels the tree builds). Relock it with `make lock
+      PROJECTS=domains/vms/storefront` wherever the PyTorch index is reachable; it
+      should produce no diff.
+- [x] 2.7 Validation: `make test-core`, `make -C kit test-capacity-publication`,
       `make check-architecture`, `make check-packaging`, `make test`.
       End-to-end: none; nothing composes the state until Section 8.
+      `make test-core` (core storefront 202 passed, 2 skipped) and `make -C kit
+      test-capacity-publication` (91 passed) pass;
+      `make check-architecture` and `make check-packaging` pass; `make
+      check-comment-hygiene` passes; `make check-doc-citations
+      CHANGE=share-site-projection-state` reports nothing. **Correction (end-to-end):**
+      `SiteProjectionState` is composed nowhere yet, but 2.1 changes core's
+      `ProjectionCache`, which VM's `services/site_projection_cache.py` already uses, so
+      VM's projection-backed scenarios exercise the new serialization now: `e2e_deal`,
+      `e2e_deal_buyer_cli`, `multi_registry` (its admin refresh), `e2e_listing_shapes`,
+      `e2e_compute_dynamic_listings`, `e2e_pool_declared_modes`, and `e2e_vm_introduction`.
+      No bare-metal or API-credit scenario reaches it.
+      `make -k test`: every suite that ran passed (54 pytest runs, no failure), but three
+      projects did not run, because their environments cannot be created while
+      `download.pytorch.org` is refused: `kit/policy`, `domains/vms/buyer`, and
+      `domains/vms/storefront`. The VM storefront is the one that matters here: its
+      tests build `ProjectionCache`s and set their private fields, and they ran against
+      neither the new cache nor the new kit in this session. They were then run against
+      this section in torch-free environments (frozen sync from the committed locks, the
+      internal wheels reinstalled): VM storefront unit 1036 passed, 1 skipped; VM storefront
+      integration 411 passed, `test_alkahest` included against Anvil; `kit/policy` 63
+      passed; VM buyer 197 passed. (`test-deployment-packaging` stopped at `helm-render`
+      for want of a `helm` binary; nothing in this section reaches a chart.)
+
+Section 2 handoff:
+
+- `SiteProjectionState` composes nothing yet. Section 8 builds it over VM's capacity
+  runtime aggregate; its topology handler replaces VM's (`set_topology_error_handler` is
+  per site client, so installing the kit's overwrites VM's bucket-only handler once VM
+  stops installing its own in 8.5).
+- A topology handler needs a site client with `set_topology_error_handler` and the four
+  projection methods: VM tests whose aggregate members are SQLite or fake clients will
+  need those (Section 8's fake aggregate in `tests/fake_site.py`).
+- The poll/refresh split in 2.1 is the behaviour Section 8's inline refreshes rely on:
+  `refresh_site` always fetches after its caller's change, even while the poller runs.
+- `ProjectionCache` keeps no `_refresh_lock` attribute; nothing outside core named it.
+- Known, benign: `poll_once` compares every site's resource-pool identity before and after
+  its cycle, so a `refresh_site` that lands a change mid-cycle can make the poller wake
+  publication once more than the change alone would. A wake only makes publication run
+  sooner, so no change is planned.
 
 ## 3. The loop controller is the one place a cycle runs
 
@@ -298,7 +403,8 @@ fifteen test files, mechanically.
 - [ ] 8.5 `services/site_projection_cache.py` reduced to
       `listing_cardinality_mode_explanations`, reading the state it is given; `_caches`,
       the loaders, the poller, the refresh functions, and the unused
-      `refresh_after_topology_error` go. Rename the module if only explanations remain, and
+      `refresh_after_topology_error` go, and so does VM's `_RemoteProjectionClient`, which
+      2.2 copied into the kit rather than moved. Rename the module if only explanations remain, and
       fix the docstring in `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`
       that names it.
 - [ ] 8.6 Tests build their own state over `tests/fake_site.py`'s fake aggregate and inject

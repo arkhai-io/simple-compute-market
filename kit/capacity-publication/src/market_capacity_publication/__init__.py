@@ -36,6 +36,12 @@ from .publication import (
     RegistryDivergence,
     ReconciliationPlan,
 )
+from .site_projections import (
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
+    SiteProjectionState,
+    freshly_confirmed,
+)
 
 __all__ = [
     "CapacityAdminRouteError",
@@ -66,4 +72,8 @@ __all__ = [
     "PublicationRuntime",
     "RegistryDivergence",
     "ReconciliationPlan",
+    "CAPACITY_BUCKET",
+    "RESOURCE_POOL",
+    "SiteProjectionState",
+    "freshly_confirmed",
 ]
