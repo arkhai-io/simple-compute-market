@@ -107,15 +107,9 @@ The first two are stated below as rules a check can hold; the third is stated as
 
 ### Repository layers
 
-```text
-composition      roles, storefronts, buyers, deployed services — where composing happens
-        ↓
-specialization   what a family or domain supplies to be composed — vocabulary, contracts,
-        ↓        clients, codecs, policies, adapters, family kits
-kit              reusable capabilities that compose nothing and discover nothing
-        ↓
-core             carriers with no internal dependencies
-```
+![The four package layers in dependency order](diagrams/repository-layers.svg)
+
+The diagram's source is [`diagrams/repository-layers.drawio`](diagrams/repository-layers.drawio); the SVG beside it is the export and also opens in draw.io. The kit areas diagram below uses the same layers and colours and adds scope and kind.
 
 A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Any import is a dependency — at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except` — so every layer shares one definition of "depends on", and a boundary check walks every import, not only module-level ones. A distribution a package imports is declared in its `pyproject.toml`; an internal distribution declared but never imported is suspect and is either removed or carries a stated runtime reason (an entry point, a driver, an optional extra). A distribution only a project's tests import belongs in its `dev` dependency group, which is not a runtime dependency and which the check does not read, so a runtime declaration is removed only once neither the source nor the tests import it. The check reads import statements: a package loaded by name through `importlib` or `__import__` is an edge it cannot see, and no internal package is loaded that way.
 
