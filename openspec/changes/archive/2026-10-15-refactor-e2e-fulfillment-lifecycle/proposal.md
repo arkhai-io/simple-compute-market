@@ -47,21 +47,28 @@ Fixed in `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and
   test control, advances the durable fulfillment record the same way the
   production convergence watchdog would) → `get_fulfillment_status` asserting
   `active`.
-- Stage 09c (lease registration) now sources `reserved_resource_id` from the
-  admin-only `DealLease` view (`get_capacity_reservation`) instead of
-  expecting it pre-populated from a buyer-facing stage event -- the buyer-facing
-  reservation response is intentionally opaque (`openspec/specs/site-capacity/spec.md`),
-  and stage 08b's resource-id assertion against that opaque source was
-  already broken independent of this change (confirmed: `resource_id` has
-  been stripped from the reservation response since before this change
-  existed). The admin lease view is a legitimate, separate introspection
-  channel, not a way around that opacity guarantee -- see that stage's
-  docstring.
+- Stage 09c (lease registration) confirms placement through the admin-only
+  `DealLease` view instead of expecting resource identity pre-populated from
+  a buyer-facing stage event -- the buyer-facing reservation response is
+  intentionally opaque (`openspec/specs/site-capacity/spec.md`), and stage
+  08b's resource-id assertion against that opaque source was already broken
+  independent of this change (confirmed: `resource_id` has been stripped from
+  the reservation response since before this change existed). The admin lease
+  view is a legitimate, separate introspection channel, not a way around that
+  opacity guarantee -- see that stage's docstring. As implemented, the lease
+  reports the executor (`host_id`) and a null `resource_id`, so 09c asserts
+  placement against the host the deal was admitted on and assigns
+  `reserved_resource_id` from the scenario's own declared resource (the
+  domain driver's constant in the shared stage, the module's constant in the
+  buyer CLI scenario); the identifier is never read from the lease or the
+  buyer-facing path.
 - `DealState.provisioning_job_id`/`reserved_resource_id` fields reworked:
   `fulfillment_id` (already existed, previously teardown-only) is now the
-  identity captured at settlement and reused through teardown;
-  `reserved_resource_id` is now populated at 09c from admin introspection,
-  not treated as available earlier.
+  identity captured at settlement for stages 08b–09c; the teardown stages
+  read the fulfillment identity from the lease at 10b (the shared stages
+  keep it as a separate `teardown_fulfillment_id`) and never assert it equal
+  to the settlement capture; `reserved_resource_id` is populated at 09c, not
+  treated as available earlier.
 
 No `compute-provisioning-service` or `kit/fulfillment` changes were needed --
 `get_fulfillment_status`, `run_fulfillment_convergence_cycle`, and `drain`
@@ -137,10 +144,11 @@ other scenario files' use of `DealState`. No changes needed.
 - Draining the mock executor and advancing fulfillment convergence are two
   separately driven facts — the shared stage 09a docstring in
   `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
-- Resource identity is confirmed through admin introspection at stage 09c,
-  never inferred from the buyer-facing path — the shared stage 09c docstring
-  and `openspec/specs/site-capacity/spec.md`'s "Capacity accounting is private
-  to the site authority".
+- Placement is confirmed through admin introspection at stage 09c, never
+  inferred from the buyer-facing path; the scenario's resource identifier is
+  its own declared value, assigned there — the shared stage 09c docstring and
+  `openspec/specs/site-capacity/spec.md`'s "Capacity accounting is private to
+  the site authority".
 - A client's `transport` seam is how a boundary-opacity proof is written —
   `docs/development/TESTING.md#2-integration-tests` and the module docstrings
   of the two opacity tests.

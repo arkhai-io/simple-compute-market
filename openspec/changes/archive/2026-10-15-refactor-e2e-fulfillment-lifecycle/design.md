@@ -102,7 +102,16 @@ the compute family's client (`SyncComputeProvisioningClient.get_lease`, admin)
 and the reservation through the site client, and back-dates the lease through
 the site's truncation (`SiteCapacityClient.truncate_lease`, admin), which may only
 move a leased end earlier. Leases are registered by executor target once; there
-is no lease update.
+is no lease update. The lease also reports a null `resource_id`, so 09c no
+longer sources `reserved_resource_id` from the lease as this section
+describes: it confirms placement against the lease's `host_id` and assigns the
+scenario's own declared resource identifier (the driver's constant in the
+shared stage, the module's in the buyer CLI scenario), which the later
+capacity reads and the re-reservation address. The teardown stages likewise
+read the fulfillment identity from the lease at 10b (as
+`teardown_fulfillment_id` in the shared stages) rather than reusing the
+settlement capture, and assert no equality between the two. Recorded by
+closeout review 01 F1.
 
 ### Design promotion record
 
@@ -232,12 +241,13 @@ then reverting.
 | The genuine cross-service proof lives wherever it already existed (`test_full_deal.py`), not duplicated into a new scenario | Same as above |
 | `core/storefront` gains an `integration` test tier, matching the pattern other packages already use | `core/storefront/pyproject.toml` (mechanical config change, no spec text needed) |
 
-## Section 4: light review pass (not started)
+## Section 4: light review pass (implemented, 2026-07-29)
 
-No design questions anticipated -- confirm `test_multi_registry.py` and
-`test_buy_oneshot_buyer_cli.py` don't reference stale fulfillment-lifecycle
-vocabulary (Section 1's inventory found none, but that was a grep-based
-inventory, not a full read).
+No design question arose. Both `test_multi_registry.py` and
+`test_buy_oneshot_buyer_cli.py` were read in full, not only grepped as in
+Section 1's inventory: neither references fulfillment-lifecycle vocabulary,
+and the latter's direct assignment of `reserved_resource_id` is independent of
+how the other scenarios populate it. No changes were needed.
 
 ## Closeout (2026-10-15)
 
@@ -331,9 +341,9 @@ docstrings.
 
 | Accepted decision | Classification | Permanent location |
 |---|---|---|
-| `fulfillment_id`, not `provisioning_job_id`, is captured at settlement and reused through teardown | Permanent, already stated | `docs/development/ARCHITECTURE.md#identifiers`; `core_storefront.models.settle_models.SettleStatusResponse`'s docstring |
+| `fulfillment_id`, not `provisioning_job_id`, is the identity captured at settlement (08b) and read back from the lease at teardown (10b, as `teardown_fulfillment_id` in the shared stages, with no equality asserted between the two) | Permanent, already stated | `docs/development/ARCHITECTURE.md#identifiers`; `core_storefront.models.settle_models.SettleStatusResponse`'s docstring; the `Stage10b_LeaseCycleBeginsTeardown` stage and `ComputeDealState`'s field comments in `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py` |
 | Job completion (`drain()`) and fulfillment convergence (an explicit advance) are two separately driven facts; `drain()` stands in for waiting on one job by id in a single-job scenario | Permanent | `Stage09a_ProvisioningCompletes` docstring in `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`; the convergence rule it cites, `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; the step-versus-cycle rule, `docs/development/TESTING.md#2-integration-tests` |
-| Resource identity is confirmed at stage 09c through admin introspection, never inferred from the buyer-facing path | Permanent | `Stage09c_LeaseRecorded` docstring in the same helper; the opacity rule, `openspec/specs/site-capacity/spec.md`, "Capacity accounting is private to the site authority" |
+| Placement is confirmed at stage 09c through admin introspection (the lease's `host_id`), never inferred from the buyer-facing path; the scenario's resource identifier is its own declared value, assigned there, since the lease reports a null `resource_id` | Permanent | `Stage09c_LeaseRecorded` docstring in the same helper; the opacity rule, `openspec/specs/site-capacity/spec.md`, "Capacity accounting is private to the site authority" |
 | `DealState.provisioning_job_id` removed; `fulfillment_id` produced at 08b and `reserved_resource_id` at 09c, each with one producer before any consumer | Permanent | `openspec/specs/test-compatibility/spec.md`, "Exact e2e state dependencies"; held by `e2e-tests/tests/unit/test_compute_deal_stages.py` |
 | Teardown stages 10a–11b needed no rewrite; the proposed sequence was already implemented | Change history | This document, "Section 2"; `pools-7-storefront-fulfillment-cutover` task 10.14's correction and resolution notes. The state chain itself is `openspec/specs/physical-provisioning/spec.md`, "Site-backed release lifecycle", and `docs/development/ARCHITECTURE.md#release` |
 | Stage 08b's failure masked every downstream stage, so "no e2e run exists" and this change's finding were one root cause | Change history | This document, "Section 2" |
