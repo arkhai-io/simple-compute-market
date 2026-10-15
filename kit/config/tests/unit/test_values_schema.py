@@ -95,7 +95,7 @@ def test_other_spellings_matches_every_spelling_but_the_exact_one() -> None:
     assert not pattern.match("sinks")
 
 
-def test_a_typed_section_is_closed_and_its_fields_match_any_spelling() -> None:
+def test_a_typed_section_is_closed_and_keys_its_fields_by_any_case_pattern() -> None:
     fragment = values_schema.model_fragment(Wallet, role=ROLE)
 
     assert fragment["additionalProperties"] is False
@@ -238,7 +238,7 @@ def test_the_sink_key_misspelled_is_refused_in_every_instance_table() -> None:
 # --- retired keys -------------------------------------------------------------
 
 
-def test_a_retired_key_is_refused_in_any_spelling() -> None:
+def test_a_retired_key_is_refused_under_its_any_case_pattern() -> None:
     definition = values_schema.config_definition(
         {"wallet": values_schema.model_fragment(Wallet, role=ROLE)},
         retired=["old_interval"],
@@ -281,6 +281,58 @@ def test_a_retired_key_a_typed_section_still_has_is_refused_at_generation() -> N
 def test_a_retired_key_must_be_a_dotted_key_path() -> None:
     with pytest.raises(ValueError, match="not a dotted key path"):
         values_schema.config_definition({}, retired=["capacity..x"])
+
+
+def test_a_retired_key_among_entries_typed_by_additional_properties_is_refused() -> None:
+    """A pattern for the key would bypass the ``additionalProperties`` schema
+    typing the entry, reopening the secret settings that typing refuses."""
+    with pytest.raises(ValueError, match="additionalProperties"):
+        values_schema.config_definition(
+            {"delivery": _sinks()}, retired=["delivery.west.legacy"]
+        )
+
+
+def test_a_retired_key_in_a_typed_mapping_is_refused() -> None:
+    class Inner(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        token: str = Field(default="", json_schema_extra={"secret": True})
+
+    class Outer(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        entries: dict[str, Inner] = Field(default_factory=dict)
+
+    with pytest.raises(ValueError, match="additionalProperties"):
+        values_schema.config_definition(
+            {"outer": values_schema.model_fragment(Outer, role=ROLE)},
+            retired=["outer.entries.legacy"],
+        )
+
+
+def test_a_retired_key_under_a_combinator_is_refused() -> None:
+    """An optional model is an ``anyOf``: its fields are out of a pattern's
+    sight, so a retirement there could refuse a field the model still has."""
+
+    class Inner(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        label: str = ""
+
+    class Outer(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        inner: Inner | None = None
+
+    with pytest.raises(ValueError, match="anyOf"):
+        values_schema.config_definition(
+            {"outer": values_schema.model_fragment(Outer, role=ROLE)},
+            retired=["outer.inner.label"],
+        )
+
+
+@pytest.mark.parametrize(
+    "retired", [["capacity.a", "capacity"], ["Capacity", "capacity.a"]]
+)
+def test_a_retired_key_under_another_retired_key_is_refused(retired) -> None:
+    with pytest.raises(ValueError, match="lies under retired key"):
+        values_schema.config_definition({}, retired=retired)
 
 
 def test_without_retired_keys_the_definition_holds_only_its_sections() -> None:
@@ -339,3 +391,12 @@ def test_write_then_check_round_trips_the_schema_files_under_the_root(tmp_path) 
     assert _main(tmp_path, "check") == 0
     written = json.loads((tmp_path / "values.schema.json").read_text())
     assert written["definitions"][NAME] == _definition()
+
+
+def test_a_missing_schema_file_is_named_with_the_root(tmp_path, capsys) -> None:
+    assert _main(tmp_path, "check") == 2
+    assert _main(tmp_path, "write") == 2
+
+    error = capsys.readouterr().err
+    assert str(tmp_path / "values.schema.json") in error
+    assert f"under the root {tmp_path}" in error

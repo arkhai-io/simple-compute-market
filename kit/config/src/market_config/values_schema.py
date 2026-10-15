@@ -258,12 +258,37 @@ def sink_typed_section(
     }
 
 
+# Keywords whose subschemas a key is also validated against. A field reached
+# through one is invisible to a pattern added beside it, so a retirement there
+# could neither see a typed field it would refuse nor know what it overrides.
+_COMBINATORS = ("allOf", "anyOf", "oneOf", "not", "if", "then", "else", "dependencies")
+
+
 def _retire(node: dict[str, Any], path: Sequence[str], dotted: str) -> None:
-    """Refuse ``path`` under ``node``, opening an untyped section on the way."""
+    """Refuse ``path`` under ``node``, declaring each section on the way an object.
+
+    A key matching a ``patternProperties`` entry is not checked against the
+    node's ``additionalProperties``, and a pattern beside a combinator cannot
+    see the fields its subschemas type. A retired key among entries an
+    ``additionalProperties`` schema types, or under a combinator, is therefore
+    refused at generation, to be retired in the model that types it instead.
+    """
     head, *rest = path
+    combinators = sorted(key for key in _COMBINATORS if key in node)
+    if combinators:
+        raise ValueError(
+            f"retired key {dotted!r} lies under {', '.join(combinators)}, whose "
+            "subschemas may type it; retire it in the model instead"
+        )
     patterns = node.setdefault("patternProperties", {})
     pattern = any_case(head)
     existing = patterns.get(pattern)
+    if existing is None and isinstance(node.get("additionalProperties"), Mapping):
+        raise ValueError(
+            f"retired key {dotted!r} lies among entries typed by "
+            "additionalProperties, which a pattern for it would bypass; "
+            "retire it in the model instead"
+        )
     if not rest:
         if existing is not None and existing is not False:
             raise ValueError(f"retired key {dotted!r} is still a typed field")
@@ -277,6 +302,18 @@ def _retire(node: dict[str, Any], path: Sequence[str], dotted: str) -> None:
     _retire(existing, rest, dotted)
 
 
+def _nested_retirements(retired: Sequence[str]) -> list[tuple[str, str]]:
+    """Each pair of retired keys where the first lies under the second."""
+    folded = [(dotted, tuple(dotted.lower().split("."))) for dotted in retired]
+    return [
+        (inner, outer)
+        for inner, inner_path in folded
+        for outer, outer_path in folded
+        if len(outer_path) < len(inner_path)
+        and inner_path[: len(outer_path)] == outer_path
+    ]
+
+
 def config_definition(
     sections: Mapping[str, Any], *, retired: Iterable[str] = ()
 ) -> dict[str, Any]:
@@ -287,7 +324,8 @@ def config_definition(
     dotted path such as ``"capacity.old_setting"``: each is refused in any
     spelling, so a deployment still stating one fails at render instead of
     being silently ignored. A retired key may not be a field a typed section
-    still has.
+    still has, lie under another retired key, or lie where a pattern for it
+    would bypass or miss the typing of its section (see :func:`_retire`).
     """
     # Sections are matched in any spelling, so two names differing only by case
     # would claim the same keys; this refuses them before anything is built.
@@ -299,11 +337,19 @@ def config_definition(
             for name, fragment in sorted(sections.items())
         },
     }
-    for dotted in retired:
-        path = dotted.split(".")
-        if not all(path):
+    retired_keys = list(retired)
+    for dotted in retired_keys:
+        if not all(dotted.split(".")):
             raise ValueError(f"retired key {dotted!r} is not a dotted key path")
-        _retire(definition, path, dotted)
+    nested = _nested_retirements(retired_keys)
+    if nested:
+        inner, outer = nested[0]
+        raise ValueError(
+            f"retired key {inner!r} lies under retired key {outer!r}, "
+            "which refuses it already"
+        )
+    for dotted in retired_keys:
+        _retire(definition, dotted.split("."), dotted)
     return definition
 
 
@@ -350,6 +396,11 @@ def main(
     )
     args = parser.parse_args(argv)
     paths = [args.root / relative for relative in schema_files]
+    missing = [path for path in paths if not path.is_file()]
+    if missing:
+        for path in missing:
+            print(f"no schema file {path} under the root {args.root}", file=sys.stderr)
+        return 2
     definition = build_definition()
     if args.action == "check":
         stale = stale_files(paths, definition, name=name)

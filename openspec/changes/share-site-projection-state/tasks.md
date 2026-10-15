@@ -537,9 +537,17 @@ Touches `kit/config`, VM's storefront, and the root `Makefile`.
       definition's name, and `main(argv, *, build_definition, name, schema_files,
       description)`, whose `write`/`check` take the repository root as `--root` (the
       working directory by default) and resolve the service's named files under it. A
-      retired key is a dotted path refused in any spelling; under an untyped section it
-      opens that section only to refuse the key, and a retired key a typed section still
-      has is refused at generation. The section fragments are copied before retiring, so a
+      retired key is a dotted path refused in any spelling: it adds a refusing pattern
+      for its last segment, and for each section on the way a pattern declaring it an
+      object, under a typed section exactly as under an untyped one, which leaves the rest
+      of that section as it was. **Correction (review):** the first version also opened a
+      section among entries an `additionalProperties` schema types, and a key matching a
+      pattern skips that schema, so retiring `delivery.west.legacy` reopened a webhook's
+      secret `url`. Generation now refuses a retired key that lies among such entries or
+      under a combinator (`anyOf`, `allOf`, … — an optional model is one), whose fields a
+      pattern cannot see; such a key is retired in its model instead. It also refuses a
+      retired key a typed section still has, and a retired key under another retired key
+      (it once reported the outer one as "still a typed field"). The section fragments are copied before retiring, so a
       caller's fragment is never mutated. The module is imported as
       `market_config.values_schema`, not re-exported from the package root, as
       `config_loader` and `registry_url` are not. **Differed:** `sink_typed_section` takes
@@ -573,7 +581,15 @@ Touches `kit/config`, VM's storefront, and the root `Makefile`.
       fragment; a retired key a typed section still has, and a malformed path, refused at
       generation; no retired keys adding nothing; render replacing only its definition;
       `stale_files` naming the stale file; and `write`/`check` round-tripping files under
-      `--root`. VM (unit, frozen environment): the generic cases moved to the kit (any-case,
+      `--root`. **Amended (review):** 161 passed, six added — a retired key among entries an
+      `additionalProperties` schema types (the sink section, a typed mapping), under an
+      optional model's `anyOf`, and under another retired key (both orders) each refused at
+      generation, and a missing schema file named with the root, exit 2, rather than a
+      traceback. The two tests named "… any spelling" check that the schema keys a field by
+      its `any_case` pattern, which `test_any_case_matches_every_spelling_and_nothing_else`
+      proves; they are renamed to say so. No kit test validates documents against a
+      schema: `kit/config` has no JSON Schema validator, and VM's tests validate its
+      committed definition with `jsonschema`. VM (unit, frozen environment): the generic cases moved to the kit (any-case,
       case collisions, nested secrets, recursive references, the stale check, a sink
       without a declared model); VM's file keeps the cases on its own definition and its
       committed schemas, reads the schema paths from `SCHEMA_FILES`, and adds one: the
@@ -588,8 +604,9 @@ Touches `kit/config`, VM's storefront, and the root `Makefile`.
       Done: `arkhai-kit-config` 0.3.0; VM declares `arkhai-kit-config>=0.3.0`. `make lock`
       relocked every project but the three PyTorch-index ones (refused here, as in 2.6); VM
       storefront's lock was edited by hand with the version, wheel-name, and specifier
-      substitutions uv wrote for the same package elsewhere (16.6 relocks it); neither
-      `kit/policy` nor the VM buyer locks `kit/config` differently. Evidence, after `make
+      substitutions uv wrote for the same package elsewhere (16.6 relocks it), and so was
+      `domains/vms/buyer/uv.lock`, which locks `arkhai-kit-config` too (its version and
+      wheel name, 0.2.0 to 0.3.0); `kit/policy` does not lock it. Evidence, after `make
       dist` and reinstalling the rebuilt internal wheels into the frozen environments:
       `make -C kit test-config` (unit) 155 passed; VM storefront (frozen, `UV_FROZEN=1`) unit
       1031 passed, 1 skipped (five fewer than before: the generic cases moved to the kit),
@@ -626,6 +643,28 @@ Section 5 handoff:
 - The VM drift test still runs only in VM's environment (`make test-storefront`), which this
   container builds frozen; `make helm-values-schema` uses `--frozen --no-sync` and so runs
   there unchanged.
+- Retirements now have two homes. Both charts already refuse retired keys in a hand-written
+  `config.allOf` block beside the generated definition
+  (`helm/charts/storefront/values.schema.json`, `helm/values.schema.json`: `seller`,
+  `registryAuthority`, `registryUrl`, `storefrontDomains`, `configMapName`,
+  `hostedSettlement`, `chain`, the CSV inventory keys, `escrow_templates`,
+  `capacity.use_site_projection_for_listings`; `DEPLOYMENT_AND_CONFIG.md` describes them).
+  10.3 decides whether `claims_sweep_interval` goes in `RETIRED_KEYS`, as planned, and then
+  either moves the old block's keys there or states which home is for which kind of key;
+  17.9 documents the outcome.
+- For 17.9: D14c says each storefront writes only its own chart's schema, yet VM also writes
+  the umbrella `helm/values.schema.json`'s storefront definition (as 5.2 planned). That
+  definition types the umbrella's `storefront` subchart, which is VM's chart, so it is VM's
+  artifact; the promotion should say so, so "a domain's tooling never writes another
+  domain's artifact" stays unambiguous.
+- For 17.9: `TESTING.md`'s "A values schema generated from typed models" says packaging
+  checks cannot run the drift test "because the generator imports the storefront's
+  third-party dependencies". The generator is now `kit/config` (pydantic only) with its own
+  unit tests; only each storefront's section list needs its environment.
+- `settlement_fragment` states the `[Settlement]` root keys `schema_version` and `priority`
+  itself: the settlement runtime names them only as string literals in
+  `SettlementRegistry.resolve` and exports no constant for them, so there is nothing to
+  import. A runtime constant for the root keys would let the generator read them.
 
 Orchestration handoff (for the next session): sections run one at a time through a fresh
 implementer agent following `.agents/skills/change-implement/SKILL.md`, then a fresh-context
@@ -987,7 +1026,9 @@ configuration.
       `src/startup.py`, and the lane overlays use `settlement_servicing_interval_seconds`; a
       configuration stating `claims_sweep_interval` refuses startup naming its replacement;
       VM's section list marks the key retired and `make helm-values-schema` regenerates
-      both schemas, so an agent's `config` stating it is refused at render.
+      both schemas, so an agent's `config` stating it is refused at render. The charts'
+      hand-written `config.allOf` block of retired keys is a second home for retirements:
+      decide between them first (Section 5 handoff).
 - [ ] 10.4 The VM lane's overlays declare every site's service peer if any does not yet,
       so the lane starts under 10.1.
 - [ ] 10.5 Tests. Unit: `tests/unit/test_config_loader.py` — the retired key's refusal.
