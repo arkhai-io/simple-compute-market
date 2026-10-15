@@ -29,34 +29,11 @@ Physical delivery is deliberately separate from commercial agreement. A seller m
 
 Not every market has physical delivery. API credits reuse the same schema-opaque negotiation and settlement roles while a quota authority issues prepaid bearer-key balances. They do not acquire compute-provisioning dependencies merely to fit the physical lifecycle.
 
-The diagram below places every process at the boundary of the operator that runs it. Solid edges are calls between processes; the dashed edge is the buyer using what was delivered. The resource service stands for whatever seller infrastructure delivers a domain's resource, such as the compute provisioner or the API-credits service; each domain's own diagram names it. The contact-exchange mechanism settles inside the storefront and buyer with no external party, so it has no node here.
+The diagram below places every process at the boundary of the operator that runs it. The resource service stands for whatever seller infrastructure delivers a domain's resource, such as the compute provisioner or the API-credits service; each domain's own diagram names it. The contact-exchange mechanism settles inside the storefront and buyer with no external party, so it has no node here.
 
-```mermaid
-flowchart LR
-    subgraph buyer_op["Buyer operator"]
-        buyer["Buyer\n`market` CLI or agent"]
-    end
-    subgraph registry_op["Registry operator"]
-        registry["Registry\none filter spec, listings, publishers"]
-    end
-    subgraph seller_op["Seller operator"]
-        storefront["Storefront\nlistings, negotiation, deal state"]
-        resource["Resource service\ndomain-specific delivery authority"]
-    end
-    subgraph mechanisms["External settlement mechanisms"]
-        alkahest["Alkahest escrow\non chain"]
-        payments["Arkhai payments service"]
-    end
-    buyer -- "discovery" --> registry
-    registry ~~~ storefront
-    storefront -- "signed publication" --> registry
-    buyer -- "signed negotiation request" --> storefront
-    storefront -- "signed response or Agreement" --> buyer
-    buyer -- "fund escrow or approve mandate" --> mechanisms
-    storefront -- "claims, receipt verification" --> mechanisms
-    storefront -- "fulfillment" --> resource
-    buyer -. "uses the delivered resource" .-> resource
-```
+![Every process at the boundary of the operator that runs it](diagrams/system-overview.svg)
+
+The diagram's source is [`diagrams/system-overview.drawio`](diagrams/system-overview.drawio); the SVG beside it is the export and also opens in draw.io.
 
 Production permits independently operated registries and seller stacks. Buyers may be ephemeral CLI invocations or long-running agents. Local development adds an Anvil fixture and test-only composition.
 
