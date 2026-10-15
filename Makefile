@@ -804,12 +804,11 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 
 # The Helm values schemas carry one definition generated from the storefront's
 # typed configuration models; it keeps secret-marked fields out of an agent's
-# pass-through config. It runs in the storefront's own environment (make
-# init-storefront), and the storefront's unit suite fails when it is stale.
-STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
-
+# pass-through config. The storefront names the schema files it writes, and the
+# generator runs in the storefront's own environment (make init-storefront),
+# whose unit suite fails when a committed definition is stale.
 helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
-	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)

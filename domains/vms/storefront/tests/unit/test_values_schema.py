@@ -3,14 +3,15 @@
 The definition keeps secret-marked and role-inapplicable fields out of an
 agent's pass-through config and closes typed sections. These tests fail when
 the committed schemas are stale, so a model or registration change cannot
-reach a chart without regenerating them (``make helm-values-schema``).
+reach a chart without regenerating them (``make helm-values-schema``). The
+generator's own rules are tested with ``market_config.values_schema``; these
+tests cover the definition the VM storefront's sections produce.
 """
 
 from __future__ import annotations
 
 import ast
 import json
-import re
 from pathlib import Path
 
 import market_storefront.values_schema as module
@@ -18,17 +19,12 @@ import pytest
 import tomllib
 import yaml
 from jsonschema import Draft7Validator
-from market_delivery.builtin.file_sink import FileSinkSettings
+from market_config.values_schema import any_case, stale_files
 from market_storefront import values_schema
 from market_storefront.utils.config import IdentityConfigDeclaration
-from market_storefront.values_schema import _delivery_fragment, any_case
-from pydantic import BaseModel, ConfigDict, Field
 
 REPO = Path(__file__).resolve().parents[5]
-SCHEMAS = (
-    REPO / "helm" / "values.schema.json",
-    REPO / "helm" / "charts" / "storefront" / "values.schema.json",
-)
+SCHEMAS = tuple(REPO / relative for relative in values_schema.SCHEMA_FILES)
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +34,7 @@ def definition() -> dict:
 
 def _field(node: dict, name: str):
     """A field's schema, keyed by the any-case pattern for ``name``."""
-    return node["patternProperties"][values_schema.any_case(name)]
+    return node["patternProperties"][any_case(name)]
 
 
 def _section(definition: dict, name: str) -> dict:
@@ -47,7 +43,7 @@ def _section(definition: dict, name: str) -> dict:
 
 def _allowed(node: dict, *names: str) -> bool:
     patterns = {p for p, schema in node["patternProperties"].items() if schema is not False}
-    return patterns == {values_schema.any_case(n) for n in names}
+    return patterns == {any_case(n) for n in names}
 
 
 def _withheld(node: dict, *names: str) -> bool:
@@ -65,18 +61,16 @@ def _walk(node):
 
 
 def test_committed_values_schemas_carry_the_generated_definition(definition) -> None:
-    stale = values_schema.stale_files(SCHEMAS, definition)
+    stale = stale_files(SCHEMAS, definition, name=values_schema.DEFINITION)
     assert not stale, (
         f"regenerate with `make helm-values-schema`: {[str(p) for p in stale]}"
     )
 
 
-def test_any_case_matches_every_spelling_and_nothing_else() -> None:
-    pattern = re.compile(values_schema.any_case("private_key"))
-    for spelling in ("private_key", "Private_Key", "PRIVATE_KEY"):
-        assert pattern.match(spelling)
-    for other in ("private_keys", "privatekey", "x_private_key"):
-        assert not pattern.match(other)
+def test_the_command_checks_the_schema_files_the_storefront_names() -> None:
+    """The command ``make helm-values-schema`` runs finds the files the
+    storefront names under the repository root it is given."""
+    assert values_schema.main(["check", "--root", str(REPO)]) == 0
 
 
 def test_wallet_private_key_is_refused_and_the_section_closed(definition) -> None:
@@ -152,7 +146,7 @@ def test_identity_declaration_accepts_every_shipped_identity_table() -> None:
 def test_registry_auth_is_refused_and_the_section_left_open(definition) -> None:
     registry = _section(definition, "registry")
     assert registry["additionalProperties"] is True
-    assert registry["patternProperties"] == {values_schema.any_case("auth"): False}
+    assert registry["patternProperties"] == {any_case("auth"): False}
 
 
 def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
@@ -176,53 +170,6 @@ def test_definition_carries_no_defaults_references_markers_or_exact_names(defini
     for node in _walk(definition):
         if isinstance(node, dict):
             assert not forbidden & set(node), node
-
-
-def test_fields_differing_only_by_case_are_refused_at_generation() -> None:
-    class Ambiguous(BaseModel):
-        name: str = ""
-        Name: str = ""
-
-    with pytest.raises(ValueError, match="differ only by case"):
-        values_schema.model_fragment(Ambiguous)
-
-
-def test_a_secret_marked_field_is_refused_wherever_it_nests() -> None:
-    class Inner(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        token: str = Field(default="", json_schema_extra={"secret": True})
-        label: str = ""
-
-    class Outer(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        sinks: dict[str, Inner] = Field(default_factory=dict)
-        buyer_only: str = Field(default="", json_schema_extra={"roles": ["buyer"]})
-
-    fragment = values_schema.model_fragment(Outer)
-
-    assert _withheld(fragment, "buyer_only")
-    inner = _field(fragment, "sinks")["additionalProperties"]
-    assert _field(inner, "label") == {"type": "string"}
-    assert _withheld(inner, "token")
-
-
-def test_recursive_references_become_unconstrained() -> None:
-    class Node(BaseModel):
-        children: list[Node] = Field(default_factory=list)
-
-    fragment = values_schema.model_fragment(Node)
-
-    assert _field(fragment, "children")["items"] == {}
-
-
-def test_check_reports_a_stale_schema(tmp_path, definition) -> None:
-    current = tmp_path / "current.json"
-    stale = tmp_path / "stale.json"
-    current.write_text(values_schema.render({"type": "object"}, definition))
-    stale.write_text(json.dumps({"definitions": {values_schema.DEFINITION: {}}}))
-
-    assert values_schema.main(["check", str(current)]) == 0
-    assert values_schema.main(["check", str(current), str(stale)]) == 1
 
 
 def test_contact_fields_are_public_configuration(definition) -> None:
@@ -292,21 +239,10 @@ def test_the_generator_names_no_sink() -> None:
     assert not {name for name in imported if name.startswith("market_delivery_apprise")}
 
 
-def test_a_sink_without_a_declared_model_stays_open() -> None:
-
-    fragment = _delivery_fragment("seller", sinks={"file": FileSinkSettings})
-    (choices,) = fragment["additionalProperties"]["dependencies"].values()
-    (pattern,) = choices["anyOf"][-1]["patternProperties"].values()
-    assert pattern["not"]["enum"] == ["file"]
-    # A table named for a sink with no declared model is not typed by name.
-    assert any_case("file") in fragment["patternProperties"]
-    assert any_case("webhook") not in fragment["patternProperties"]
-
-
 def _committed_definition() -> dict:
     """The storefront configuration definition as the chart actually validates it."""
     schema = json.loads(SCHEMAS[1].read_text(encoding="utf-8"))
-    return schema["definitions"]["storefrontServiceConfig"]
+    return schema["definitions"][values_schema.DEFINITION]
 
 
 def _accepts(delivery: dict) -> bool:

@@ -414,7 +414,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -425,7 +425,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

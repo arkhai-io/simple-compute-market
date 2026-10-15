@@ -524,23 +524,85 @@ Section 4 handoff:
 Delivers the generic generator in `kit/config`, VM keeping only its section list (D14c).
 Touches `kit/config`, VM's storefront, and the root `Makefile`.
 
-- [ ] 5.1 `kit/config/src/market_config/values_schema.py` (new): the generic parts of
+- [x] 5.1 `kit/config/src/market_config/values_schema.py` (new): the generic parts of
       `domains/vms/storefront/src/values_schema.py` — field publicizing, secret refusal,
       sink typing over sink models passed in (so `kit/config` takes no `kit/delivery`
       dependency), rendering, the drift check, and the `write`/`check` entry — plus the
       refusal of a retired key in a storefront's `config`, which C4 needs.
-- [ ] 5.2 `domains/vms/storefront/src/values_schema.py`: reduced to VM's section list, its
+      Done: `any_case`, `other_spellings`, `any_case_fields`, `model_fragment(model, *,
+      role)`, `settlement_fragment(mechanisms, *, role)` (reading only each registration's
+      `config_key`, `config_model`, and `roles`, through a `SettlementSection` protocol,
+      so tests need no full `MechanismRegistration`), `sink_typed_section`,
+      `config_definition(sections, *, retired=())`, `render` and `stale_files` keyed by the
+      definition's name, and `main(argv, *, build_definition, name, schema_files,
+      description)`, whose `write`/`check` take the repository root as `--root` (the
+      working directory by default) and resolve the service's named files under it. A
+      retired key is a dotted path refused in any spelling; under an untyped section it
+      opens that section only to refuse the key, and a retired key a typed section still
+      has is refused at generation. The section fragments are copied before retiring, so a
+      caller's fragment is never mutated. The module is imported as
+      `market_config.values_schema`, not re-exported from the package root, as
+      `config_loader` and `registry_url` are not. **Differed:** `sink_typed_section` takes
+      the sink key and the section's own settings as well as the sink models, because both
+      are the delivery kit's vocabulary (`SINK_KEY`, `RESERVED_SECTION_KEYS`) that a kit
+      without a `kit/delivery` dependency cannot name; and the definition's name is each
+      service's, passed in, not a kit constant.
+- [x] 5.2 `domains/vms/storefront/src/values_schema.py`: reduced to VM's section list, its
       discovered sinks, its settlement registry, and the schema files it writes (its own
       chart and the umbrella's storefront definition). The root `Makefile`'s
       `helm-values-schema` keeps its target and output.
-- [ ] 5.3 Tests. `kit/config/tests/unit/test_values_schema.py` (new, unit): publicizing,
+      Done: `DEFINITION`, `ROLE`, `SCHEMA_FILES` (repository-relative), `RETIRED_KEYS`
+      (empty; 10.3 adds `claims_sweep_interval`), `[Delivery]`'s own three settings, and
+      `storefront_config_definition`, which discovers the installed sinks and builds the
+      sections over the kit. The `Makefile` target keeps its name and writes the same two
+      files, now passing `--root ../../..` rather than the file list, since the storefront
+      names its files; its `STOREFRONT_VALUES_SCHEMAS` variable goes.
+- [x] 5.3 Tests. `kit/config/tests/unit/test_values_schema.py` (new, unit): publicizing,
       secret refusal, sink typing, retired-key refusal, and drift detection over a small
       model set. VM's `tests/unit/test_values_schema.py` passes with the committed schemas
       unchanged, proving the move regenerates the same definition.
+      Done. Kit (unit, `make -C kit test-config`: 155 passed, 24 of them this file):
+      any-case and other-spelling patterns; a closed typed section; no defaults,
+      references, markers, or exact names; case-only collisions refused; recursive
+      references unconstrained; secret and role-inapplicable fields refused, and a field
+      applying to the roles it names; a nested secret refused; settlement closed to the
+      mechanisms registered for the role; the sink section's own settings, per-sink
+      typing, a named table stating no other sink, a named instance typed by its `sink`, an
+      untyped sink open, and the misspelled sink key refused; a retired key refused at the
+      top level, in an untyped section, and in a typed one without mutating the caller's
+      fragment; a retired key a typed section still has, and a malformed path, refused at
+      generation; no retired keys adding nothing; render replacing only its definition;
+      `stale_files` naming the stale file; and `write`/`check` round-tripping files under
+      `--root`. VM (unit, frozen environment): the generic cases moved to the kit (any-case,
+      case collisions, nested secrets, recursive references, the stale check, a sink
+      without a declared model); VM's file keeps the cases on its own definition and its
+      committed schemas, reads the schema paths from `SCHEMA_FILES`, and adds one: the
+      command checks the files the storefront names under the repository root.
+      `test_values_schema.py` 29 passed, the drift test against the committed schemas
+      unchanged; `make helm-values-schema` rewrote both files (new modification times)
+      with no diff.
 - [ ] 5.4 Bump `kit/config`'s version, declare it where VM imports it, refresh the locks.
       Validation: `make -C kit test-config`, `make test-storefront`,
       `make helm-values-schema` with no diff, `make -C helm test-render`,
       `make check-architecture`, `make check-packaging`, `make test`. End-to-end: none.
+      **Stopped here (session ended by the owner, 2026-10-15).** 5.1–5.3 are implemented and
+      committed unverified as a work-in-progress commit: `kit/config` is bumped and declared,
+      locks refreshed (VM storefront's by hand), and `make helm-values-schema` regenerated both
+      committed schemas with no diff. Not yet run: VM storefront unit and integration in its
+      frozen environment, `make -C helm test-render` with `STOREFRONT_PYTHON`, `make
+      check-packaging`, `make -k test`, `make check-comment-hygiene`, `make
+      check-doc-citations`; nor the fresh-context compliance review. The next session runs
+      these, fixes what they report, checks 5.4, and amends the WIP commit into the section
+      commit.
+
+Orchestration handoff (for the next session): sections run one at a time through a fresh
+implementer agent following `.agents/skills/change-implement/SKILL.md`, then a fresh-context
+review; fixes are amended into the section commit or land as a follow-up commit. This
+container's network policy blocks `download.pytorch.org`, so `kit/policy`, `domains/vms/buyer`,
+and `domains/vms/storefront` run in environments built with `uv sync --frozen --find-links
+.dist --reinstall-package <internal...>` and tested with `UV_FROZEN=1` (task 16.6 relocks them
+elsewhere); Foundry (`anvil`) and Helm (built from source with `go install
+helm.sh/helm/v3/cmd/helm@v3.16.4`) must be reinstalled in a fresh container.
 
 ## 6. Alkahest release conditions derived by the mechanism
 
