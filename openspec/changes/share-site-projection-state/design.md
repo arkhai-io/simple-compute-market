@@ -327,6 +327,21 @@ Secrets is owed. Accepted scope beyond the original proposal.
   demands for bare metal (keeps the unchecked arbiter), copying VM's derivation, a configured
   raw list, a guard-only fix, and a separate change for the fix.
 
+  As delivered (Section 6), "built with the Alkahest publication option" is one kit function,
+  `market_alkahest.release_conditions`, that each domain's publication calls where it builds
+  the listing, not an output of the option builder: VM derives a listing's `demands` into its
+  create request before its options are built, and its refresh compares them there, so a
+  builder output VM ignored would be a second derivation path. Each domain's input is the
+  chains its Alkahest publication names: VM's compiled clauses, which keeps its output
+  unchanged; bare metal's and API credits' Alkahest options as built (API credits' accepted
+  escrows, which are its Alkahest publication form). VM can therefore advertise a condition
+  for a chain whose option readiness suppressed; that condition authorizes nothing, because no
+  option exists to select. The API-credit storefront delivers `recipient` only and bare metal
+  `recipient` and `oracle_gated`; each composition refuses another configured model at
+  startup, naming it. A section stating both the oracle-gated and the interruptible model
+  refuses startup in every storefront composing Alkahest, VM included, enabled or not, since
+  one escrow has one arbiter.
+
 ### Consequences and conventions
 
 - **C1. The bare-metal `publish` command is an API client.** It calls the administrator

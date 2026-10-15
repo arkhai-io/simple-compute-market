@@ -1073,11 +1073,16 @@ DEAL_TOKEN = "0x" + "22" * 20
 DEAL_CHAIN_ID = 424242
 
 
-async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller(
-    db, tmp_path, monkeypatch
-):
-    # The deal token's metadata is cached where the option builder reads it,
-    # so the real Alkahest option builds without a chain to ask.
+ALKAHEST_ADDRESS_BOOK = str(anvil_address_book_path())
+
+
+def alkahest_publication(tmp_path, monkeypatch, signer):
+    """Alkahest settlement publishing one clause on the anvil chain.
+
+    Returns the composition and the configured publication inputs the payload
+    builder reads. The deal token's metadata is cached where the option builder
+    reads it, so the real Alkahest option builds without a chain to ask.
+    """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     tokens = tmp_path / "cache" / "arkhai" / "tokens"
     tokens.mkdir(parents=True)
@@ -1094,61 +1099,67 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
         ),
         encoding="utf-8",
     )
-    address_book = str(anvil_address_book_path())
-    domain = get_market_domain_contract()
+    composition = alkahest_composition(
+        signer,
+        wallet=SELLER_WALLET,
+        chain_clients={"anvil": object()},
+        section={"address_config_path": None},
+        chains={
+            "anvil": {
+                "rpc_url": "http://anvil.test",
+                "chain_id": DEAL_CHAIN_ID,
+                "alkahest_address_config_path": ALKAHEST_ADDRESS_BOOK,
+            }
+        },
+    )
+    environ = {
+        "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": json.dumps(
+            [
+                {
+                    "mechanism": "alkahest.v1",
+                    "asset": DEAL_TOKEN,
+                    "rate": "1",
+                    "per": "hour",
+                    "mechanism_input": {
+                        "chain": "anvil",
+                        "escrow_kind": "erc20_escrow_obligation_default",
+                    },
+                }
+            ]
+        ),
+        "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
+    }
+    return composition, environ
+
+
+#: The release condition a listing on the anvil chain advertises by default.
+RECIPIENT_CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": get_recipient_arbiter("anvil", config_path=ALKAHEST_ADDRESS_BOOK).lower(),
+    "demand_data": {"recipient": SELLER_WALLET.lower()},
+}
+
+
+async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller(
+    db, tmp_path, monkeypatch
+):
     signer = create_signer("ed25519", b"\x21" * 32)
+    composition, environ = alkahest_publication(tmp_path, monkeypatch, signer)
     runtime = BareMetalStorefrontRuntime(
         db=db,
-        domain=domain,
+        domain=get_market_domain_contract(),
         seller_principal=signer.identity,
         admin_principals=TrustedIdentitySet(identities=(signer.identity,)),
         storefront_url=STOREFRONT_URL,
         marketplace_signer=signer,
         seller_evm_address=SELLER_WALLET,
-        settlement_composition=alkahest_composition(
-            signer,
-            wallet=SELLER_WALLET,
-            chain_clients={"anvil": object()},
-            section={"address_config_path": None},
-            chains={
-                "anvil": {
-                    "rpc_url": "http://anvil.test",
-                    "chain_id": DEAL_CHAIN_ID,
-                    "alkahest_address_config_path": address_book,
-                }
-            },
-        ),
+        settlement_composition=composition,
     )
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
-    storefront.terms = publication_payload_builder(
-        runtime,
-        {
-            "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": json.dumps(
-                [
-                    {
-                        "mechanism": "alkahest.v1",
-                        "asset": DEAL_TOKEN,
-                        "rate": "1",
-                        "per": "hour",
-                        "mechanism_input": {
-                            "chain": "anvil",
-                            "escrow_kind": "erc20_escrow_obligation_default",
-                        },
-                    }
-                ]
-            ),
-            "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
-        },
-    )
+    storefront.terms = publication_payload_builder(runtime, environ)
 
     await storefront.run()
 
     body = storefront.registries.sent[0][3]
     assert [escrow["chain_name"] for escrow in body["accepted_escrows"]] == ["anvil"]
-    assert body["demands"] == [
-        {
-            "chain_name": "anvil",
-            "arbiter": get_recipient_arbiter("anvil", config_path=address_book).lower(),
-            "demand_data": {"recipient": SELLER_WALLET.lower()},
-        }
-    ]
+    assert body["demands"] == [RECIPIENT_CONDITION]

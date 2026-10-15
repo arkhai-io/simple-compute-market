@@ -679,8 +679,8 @@ helm.sh/helm/v3/cmd/helm@v3.16.4`) must be reinstalled in a fresh container.
 
 Delivers listing `demands` derived by `kit/alkahest` for every domain, with each domain
 declaring its release models (D14d; `storefront-publication` "An Alkahest listing advertises
-its release conditions"). Touches `kit/alkahest`, VM's and bare metal's storefronts. Bare
-metal still reads its settlement configuration from its present source; Section 11 changes
+its release conditions"). Touches `kit/alkahest` and the VM, bare-metal, and API-credit
+storefronts (the API-credit storefront added by 6.7). Bare metal still reads its settlement configuration from its present source; Section 11 changes
 the source, not the derivation.
 
 - [x] 6.1 `kit/alkahest/src/market_alkahest/` (a new `release_conditions.py`, exported):
@@ -726,6 +726,10 @@ the source, not the derivation.
       shared settlement config". **Consequence:** a VM section stating both the
       oracle-gated and the interruptible model now refuses VM's startup at composition;
       before, VM started and every Alkahest candidate failed publication.
+      **Amended (review):** VM's check is `require_vm_release_model(domain)` in
+      `src/settlement_composition.py`, which `_build_vm_services` calls before it builds
+      the database, signer, or anything else (beside the admissibility default's parse),
+      as well as the composition; `design.md` D14d records the refusal for promotion.
 - [x] 6.3 VM: `publication_terms.py` reads the kit's derivation and keeps no derivation of
       its own; `demands_for_publication_clauses` and its caller in
       `services/publication_loop.py` are unchanged in output.
@@ -748,7 +752,11 @@ the source, not the derivation.
       settlement composition, which holds the section, wallet, and chains, rather than in
       `publication_composition.py`; and it covers only Alkahest options actually built
       (a ready mechanism), whereas VM derives from its clauses whatever their readiness,
-      as before. Startup refuses `interruptible` (6.2).
+      as before. Startup refuses `interruptible` (6.2). `design.md` D14d now records the
+      mechanism as delivered and each domain's input.
+      **Amended (review):** the chains are taken only from escrows the Alkahest
+      clauses built, and the seller wallet is read as an address string or as a
+      wallet carrying `address` (mapping or object), as the kit's preflight reads it.
 - [x] 6.5 Tests. `kit/alkahest/tests/unit/test_release_conditions.py` (new, unit): each
       model's condition per chain, the oracle-gated wallet-as-oracle refusal, the
       mutual-exclusion refusal, and the undeclared-model refusal. VM's
@@ -781,16 +789,29 @@ the source, not the derivation.
       holding the real Alkahest composition and option builder (the token's metadata
       cached under a temporary `XDG_CACHE_HOME`, so no chain is asked) and reads the
       registry body's `demands`; with the derivation replaced by `()` it fails.
-      **Differed (level):** that file is the cycle's public API against a real database
-      with site and registry doubles, which its own docstring says is not application
-      integration; no typed-client route reaches a payload's terms more directly.
+      That file is the cycle's public API against a real database with site and
+      registry doubles, which its own docstring says is not application integration.
+      **Corrected (review):** the claim first recorded here, that no typed-client route
+      reached a payload's terms more directly, was wrong. Application integration,
+      through the typed client: `tests/test_http_publication_settlement.py` runs the real
+      app and lifespan with the real settlement composition and option builder, steps
+      publication through `StorefrontClient.admin_run_lifecycle_cycle("publication")`
+      with `publication_payload_builder` composing the payload, and reads the listing a
+      buyer fetches with `get_listing`: it advertises the recipient arbiter paying the
+      seller wallet; it fails with the derivation replaced by `()`. The cycle-level case
+      stays, sharing `alkahest_publication` and `RECIPIENT_CONDITION` from
+      `test_publication_cycle.py`.
       `tests/test_app_composition.py` (application startup): the app's lifespan, given a
       runtime factory composing an interruptible section, refuses with
-      `ReleaseModelError` naming the model and installs no storefront; an oracle-gated
-      section composes. `tests/test_runtime_environment.py`: the environment path
+      `ReleaseModelError` naming the model and installs no storefront.
+      `test_an_oracle_gated_section_composes` builds the runtime only (composition, not
+      startup). `tests/test_runtime_environment.py`: the environment path
       refuses `interruptible`, enabled or disabled, naming the model rather than calling
       the root malformed. `tests/settlement_compositions.py`'s `alkahest_composition`
-      takes `section` and `chains` overrides.
+      takes `section` and `chains` overrides. VM (application integration, real app and
+      lifespan): `tests/integration/test_release_model_startup.py` — a section stating
+      both the oracle-gated and the interruptible model, enabled or not, refuses startup
+      with `ReleaseModelError` before any database, container service, or loop exists.
 - [x] 6.6 Bump versions and refresh locks. Validation: `make -C kit test-alkahest`,
       `make test-storefront`, `make test-bare-metal`, `make check-architecture`,
       `make check-packaging`, `make test`. End-to-end: `e2e_deal`, `e2e_non_erc20_settlement`
@@ -814,6 +835,12 @@ the source, not the derivation.
       rules included), `make check-comment-hygiene`, `make check-doc-citations
       CHANGE=share-site-projection-state` (nothing reported), and `openspec validate
       --strict` pass. The pipeline was not run for this section.
+      **Review fixes, re-run:** VM storefront (frozen) unit 1024 passed, 1 skipped,
+      integration 414 passed (two new startup cases); bare metal 134 + 317 + 11 + 40
+      passed (the application-integration case new); `make test-apicredits` all passed,
+      storefront 143; `make -k test` passed everywhere but the three PyTorch-index reinits;
+      `make check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state`, and `openspec validate --strict` pass.
       **Correction (end-to-end):** every VM-lane scenario whose storefront publishes
       through its loop derives its listings' `demands` through the kit now, and every VM
       startup runs the release-model check: `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`,
@@ -827,6 +854,42 @@ the source, not the derivation.
       still falls back to the recipient arbiter for the seller wallet, which is the
       advertised condition and the one the scenario's escrow is created under, so the
       deal itself is unchanged.
+- [x] 6.7 The API-credit storefront: its Alkahest seller stage declares `{recipient}`, its
+      composition refuses any other configured model at startup, and its listings publish
+      the kit-derived conditions for the chains of the Alkahest escrows they publish.
+      **Plan gap (review):** the plan named VM and bare metal only, though D14d covers every
+      domain composing Alkahest, and the API-credit storefront composes it with
+      `escrow_shape_guard` among its default seller policies, so Section 7's fail-closed
+      rules would otherwise refuse every API-credit Alkahest deal.
+      Done: `src/settlement_stages.py`'s `AlkahestSellerStage` takes a required
+      `release_models`; `src/settlement_composition.py` declares `{RECIPIENT_RELEASE}` (a
+      credit grant judges no oracle's verdict and splits no refund), refuses another
+      configured model, enabled or not, before building anything, and gains
+      `ApiCreditsSettlementComposition.release_conditions(accepted_escrows)` over the kit's
+      `release_conditions`, with the composition holding `seller_wallet_address` from
+      `[wallet].address` (the mechanism resources carry no wallet, and adding one would
+      change Alkahest's readiness inputs); `services/listing_service.py` publishes those
+      conditions as the listing's `demands` for the accepted escrows that survive the
+      backing filter — the caller's and the clauses' alike, accepted escrows being the
+      API-credit Alkahest publication form. `pyproject.toml` requires
+      `arkhai-kit-alkahest>=0.5.0`; its lock relocked. The lane's `storefront.credits.toml`
+      names the anvil chain's address book and `[wallet].address`, so its seeded listing
+      advertises the recipient arbiter paying that wallet. The API-credit buyer builds its
+      proposal from the listing with `escrow_proposal_from_accepted_entry`, which now
+      selects that demand; materialization then encodes the recipient arbiter for the seller
+      wallet, the same condition its fallback used before, and the buyer's suites pass.
+      Tests, application integration through the typed client:
+      `tests/integration/test_alkahest_release_conditions.py` — a listing published from
+      quota is read by a buyer's `StorefrontClient.get_listing` advertising the recipient
+      arbiter from the anvil address book paying the configured wallet (it fails with the
+      demands left empty); and the composition startup builds refuses `interruptible`,
+      naming it. `test_publish_reconcile.py`'s composition double returns no conditions;
+      `tests/unit/test_settlement_fulfillment.py` constructs the stage with its models.
+      `make test-apicredits`: storefront 143 passed, and every other API-credit suite
+      (buyer, domain, service, middleware) passed. End-to-end (API-credit lane):
+      `e2e_credits_deal` (its seeded listing now advertises the condition, and its buyer
+      selects it); `e2e_credits_payment_deal` publishes no Alkahest escrow. The pipeline
+      was not run.
 
 Section 6 handoff:
 
@@ -846,6 +909,10 @@ Section 6 handoff:
   `alkahest_address_config_path`. Section 11, moving settlement and chains to
   `[Settlement]`, `[Wallet]`, and `[Chains.<name>]`, must keep those shapes or adapt it;
   the kit accepts chain objects as well.
+- For the owner, undecided: every storefront still starts and then refuses every Alkahest
+  candidate when `oracle_gated` names no trusted oracle or its oracle is the seller wallet.
+  These could be startup refusals too, as the release model is; the wallet check needs the
+  wallet at composition, which each storefront has there.
 - `tests/settlement_compositions.py`'s `alkahest_composition` takes `section` and `chains`
   overrides; its default section's `address_config_path` names a file absent outside the
   image, which blocks Alkahest readiness, so a test that needs a built Alkahest option
@@ -890,8 +957,11 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
 - [ ] 7.5 Bump versions and refresh locks. Validation: `make -C kit test-alkahest
       test-policy`, `make test-storefront`, `make test-bare-metal`, `make test-vms-buyer`
       (the buyer's `validate_selected_escrow_plan` caller), `make check-architecture`,
-      `make check-packaging`, `make test`. End-to-end: `e2e_deal`, `e2e_deal_buyer_cli`,
-      `e2e_non_erc20_settlement`, `e2e_bare_metal_mock_deal`.
+      `make check-packaging`, `make test-apicredits` (the API-credit storefront composes
+      Alkahest and runs `escrow_shape_guard` by default), `make test`. End-to-end:
+      `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_non_erc20_settlement`,
+      `e2e_bare_metal_mock_deal`, and the API-credit lane's `e2e_credits_deal` and
+      `e2e_credits_payment_deal`.
 
 ## 8. VM composes the shared projection state
 

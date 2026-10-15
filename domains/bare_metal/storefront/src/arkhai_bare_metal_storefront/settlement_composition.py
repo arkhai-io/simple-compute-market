@@ -84,6 +84,16 @@ SELLER_STAGES = SettlementStageTable(
     }
 )
 
+
+def _wallet_address(wallet: Any) -> str:
+    """The seller wallet's address, given as the address or as a wallet carrying one."""
+    if wallet is None or isinstance(wallet, str):
+        return wallet or ""
+    if isinstance(wallet, Mapping):
+        return str(wallet.get("address") or "")
+    return str(getattr(wallet, "address", "") or "")
+
+
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
 
@@ -207,6 +217,7 @@ class BareMetalStorefrontSettlementComposition:
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
+        alkahest_chains: set[str] = set()
 
         for clause in clauses:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
@@ -237,6 +248,8 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
+            if clause.mechanism == ALKAHEST_MECHANISM:
+                alkahest_chains.update(str(item["chain_name"]) for item in built_escrows)
             settlement_options.extend(
                 SettlementOption.model_validate(item).model_dump(mode="json")
                 for item in built_options
@@ -254,14 +267,11 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(self._release_conditions(accepted_escrows)),
+            demands=tuple(self._release_conditions(alkahest_chains)),
             max_duration_seconds=max_duration_seconds,
         )
 
-    def _release_conditions(
-        self, accepted_escrows: Sequence[Mapping[str, Any]]
-    ) -> list[dict[str, Any]]:
-        chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
+    def _release_conditions(self, chain_names: set[str]) -> list[dict[str, Any]]:
         if not chain_names:
             return []
         chains = self.resources.get("chains")
@@ -269,7 +279,7 @@ class BareMetalStorefrontSettlementComposition:
             self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
             chain_names=chain_names,
             chains=chains if isinstance(chains, Mapping) else {},
-            wallet_address=str(self.resources.get("wallet") or ""),
+            wallet_address=_wallet_address(self.resources.get("wallet")),
         )
 
     def runtime_clients(self) -> dict[str, Any]:

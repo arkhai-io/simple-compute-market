@@ -317,7 +317,7 @@ async def test_startup_refuses_a_release_model_bare_metal_cannot_deliver(
     assert getattr(app.state, "storefront_container", None) is None
 
 
-async def test_an_oracle_gated_release_model_is_delivered(tmp_path) -> None:
+async def test_an_oracle_gated_section_composes(tmp_path) -> None:
     runtime = _direct_runtime(
         tmp_path,
         seller_evm_address="0x" + "33" * 20,

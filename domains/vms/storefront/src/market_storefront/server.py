@@ -78,6 +78,7 @@ from market_storefront.services.publication_terms import (
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.site_projection_cache import refresh_site_resource_pools
+from market_storefront.settlement_composition import require_vm_release_model
 
 logger = logging.getLogger(__name__)
 
@@ -256,8 +257,10 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read stops startup rather than publishing without it.
+    # cannot read, or an Alkahest release model it cannot deliver, stops
+    # startup rather than publishing without it.
     admissibility_default = parse_configured_admissibility_default()
+    require_vm_release_model(domain)
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)

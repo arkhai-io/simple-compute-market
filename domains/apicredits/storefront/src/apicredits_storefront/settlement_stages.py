@@ -523,9 +523,16 @@ class AlkahestSellerStage:
     registration = staticmethod(create_alkahest_registration)
     retry_uncertain = False
 
-    def __init__(self, *, fulfils_through_capacity: bool) -> None:
+    def __init__(
+        self, *, fulfils_through_capacity: bool, release_models: frozenset[str]
+    ) -> None:
         # As for the payment stage: required, with no default.
         self.fulfils_through_capacity = fulfils_through_capacity
+        # The Alkahest release models, from market_alkahest.RELEASE_MODELS, a
+        # credit deal may be released under. Composition refuses a configured
+        # [Settlement.alkahest] model outside them, so a listing never
+        # advertises a condition its deal could not honour.
+        self.release_models = release_models
 
     def validate_selection(self, selection: Any) -> None:
         if selection.expiration_unix is None:
