@@ -1,61 +1,77 @@
 ## Why
 
 The two compute storefronts read their sites' resource-pool projections by two routes.
-The VM storefront holds each site's projections in memory, polls them, wakes its
-publication loop when a site's resource-pool generation changes, and publishes on a
-timer. The state lives in VM's own `site_projection_cache` module, 272 lines of
-composition over the shared `ProjectionCache` primitive in `core/storefront`. The
-bare-metal storefront holds nothing: its publication fetches every site's projection
-live on each run, its opening recheck fetches the listing's site live on each
+The VM storefront holds each site's projections in a process-global module of its own,
+polls them, wakes its publication loop when a site's resource-pool generation changes, and
+publishes on a timer. The bare-metal storefront holds nothing: its publication fetches
+every site live on each run, its opening recheck fetches the listing's site live on each
 opening, and its publication runs only when an operator invokes it.
 
-That difference now blocks Goal 7. `unbacked-bare-metal-listings` publishes bare-metal
-listings that are never judged against availability, so source reconciliation is the
-only reconciliation they get. While bare-metal publication runs only when an operator
-invokes it, an unbacked listing whose pool is withdrawn stays advertised until someone
-runs it — the failure source reconciliation exists to prevent. And because the recheck
-fetches live, that change had to scope the inventory guard so an unbacked listing's
-recheck may call its origin site, and accept that every opening of one is refused while
-its site is unreachable.
+That difference blocks Goal 7. `unbacked-bare-metal-listings` publishes bare-metal listings
+that are never judged against availability, so source reconciliation is the only
+reconciliation they get; while bare-metal publication runs only on an operator's command, an
+unbacked listing whose pool is withdrawn stays advertised until someone runs it. And because
+the recheck fetches live, every bare-metal opening depends on its site being reachable.
 
-Holding projections is already the agreed end state for every storefront
-(`resolve-compute-family-findings`), and moving VM's projection state into the kit was
-an item of `kit-owned-listing-and-fulfillment-lifecycles`, which waits on the
-storefront shell. The item does not depend on the shell, so it is carved out here as
-`unbacked-bare-metal-listings`' prerequisite.
+Holding projections is the agreed end state for every storefront
+(`resolve-compute-family-findings`), and moving VM's projection state into the kit was an
+item of `kit-owned-listing-and-fulfillment-lifecycles`, which waits on the storefront shell.
+The item needs neither, so it is carved out here as `unbacked-bare-metal-listings`'
+prerequisite.
+
+Doing so exposed three further gaps this change also closes. The bare-metal storefront reads
+its settings from environment variables and its chart passes them as pod `env`, contrary to
+`docs/development/DEPLOYMENT_AND_CONFIG.md`. VM verifies every site's responses against one
+shared principal set, contrary to "Storefronts hold an exact principal per site authority",
+while bare metal pins per site without a rotation set. And bare-metal listings advertise no
+Alkahest release conditions, which leaves the seller's escrow-shape guard accepting a
+buyer-chosen arbiter unchecked.
 
 ## What Changes
 
-- Move the per-site projection state VM's `site_projection_cache` composes into
-  `kit/capacity-publication`, over any aggregate capacity client: each configured
-  site's resource-pool and capacity-bucket caches, their poller as a storefront
-  lifecycle loop, the publication wake on a resource-pool generation change, the
-  per-site refresh an override write or an inline reconciliation asks for, the
-  topology-error refresh, and the per-site, per-family status summary. VM composes it
-  and keeps only what is VM's, such as its `listing_cardinality_mode` explanations.
-- The bare-metal storefront composes the same state over the aggregate it already
-  builds. Its publication derives from the held projections, and a site whose
-  projection is not held holds its listings, as an unreachable site does today. Its
-  opening recheck reads the held projection of the listing's site rather than fetching
-  it.
-- Bare-metal publication runs as a timer-driven lifecycle loop on the storefront's
-  existing loop controller, as VM's does: held by the lifecycle pause, stepped and
-  previewed while held, woken by a resource-pool generation change and by an accepted
-  pool-override write. The publication command keeps running one cycle through the
-  storefront's API.
-- Bare-metal pool-override writes refresh the held projection of their site and wake
-  the loop, and override status reads the held projection.
-- Every bare-metal end-to-end scenario that steps publication holds the storefront's
-  loops first, as VM's deal scenarios do.
+- **Shared projection state.** `kit/capacity-publication` owns per-site projection state: one
+  instance per storefront process over its aggregate capacity client, holding both
+  projection families for every configured site, with its poller as a lifecycle loop, the
+  publication wake on a resource-pool generation change seen by the poller or a drift check,
+  per-site and in-place full refresh that keeps a failing site's last generation, a drift
+  check of every family on a topology error, and a per-site status. VM's
+  `site_projection_cache` is reduced to VM's `listing_cardinality_mode` explanations and its
+  consumers take the injected instance. The `site-projections` step is the timer's cycle.
+- **Bare metal on held projections and a loop.** Bare-metal publication derives from the held
+  projections, checks generation trust when it reads, runs as a timer-driven loop on the
+  storefront's controller (held, stepped, and previewed), and holds a site whose projection is
+  not held. The opening recheck reads the held projection. Override writes refresh the site's
+  held projection and wake the loop; override status reads the held projection, and the
+  durable accepted-generation table is frozen. The `publish` command becomes an API client.
+- **Startup refusal and loop status.** Both storefronts refuse to start without publication
+  configuration. Both report each loop's state and publication's last cycle in system
+  status; bare metal also reports its per-site derivation summary.
+- **Bare-metal configuration on VM's conventions.** The bare-metal storefront reads
+  `storefront.toml`, `storefront.json`, and `storefront.secrets.toml` under VM's key
+  vocabulary; its chart renders `config` through unchanged with a Secret overlay and a
+  generated values schema; Compose and the lane mount files. The values-schema generator
+  moves to `kit/config`. Site trust comes from each site's service peer in both storefronts.
+  VM's `claims_sweep_interval` becomes `settlement_servicing_interval_seconds`.
+- **Alkahest release conditions for every domain.** Listing `demands` are derived by
+  `kit/alkahest` from `[Settlement.alkahest]` for every domain, each domain declares the
+  release models it can deliver, and the escrow-shape guard fails closed.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `storefront-publication`: publication runs as a controllable lifecycle loop in both
-  compute storefronts; an accepted pool-override write wakes it in both; a bare-metal
-  site whose projection is not held holds its listings during a cycle; the bare-metal
-  opening recheck reads its site's held projection.
+- `storefront-publication`: one per-process held projection state read by every publication
+  source; publication runs as a controllable loop in each dedicated compute storefront;
+  bare-metal recheck, override writes, and override status read held projections; a site
+  whose projection is not held holds its listings during a bare-metal cycle; loop state in
+  system status; a storefront that cannot publish refuses to start; Alkahest listings
+  advertise their release conditions.
+- `market-composition`: per-site projection state is kit-owned and per process; a loop
+  records each cycle's outcome with the controller.
+- `deployment-state`: the bare-metal seller role is configured through mounted files; a
+  storefront reads no application settings from its environment.
+- `negotiation-protocol`: a selected release condition must be one the listing advertises,
+  including when it advertises none.
 
 ### New Capabilities
 
@@ -64,49 +80,87 @@ None.
 ## Non-Goals
 
 - Unbacked bare-metal supply, which `unbacked-bare-metal-listings` adds on top of this.
+- Bare-metal publication inside the combined compute-family storefront, and one loop
+  covering several listing types; both belong to the storefront unification that is a
+  future roadmap goal.
 - The listing lifecycle and fulfillment convergence, which stay with
   `kit-owned-listing-and-fulfillment-lifecycles`.
-- API credits, whose storefront reads the credits service's projection for its own
-  listings and holds no per-site projection state; whether it should is not decided
-  here.
-- A pool-override write's live check against the site, which stays live: its
-  requirement is that a write is judged against the site's current projection, not a
-  held one.
+- Retiring VM's admin projection refresh route, which `kit-owned-storefront-shell` decides.
+- Extracting the storefronts' typed configuration models into a kit.
+- API credits, whose storefront holds no per-site projection state.
+- A pool-override write's live check against the site, which stays live: its requirement is
+  that a write is judged against the site's current projection.
 
 ## Impact
 
-- `kit/capacity-publication`: the per-site projection state and its poller.
-- `domains/vms/storefront`: `site_projection_cache.py` reduced to VM's own
-  explanations, and its consumers moved onto the kit's state.
-- `domains/bare_metal/storefront`: publication, opening recheck, pool overrides, the
-  lifecycle steps and server startup, and the durable accepted-generation table that
-  override status reads today.
-- `e2e-tests/`: bare-metal scenarios that step publication hold the loops first.
-- No wire break. A bare-metal storefront's database keeps its accepted-generation
-  table, whatever this change decides it is for.
+- `kit/capacity-publication`: `SiteProjectionState` and its poller.
+- `kit/storefront`: per-cycle outcome recording and a status snapshot on the loop controller.
+- `kit/config`: the values-schema generator.
+- `kit/alkahest`: demand derivation and per-domain release-model declaration.
+- `kit/policy`: `escrow_shape_guard` fails closed.
+- `domains/vms/storefront`: consumers onto the injected state; the step; per-site trust;
+  startup refusal; lifecycle status; the generator's section list; demand derivation removed;
+  the interval key rename.
+- `domains/bare_metal/storefront`: publication, recheck, overrides, lifecycle steps, server
+  startup, status, configuration loading, typed models, CLI commands, and a packaged
+  `settings.toml`; the accepted-generation table frozen.
+- `helm/charts/bare-metal-storefront` and the umbrella: config pass-through, overlay,
+  generated schema, render tests. `helm/charts/storefront`: the interval key rename.
+- `compose.bare-metal.yml`, `domains/bare_metal/compose.yml`, the root `Makefile`'s
+  `e2e-bare-metal-dev-env`, and `e2e-tests/`: file-mounted configuration; bare-metal scenarios
+  hold the loops.
+- Wire: additive `lifecycle` and derivation sections in system status; bare metal's
+  `site_projections` gains the capacity-bucket family. Deployment: VM storefronts must
+  configure publication and a service peer per site to start; VM's interval key is renamed.
+  The bare-metal chart's values change shape; bare metal has no deployed release to migrate.
+- Validation of the chart work needs Helm and a cluster, so it runs in a local session.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary", whose
-      statement that bare-metal publication remains operator-invoked no longer holds,
-      and the kit's ownership of per-site projection state.
-- [x] Existing subsystem specification — `storefront-publication` and its companion's
-      "Autonomous publication" and "Reconciliation"; `market-composition`'s companion
-      for the kit's projection state.
+- [x] `docs/development/ARCHITECTURE.md` — "Storefront capacity boundary" and the
+      capacity-publication paragraph (bare metal on a loop over held projections; the kit
+      owns per-site projection state); kit areas (`kit/config`'s generator, `kit/alkahest`'s
+      demand derivation); a domain's tooling never writes another domain's artifact.
+- [x] Existing subsystem specification — `storefront-publication`, `market-composition`,
+      `deployment-state`, and `negotiation-protocol`, with the companions
+      `storefront-publication/architecture.md` ("Projection families", "Reconciliation",
+      "Storefront pool overrides", "Unknown sites and inline reconciliation", "Autonomous
+      publication") and `market-composition/architecture.md` (the kit's projection state).
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-Also: `docs/development/DEPLOYMENT_AND_CONFIG.md` for the bare-metal publication and
-projection-poll intervals, and `docs/development/TESTING.md` if the lanes' hold
-convention changes.
+Also `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Bare-metal role configuration",
+"Per-domain stack composition", "Combined compute-family storefront", the bare-metal
+pool-override text, interval keys, VM's startup refusal and per-site trust),
+`docs/development/TESTING.md` (the bare-metal loop rows), `docs/bare-metal-seller-quickstart.md`,
+and `docs/development/ROADMAP.md` (Goal 4's gap row, Goal 7's current state).
+
+### Knowledge to promote
+
+- Per-site projection state is kit-owned, one instance per process, both families for every
+  site, refreshed in place — `openspec/specs/storefront-publication/spec.md`,
+  `openspec/specs/market-composition/spec.md`, and `market-composition/architecture.md`.
+- Bare-metal publication is a timer loop over held projections, with trust checked on read —
+  `openspec/specs/storefront-publication/spec.md` and its companion.
+- A storefront that cannot publish refuses to start; loop state is in system status —
+  `openspec/specs/storefront-publication/spec.md`.
+- Bare-metal configuration follows the storefront file conventions; no storefront reads
+  application settings from its environment; site trust comes from each site's service peer
+  — `openspec/specs/deployment-state/spec.md` and `DEPLOYMENT_AND_CONFIG.md`.
+- Alkahest release conditions are the mechanism's, and an unadvertised one is refused —
+  `openspec/specs/storefront-publication/spec.md` and `openspec/specs/negotiation-protocol/spec.md`.
+- A domain's tooling never writes another domain's artifact — `ARCHITECTURE.md`.
 
 ## Dependencies
 
-- **Carved out of `kit-owned-listing-and-fulfillment-lifecycles`**, whose item
-  "Replace the VM storefront's `site_projection_cache` with the capacity/publication
-  kit's per-site projection state" moves here. That change no longer carries it.
-- **Blocks `unbacked-bare-metal-listings`**, whose recheck and source reconciliation
-  rely on bare metal holding projections and publishing on a loop.
+- **Carved out of `kit-owned-listing-and-fulfillment-lifecycles`**, which no longer carries
+  per-site projection state.
+- **Blocks `unbacked-bare-metal-listings`**, whose recheck and source reconciliation rely on
+  bare metal holding projections and publishing on a loop.
+- **Closes an unowned item** recorded under `publish-multidimensional-listing-shape`: the
+  admin projection refresh discarding last-known generations.
+- **Hands `kit-owned-storefront-shell`** the question of retiring VM's admin projection
+  refresh route.
 - Depends on nothing open: `encapsulate-capacity-backing` (archived 2026-10-14) and
-  `kit-owned-storefront-loop-lifecycle` (archived) supply the binding and the loop
-  controller it builds on.
+  `kit-owned-storefront-loop-lifecycle` (archived) supply the binding and the loop controller
+  it builds on.
