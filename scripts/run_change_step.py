@@ -284,14 +284,21 @@ def _section_ids(sessions: Any) -> bool:
 
 def note_round(path: Path, sections: Any, by: str, clock: Clock = _utc_now) -> Entry:
     """Record the implementation round the owner agreed: its sessions, each a list
-    of the sections that session implements, in order."""
+    of the sections that session implements, in order.
+
+    `after` is the highest number among the records and transcripts in `reviews/`
+    when the round was agreed,
+    so the round's own records — the owner's notes, its validation and review,
+    their triage — are those numbered above it.
+    """
     if not _section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
                         f"sections; got {sections!r}")
     if not by:
         raise StepError("a round names who agreed it")
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
-                               "sections": sections, "by": by}, clock)
+                               "sections": sections, "by": by,
+                               "after": next_number(path.parent) - 1}, clock)
 
 
 def note_orchestrator(path: Path, decision: str, reason: str,

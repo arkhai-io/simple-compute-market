@@ -389,7 +389,7 @@ Delivers `scripts/change_next_step.py` (D14; D5, D5a, D9, D13; 01 F1, F2, F3;
 requirements "The next step is computed from the files" and "A design blocked on a
 prerequisite halts").
 
-- [ ] 4.1 Read the index row (status, `Depends on`, `Notes`), `reviews/` and their
+- [x] 4.1 Read the index row (status, `Depends on`, `Notes`), `reviews/` and their
       triage gates, `tasks.md`'s sections and checks, the log, and
       `round_view.open_view()`; print `{"step": ..., "reason": ...}`, or an
       `unclassified` result naming what it read when no rule applies. The rules
@@ -398,19 +398,136 @@ prerequisite halts").
       agreed sections, the round view, validation and the implementation review
       side by side, triage, pre-closeout, closeout, the closeout review, archive
       cleanup.
-- [ ] 4.2 The owner results: a round view open (D9, 01 F3); a prerequisite whose
+      Done. `compute(root, change)` returns `{"step", "reason", …}`; the steps it
+      names are `design`, `plan`, `implement` (with the round's next session's
+      `sections`), `round-view`, `validate`, `review` (with its `kind`),
+      `validate-and-review`, `triage`, `closeout`, `archive-cleanup`, plus
+      `owner`, `done` (archived), and `unclassified` (with `read`, a summary of
+      every input). Rules, in order: an open round view; no index row; the
+      status (`archived`, `deferred`, `blocked in` → owner); a dependency gating
+      the current phase or an earlier one (4.2); then one function per phase.
+      Design: an untriaged design review → triage; a design discussion whose last
+      run finished → the design review; else design. Planning: a written plan
+      (last plan run finished) → the owner accepts it; else plan. Implementation:
+      no agreed round, or `ready for implementation` with the last round done →
+      the owner agrees a round, naming the open sections; the round's first
+      session with an open section → implement; the round implemented and no
+      record numbered after it → round view; then validation and the
+      implementation review, whichever is missing (both → side by side); any of
+      the round's records untriaged → triage; a validation not clearing `HEAD`
+      (the wrapper's `validation_problem`, so fixes after triage are validated
+      again) → validate; sections left → the owner agrees the next round; every
+      section before closeout checked → the pre-closeout review, its triage, and
+      a gate not passed → owner. Closeout: not yet archived, or archived but not
+      committed (closeout resumes after its archive step) → closeout; archived →
+      the closeout review, its triage, then archive cleanup once the gate passed,
+      or the owner. Before any phase rule, a step of the current phase whose
+      latest run asked, returned, was blocked, or stopped yields the owner,
+      naming it (`resume`, `return_to`, `blocked_on`, `denials`), for every step,
+      triage, validation, and review included, so a question is always answered
+      by resuming its session; a review counts for the phase its `kind` belongs
+      to; an `orchestrator` line clears what came before it, so the orchestrating
+      session can rerun a stopped step once it has recorded why; a design blocked
+      on a prerequisite is left to 4.2's rules. A written plan yields the owner
+      with `resume: plan`, since the planning session sets the status when the
+      owner accepts. A gate is passed when the triage's `## Gate` begins
+      "Passed": the triage skill's template asks only for the owner's words, and
+      existing triage files begin so by convention, not by contract. A section is
+      a `## N. Title` heading; it is complete when it has tasks and none is open;
+      one whose title contains "closeout" (plans write "Closeout", "Plan
+      closeout", "Repository closeout") is never part of a round. A pasted
+      `-external` review counts as its kind. An untriaged design review routes
+      to the triage step, where `change-design` §1 would triage it inside the
+      design session: both skills can triage it, and a separate step keeps the
+      design session's turns to the discussion. A malformed `Depends on` entry
+      is unclassified.
+      To tell a round's records from earlier ones, a `round` line now records
+      `after`, the highest record number when it was agreed (`note_round`,
+      section 1's, extended; unit-tested there). The index row is read through
+      `check_change_index.index_rows`, its new public reader, whose `Row` now
+      carries `Notes`. The task list's file name is the constant `TASKS_FILE`;
+      `make check-comment-hygiene` rejects any literal `tasks.md` in Python,
+      which a script that reads the file cannot avoid, so the check now exempts
+      exactly that definition line by its content, with a Makefile comment
+      saying why; a mention anywhere else in the script still fails (checked by
+      hand). This changes a repository check, which the plan did not name: the
+      owner decides whether it stands (the alternatives are matching only
+      comments, which grep does poorly, or building the name indirectly, which
+      would evade the check rather than answer it); until then it is this
+      section's proposal, and `AGENTS.md`'s description of the check ("rejects
+      … `tasks.md` references") is true except for that one line.
+- [x] 4.2 The owner results: a round view open (D9, 01 F3); a prerequisite whose
       directory is not on the branch (D5, 01 F2); a design-gating dependency not
       archived (01 F1); a design-gating dependency archived on this branch, the
       release proposed (D5a); a status that disagrees with the log, where the
       files prevail.
-- [ ] 4.3 Tests in `scripts/tests/test_change_next_step.py`: unit, over fixture
+      Done. A dependency is read from `Depends on` with its phase (none means
+      implementation) and holds the change when it gates the current phase or an
+      earlier one: no directory on the branch → owner, merge dev; archived here →
+      owner, `release`; otherwise → owner, waits. A design whose last run ended
+      `blocked` on a change with no directory here → owner, merge dev; once that
+      change's directory has arrived but `Depends on` does not name it → design,
+      to record it. A disagreement is reported, not routed: when the log's last
+      step belongs to a later phase than the status, the step the files give is
+      returned with a `disagreement` naming both. A blocked design whose
+      prerequisite is archived here no longer holds design, so once the owner
+      releases the dependency (D5a) design resumes.
+- [x] 4.3 Tests in `scripts/tests/test_change_next_step.py`: unit, over fixture
       change directories and logs, for every rule and owner result above and an
       unclassifiable state; the round-view case in a temporary Git repository,
       with a view opened by `round_view.start` and closed by `round_view.done`,
       since a real repository is the lowest level that proves it.
-- [ ] 4.4 Verification: `uv run pytest -q scripts/tests/test_change_next_step.py`
+      Done: 67 tests. Unit, over fixture index rows, change directories, records
+      with triage files, and logs written through the wrapper, with `HEAD`, the
+      round view, and whether the archive is committed injected: every rule
+      above, each owner result (a question, return, block, and stop each, for
+      design, implementation, triage, validation beside a finished review,
+      closeout, and archive cleanup; an `orchestrator` line clearing a stop; a
+      design review's stop not holding implementation; a confirmed return no
+      longer waiting), each dependency result (no directory, not archived,
+      archived, gating a later phase, malformed, and the release letting design
+      resume), the closeout section's title variants, an external review, an
+      uncommitted archive, a pruned archived row, the disagreement, and
+      unclassified states (no row, a status outside the legend, no sections, a
+      round naming an unknown section, an unknown change, a malformed log).
+      The round-view case runs in a temporary Git repository: open, the result
+      waits on the owner naming the view; closed, it moves on to the round view
+      step.
+- [x] 4.4 Verification: `uv run pytest -q scripts/tests/test_change_next_step.py`
       (unit, with the temporary repository); `make test`; the script run by hand
       on this change and on the pilot change, its results recorded here.
+      `uv run --no-project --with pytest pytest -q
+      scripts/tests/test_change_next_step.py`: 46 passed, then 67 after the
+      fresh-context fixes; all of `scripts/tests` together: 821, then 842. `make check-comment-hygiene`, `make check-packaging`:
+      passed. `make test`: passed, `scripts/tests` included, before the
+      fresh-context fixes, which touched only `change_next_step.py`, its test,
+      and `note_round`'s docstring, and ran with the focused suites and
+      `make check-comment-hygiene`. By hand, after the fixes:
+      - `orchestrate-change-workflow`, at `in implementation` with no round line
+        (its sections so far were agreed in chat, before rounds existed):
+        `{"step": "owner", "reason": "agree the next implementation round: which
+        sections, and how many sessions", "round": ["5", "6", "7"]}`, section 4
+        being checked; before it was, the same with `"4"` first.
+      - `fix-resource-pool-provider-at-creation`: `{"step": "design", "reason":
+        "ready for design"}`.
+      - `agent-driven-change-workflow` (archived): `{"step": "done"}`; and
+        `name-unverifiable-responses` (`in implementation`): owner, agree a round
+        of section 3.
+      This change's index row still read `ready for implementation` after
+      section 1, which should have set `in implementation`; corrected here, with
+      its `Notes`.
+
+Handoff. The rules take the skills' entry checks and handoffs at their word, so
+gaps will show in the pilot as `unclassified` results or `orchestrator` lines
+(7.3): for example, a discussion step that finished but left its status (design
+finished is treated as ready for review), a triage that committed fixes (read only
+through the validation no longer naming `HEAD`), and owner notes saved with no
+review or validation yet (the round view is then treated as done). A round's
+records are those numbered above its `after`, so records written before a round
+was agreed, under no orchestrator, never count for it. The orchestrator (6.1) must
+save a record of the owner's reading even when the owner has no notes ("No
+notes."), since that record is how the computation knows the round view happened;
+without one it names the round view again.
 
 ## 5. The leaf skills report through the wrapper
 

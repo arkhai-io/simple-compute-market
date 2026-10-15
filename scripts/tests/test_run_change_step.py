@@ -148,7 +148,8 @@ def test_seq_increases_across_outcomes_and_notes(tmp_path: Path) -> None:
     entries = step.read_log(log)
     assert [entry["seq"] for entry in entries] == [1, 2, 3]
     assert entries[0] == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "orchestrator",
-                          "outcome": "round", "sections": [[1, 2], [3]], "by": "owner"}
+                          "outcome": "round", "sections": [[1, 2], [3]], "by": "owner",
+                          "after": 0}
     assert entries[1]["sections"] == [1, 2]
     assert entries[2]["decision"] == "rerun validate"
 
@@ -1411,3 +1412,11 @@ def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path
 def test_planning_starts_fresh_only_for_fresh_1() -> None:
     assert _make_n("plan", "CHANGE=X", "UNATTENDED=1", "FRESH=0") == [
         'python3 scripts/run_change_step.py run plan "X"']
+
+
+def test_a_round_records_the_last_record_before_it(tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    (log.parent / "transcripts").mkdir(parents=True)
+    (log.parent / "transcripts" / "04-review.log").write_text("x", "utf-8")
+
+    assert step.note_round(log, [[2]], "owner", clock=_clock)["after"] == 4

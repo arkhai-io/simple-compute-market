@@ -736,6 +736,9 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+# The workflow's next-step script reads a change's task list, so it names that file
+# once, as the constant TASKS_FILE; only that definition line is exempt, and any
+# other mention in the script is still caught.
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@echo "Scanning for change-ID and task-number references outside openspec/..."
 	@matches=$$(grep -rnE \
@@ -743,7 +746,9 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		--include="*.py" --include="*.yml" --include="*.yaml" \
 		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
 		--exclude-dir=".venv" --exclude-dir=".dist" --exclude-dir="node_modules" --exclude-dir="build" \
-		. 2>/dev/null || true); \
+		. 2>/dev/null \
+		| grep -vE '^\./scripts/change_next_step\.py:[0-9]+:TASKS_FILE = "tasks\.md"$$' \
+		|| true); \
 	if [ -n "$$matches" ]; then \
 		echo "$$matches"; \
 		echo ""; \

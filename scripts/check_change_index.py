@@ -56,6 +56,7 @@ class Row(NamedTuple):
     path: str
     status: str
     depends_on: str | None
+    notes: str = ""
 
 
 def _cells(line: str) -> list[str]:
@@ -92,8 +93,14 @@ def _rows(lines: Sequence[str]) -> tuple[list[Row], list[str]]:
             problems.append(f"{INDEX}:{number}: the Change cell links no change")
             continue
         rows.append(Row(number, link.group("name"), link.group("path"), row["Status"],
-                        row.get("Depends on")))
+                        row.get("Depends on"), row.get("Notes", "")))
     return rows, problems
+
+
+def index_rows(root: Path = ROOT) -> list[Row]:
+    """Every change row of the index, as the check reads it; malformed rows are left out."""
+    index = root / INDEX
+    return _rows(index.read_text("utf-8").splitlines() if index.is_file() else [])[0]
 
 
 def _check_row(root: Path, row: Row) -> list[str]:
