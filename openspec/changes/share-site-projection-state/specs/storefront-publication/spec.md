@@ -58,7 +58,7 @@ holds and their reasons, including a site whose projection generation its domain
 
 Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains resource-granular inside the provisioning site authority, which applies each pool provider's host requirement.
 
-A storefront that derives listings from site projections SHALL hold one per-site projection state for its process, holding the resource-pool and capacity-bucket projections of every configured site, and every publication source, listing-source check, override status, and status report in the process SHALL read that one state rather than querying a site per listing type. It SHALL load both projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale, without counting as a confirmation of it, rather than representing an empty projection; this holds for a poll an operator invokes as for a timed one. Topology-sensitive authoritative errors MAY trigger one coalesced drift check of every held family but SHALL NOT automatically retry a state-changing request. A resource-pool generation change observed by a poll, timed or operator-invoked, or by a drift check SHALL wake publication; a refresh an operation runs to reconcile inline SHALL NOT.
+A storefront that derives listings from site projections SHALL hold one per-site projection state for its process, holding the resource-pool and capacity-bucket projections of every configured site, and every publication source, listing-source check, override status, and status report in the process SHALL read that one state rather than querying a site per listing type. It SHALL load both projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale, without counting as a confirmation of it, rather than representing an empty projection; this holds for a poll an operator invokes as for a timed one. Topology-sensitive authoritative errors MAY trigger one coalesced drift check of every held family but SHALL NOT automatically retry a state-changing request. A resource-pool generation change observed by a poll, timed or operator-invoked, or by a drift check SHALL wake publication; a refresh an operation runs to reconcile inline SHALL NOT. Operations on one site's projection family SHALL run one at a time, so a failed operation never replaces a confirmation that completed after it began.
 
 Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation.
 
@@ -262,11 +262,11 @@ these hold:
 
 It MUST refuse with the availability reason when the held projection's bare-metal view
 shows the Physical Resource unavailable, and as retryable when the projection it holds for
-the site has no value, is stale, or has a generation whose bare-metal views are refused, or
-when no site authority is configured. Only a freshly confirmed generation, one whose most
-recent poll succeeded, confirms a listing, so the availability and declarations a recheck
-relies on lag the site by at most one poll interval; admission at the site remains
-authoritative.
+the site has no value, is not freshly confirmed, or has a generation whose bare-metal views
+are refused, or when no site authority is configured. A generation is freshly confirmed when
+its most recent poll succeeded within the storefront's source-confirmation window, so the
+availability and declarations a recheck relies on lag the site by at most that window;
+admission at the site remains authoritative.
 
 #### Scenario: A declaration shrinks beneath its listing
 
@@ -291,6 +291,13 @@ authoritative.
 - **WHEN** a buyer opens a negotiation on a bare-metal listing whose site's most recent
   projection poll failed, so the storefront holds only an earlier generation
 - **THEN** the opening is refused as retryable, and the earlier generation confirms nothing
+
+#### Scenario: The held generation's confirmation has expired
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose site's generation is still
+  `loaded` but was last confirmed longer ago than the source-confirmation window, because no
+  poll has run since
+- **THEN** the opening is refused as retryable, until a poll confirms the site again
 
 #### Scenario: The held generation is refused
 
@@ -319,12 +326,13 @@ accept and for any acceptance; a seller decision that independently rejects or e
 keeps its own reason.
 
 
-A source the storefront derives from site projections is confirmed only by a freshly confirmed
-generation of its site's resource-pool projection, one whose most recent poll succeeded and that
-the listing's domain accepts. A site whose projection is not held, is stale, or holds a
-generation the domain refuses cannot confirm the listing, and the check refuses as retryable.
-Publication may still derive from a stale generation, holding listings through an outage; a
-source check may not.
+A source the storefront derives from site projections is confirmed only when every projection
+family the check reads is freshly confirmed — its most recent poll succeeded, within the
+storefront's source-confirmation window, which defaults to three of its poll intervals — and is
+accepted by the listing's domain. A family that is not held, whose latest poll failed, whose
+confirmation is older than the window, or whose generation the domain refuses cannot confirm the
+listing, and the check refuses as retryable. Publication may still derive from such a
+generation, holding listings through an outage; a source check may not.
 
 #### Scenario: An unbacked listing matches its declaration
 
@@ -370,6 +378,19 @@ source check may not.
 
 - **WHEN** a buyer exits a negotiation whose listing's site cannot be reached
 - **THEN** the exit is recorded without a site call
+
+#### Scenario: One family a check reads is stale
+
+- **WHEN** a buyer negotiates against a fungible VM listing whose site's resource-pool family is
+  freshly confirmed while its capacity-bucket family's latest poll failed
+- **THEN** the round is refused as retryable, rather than judged on the stale bucket counts
+
+#### Scenario: The loops are held past the confirmation window
+
+- **WHEN** an operator holds the lifecycle loops, trading stays enabled, and a buyer negotiates
+  after the source-confirmation window has passed since the last poll
+- **THEN** the round is refused as retryable, and succeeds once the operator steps the
+  site-projection loop
 
 #### Scenario: An unbacked listing's site is stale
 

@@ -128,7 +128,14 @@ reads `view()` and confirms only from a `loaded` generation (D5). An unconfigure
 to `view` or `refresh_site` raises the kit's `CapacityBindingError`, as
 `CapacityRuntime.site_client` does; an unknown family raises `ValueError`. `refresh_site`
 never raises for a failed fetch: the cache keeps its last generation as `stale` with its
-error and does not advance its last confirmation. Rejected: a kit module-level registry, a process
+error and does not advance its last confirmation.
+
+The state runs one operation at a time on a site's family, its version check included: a
+caller arriving while one is in flight — the poller, the admin route, a drift check, an inline
+refresh — waits for it and returns its result rather than polling again, so a failed operation
+never replaces a confirmation that completed after it began (03 F3). The fix belongs in core's
+`ProjectionCache`, whose `poll_once` today checks the version outside its refresh lock, so
+every user of the primitive gains it. Rejected: a kit module-level registry, a process
 global that contradicts the instance-scoped loop controller and keeps the module patching
 `TESTING.md` rules out; and an instance with a VM module facade, leaving two ways to reach
 the state.
@@ -178,19 +185,31 @@ domain's rule; and a neutral check in the kit, which would interpret opaque
 `publication_views`.
 
 **Only a freshly confirmed generation confirms a source check (01 F4 / 02 F1).** A held
-generation is in one of four conditions: none held, freshly confirmed (`loaded`: the most
-recent poll succeeded), stale (a retained generation whose latest poll failed), or refused by
-the reading domain. Publication reads any held generation, stale included, because holding a
-site's listings through an outage is its job. A listing-source check — before every seller
-decision and every acceptance, in both domains — confirms a listing only from a `loaded`
-generation its domain accepts; every other condition refuses as retryable, and an exit is
-never checked. The bound on the availability and provenance an opening relies on is
-therefore one poll interval. This closes VM's existing gap, whose check confirmed from any
+generation is in one of four conditions: none held, freshly confirmed, stale, or refused by
+the reading domain. Freshly confirmed means `loaded` — the most recent poll succeeded — with a
+last confirmation (`fetched_at`) no older than `[capacity].source_confirmation_seconds`, which
+defaults to three times `[capacity].poll_interval` when not stated and which a lane or an
+operator may widen (03 F1). A `loaded` generation older than that is stale for this purpose,
+because a cache only becomes `stale` when a poll fails, and while no poll runs — the loops held
+with trading live, or a poller that has exited or hung — it would otherwise stay `loaded`
+indefinitely. Publication reads any held generation, stale included, because holding a site's
+listings through an outage is its job. A listing-source check — before every seller decision
+and every acceptance, in both domains — confirms a listing only when every projection family it
+reads is freshly confirmed and accepted by its domain: bare metal's reads the resource-pool
+family; VM's reads it and the capacity-bucket family its fungible availability uses (03 F2).
+Every other condition refuses as retryable, and an exit is never checked. The bound on the
+availability and provenance a source check relies on is therefore the confirmation window, and
+an operator holding the loops restores freshness on demand by stepping `site-projections`. This closes VM's existing gap, whose check confirmed from any
 held generation including for unbacked listings, which have no admission backstop. Refusing a
 backed listing on stale data costs nothing in practice: a reservation that follows cannot
 reach a site that cannot be polled. Rejected: accepting unbounded staleness as policy; a
 configurable freshness window, a key an operator has no basis to tune; and bounding unbacked
-listings only through a new backing-delegate operation.
+listings only through a new backing-delegate operation. For elapsed time (03 F1), rejected: a
+fixed multiple with no setting, which would stall every paused scenario until it steps the
+poller; suspending the window while the poller is held, which reopens the gap for exactly the
+operator who paused; and no window at all. For a check reading two families (03 F2), rejected:
+dropping a stale bucket generation and computing availability from resource rows, which makes
+the computation depend on freshness and the rule domain-specific.
 
 ### D6. A storefront that cannot publish refuses to start; loop state reaches status
 
@@ -213,10 +232,15 @@ Both storefronts' system status gains a `lifecycle` section: the loop controller
 states and publication's last cycle outcome. The kit controller gains an operation each loop
 records its cycle's outcome through and a snapshot of states and last outcomes (02 F5):
 
-- the controller runs each loop's timer cycle and its step under one per-loop lock, so they
-  never run a cycle concurrently; this replaces bare metal's `publication_lock` and gives VM's
-  publication, and every other loop, the serialization it lacks; a held loop runs no timer
-  cycles, so a step taken while held never waits;
+- the controller's `run_cycle(name)` is the one place a cycle runs, under that loop's lock,
+  recording its outcome in a `finally`; a loop registers its step and its interval, and the
+  timer the controller starts is a gate, `run_cycle`, wait loop over the same operation, so the
+  timer and an operator's step never run a cycle concurrently (03 F3); every VM and bare-metal
+  loop moves onto it, replacing bare metal's `publication_lock` and giving VM's publication, and
+  every other loop, the serialization it lacks; a held loop runs no timer cycles, so a step
+  taken while held never waits. The per-site capacity-event pollers that
+  `run_capacity_event_pollers` fans out are the one exception in shape: each site's feed
+  cursor has its own lock, which the capacity-events step takes per site;
 - each invocation, timer or step, records exactly one terminal outcome, including one that
   raised, naming the stage that failed (`compose`, `run`, or `converge`);
 - a recorded error carries the exception's type, and its message only when the exception is
@@ -334,9 +358,11 @@ Secrets is owed. Accepted scope beyond the original proposal.
 - **C9. Compose and the lane mount files**, through a committed development
   `storefront.toml` for bare metal and a secrets file; only bare-metal targets produce
   bare-metal files.
-- **C10. Reconciled meanings.** Bare metal refuses a zero or absent
-  `default_max_duration_seconds`, which VM reads as unlimited. Bare metal publishes to
-  every `[registry].urls` entry through the runtime's existing fan-out.
+- **C10. Reconciled meanings.** Bare metal holds and reports a pool whose effective maximum
+  lease duration, resolved through its override and then
+  `[pricing].default_max_duration_seconds`, is absent or not positive; VM reads an absent or
+  zero value as unlimited (03 F5). Bare metal publishes to every `[registry].urls` entry
+  through the runtime's existing fan-out.
 - **C11. Settlement and wallet use the shared files.** `[Settlement]` replaces the
   settlement JSON; `[Wallet].address`, `[Chains.<name>]`, and the overlay's wallet key
   replace their variables; the all-or-none Alkahest input rule keeps its refusal.
@@ -348,9 +374,13 @@ Secrets is owed. Accepted scope beyond the original proposal.
   future `ROADMAP.md` goal, not promoted now.
 - The compute storefront pulls every resource pool once for all listing types:
   `storefront-publication` ("Projection-backed listing candidate derivation").
-- A storefront never reads application settings from its environment: already in
-  `DEPLOYMENT_AND_CONFIG.md`; stated normatively in `deployment-state`; its mechanical check is
-  `check-storefront-environment-reads`'s.
+- A storefront's configuration reaches it through its configuration system; a value travels
+  outside it only when it controls which configuration is loaded or must be kept from the
+  loader, and a chart knows a value only where the deployment needs it for a stated reason.
+  This is configuration guidance, held by a compliance check, never a runtime refusal (03 F4):
+  `deployment-state`, with the explanation in `DEPLOYMENT_AND_CONFIG.md` beside its pod rule;
+  its check is `check-storefront-environment-reads`', which also owns the open question of how
+  storefront signing material is resolved.
 - A domain's tooling never writes another domain's artifact: `ARCHITECTURE.md`, as
   guidance no check enforces.
 - A storefront that cannot publish is not a supported deployment: `storefront-publication`.

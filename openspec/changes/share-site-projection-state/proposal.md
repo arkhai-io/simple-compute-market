@@ -42,16 +42,21 @@ buyer-chosen arbiter unchecked.
   projections, checks generation trust when it reads, runs as a timer-driven loop on the
   storefront's controller (held, stepped, and previewed), and holds a site whose projection is
   not held. The opening recheck reads the held projection. In both domains a listing-source
-  check confirms a listing only from a freshly confirmed generation, so a stale one refuses as
-  retryable while publication keeps holding through it. Override writes refresh the site's
+  check confirms a listing only when every projection family it reads was confirmed by a poll
+  within `[capacity].source_confirmation_seconds` (three poll intervals unless stated), so a
+  stale or expired one refuses as retryable while publication keeps holding through it. The
+  state runs one operation at a time on a site's family, so a failed refresh never overwrites
+  a newer confirmation. Override writes refresh the site's
   held projection and wake the loop; override status reads the held projection, and the
   durable accepted-generation table is frozen. The `publish` command becomes an API client.
 - **Startup refusal and loop status.** Both storefronts refuse to start when publishing is
   impossible for the whole storefront (no registry or authority pin, no enabled settlement
   mechanism, no site or a site without exactly one service peer); clauses and lease bounds stay
-  per-pool terms, a pool resolving none being held and reported. Both report each loop's state
+  per-pool terms, a pool resolving none being held and reported (in bare metal, also one with
+  no positive maximum lease duration). Both report each loop's state
   and publication's last cycle in system status; the loop controller serializes each loop's
-  timer cycle and step and records one sanitized outcome per cycle. Bare metal also reports its
+  timer cycle and step through one `run_cycle` boundary and records one sanitized outcome per
+  cycle. Bare metal also reports its
   per-site derivation summary.
 - **Bare-metal configuration on VM's conventions.** The bare-metal storefront reads
   `storefront.toml`, `storefront.json`, and `storefront.secrets.toml` under VM's key
@@ -77,12 +82,13 @@ buyer-chosen arbiter unchecked.
   bare-metal recheck, override writes, and override status read held projections; a site
   whose projection is not held holds its listings during a bare-metal cycle; loop state in
   system status; a storefront that cannot publish refuses to start; a listing-source check
-  confirms only from a freshly confirmed generation; site responses and callbacks share the
+  confirms only when every family it reads is confirmed within the source-confirmation window; site responses and callbacks share the
   durable rotating trust set; Alkahest listings advertise their release conditions.
 - `market-composition`: per-site projection state is kit-owned and per process; a loop
   records each cycle's outcome with the controller.
 - `deployment-state`: the bare-metal seller role is configured through mounted files; a
-  storefront reads no application settings from its environment.
+  storefront's configuration reaches it through its configuration system, and only
+  meta-configuration and the signing credential travel outside it.
 - `negotiation-protocol`: an Alkahest obligation uses exactly the release condition its listing
   authorizes, whatever seller policies run.
 
@@ -162,8 +168,9 @@ and `docs/development/ROADMAP.md` (Goal 4's gap row, Goal 7's current state).
   `openspec/specs/storefront-publication/spec.md` and its companion.
 - A storefront that cannot publish refuses to start; loop state is in system status —
   `openspec/specs/storefront-publication/spec.md`.
-- Bare-metal configuration follows the storefront file conventions; no storefront reads
-  application settings from its environment; site trust comes from each site's service peer
+- Bare-metal configuration follows the storefront file conventions; a storefront's
+  configuration reaches it through its configuration system, conformance being a compliance
+  check rather than a runtime refusal; site trust comes from each site's service peer
   — `openspec/specs/deployment-state/spec.md` and `DEPLOYMENT_AND_CONFIG.md`.
 - Alkahest release conditions are the mechanism's, and an unadvertised one is refused —
   `openspec/specs/storefront-publication/spec.md` and `openspec/specs/negotiation-protocol/spec.md`.

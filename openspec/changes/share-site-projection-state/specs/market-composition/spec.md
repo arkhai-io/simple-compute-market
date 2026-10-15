@@ -12,7 +12,9 @@ consumer; the kit MUST NOT keep that state at module level, and a domain MUST NO
 projection cache of its own. The poller MUST run as a loop registered with the storefront's
 loop controller, and its step MUST run exactly the poller's cycle. The state MUST be
 domain-neutral: it holds whatever generation a site serves, and a domain's acceptance rules
-for a generation apply when that domain reads it.
+for a generation apply when that domain reads it. It MUST run one operation at a time on a
+site's family, including its version check, so a caller arriving during an operation waits for
+it and a failed operation never replaces a confirmation that completed after it began.
 
 #### Scenario: Two consumers read one site
 
@@ -41,8 +43,11 @@ whether it completed, and, for a failure, the stage that failed and its error. E
 invocation MUST record exactly one terminal outcome, including one that raised, and a
 preview MUST record none. A recorded error MUST carry the exception's type and MUST carry its
 message only when the storefront's own configuration or publication error raised it, so no
-credential, secret, or private URL reaches status. The controller MUST run a loop's timer
-cycle and its step under one per-loop serialization, so they never run a cycle concurrently.
+credential, secret, or private URL reaches status. The controller MUST be the one place a loop's cycle runs: a loop
+registers its step and its interval, the controller's timer runs the step through the same
+operation an operator's step does, and that operation holds the loop's lock, so the timer and a
+step never run a cycle concurrently. A kit runtime that fans one loop out into independent
+per-site cycles MUST serialize each site's cycle and that site's step instead.
 The controller MUST report, in one snapshot, every loop's state and the last outcome each loop
 recorded, for a storefront's system status to read; a loop that has exited or been cancelled
 MUST remain distinguishable from a running loop whose last cycle failed.

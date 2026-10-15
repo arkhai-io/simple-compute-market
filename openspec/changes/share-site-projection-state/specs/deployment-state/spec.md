@@ -29,17 +29,27 @@ The bare-metal storefront MUST be buildable as a wheel from the repository `.dis
 
 ## ADDED Requirements
 
-### Requirement: A storefront reads no application settings from its environment
+### Requirement: A storefront's configuration reaches it through its configuration system
 
-A storefront MUST read its application settings only through its configuration loader,
-from its configuration files and the loader's documented override layer. Outside the
-loader it MUST read from its environment only the signing credential and the location of
-its configuration directory, and its chart MUST supply nothing else through pod
-environment entries.
+Every configuration value of a storefront MUST be supplied through its configuration system:
+its configuration files and its loader's documented override layer. A value MAY be supplied
+outside that system only when it controls which configuration is loaded — the configuration
+directory and the profiles to layer — or when it must be kept from the loader, as the signing
+credential is. A storefront's chart MUST know a configuration value only where the deployment
+itself needs it for a stated reason, such as the port its container, probes, and Service share,
+and MUST supply outside the configuration system only values of those two kinds. Conformance is
+a compliance check of the source and charts, not a runtime refusal: a storefront MUST NOT refuse
+to start because a value reached it through its environment, and the loader's override layer
+remains available to an operator.
 
-#### Scenario: A setting is supplied as an environment variable the storefront does not read
+#### Scenario: An operator overrides a setting on a development cluster
 
-- **WHEN** an operator sets a bare-metal publication setting under a retired
-  environment-variable name instead of in the storefront's configuration files
-- **THEN** the storefront does not read it, and refuses to start for the setting the
-  files lack
+- **WHEN** an operator injects a setting through the loader's environment override layer into a
+  running deployment and restarts it
+- **THEN** the storefront starts and applies the override
+
+#### Scenario: The chart renders a storefront's environment
+
+- **WHEN** the bare-metal chart is rendered
+- **THEN** its pod environment carries only the configuration directory and the signing
+  credential, and every other value is in a mounted configuration file
