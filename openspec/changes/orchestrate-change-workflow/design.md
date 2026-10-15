@@ -267,7 +267,11 @@ Rejected: outcomes only — "is it stuck?" can only be answered by waiting.
 Planning resumes the design step's session, after the design review and its triage,
 since `change-plan` is better written with the design's context; it reads the gate
 from the files as its entry check requires, and is a discussion step. When the
-design session has grown large, the orchestrator offers a fresh one. Closeout and
+design session has grown large, the orchestrator offers a fresh one. Planning has no
+`make` target today, since it has run in the design session by hand; it gains
+`make plan CHANGE=<change>`, opening `/change-plan <change>` interactively, so that
+like every step it has a target whose unattended form (D1) runs it, resuming the
+design step's session recorded in the log. Closeout and
 archive cleanup are delegated: closeout's points put to the owner become `question`
 outcomes, and a part that needs a code edit becomes `returned` to implementation.
 Archive cleanup drafts the pull request; the owner creates it.
