@@ -38,12 +38,17 @@ prerequisite; or stopped, with its reason and any tools it was denied. The wrapp
 MUST append each outcome, with the run's session and commit, to the change's
 workflow log, and MUST record a stopped outcome itself for a run that ends without
 one. Where the workflow log and the change's files disagree, the files MUST prevail.
-A stopped outcome's denials MUST be taken from the run's own record of denied tools.
+Every outcome's denials MUST be taken from the run's own record of denied tools,
+over every turn of the run, each with the harness's reason for it.
 A review run's outcome MUST name the review record that run published; a review run
 that published none MUST be recorded as stopped, and an earlier record MUST NOT count
 as its result.
 A question MUST be answered by resuming the same session with the owner's answer.
-A proposed return MUST NOT change the change's status until the owner confirms it.
+A proposed return MUST NOT change the change's status until the owner confirms it;
+the confirmation MUST be recorded in the workflow log as a decision naming the run
+it resolves and the step it directs, and the step so directed sets the status.
+A decision recorded in the workflow log MUST name the run it resolves, and MUST NOT
+resolve any other.
 An interactive run of a step MUST behave as it does without the wrapper.
 
 #### Scenario: Validation needs an environmental remedy
@@ -63,6 +68,20 @@ An interactive run of a step MUST behave as it does without the wrapper.
   design does not make
 - **THEN** it ends with a proposed return to design, and the change's status is
   unchanged until the owner confirms the return
+
+#### Scenario: The owner confirms a return
+
+- **WHEN** the owner confirms a proposed return to design
+- **THEN** the confirmation is recorded as a decision resolving that run and
+  directing the design step, the next-step computation names design until it has
+  run, and the design step sets the status
+
+#### Scenario: A decision about one run leaves another waiting
+
+- **WHEN** a validation run has asked a question and a review run beside it stopped,
+  and a decision resolves the review's stop
+- **THEN** the validation's question still waits, and is answered by resuming its
+  session
 
 ### Requirement: The next step is computed from the files
 
@@ -85,6 +104,21 @@ status; and MUST record what it decided in the workflow log.
 - **WHEN** a change's status disagrees with its workflow log
 - **THEN** the orchestrating session follows the files and records that it did
 
+#### Scenario: A fix follows a failed gate
+
+- **WHEN** a pre-closeout or closeout review's gate did not pass, and a commit after
+  the commit it reviewed changes more than changes' records
+- **THEN** the computation names the review of the same kind again, a pre-closeout
+  one once that commit has a passing validation; while no such commit exists, it
+  names the owner, whose decision may direct a repeat review
+
+#### Scenario: A round is recorded after the fact
+
+- **WHEN** a round's sections were implemented and its records written before the
+  round was recorded
+- **THEN** the round is recorded naming the last record before it, and the
+  computation reads the records above that number as the round's
+
 ### Requirement: Discussion steps stay conversations with the owner
 
 Design, planning, and triage MUST NOT run without the owner. When orchestrated, each
@@ -100,9 +134,18 @@ owner in the orchestrating session, with the owner's reply resuming that session
 ### Requirement: Unattended runs are held to their step's permissions
 
 An unattended run MUST be limited to the tools its step's permission table allows,
-and MUST NOT be granted a push other than validation's guarded push. A run denied a
-tool MUST end with a stopped outcome naming the denial, rather than asking a question
-or working around it. A
+and MUST NOT be granted a push other than validation's guarded push. Every denial a
+run records MUST be recorded on the run's outcome, from the run's own record and
+with the harness's reason. A run that cannot go on without a denied tool MUST end
+with a stopped outcome naming the denial, rather than asking a question or working
+around it; a run that goes on MUST do so only by calls its step's rules allow. The
+orchestrating session MUST read each recorded denial from the run's record, never
+from the step's message; classify it by the harness's reason as a gap in the table
+or a forbidden action; check the run's later calls for a workaround; propose, for
+a gap, the narrowest rule that matches the call and say whether it is a one-run
+grant or a tracked change; and record its reading in the workflow log as the
+decision resolving that run, before the next step runs. A denial by a deny rule
+MUST NOT be granted for one run. A
 change to a step's permissions MUST be made by the owner, as a tracked change, or
 granted by the owner for one resumed run. Interactive runs MUST NOT be restricted by
 the table.
@@ -112,6 +155,18 @@ the table.
 - **WHEN** an unattended validation run attempts `make lock`
 - **THEN** the call is denied, and the run ends stopped, its outcome naming the
   denial
+
+#### Scenario: A step is denied a command no rule names
+
+- **WHEN** an unattended run is denied a command because no allow rule names it
+- **THEN** the orchestrating session proposes the narrowest allow rule matching the
+  call, and the owner grants it for the resumed run or commits it to the table
+
+#### Scenario: A step is denied by a deny rule
+
+- **WHEN** an unattended run is denied a call that a deny rule names
+- **THEN** the denial stands, and the run's attempt is reported to the owner as a
+  finding
 
 ### Requirement: A design blocked on a prerequisite halts
 

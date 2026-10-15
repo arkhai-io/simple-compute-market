@@ -29,7 +29,7 @@ allow = [
   "Bash(git merge-base*)",
   "Bash(python3 scripts/find_change.py*)",
   "Bash(python3 scripts/run_change_step.py log*)",
-  "Bash(make round-view-closed)", "Bash(make check-change-index)",
+  "Bash(make round-view-closed*)", "Bash(make check-change-index)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
@@ -107,7 +107,7 @@ allow = [
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
 ]
-deny = ["Edit", "Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
+deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
         "Bash(docker push*)", "Bash(helm push*)"]
 
 # Closeout changes documentation only; a part that needs code returns the change

@@ -125,10 +125,11 @@ class Fake:
         return [" ".join(command) for command in self.commands]
 
 
-def _validation(tmp_path: Path, fake: Fake, part: str) -> object:
+def _validation(tmp_path: Path, fake: Fake, part: str,
+                echo: object = lambda line: None) -> object:
     clock = iter(float(n) for n in range(1000))
     return validator.Validation(part, root=tmp_path, runner=fake.run, read=fake.read,
-                                clock=lambda: next(clock))
+                                clock=lambda: next(clock), echo=echo)
 
 
 def _storefront_env(tmp_path: Path) -> None:
@@ -161,6 +162,29 @@ def test_local_runs_packaging_then_tests_and_writes_a_summary(tmp_path: Path) ->
     written = json.loads((log_dir / "summary.json").read_text("utf-8"))
     assert written["commit"] == COMMIT and written["passed"] is True
     assert (log_dir / "test.log").read_text("utf-8") == "test output\n"
+
+
+def test_a_part_says_when_each_step_starts_and_ends(tmp_path: Path) -> None:
+    fake = Fake(fail=["test"])
+    said: list[str] = []
+
+    validator.validate_local(_validation(tmp_path, fake, "local", echo=said.append))
+
+    logs = f".snapshot/validation/{COMMIT[:12]}/local/1"
+    assert said == [
+        f"dist-clean: running (make dist-clean; log {logs}/dist-clean.log)",
+        "dist-clean: passed in 1.0s",
+        f"check-packaging: running (make check-packaging; log {logs}/check-packaging.log)",
+        "check-packaging: passed in 1.0s",
+        f"test: running (make test; log {logs}/test.log)",
+        "test: failed in 1.0s",
+    ]
+
+
+def test_a_step_line_is_printed_flushed(capsys: pytest.CaptureFixture[str]) -> None:
+    validator._say("test: running")
+
+    assert capsys.readouterr().out == "test: running\n"
 
 
 def test_local_stops_at_the_first_failure_with_its_output_tail(tmp_path: Path) -> None:

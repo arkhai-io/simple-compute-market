@@ -75,7 +75,10 @@ def _reviews(root: Path) -> Path:
     return step.change_directory(root, CHANGE) / "reviews"
 
 
-def _record(root: Path, name: str, *, triage: str | None = None, text: str = "x") -> None:
+def _record(root: Path, name: str, *, triage: str | None = None, text: str = "x",
+            reviewed: str | None = None) -> None:
+    if reviewed is not None:
+        text = f"{text}\n<!-- reviewed-commit: {reviewed} -->\n"
     (_reviews(root) / name).write_text(text, "utf-8")
     if triage is not None:
         (_reviews(root) / name.replace(".md", ".triage.md")).write_text(
@@ -86,18 +89,27 @@ def _validation(commit: str = HEAD, result: str = "passed") -> str:
     return f"# Validation\n\n- **Commit:** {commit} on feat/x\n- **Result:** {result}\n"
 
 
-def _log(root: Path, step_name: str, outcome: dict, **extra) -> None:
-    step.record_outcome(step.log_path(root, CHANGE), step_name, outcome, session="s",
-                        commit=HEAD, extra=extra or None)
+def _log(root: Path, step_name: str, outcome: dict, **extra) -> dict:
+    return step.record_outcome(step.log_path(root, CHANGE), step_name, outcome, session="s",
+                               commit=HEAD, extra=extra or None)
 
 
-def _round(root: Path, sections) -> None:
-    step.note_round(step.log_path(root, CHANGE), sections, "owner")
+def _decide(root: Path, decision: str = "decided", **fields) -> dict:
+    return step.note_orchestrator(step.log_path(root, CHANGE), decision, "a reason", **fields)
 
 
-def _next(root: Path, *, uncommitted: bool = False) -> dict:
+def _round(root: Path, sections, after: int | None = None) -> None:
+    step.note_round(step.log_path(root, CHANGE), sections, "owner", after)
+
+
+# What HEAD changed since a reviewed commit: a fix in code, unless a test says otherwise.
+FIX = ["scripts/change_next_step.py"]
+RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
+
+
+def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX) -> dict:
     return nxt.compute(root, CHANGE, head=lambda _: HEAD, view=lambda _: None,
-                       uncommitted=lambda *_: uncommitted)
+                       uncommitted=lambda *_: uncommitted, changed_since=lambda *_: changed)
 
 
 def _check(root: Path, tasks: str) -> None:
@@ -283,17 +295,70 @@ def test_an_untriaged_pre_closeout_review_is_triaged(tmp_path: Path) -> None:
     assert _next(root)["step"] == "triage"
 
 
-def test_a_pre_closeout_gate_not_passed_waits_for_the_owner(tmp_path: Path) -> None:
+def _failed_pre_closeout(tmp_path: Path, *, reviewed: str, validated: str = HEAD) -> Path:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2, 3]])
     _check(root, ALL_WORK_DONE)
-    _record(root, "01-validation.md", text=_validation(), triage="Not a gate.")
+    _record(root, "01-validation.md", text=_validation(validated), triage="Not a gate.")
     _record(root, "02-implementation.md", triage="Passed.")
-    _record(root, "03-pre-closeout.md", triage="Not passed: F2 first.")
+    _record(root, "03-pre-closeout.md", triage="Not passed: F2 first.", reviewed=reviewed)
+    return root
+
+
+def test_a_pre_closeout_gate_not_passed_waits_for_the_owner(tmp_path: Path) -> None:
+    root = _failed_pre_closeout(tmp_path, reviewed=HEAD)
 
     result = _next(root)
 
     assert result["step"] == "owner" and "03-pre-closeout.md" in result["reason"]
+
+
+# A failed gate is answered by a fix: once HEAD moved past the reviewed commit in
+# more than changes' records, the review of the same kind runs again.
+
+def test_a_fix_after_a_failed_pre_closeout_gate_is_validated_then_reviewed_again(
+        tmp_path: Path) -> None:
+    root = _failed_pre_closeout(tmp_path, reviewed="e" * 40, validated="e" * 40)
+
+    unvalidated = _next(root)
+    _record(root, "04-validation.md", text=_validation(HEAD), triage="Not a gate.")
+    validated = _next(root)
+
+    assert unvalidated["step"] == "validate" and "not HEAD" in unvalidated["reason"]
+    assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
+    assert "03-pre-closeout.md" in validated["reason"]
+
+
+def test_a_records_only_change_after_a_failed_gate_is_not_a_fix(tmp_path: Path) -> None:
+    root = _failed_pre_closeout(tmp_path, reviewed="e" * 40)
+
+    assert _next(root, changed=RECORDS_ONLY)["step"] == "owner"
+
+
+def test_a_fix_after_a_failed_closeout_gate_is_reviewed_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _record(root, "05-closeout.md", triage="Not passed.", reviewed="e" * 40)
+
+    fixed = _next(root)
+    unchanged = _next(root, changed=RECORDS_ONLY)
+
+    assert (fixed["step"], fixed["kind"]) == ("review", "closeout")
+    assert unchanged["step"] == "owner"
+
+
+def test_the_owner_may_direct_a_repeat_review_with_no_fix(tmp_path: Path) -> None:
+    root = _failed_pre_closeout(tmp_path, reviewed=HEAD)
+    _decide(root, "review again", by="owner", next_step="review", kind="pre-closeout")
+
+    directed = _next(root)
+    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                        commit=HEAD, extra={"kind": "pre-closeout", "record": "04-pre-closeout.md"})
+    _record(root, "04-pre-closeout.md", reviewed=HEAD)
+    after = _next(root)
+
+    assert (directed["step"], directed["kind"]) == ("review", "pre-closeout")
+    assert "review again" in directed["reason"]
+    assert after["step"] == "triage"
 
 
 # Closeout.
@@ -533,22 +598,100 @@ def test_a_validation_question_waits_beside_a_finished_review(tmp_path: Path) ->
         "owner", "validate", "environmental remedy")
 
 
-def test_a_stopped_run_waits_until_the_orchestrator_records_its_decision(
-        tmp_path: Path) -> None:
+def test_a_stopped_run_waits_until_a_decision_resolves_it(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _implemented_round(root)
     _record(root, "02-implementation-owner.md")
     _record(root, "03-validation.md", text=_validation())
-    step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
-                        commit=HEAD, extra={"kind": "implementation"})
+    run = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
+                              commit=HEAD, extra={"kind": "implementation"})
 
     stopped = _next(root)
-    step.note_orchestrator(step.log_path(root, CHANGE), "rerun the review",
-                           "codex authentication renewed")
+    _decide(root, "rerun the review")
+    undecided = _next(root)
+    _decide(root, "rerun the review", resolves=run["seq"])
     decided = _next(root)
 
     assert (stopped["step"], stopped["denials"]) == ("owner", [{"tool_name": "Bash"}])
+    assert undecided["step"] == "owner"
     assert (decided["step"], decided["kind"]) == ("review", "implementation")
+
+
+def test_a_decision_about_one_run_leaves_another_steps_question_waiting(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _implemented_round(root)
+    _record(root, "02-implementation-owner.md")
+    _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy"})
+    review = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
+                                 commit=HEAD, extra={"kind": "implementation"})
+    _decide(root, "rerun the review", resolves=review["seq"])
+
+    result = _next(root)
+
+    assert (result["step"], result["resume"], result["awaiting"]) == (
+        "owner", "validate", "environmental remedy")
+
+
+def test_a_run_that_went_on_past_a_denial_waits_for_its_reading(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    run = _log(root, "implement", {**FINISHED, "denials": [{"tool_name": "Bash"}]},
+               sections=[2])
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", resolves=run["seq"])
+    read = _next(root)
+
+    assert unread["step"] == "owner" and "denied 1 tool call" in unread["reason"]
+    assert unread["denials"] == [{"tool_name": "Bash"}]
+    assert read["step"] == "implement"
+
+
+def test_a_confirmed_return_routes_to_the_step_returned_to(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    run = _log(root, "implement", {"outcome": "returned", "message": "Needs a decision.",
+                                   "return_to": "design", "evidence": "the notes"},
+               sections=[2])
+
+    unconfirmed = _next(root)
+    _decide(root, "return to design confirmed", by="owner", resolves=run["seq"],
+            next_step="design")
+    confirmed = _next(root)
+
+    assert (unconfirmed["step"], unconfirmed["return_to"]) == ("owner", "design")
+    assert confirmed["step"] == "design" and "confirmed" in confirmed["reason"]
+
+
+def test_a_directed_step_that_has_run_is_no_longer_directed(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    run = _log(root, "implement", {"outcome": "returned", "message": "Needs a decision.",
+                                   "return_to": "design", "evidence": "the notes"})
+    _decide(root, "return to design confirmed", by="owner", resolves=run["seq"],
+            next_step="design")
+    _log(root, "design", FINISHED)
+
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "design")
+
+
+def test_a_round_recorded_after_the_fact_owns_the_records_above_its_after(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, f"01-{KIND}.md", triage="Passed.")
+    _record(root, "02-implementation-owner.md")
+    _record(root, "03-validation.md", text=_validation())
+    _record(root, "04-implementation.md")
+
+    unrecorded = _next(root)
+    _round(root, [[2]], after=1)
+    recorded = _next(root)
+
+    assert (unrecorded["step"], unrecorded["round"]) == ("owner", ["3"])
+    assert recorded == {"step": "triage",
+                        "reason": "02-implementation-owner.md, 03-validation.md, "
+                                  "04-implementation.md have no triage"}
 
 
 def test_a_blocked_step_other_than_design_waits_for_the_owner(tmp_path: Path) -> None:
@@ -567,6 +710,24 @@ def test_a_design_reviews_stopped_run_does_not_hold_implementation(tmp_path: Pat
     _round(root, [[2]])
 
     assert _next(root)["step"] == "implement"
+
+
+def test_a_design_triages_stopped_run_does_not_hold_implementation(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                        commit=HEAD, extra={"kind": "design"})
+    _log(root, "triage", STOPPED)
+    _round(root, [[2]])
+
+    assert _next(root)["step"] == "implement"
+
+
+def test_a_triage_with_no_review_before_it_holds_any_phase(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _log(root, "triage", STOPPED)
+    _round(root, [[2]])
+
+    assert _next(root)["step"] == "owner"
 
 
 def test_a_return_the_owner_confirmed_no_longer_waits(tmp_path: Path) -> None:

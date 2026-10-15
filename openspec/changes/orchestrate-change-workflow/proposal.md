@@ -115,7 +115,9 @@ reports when run unattended; `change-plan`'s and `change-implement`'s section
 sizing; `change-design`'s prerequisite path), the workflow `make` targets and a new
 `make orchestrate`, new scripts (`scripts/run_change_step.py`, absorbing
 `scripts/run_change_review.py`; `scripts/change_next_step.py`;
-`scripts/change_outcome.schema.json`; `scripts/change_steps.toml`) with their tests,
+`scripts/check_comment_hygiene.py`, a port of the Makefile's check) with their
+tests, the outcome schema (`.agents/change-outcome.schema.json`) and the step
+permission table (`.claude/change-steps.toml`),
 the `change-workflow` specification and architecture companion,
 `docs/agents/change-workflow.md`, and `AGENTS.md`. No service code changes, beyond
 the pilot change's own.

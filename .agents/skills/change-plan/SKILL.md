@@ -24,17 +24,21 @@ Run interactively, as most runs are, this section does not apply, and nothing el
 in the skill changes. When this skill runs through `scripts/run_change_step.py` —
 `make plan UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
-`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+`.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
 
 - **A stop for the owner is a question.** Wherever this skill says to stop and
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
-  `reason` naming the call and why the step needed it, and `denials` listing the
-  calls as you saw them; the wrapper replaces them with the run's own record. Never
-  work around a denial, with another tool or otherwise, and never ask about it as a
-  question.
+- **A denied tool stops the step.** Run one command per Bash call: a chained
+  command runs only when every command in it is allowed, so if a chained command
+  is denied, run its commands one call at a time. If a single command or any other
+  tool call is denied, finish every part of the work that does not depend on it,
+  then end with `stopped`, `reason` naming that exact call and why the step needed
+  it, and `denials` listing the calls as you saw them; the wrapper replaces them
+  with the run's own record. One denied call is not a denied tool: never report
+  the tool as not allowed. Never do by another tool what a denied call would have
+  done, and never ask about a denial as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -98,8 +102,10 @@ If planning exposes a question the design did not answer, it is a design decisio
 and no review has seen it. Planning stops: never settle it inside a task, and never
 plan on an answer the design review did not cover.
 
-1. Tell the owner what planning found and why it stopped, and set the change's
-   status back to `in design`.
+1. Tell the owner what planning found and why it stopped. Interactively, set the
+   change's status back to `in design` and go on with steps 2–4 in this session.
+   Unattended, end the turn `returned` instead, as "Running unattended" says, and
+   leave the status: the owner confirms the return, and the design step sets it.
 2. Settle the question as `change-design` settles a decision, and record it in
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether

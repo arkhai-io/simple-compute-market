@@ -40,12 +40,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from round_view import RoundError, View, open_view  # noqa: E402
-from run_change_step import (ORCHESTRATOR, StepError, log_path, read_log,  # noqa: E402
+from run_change_step import (ORCHESTRATOR, ChangedSince, StepError,  # noqa: E402
+                             _changed_since, _RECORD as _RECORD_PATH, log_path, read_log,
                              validation_problem)
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("design", "planning", "implementation", "closeout")
 _RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
+_REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
 _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
@@ -97,6 +99,13 @@ class Record:
         """The kind of review this record is, `-external` copies included."""
         kind = self.kind.removesuffix("-external")
         return kind if kind in _REVIEW_PHASE else None
+
+    @property
+    def reviewed_commit(self) -> str | None:
+        """The commit a review record says it reviewed: the last marker, since a
+        review may quote an earlier record's."""
+        commits = _REVIEWED_COMMIT.findall(self.path.read_text("utf-8"))
+        return commits[-1] if commits else None
 
 
 @dataclass(frozen=True)
@@ -197,6 +206,17 @@ def _step_lines(log: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     return [entry for entry in log if entry.get("step") != ORCHESTRATOR]
 
 
+def _triage_phase(before: Sequence[dict[str, Any]]) -> str | None:
+    """The phase a triage run belongs to: that of the review or validation it
+    followed, the nearest one logged before it; None with none logged."""
+    for entry in reversed(before):
+        if entry.get("step") == "review":
+            return _REVIEW_PHASE.get(entry.get("kind", ""))
+        if entry.get("step") == "validate":
+            return "implementation"
+    return None
+
+
 def _owner(reason: str, **extra: Any) -> Result:
     return {"step": "owner", "reason": reason, **extra}
 
@@ -216,6 +236,12 @@ def _waiting(entry: dict[str, Any]) -> Result | None:
     if outcome == "stopped":
         return _owner(f"the {step} step stopped: {entry.get('reason', '')}",
                       denials=entry.get("denials", []))
+    if denials := entry.get("denials"):
+        # The run went on past a denial: the orchestrating session reads each
+        # denial against the step's rules before the change moves on.
+        return _owner(f"the {step} step ended {outcome} but was denied {len(denials)} tool "
+                      "call(s): read them against its rules and record the reading",
+                      denials=denials)
     return None
 
 
@@ -223,12 +249,14 @@ class Computation:
     def __init__(self, root: Path, change: str, *,
                  head: Callable[[Path], str | None] = _git_head,
                  view: Callable[[Path], View | None] = _open_view,
-                 uncommitted: Callable[[Path, Path], bool] | None = None) -> None:
+                 uncommitted: Callable[[Path, Path], bool] | None = None,
+                 changed_since: ChangedSince = _changed_since) -> None:
         self.root = root
         self.state = State(change)
         self._head = head
         self._view = view
         self._uncommitted = uncommitted or _uncommitted
+        self._changed_since = changed_since
 
     def run(self) -> Result:
         state = self.state
@@ -280,6 +308,8 @@ class Computation:
             return waiting
         if waiting := self.pending(phase):
             return waiting
+        if directed := self.directed():
+            return directed
         return getattr(self, f"_{phase}")(status)
 
     def dependencies(self, phase: str) -> Result | None:
@@ -392,12 +422,16 @@ class Computation:
         if untriaged := self.untriaged(kinds=("pre-closeout",)):
             return {"step": "triage", "reason": f"{untriaged} has no triage"}
         reviews = [r for r in self.state.records if r.review_kind == "pre-closeout"]
-        if reviews and reviews[-1].gate_passed() is False:
-            return _owner(f"{reviews[-1].path.name}'s gate has not passed: decide what "
+        failed = reviews[-1] if reviews and reviews[-1].gate_passed() is False else None
+        if failed and not self.fixed_since(failed):
+            return _owner(f"{failed.path.name}'s gate has not passed: decide what "
                           "happens before the next pre-closeout review")
         if problem := self.validation_problem():
             return {"step": "validate", "reason": f"a pre-closeout review needs a passing "
                                                   f"validation of HEAD: {problem}"}
+        if failed:
+            return {"step": "review", "kind": "pre-closeout",
+                    "reason": f"the fix after {failed.path.name}'s failed gate is validated"}
         return {"step": "review", "kind": "pre-closeout",
                 "reason": "every section before closeout is checked and validated"}
 
@@ -417,6 +451,9 @@ class Computation:
         if reviews[-1].gate_passed():
             return {
                 "step": "archive-cleanup", "reason": "the closeout gate has passed"}
+        if self.fixed_since(reviews[-1]):
+            return {"step": "review", "kind": "closeout",
+                    "reason": f"a fix landed after {reviews[-1].path.name}'s failed gate"}
         return _owner(f"{reviews[-1].path.name}'s gate has not passed")
 
     # Shared readings.
@@ -428,26 +465,66 @@ class Computation:
     def pending(self, phase: str) -> Result | None:
         """A step of `phase` whose latest run waits on the owner, if one does.
 
-        A question is answered by resuming its session, and a returned, blocked, or
-        stopped run is decided by the owner or the orchestrating session; none is
-        routed past by running the step afresh. An `orchestrator` line records such
-        a decision, so only runs after the latest one are read. A design that ended
-        blocked on a prerequisite is the prerequisite rules', not this one's.
+        A question is answered by resuming its session; a returned, blocked, or
+        stopped run, or one that went on past a denial, is decided by the owner or
+        the orchestrating session; none is routed past by running the step afresh.
+        An `orchestrator` line records such a decision and names the run it
+        resolves, and only that run stops waiting: a decision about one step's run
+        says nothing about another's. A design that ended blocked on a prerequisite
+        is the prerequisite rules', not this one's.
         """
         log = self.state.log
-        decided = max((e["seq"] for e in log if e.get("outcome") == ORCHESTRATOR),
-                      default=0)
+        resolved = {e.get("resolves") for e in log if e.get("outcome") == ORCHESTRATOR}
         latest: dict[str, dict[str, Any]] = {}
-        for entry in log:
+        for index, entry in enumerate(log):
             name = entry.get("step")
-            if (entry["seq"] > decided and name in _PHASE_STEPS[phase]
-                    and (name != "review"
-                         or _REVIEW_PHASE.get(entry.get("kind", "")) == phase)):
-                latest[name] = entry
+            if name not in _PHASE_STEPS[phase]:
+                continue
+            if name == "review" and _REVIEW_PHASE.get(entry.get("kind", "")) != phase:
+                continue
+            if name == "triage" and _triage_phase(log[:index]) not in (phase, None):
+                continue
+            latest[name] = entry
         waiting = [entry for entry in latest.values()
-                   if not (entry.get("step") == "design" and entry.get("outcome") == "blocked")
+                   if entry["seq"] not in resolved
+                   and not (entry.get("step") == "design" and entry.get("outcome") == "blocked")
                    and _waiting(entry)]
         return _waiting(max(waiting, key=lambda e: e["seq"])) if waiting else None
+
+    def directed(self) -> Result | None:
+        """The step the latest decision directs, until that step has run.
+
+        An `orchestrator` line with `next` is the owner's word on a step: a
+        confirmed return names the phase's step, which sets the status when it
+        runs; a review asked for again names `review` and its kind.
+        """
+        log = self.state.log
+        decision = next((e for e in reversed(log)
+                         if e.get("outcome") == ORCHESTRATOR and e.get("next")), None)
+        if decision is None:
+            return None
+        step, kind = decision["next"], decision.get("kind")
+        if any(e["seq"] > decision["seq"] and e.get("step") == step
+               and (step != "review" or kind is None or e.get("kind") == kind)
+               for e in log):
+            return None
+        result = {"step": step, "reason": f"directed by the decision at seq {decision['seq']}: "
+                                          f"{decision.get('decision', '')}"}
+        if kind:
+            result["kind"] = kind
+        return result
+
+    def fixed_since(self, review: Record) -> bool:
+        """Whether `HEAD` changed more than changes' records since `review` was
+        written: a fix the owner accepted at its triage has landed."""
+        reviewed, head = review.reviewed_commit, self.state.head
+        if reviewed is None or head is None or head.startswith(reviewed):
+            return False
+        changed = self._changed_since(self.root, reviewed, head)
+        if changed is None:
+            # Not an ancestor: HEAD is not the reviewed commit, however it moved.
+            return True
+        return any(not _RECORD_PATH.match(path) for path in changed)
 
     def untriaged(self, kinds: Sequence[str]) -> str | None:
         for record in reversed(self.state.records):

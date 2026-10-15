@@ -6,6 +6,7 @@ import fnmatch
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -220,6 +221,51 @@ def test_an_orchestrator_line_without_its_decision_or_reason_is_refused(
         step.note_orchestrator(_log(tmp_path), decision, reason)
 
 
+def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
+        tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    run = step.record_outcome(log, "implement", VALID["returned"], session="s", commit=COMMIT)
+
+    line = step.note_orchestrator(log, "return to design confirmed", "the owner's word",
+                                  by="owner", resolves=run["seq"], next_step="design",
+                                  clock=_clock)
+    review = step.note_orchestrator(log, "review again", "the owner asked", by="owner",
+                                    next_step="review", kind="pre-closeout", clock=_clock)
+
+    assert line == {"seq": 2, "at": "2026-10-21T09:15:40Z", "step": "orchestrator",
+                    "outcome": "orchestrator", "by": "owner",
+                    "decision": "return to design confirmed", "reason": "the owner's word",
+                    "resolves": 1, "next": "design"}
+    assert (review["next"], review["kind"]) == ("review", "pre-closeout")
+    assert step.note_orchestrator(log, "d", "r")["by"] == "orchestrator"
+
+
+@pytest.mark.parametrize("fields,problem", [
+    ({"resolves": 9}, "no run has seq 9"),
+    ({"next_step": "deploy"}, "unknown step 'deploy'"),
+    ({"kind": "design"}, "a kind goes with next = review"),
+    ({"next_step": "review", "kind": "triage"}, "unknown review kind 'triage'"),
+    ({"by": ""}, "names who decided"),
+])
+def test_a_decision_naming_what_the_log_lacks_is_refused(tmp_path: Path, fields: dict,
+                                                         problem: str) -> None:
+    log = _log(tmp_path)
+    step.note_orchestrator(log, "an earlier decision", "r", clock=_clock)
+
+    with pytest.raises(step.StepError, match=problem):
+        step.note_orchestrator(log, "d", "r", **fields)
+
+    assert len(step.read_log(log)) == 1
+
+
+def test_a_decision_resolves_only_a_steps_run(tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    note = step.note_orchestrator(log, "an earlier decision", "r", clock=_clock)
+
+    with pytest.raises(step.StepError, match="a decision resolves a step's run"):
+        step.note_orchestrator(log, "d", "r", resolves=note["seq"])
+
+
 def test_an_outcome_may_not_set_what_the_wrapper_records(tmp_path: Path) -> None:
     with pytest.raises(step.StepError, match="does not conform"):
         step.record_outcome(_log(tmp_path), "plan", {**VALID["finished"], "commit": "x"},
@@ -234,15 +280,20 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     log = _log(tmp_path)
 
-    assert step.main(["note", CHANGE, "round", "--sections", "1;2,3"], root=tmp_path) == 0
-    assert step.main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r"],
+    assert step.main(["note", CHANGE, "round", "--sections", "1;2,3", "--after", "4"],
+                     root=tmp_path) == 0
+    assert step.main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
+                      "--by", "owner", "--next", "review", "--kind", "closeout"],
                      root=tmp_path) == 0
     capsys.readouterr()
     assert step.main(["log", CHANGE, "--last", "1"], root=tmp_path) == 0
 
     printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert [entry["outcome"] for entry in step.read_log(log)] == ["round", "orchestrator"]
-    assert step.read_log(log)[0]["sections"] == [[1], [2, 3]]
+    entries = step.read_log(log)
+    assert [entry["outcome"] for entry in entries] == ["round", "orchestrator"]
+    assert (entries[0]["sections"], entries[0]["after"]) == ([[1], [2, 3]], 4)
+    assert (entries[1]["by"], entries[1]["next"], entries[1]["kind"]) == (
+        "owner", "review", "closeout")
     assert [entry["seq"] for entry in printed] == [2]
 
 
@@ -367,6 +418,28 @@ def _allows(rules, command: str) -> bool:
     return matches(rules.allow) and not matches(rules.deny)
 
 
+def _allows_chain(rules, command: str) -> bool:
+    """A chained command runs only when every command in it is allowed."""
+    parts = [part.strip() for part in re.split(r"\s*(?:;|&&|\|\||\|)\s*", command)]
+    return all(_allows(rules, part) for part in parts if part)
+
+
+def _allows_edit(rules, tool: str, path: str) -> bool:
+    """Whether editing `path` with `tool` matches an allow rule and no deny rule.
+
+    An `Edit` rule, bare or with a pattern, applies to every tool that edits a
+    file, `Write` among them, as the harness's rules do; a `Write` rule to Write
+    alone.
+    """
+    def matches(rule_list) -> bool:
+        for rule in rule_list:
+            name, _, rest = rule.partition("(")
+            if name in ("Edit", tool) and fnmatch.fnmatchcase(path, rest[:-1] if rest else "*"):
+                return True
+        return False
+    return matches(rules.allow) and not matches(rules.deny)
+
+
 PUSHES = ["git push origin HEAD", "make push-branch", "uv run git push",
           "uv run bash -c 'git push'", "make run-e2e", "docker push registry/image",
           "helm push chart.tgz oci://registry"]
@@ -383,8 +456,34 @@ def test_no_step_may_push_except_validations_guarded_push() -> None:
 def test_every_step_may_check_that_no_round_view_is_open() -> None:
     for name, rules in step.load_steps().items():
         assert _allows(rules, "make round-view-closed"), name
+        assert _allows(rules, "make round-view-closed CHANGE=x"), name
         assert not _allows(rules, "make round-view CHANGE=x"), name
         assert not _allows(rules, "make round-done"), name
+
+
+READ_ONLY = ["ls -la .agents", "cat AGENTS.md", "head -5 x.log", "tail -n 20 x.log",
+             "wc -l x.log", "grep -n seq workflow.jsonl", "echo rc=$?", "diff a b",
+             "find . -name '*.md'"]
+WRITING_FINDS = ["find . -name '*.pyc' -delete", "find . -name x -exec rm {} \\;",
+                 "find . -execdir rm {} \\;", "find . -ok rm {} \\;", "find . -fprint out",
+                 "find . -fprintf out %p", "find . -fls out"]
+
+
+def test_every_step_may_run_the_read_only_utilities_but_not_a_find_that_writes() -> None:
+    for name, rules in step.load_steps().items():
+        assert all(_allows(rules, command) for command in READ_ONLY), name
+        assert not any(_allows(rules, command) for command in WRITING_FINDS), name
+
+
+def test_validation_may_run_its_skills_commands_one_per_call_or_chained() -> None:
+    rules = step.load_steps()["validate"]
+    chained = ("make round-view-closed; echo rc=$?; git status --porcelain "
+               "--untracked-files=all; git rev-parse HEAD; git branch --show-current; "
+               f"python3 scripts/find_change.py {CHANGE}; gh auth status 2>&1 | head -5")
+
+    assert _allows_chain(rules, chained)
+    assert _allows(rules, "gh run view 38723279321 --json headSha,conclusion,jobs")
+    assert not _allows_chain(rules, "git status; make lock")
 
 
 def test_a_step_row_without_a_skill_is_refused(tmp_path: Path) -> None:
@@ -398,7 +497,21 @@ def test_a_step_row_without_a_skill_is_refused(tmp_path: Path) -> None:
 def test_validation_may_not_relock_or_commit() -> None:
     rules = step.load_steps()["validate"]
 
-    assert {"Bash(make lock*)", "Bash(git commit*)", "Edit"} <= set(rules.deny)
+    assert {"Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)"} <= set(rules.deny)
+
+
+def test_validation_may_write_only_its_own_record() -> None:
+    """A bare `Edit` deny would also deny the record's `Write`, since edit rules
+    apply to every editing tool; the row relies on no allow rule naming anything
+    else instead."""
+    rules = step.load_steps()["validate"]
+    record = "openspec/changes/shape-bounds/reviews/07-validation.md"
+
+    assert _allows_edit(rules, "Write", record)
+    assert not _allows_edit(rules, "Edit", record)
+    assert not _allows_edit(rules, "Write", "scripts/run_change_step.py")
+    assert not _allows_edit(rules, "Edit", "scripts/run_change_step.py")
+    assert "Edit" not in rules.deny
 
 
 def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
@@ -425,9 +538,8 @@ def test_each_outcome_is_logged_with_its_session_and_commit(tmp_path: Path, kind
 
     line = _wrapper(tmp_path, claude).run("triage", CHANGE)
 
-    expected = dict(VALID[kind])
-    if kind == "stopped":
-        expected["denials"] = []
+    # Every line carries the run's own record of denials, the step's replaced.
+    expected = {**VALID[kind], "denials": []}
     assert {key: line[key] for key in expected} == expected
     assert (line["step"], line["session"], line["commit"], line["exit_status"]) == (
         "triage", SESSION, COMMIT, 0)
@@ -697,8 +809,9 @@ def test_only_implementation_takes_sections(tmp_path: Path) -> None:
 
 def test_no_step_may_edit_its_own_permissions() -> None:
     for name, rules in step.load_steps().items():
-        assert {"Edit(scripts/change_steps.toml)", "Write(scripts/change_steps.toml)",
-                "Edit(.claude/**)", "Write(.claude/**)"} <= set(rules.deny), name
+        assert {"Edit(.claude/**)", "Write(.claude/**)"} <= set(rules.deny), name
+        assert not _allows_edit(rules, "Edit", step.STEP_TABLE.relative_to(step.ROOT).as_posix()), name
+        assert not _allows_edit(rules, "Write", ".claude/settings.json"), name
 
 
 @pytest.mark.parametrize("table,problem", [
@@ -730,15 +843,90 @@ def test_planning_after_a_design_run_without_a_session_is_refused(tmp_path: Path
 
 
 @pytest.mark.parametrize("kind", ["finished", "question"])
-def test_a_run_denied_a_tool_ends_stopped_whatever_it_answered(tmp_path: Path, kind: str) -> None:
+def test_a_run_that_went_on_past_a_denial_is_logged_as_it_ended_with_the_denial(
+        tmp_path: Path, kind: str) -> None:
     recorded = [{"tool_name": "Bash", "tool_input": {"command": "cat x"}}]
     claude = FakeClaude((_event_lines(VALID[kind], denials=recorded), 0))
 
     line = _wrapper(tmp_path, claude).run("design", CHANGE)
 
     assert (line["outcome"], line["message"], line["denials"]) == (
-        "stopped", VALID[kind]["message"], recorded)
-    assert line["reason"] == f"the run was denied 1 tool call(s) but ended {kind}"
+        kind, VALID[kind]["message"], recorded)
+
+
+# The run id is a fixture value, not a pipeline run.
+DENIED = {"tool_name": "Bash", "tool_use_id": "t1",
+          "tool_input": {"command": "gh run view 123456 --json headSha"}}
+
+
+def _two_turn_lines(first: dict, second: dict) -> list[str]:
+    """A run denied a call in its first turn, woken for a second by a background
+    task finishing: two result events, only the first listing the denial."""
+    def assistant(id_: str, name: str, given: dict) -> dict:
+        return {"type": "assistant", "session_id": SESSION,
+                "message": {"content": [{"type": "tool_use", "id": id_, "name": name,
+                                         "input": given}]}}
+
+    def result(outcome: dict, denials: list) -> dict:
+        return {"type": "result", "subtype": "success", "is_error": False,
+                "session_id": SESSION, "permission_denials": denials, "result": "done",
+                "structured_output": outcome}
+
+    events = [
+        {"type": "system", "subtype": "init", "session_id": SESSION},
+        assistant("t1", "Bash", DENIED["tool_input"]),
+        {"type": "system", "subtype": "permission_denied", "session_id": SESSION,
+         "tool_use_id": "t1", "decision_reason_type": "mode"},
+        result(first, [DENIED]),
+        {"type": "system", "subtype": "task_notification", "session_id": SESSION},
+        assistant("t2", "Bash", {"command": "tail -n 20 local/1/test.log"}),
+        result(second, []),
+    ]
+    return [json.dumps(event) + "\n" for event in events]
+
+
+def test_denials_are_gathered_over_every_turn_with_the_harness_reason(tmp_path: Path) -> None:
+    claude = FakeClaude((_two_turn_lines(VALID["stopped"], VALID["finished"]), 0))
+
+    line = _wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert line["outcome"] == "finished"
+    assert line["denials"] == [{**DENIED, "reason": "mode"}]
+
+
+def test_a_runs_denials_are_listed_with_the_calls_after_each(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    claude = FakeClaude((_two_turn_lines(VALID["stopped"], VALID["finished"]), 0))
+    _wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert step.main(["denials", CHANGE, "1"], root=tmp_path) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "denied: Bash gh run view 123456 --json headSha (mode)",
+        "  calls after it:",
+        "    Bash tail -n 20 local/1/test.log",
+    ]
+
+
+def test_a_run_without_denials_or_without_a_transcript_says_so(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    claude = FakeClaude((_event_lines(VALID["finished"]), 0))
+    _wrapper(tmp_path, claude).run("design", CHANGE)
+    log = step.log_path(tmp_path, CHANGE)
+    # A review's line has no transcript to read: Codex's session is its own log.
+    step.record_outcome(log, "review", {**VALID["stopped"], "denials": []}, session=None,
+                        commit=COMMIT, extra={"kind": "design"})
+    step.record_outcome(log, "review", VALID["stopped"], session=None, commit=COMMIT,
+                        extra={"kind": "design"})
+
+    assert step.main(["denials", CHANGE, "1"], root=tmp_path) == 0
+    assert capsys.readouterr().out == "seq 1: the design run recorded no denial\n"
+    assert step.main(["denials", CHANGE, "2"], root=tmp_path) == 0
+    assert capsys.readouterr().out == "seq 2: the review run recorded no denial\n"
+    assert step.main(["denials", CHANGE, "3"], root=tmp_path) == 1
+    assert "no transcript" in capsys.readouterr().err
+    assert step.main(["denials", CHANGE, "9"], root=tmp_path) == 1
+    assert "no seq 9" in capsys.readouterr().err
 
 
 def test_a_backwards_section_range_is_refused(tmp_path: Path,
@@ -1420,3 +1608,14 @@ def test_a_round_records_the_last_record_before_it(tmp_path: Path) -> None:
     (log.parent / "transcripts" / "04-review.log").write_text("x", "utf-8")
 
     assert step.note_round(log, [[2]], "owner", clock=_clock)["after"] == 4
+
+
+def test_a_round_recorded_after_the_fact_is_given_its_last_record_before_it(
+        tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    (log.parent / "transcripts").mkdir(parents=True)
+    (log.parent / "transcripts" / "09-triage.jsonl").write_text("x", "utf-8")
+
+    assert step.note_round(log, [[1, 2, 3]], "owner", after=1, clock=_clock)["after"] == 1
+    with pytest.raises(step.StepError, match="a record number"):
+        step.note_round(log, [[1]], "owner", after=-1)

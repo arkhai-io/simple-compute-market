@@ -98,24 +98,43 @@ untracked and moves with the change when it is archived, like the transcripts.
 
 Outcomes: `finished` (with `next`), `question` (with `awaiting`), `returned` (a
 proposed return to an earlier phase, with `return_to` and its evidence), `blocked`
-(with `blocked_on`), and `stopped` (with `reason` and `denials`). The orchestrator
+(with `blocked_on`), and `stopped` (with `reason` and `denials`). Every line
+carries `denials`, the run's own record of the tool calls it was denied, gathered
+over every turn of the run (a background task finishing can wake a session for a
+second turn with its own `result` event) and each with the harness's reason for
+it. The orchestrator
 adds `round` lines (D13) and `orchestrator` lines (D14) through the wrapper's
 `note` operation, so the wrapper is the log's only writer. Each line keeps the
 step's `message`, so a restart shows the last thing a step said without parsing its
 transcript.
 
+An `orchestrator` line is a decision — the orchestrator's own routing or recovery,
+or the owner's, relayed — and names what it decides: `by` (`owner` or
+`orchestrator`), `resolves` (the `seq` of the run it settles, which alone stops
+waiting on the owner: a decision clears nothing it does not name), and, when it
+directs a step, `next` (with `kind` for a review), which the next-step computation
+names until that step has run. Settled at the first implementation round's triage
+(04 F3): the first form, a decision as free text that cleared every run before it,
+let one decision about a stopped review silence a validation question waiting
+beside it.
+
 ```jsonl
-{"seq":12,"at":"2026-10-21T09:15:40Z","step":"orchestrator","outcome":"round","sections":[[0]],"by":"owner"}
-{"seq":13,"at":"2026-10-21T10:58:22Z","step":"implement","session":"9c07…","commit":"e2d81b4a","sections":[0],"outcome":"returned","return_to":"design","message":"Task 0.4: patch has no provider field; refusing it needs a decision the design does not make.","evidence":"tasks.md §0 notes"}
-{"seq":20,"at":"2026-10-22T16:31:07Z","step":"validate","session":"51aa…","commit":"7f3c6e90","outcome":"question","message":"Helm part failed: a retained volume carries resource-policy keep. Remedy: delete it.","awaiting":"environmental remedy"}
+{"seq":12,"at":"2026-10-21T09:15:40Z","step":"orchestrator","outcome":"round","sections":[[0]],"by":"owner","after":3}
+{"seq":13,"at":"2026-10-21T10:58:22Z","step":"implement","session":"9c07…","commit":"e2d81b4a","sections":[0],"outcome":"returned","return_to":"design","message":"Task 0.4: patch has no provider field; refusing it needs a decision the design does not make.","evidence":"tasks.md §0 notes","denials":[]}
+{"seq":14,"at":"2026-10-21T11:20:05Z","step":"orchestrator","outcome":"orchestrator","by":"owner","resolves":13,"next":"design","decision":"return to design confirmed","reason":"task 0.4 needs a provider decision the design does not make"}
+{"seq":20,"at":"2026-10-22T16:31:07Z","step":"validate","session":"51aa…","commit":"7f3c6e90","outcome":"question","message":"Helm part failed: a retained volume carries resource-policy keep. Remedy: delete it.","awaiting":"environmental remedy","denials":[]}
 {"seq":22,"at":"2026-10-22T17:45:10Z","step":"review","session":"codex:019a…","commit":"7f3c6e90","outcome":"stopped","reason":"exit 1: codex authentication expired","denials":[]}
+{"seq":23,"at":"2026-10-22T17:50:41Z","step":"orchestrator","outcome":"orchestrator","by":"orchestrator","resolves":22,"next":"review","kind":"implementation","decision":"rerun the review","reason":"codex authentication renewed"}
 ```
 
 The log holds only what the files cannot: session ids, the owner's round
-agreements, and the last outcome. Where the log and the change's files disagree —
+agreements, the owner's and the orchestrator's decisions, and the last outcome.
+Where the log and the change's files disagree —
 a status edited by hand — the files win, and the orchestrator says so. A `returned`
 line does not move the index status: the owner confirms the return, and the step
-then started sets the status, as now.
+then started sets the status, as now. The confirmation is a decision line that
+resolves the `returned` run and names the phase's step as `next`, so the
+computation routes there until the step runs and sets the status (04 F1).
 
 Rejected: the final answer only, kept in the orchestrator's context — a restart
 loses session ids and round agreements. The step writing its own outcome file — a
@@ -125,7 +144,12 @@ crashed or refused run writes nothing.
 
 How many sections a session implements, and how many make a round before the round
 view, validation, review, and triage, is decided by the owner with the orchestrator
-before implementation, and recorded as a `round` line. A round of several sections
+before implementation, and recorded as a `round` line, whose `after` is the highest
+record number before the round, so the round's records are those above it. A round
+agreed before the orchestrator existed — this change's own first five sections —
+is recorded after the fact with `--after` naming that number (X1); without a round
+line the computation can only ask for a round, and the records of the one that
+happened go unread. A round of several sections
 runs back to back with no stop between them; a small change is usually one round of
 every section up to closeout. The plan describes what to change and is agnostic of
 sessions, rounds, and whether a coding harness implements it at all: a section is a
@@ -153,7 +177,16 @@ the results that wait for the owner:
   merging dev once the prerequisite's proposal lands (D5);
 - a prerequisite gating `design` is not archived: `owner`, design waits on it (D5);
 - a prerequisite gating `design` is archived on this branch: `owner`, proposing the
-  release (D5a). The
+  release (D5a);
+- a step's latest run asked, returned, was blocked, stopped, or went on past a
+  denied tool: `owner`, until a decision line resolves that run (D3); a decision
+  that names `next` routes to that step until it has run, which is how a confirmed
+  return reaches the phase's step (04 F1) and a repeat review the owner asked for
+  reaches the reviewer;
+- a pre-closeout or closeout review whose gate did not pass: `owner`, until `HEAD`
+  differs from the review's reviewed commit in more than changes' records — a fix
+  accepted at triage and committed — when the review of the same kind runs again,
+  a pre-closeout one once the fix is validated (04 F2). The
 orchestrator runs that step and never routes on its own reading. The transitions
 are already fixed by each skill's entry check and handoff; in code they are
 testable under `scripts/tests`, and the owner can run the same command by hand.
@@ -220,29 +253,68 @@ and on the owner's word drops the dependency, leaving the status `in design`, ru
 
 Every run through the wrapper, discussions included, uses
 `--permission-mode dontAsk` with the step's allow and deny rules from
-`scripts/change_steps.toml`, which the wrapper reads. The rules are specific to
-Claude Code, so they live with the wrapper rather than in the harness-neutral
-skills. An interactive run is unaffected: the owner's own permission settings apply,
-with prompts.
+`.claude/change-steps.toml`, which the wrapper reads. The rules are specific to
+Claude Code, so they live in Claude Code's own directory — whose contents say
+what a Claude Code session in this repository may do, and which the common deny
+already covers — rather than with the harness-neutral skills or under `scripts/`
+(02 O2; the outcome schema, harness-neutral, lives with the skills as
+`.agents/change-outcome.schema.json`, 02 O3). The table is TOML because the
+scripts run on the standard library, which reads TOML and not YAML, and the
+table's comments carry each row's reason, which JSON cannot hold. An interactive
+run is unaffected: the owner's own permission settings apply, with prompts.
 
 | Step | Allowed | Denied |
 |---|---|---|
 | design, plan | read; edit `openspec/`, `docs/`; the pinned OpenSpec validator; `make check-*`; for a prerequisite (D5), `git worktree add` on a new branch from dev and edits under that worktree's `openspec/` | commits of code, any push |
 | triage | design's, and implement's, since it fixes what the owner accepts and commits | any push |
 | implement | edit the repository; `make` test, lock, and check targets; `uv run`; `git add`, `git commit`; the Agent tool | any push, `make push-branch`, `make run-e2e` |
-| validate | read; write `reviews/NN-validation.md` only; `make validate-*`, `push-branch`, `run-e2e`, `round-e2e-baseline`, `fetch-e2e-logs`; `gh run list`, `gh auth status`; `docker`, `kubectl`, `helm` | editing tracked files, `make lock`, commits, any other push |
+| validate | read; write `reviews/NN-validation.md` only; `make validate-*`, `push-branch`, `run-e2e`, `round-e2e-baseline`, `fetch-e2e-logs`; `gh run list`, `gh run view`, `gh auth status`; `docker`, `kubectl`, `helm` | `make lock`, commits, any other push; any other edit for want of an allow rule — a bare `Edit` deny would deny the record's `Write` too, since an edit rule covers every editing tool (X4) |
 | closeout | edit `openspec/`, `docs/`; `openspec archive`; `make check-*`; commits | code edits, any push |
 | archive cleanup | edit the index; write `reviews/pull-request.md`; commits | any push, creating the pull request |
 
+Every step's row also allows the read-only shell utilities the skills reach for
+(`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `echo`, `diff`, `find` without its
+writing actions), since a chained command runs only when every command in it is
+allowed and the first round's validation and triage stopped on chains of exactly
+those (07 A1); `make round-view-closed` is matched with a trailing variable (X4).
+
 The allow-lists turn each skill's "never" lines into rules the harness enforces:
 validation's "never changes the commit" stops being an instruction only. A run that
-needed a denied tool ends `stopped` with its reason; the wrapper records the
-denials from the run's `permission_denials` (D3). The orchestrator reads each
-against the step's row and the skill: a gap in the list gets a proposed rule — grant
-once by resuming with it, or add it to the table as a tracked change for the owner
-to commit; an action the skill forbids is a finding, and the denial stands; anything
-unclear goes to the owner. Edits to the table are proposed, never silent, and
-logged.
+cannot go on without a denied tool ends `stopped` with its reason; one that can —
+a chained command denied for one part, rerun one command at a time — goes on and
+ends as it ends, and either way the wrapper records every denial on the line from
+the run's own record (D3; X2, X3). The orchestrator reads each as D6a says before
+the change moves on. Edits to the table are proposed, never silent, and logged.
+
+#### D6a — The orchestrator reads every denial from the record
+
+A denial is read from the run's log line, never from the step's message: the
+record is the harness's and names the call, the message is the model's and
+generalizes (the first round's steps reported "Bash is not allowed" for a chain
+missing `echo`; X5). The reading, in `change-orchestrate`:
+
+1. Each recorded denial carries the harness's reason. `mode` — no allow rule under
+   `dontAsk` — is a gap in the table. A deny-rule match is a forbidden action, the
+   skill's "never" line enforced; its value is unverified until the pilot records
+   one, and until then any value but `mode` is read as not a gap. An unknown value
+   goes to the owner.
+2. `run_change_step.py denials <change> <seq>` lists each denial with the tool
+   calls the run made after it, from the transcript. A later call that did the
+   denied call's work by another means is a workaround: the run's outcome is not
+   trusted until the owner has seen it.
+3. For a gap, the orchestrator proposes the narrowest rule that matches the call —
+   `Bash(gh run view *)`, not `Bash(gh *)` — and says which it is: a one-run
+   `--allow` on the resume, for a stopped run that needs the call to go on, or a
+   tracked table edit the owner commits, for a call the step's skill makes routine.
+   A deny-rule denial is never granted for one run: the grant cannot override it.
+4. The reading is recorded as the decision line that resolves the run, `by:
+   orchestrator`, its `decision` beginning `gap:`, `forbidden:`, or `workaround:`
+   with the call and the rule; a forbidden or workaround reading goes to the owner,
+   whose disposition is a second line, `by: owner`.
+
+A run that went on past a denial waits in the computation like a stop, until the
+reading resolves it, so the reading happens whether or not the orchestrator was
+awake when the line was written.
 
 Rejected: auto mode — what a step may do would rest on a classifier's call per
 action, unreviewable in advance. A permission-prompt tool routing each prompt to
@@ -320,8 +392,12 @@ Codex needs no output schema for this.
 
 When a skill runs through the wrapper, every "stop and ask the owner" ends its turn
 with a `question` outcome; a denied tool ends it `stopped` with its reason, never
-a question or a workaround; and its last turn ends with an outcome matching
-`scripts/change_outcome.schema.json`. Interactive use is unchanged. Beyond that:
+a question or a workaround — except that a chained command denied because one
+part lacks a rule is rerun one command at a time, since the denial is of the
+chain and not of its parts, and a step finishes every part of its work that does
+not depend on a denied call before it stops, and names that exact call (X3, X5);
+and its last turn ends with an outcome matching
+`.agents/change-outcome.schema.json`. Interactive use is unchanged. Beyond that:
 
 - `change-plan` sizes a section as a coherent, verifiable slice rather than to one
   session, and drops "one section per session" from its handoff (D13).
@@ -347,6 +423,34 @@ second branch to keep current, for a small pilot.
 The orchestrator passes no gate and answers no design question; every gate and
 question reaches the owner. Practice may show some gates safe to soften; that is a
 later decision, made on the pilot's evidence.
+
+### Decisions at the first implementation round's triage
+
+Beside the amendments above, each under its finding's label:
+
+- **04 F3 (A+)** — decision lines carry `by`, `resolves`, and `next`; see D3, D14.
+- **04 F1** — a confirmed return is a decision line resolving the `returned` run
+  with `next` the phase's step; `change-plan` section 3 sets `in design` only
+  interactively and ends `returned` unattended; see D3.
+- **04 F2 (both)** — a failed pre-closeout or closeout gate is followed by the
+  review of the same kind once a fix commit lands (and, for pre-closeout, is
+  validated), read from the review's reviewed commit against `HEAD`; a repeat
+  review with no fix is a decision line with `next`; see D14.
+- **X1** — `note round --after`; see D13.
+- **X2, X3 (option 2)** — the outcome stands and every denial is recorded; see D3,
+  D6, D12.
+- **X4, 07 A1** — the table's rules; see D6.
+- **X5, D6a** — the orchestrator's reading; see D6a.
+- **02 O2, 02 O3** — the table under `.claude/`, the schema under `.agents/`,
+  TOML kept; see D6. `check-doc-citations` verifies `.agents/` paths too, so the
+  skills' citation of the schema stays checked.
+- **02 O1** — `make check-comment-hygiene` runs `scripts/check_comment_hygiene.py`,
+  a direct port of the shell target: the same scans, file types, exclusions, and
+  the one exemption as a named rule, with unit tests. What the check catches is
+  unchanged; the step table, under `.claude/`, is outside its change-name scan as
+  that exclusion already stood.
+- **07 A2** — `validate_slice.py` prints one flushed line as each step starts and
+  ends, so a part can be watched while it runs; its summary was its only output.
 
 ## Risks / Trade-offs
 

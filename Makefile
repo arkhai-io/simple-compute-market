@@ -724,70 +724,20 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene check-doc-citations — mechanical sweep for AGENTS.md's "Python comments
-# and docstrings" rule: change IDs, section/task numbers, and change-document
-# filenames must never appear in comments or docstrings outside openspec/.
-# This catches the reliably-mechanical subset of that rule (not the fuzzier
-# "references the review that introduced the code" cases, which still need
-# a human/LLM read) and is meant to run as part of every plan's closeout
-# task, not only when someone remembers to ask. Deliberately does not match
-# a bare "tombstone" -- that word has a legitimate, unrelated meaning
-# (a soft-delete marker row) already in use in this codebase, and a regex
-# can't safely tell the two usages apart; the tombstone convention itself
-# stays a judgment-call check, not a mechanical one.
+# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments and
+# docstrings" rule: change IDs, section/task numbers, change-document filenames,
+# and OpenSpec change names must never appear in code outside openspec/. The
+# scans, their file types, exclusions, and the one exemption are
+# scripts/check_comment_hygiene.py's, with their reasons.
 # ---------------------------------------------------------------------------
-# The workflow's next-step script reads a change's task list, so it names that file
-# once, as the constant TASKS_FILE; only that definition line is exempt, and any
-# other mention in the script is still caught.
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
-	@echo "Scanning for change-ID and task-number references outside openspec/..."
-	@matches=$$(grep -rnE \
-		'POOLS-[0-9]+|[Ss]ection [0-9]+\.[0-9]+|[Ss]ection [0-9]+(\s|:|$$)|[Tt]ask [0-9]+\.[0-9]+|\btasks\.md\b|\bdesign\.md\b|\bproposal\.md\b' \
-		--include="*.py" --include="*.yml" --include="*.yaml" \
-		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
-		--exclude-dir=".venv" --exclude-dir=".dist" --exclude-dir="node_modules" --exclude-dir="build" \
-		. 2>/dev/null \
-		| grep -vE '^\./scripts/change_next_step\.py:[0-9]+:TASKS_FILE = "tasks\.md"$$' \
-		|| true); \
-	if [ -n "$$matches" ]; then \
-		echo "$$matches"; \
-		echo ""; \
-		echo "FAIL: found change-history references outside openspec/. See AGENTS.md's"; \
-		echo "'Python comments and docstrings' section -- comments must describe the"; \
-		echo "current system, not the history of the change that produced it."; \
-		exit 1; \
-	fi
-	@echo "OK: no change-ID/task-number references found outside openspec/."
-	@echo "Scanning for OpenSpec change directory names in code..."
-	@ids=$$(ls -d openspec/changes/*/ 2>/dev/null | grep -v archive | xargs -n1 basename; \
-		ls -d openspec/changes/archive/*/ 2>/dev/null | xargs -n1 basename \
-			| sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'); \
-	if [ -n "$$ids" ]; then \
-		matches=$$(echo "$$ids" | sort -u | grep -v '^$$' \
-			| grep -Ff /dev/stdin -rn \
-				--include="*.py" --include="*.toml" --include="*.yml" --include="*.yaml" \
-				--exclude-dir="openspec" --exclude-dir="docs" --exclude-dir=".git" \
-				--exclude-dir="__pycache__" --exclude-dir=".venv" --exclude-dir=".dist" \
-				--exclude-dir="node_modules" --exclude-dir="build" --exclude-dir=".claude" \
-				. 2>/dev/null || true); \
-		if [ -n "$$matches" ]; then \
-			echo "$$matches"; \
-			echo ""; \
-			echo "FAIL: code names an OpenSpec change. A comment must describe the"; \
-			echo "current system, not the change that produced it or the change that"; \
-			echo "will alter it next -- a reader of the code cannot see either, and"; \
-			echo "the name goes stale the moment the change is archived."; \
-			echo "docs/ is exempt: the roadmap's job is to name the change owning a gap."; \
-			exit 1; \
-		fi; \
-	fi
-	@echo "OK: no OpenSpec change names found in code."
+	@python3 scripts/check_comment_hygiene.py
 
 # ---------------------------------------------------------------------------
 # check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
-# docs/, tools/, scripts/, and e2e-tests/ path cited by a document must
-# resolve on this branch, and an unresolvable one is a blocking defect rather
-# than a stale link.
+# docs/, tools/, scripts/, e2e-tests/, and .agents/ path cited by a document
+# must resolve on this branch, and an unresolvable one is a blocking defect
+# rather than a stale link.
 #
 # Rejects a tombstoned target as well as an absent one. The existence test
 # this replaces could not fail on a rename-to-tombstone -- the likeliest
@@ -948,7 +898,7 @@ review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHAN
 
 # With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
 # instead: a headless Claude Code session held to the step's permissions in
-# scripts/change_steps.toml, ending with an outcome logged to the change's
+# .claude/change-steps.toml, ending with an outcome logged to the change's
 # reviews/workflow.jsonl. Without it, each target opens an interactive session as
 # the owner's own permission settings allow.
 STEP_RUN = python3 scripts/run_change_step.py run

@@ -2,15 +2,21 @@
 """Run a step of an OpenSpec change unattended, and keep the change's workflow log.
 
 `run` starts the step's skill as a headless Claude Code session (`claude -p`),
-held to the step's permissions in `scripts/change_steps.toml` under the `dontAsk`
+held to the step's permissions in `.claude/change-steps.toml` under the `dontAsk`
 permission mode, told to end its turn with an outcome matching the outcome schema,
 and streaming its events. `resume` continues the last session with the owner's
 answer, optionally granting a rule for that one run. Either way the run's event
 stream is kept as `reviews/transcripts/NN-<step>.jsonl`, with a progress file of
 its tool calls beside it, and its outcome is appended to the workflow log. A run
 that crashes, ends without an outcome, or ends with one the schema rejects is
-logged `stopped` by the wrapper itself, and a `stopped` line's denials are always
-the run's own record of denied tools, never the step's account of them.
+logged `stopped` by the wrapper itself. Every line's `denials` are the run's own
+record of denied tools, never the step's account of them: each denial as the
+harness lists it, with the harness's reason for it, gathered over every turn of
+the run, since a background task finishing can wake a session for another turn
+after its first `result` event. A step denied a tool ends `stopped` only when it
+cannot go on without it; one that went on is logged with the outcome it ended
+with, and the orchestrating session reads the recorded denials (`denials`) before
+the change moves on.
 
 A review runs in Codex instead, through `review`: the `change-review` skill in a
 read-only sandbox, so the reviewer cannot change what it reviews. Its final
@@ -29,14 +35,16 @@ start unless the latest validation record names `HEAD`, or an ancestor from whic
 override that. The review's outcome is `finished`, naming the record this run
 published, or `stopped` with the runner's reason; an earlier record never counts.
 
-A step's outcome conforms to `scripts/change_outcome.schema.json`: `finished`,
+A step's outcome conforms to `.agents/change-outcome.schema.json`: `finished`,
 `question`, `returned`, `blocked`, or `stopped`, each with the step's `message` to
 the owner. `record_outcome` appends one as a line of the change's
 `reviews/workflow.jsonl`, with a sequence number, the time, the step, and the
 run's session and commit. `note` appends the orchestrating session's own lines: a
 `round` line recording the implementation round the owner agreed, and an
-`orchestrator` line recording a routing or recovery decision it made itself. This
-module is the log's only writer.
+`orchestrator` line recording a decision — the orchestrating session's own
+routing or recovery, or the owner's, such as a confirmed return or a repeat
+review — naming the run it resolves and the step it directs next, so the next-step
+computation routes on it. This module is the log's only writer.
 
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
@@ -89,9 +97,13 @@ UNATTENDED = (
     "permission prompt or a question in this session. Follow your skill's instructions for "
     "running unattended. End every turn with an outcome matching the JSON schema you were "
     "given. Where your skill says to stop and ask the owner, end the turn with a `question` "
-    "outcome; the owner's answer resumes this session. If a tool call is denied, end with a "
-    "`stopped` outcome naming it, and never work around the denial or ask about it as a "
-    "question.")
+    "outcome; the owner's answer resumes this session. Run one command per Bash call: a "
+    "chained command runs only when every command in it is allowed. If a chained command is "
+    "denied, run its commands one call at a time. If a single command or any other tool call "
+    "is denied, finish every part of the work that does not depend on it, then end with a "
+    "`stopped` outcome whose `reason` names that exact call; one denied call is not a denied "
+    "tool. Never do by another tool what a denied call would have done, and never ask about "
+    "a denial as a question.")
 
 
 class StepError(RuntimeError):
@@ -282,32 +294,67 @@ def _section_ids(sessions: Any) -> bool:
                     for session in sessions))
 
 
-def note_round(path: Path, sections: Any, by: str, clock: Clock = _utc_now) -> Entry:
+def note_round(path: Path, sections: Any, by: str, after: int | None = None,
+               clock: Clock = _utc_now) -> Entry:
     """Record the implementation round the owner agreed: its sessions, each a list
     of the sections that session implements, in order.
 
     `after` is the highest number among the records and transcripts in `reviews/`
-    when the round was agreed,
-    so the round's own records — the owner's notes, its validation and review,
-    their triage — are those numbered above it.
+    before the round, so the round's own records — the owner's notes, its
+    validation and review, their triage — are those numbered above it. It is read
+    from `reviews/` when the round is agreed before it starts, and given for a
+    round recorded after the fact, whose records already exist.
     """
     if not _section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
                         f"sections; got {sections!r}")
     if not by:
         raise StepError("a round names who agreed it")
+    if after is not None and (isinstance(after, bool) or not isinstance(after, int)
+                              or after < 0):
+        raise StepError(f"a round's after is a record number; got {after!r}")
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                "sections": sections, "by": by,
-                               "after": next_number(path.parent) - 1}, clock)
+                               "after": next_number(path.parent) - 1 if after is None
+                               else after}, clock)
 
 
-def note_orchestrator(path: Path, decision: str, reason: str,
-                      clock: Clock = _utc_now) -> Entry:
-    """Record a routing or recovery decision the orchestrating session made itself."""
+def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
+                      resolves: int | None = None, next_step: str | None = None,
+                      kind: str | None = None, clock: Clock = _utc_now) -> Entry:
+    """Record a decision: the orchestrating session's own routing or recovery, or
+    the owner's, relayed by it.
+
+    `resolves` names the run (its `seq`) the decision settles, so that run alone
+    stops waiting on the owner: a decision clears nothing it does not name.
+    `next_step` names the step the decision directs — the step a confirmed
+    return goes to, the review the owner asked for again — which the next-step
+    computation names until that step has run; a review takes its `kind`.
+    """
     if not decision or not reason:
         raise StepError("an orchestrator line names its decision and its reason")
-    return append_entry(path, {"step": ORCHESTRATOR, "outcome": ORCHESTRATOR,
-                               "decision": decision, "reason": reason}, clock)
+    if not by:
+        raise StepError("an orchestrator line names who decided")
+    line: Entry = {"step": ORCHESTRATOR, "outcome": ORCHESTRATOR, "by": by,
+                   "decision": decision, "reason": reason}
+    if resolves is not None:
+        runs = {entry["seq"] for entry in read_log(path)
+                if entry.get("step") in STEPS}
+        if resolves not in runs:
+            raise StepError(f"no run has seq {resolves!r} in the workflow log; a decision "
+                            "resolves a step's run")
+        line["resolves"] = resolves
+    if next_step is not None:
+        if next_step not in STEPS:
+            raise StepError(f"unknown step {next_step!r}; expected one of {', '.join(STEPS)}")
+        line["next"] = next_step
+    if kind is not None:
+        if next_step != "review":
+            raise StepError("a kind goes with next = review")
+        if kind not in KINDS:
+            raise StepError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
+        line["kind"] = kind
+    return append_entry(path, line, clock)
 
 
 @dataclass(frozen=True)
@@ -416,7 +463,12 @@ def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
 
 
 def _tool_summary(tool: dict[str, Any]) -> str:
-    given = tool.get("input") if isinstance(tool.get("input"), dict) else {}
+    return _call_summary(tool.get("input"))
+
+
+def _call_summary(given: Any) -> str:
+    """One line for a tool call's input: the field that says what it did."""
+    given = given if isinstance(given, dict) else {}
     for key in ("command", "file_path", "path", "pattern", "skill", "description", "prompt"):
         if isinstance(given.get(key), str):
             summary = " ".join(given[key].split())
@@ -426,7 +478,16 @@ def _tool_summary(tool: dict[str, Any]) -> str:
 
 class Stream:
     """The run's event stream: written whole to the transcript, its tool calls to
-    the progress file, and read for the run's session and its final result."""
+    the progress file, and read for the run's session, its final result, and every
+    tool call it was denied.
+
+    A run has one `result` event per turn, and a background task finishing can
+    wake the session for another turn, so the last result is the run's end but
+    its `permission_denials` are only its own turn's; the denials are gathered
+    from every result, keyed by the call, and each takes the reason the harness
+    gave in its `permission_denied` event, which says whether the call lacked an
+    allow rule or met a deny rule.
+    """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = _utc_now,
                  echo: Callable[[str], None] | None = None) -> None:
@@ -436,6 +497,14 @@ class Stream:
         self.echo = echo
         self.session: str | None = None
         self.result: dict[str, Any] | None = None
+        self._denials: dict[str, dict[str, Any]] = {}
+        self._reasons: dict[str, str] = {}
+
+    @property
+    def denials(self) -> list[dict[str, Any]]:
+        """Every denial the run recorded, in order, each with the harness's reason."""
+        return [{**denial, **({"reason": self._reasons[key]} if key in self._reasons else {})}
+                for key, denial in self._denials.items()]
 
     def feed(self, line: str) -> None:
         with self.transcript.open("a", encoding="utf-8") as stream:
@@ -450,6 +519,14 @@ class Stream:
             self.session = event["session_id"]
         if event.get("type") == "result":
             self.result = event
+            denials = event.get("permission_denials")
+            for denial in denials if isinstance(denials, list) else []:
+                if isinstance(denial, dict):
+                    self._denials.setdefault(_denial_key(denial), denial)
+        if event.get("type") == "system" and event.get("subtype") == "permission_denied":
+            if isinstance(event.get("tool_use_id"), str) and isinstance(
+                    event.get("decision_reason_type"), str):
+                self._reasons[event["tool_use_id"]] = event["decision_reason_type"]
         message = event.get("message") if event.get("type") == "assistant" else None
         content = message.get("content") if isinstance(message, dict) else None
         for item in content if isinstance(content, list) else []:
@@ -462,16 +539,25 @@ class Stream:
                     self.echo(shown)
 
 
-def run_outcome(status: int, result: dict[str, Any] | None,
-                schema: dict[str, Any]) -> Entry:
-    """The outcome to log for a run that exited with `status` and ended with `result`.
+def _denial_key(denial: dict[str, Any]) -> str:
+    """What identifies a denied call: its tool use id, or the call itself."""
+    if isinstance(denial.get("tool_use_id"), str):
+        return denial["tool_use_id"]
+    return json.dumps(denial, sort_keys=True, ensure_ascii=False)
+
+
+def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
+                denials: Sequence[dict[str, Any]] = ()) -> Entry:
+    """The outcome to log for a run that exited with `status` and ended with `result`,
+    having been denied `denials`.
 
     The step's own outcome when it gave a valid one; otherwise a `stopped` the
-    wrapper writes, its message the reason. A `stopped` outcome's denials are
-    replaced with the run's record of them, whatever the step said.
+    wrapper writes, its message the reason. Every outcome carries the run's own
+    record of its denials, whatever the step said: a step ends `stopped` when it
+    cannot go on without a denied tool, and one that went on is logged as it
+    ended, its denials there for the orchestrating session to read.
     """
-    denials = (result or {}).get("permission_denials")
-    denials = denials if isinstance(denials, list) else []
+    denials = list(denials)
     outcome = (result or {}).get("structured_output")
     if status != 0:
         detail = (result or {}).get("result")
@@ -484,17 +570,8 @@ def run_outcome(status: int, result: dict[str, Any] | None,
         reason = "the run ended without an outcome"
     elif problems := outcome_problems(outcome, schema):
         reason = "the run's outcome does not conform to the schema: " + "; ".join(problems)
-    elif outcome["outcome"] == "stopped":
-        return {**outcome, "denials": denials}
-    elif denials:
-        # A run denied a tool ends stopped, naming the denial; a step that carried
-        # on past one may have worked around it.
-        return {"outcome": "stopped", "message": outcome["message"],
-                "reason": f"the run was denied {len(denials)} tool call(s) but ended "
-                          f"{outcome['outcome']}",
-                "denials": denials}
     else:
-        return outcome
+        return {**outcome, "denials": denials}
     return {"outcome": "stopped", "message": reason, "reason": reason, "denials": denials}
 
 
@@ -519,6 +596,60 @@ def _git_head(root: Path) -> str | None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                           text=True)
     return head.stdout.strip() if head.returncode == 0 else None
+
+
+def denial_report(reviews: Path, entry: Entry) -> list[str]:
+    """Each denial on a run's log line, with the tool calls the run made after it.
+
+    Read from the run's transcript, for the orchestrating session's reading of a
+    denial: the call as the harness recorded it, the harness's reason, and what
+    the run did next, which shows whether a later call did the denied call's work
+    by another means. The step's message is never consulted.
+    """
+    denials = entry.get("denials")
+    denials = [d for d in denials if isinstance(d, dict)] if isinstance(denials, list) else []
+    if not denials:
+        return [f"seq {entry.get('seq')}: the {entry.get('step')} run recorded no denial"]
+    transcript = entry.get("transcript")
+    if not isinstance(transcript, str) or not transcript:
+        raise StepError(f"seq {entry.get('seq')} is a {entry.get('step')} line with no "
+                        "transcript to read")
+    path = reviews / transcript
+    if not path.is_file():
+        raise StepError(f"seq {entry.get('seq')}'s transcript {transcript} is not in {reviews}")
+    calls: list[tuple[Any, str]] = []
+    for line in path.read_text("utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for item in content if isinstance(content, list) else []:
+            if isinstance(item, dict) and item.get("type") == "tool_use":
+                calls.append((item.get("id"),
+                              f"{item.get('name', '?')} {_tool_summary(item)}".rstrip()))
+    shown: list[str] = []
+    for denial in denials:
+        call = f"{denial.get('tool_name', '?')} {_call_summary(denial.get('tool_input'))}".rstrip()
+        reason = denial.get("reason")
+        shown.append(f"denied: {call} ({reason if reason else 'reason not recorded'})")
+        key = denial.get("tool_use_id")
+        index = next((i for i, (id_, _) in enumerate(calls) if key is not None and id_ == key),
+                     None)
+        if index is None:
+            shown.append("  the call is not in the transcript; every call of the run:")
+            after = calls
+        elif not calls[index + 1:]:
+            shown.append("  no call after it")
+            after = []
+        else:
+            shown.append("  calls after it:")
+            after = calls[index + 1:]
+        shown += [f"    {text}" for _, text in after]
+    return shown
 
 
 def last_run(path: Path, steps: Sequence[str]) -> Entry | None:
@@ -607,7 +738,7 @@ class Wrapper:
         failure: BaseException | None = None
         try:
             status: int | None = self.runner(command, self.root, stream.feed)
-            outcome = run_outcome(status, stream.result, schema)
+            outcome = run_outcome(status, stream.result, schema, stream.denials)
         except BaseException as exc:
             # A run that could not start, or was interrupted, still ends with a
             # line, so the log never shows its previous outcome as the latest.
@@ -615,7 +746,7 @@ class Wrapper:
             reason = (f"the run did not finish: {type(exc).__name__}"
                       + (f": {exc}" if str(exc) else ""))
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
-                       "denials": run_outcome(1, stream.result, schema)["denials"]}
+                       "denials": stream.denials}
         extra = {**(extra or {}), "exit_status": status,
                  "transcript": transcript.relative_to(log.parent).as_posix()}
         line = record_outcome(log, step, outcome, session=stream.session or session,
@@ -1065,6 +1196,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     log = commands.add_parser("log", help="print the last lines of the change's workflow log")
     log.add_argument("change")
     log.add_argument("--last", type=int, default=10)
+    denials = commands.add_parser(
+        "denials", help="print a run's denials with the tool calls it made after each")
+    denials.add_argument("change")
+    denials.add_argument("seq", type=int, help="the run's line in the workflow log")
     note = commands.add_parser("note", help="append an orchestrator line to the workflow log")
     note.add_argument("change")
     kinds = note.add_subparsers(dest="kind", required=True)
@@ -1072,9 +1207,19 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     round_.add_argument("--sections", required=True,
                         help="sessions separated by ';', each a ','-separated list of sections")
     round_.add_argument("--by", default="owner")
-    decision = kinds.add_parser(ORCHESTRATOR, help="a routing or recovery decision")
+    round_.add_argument("--after", type=int, default=None,
+                        help="the highest record number before the round, for a round "
+                             "recorded after the fact")
+    decision = kinds.add_parser(ORCHESTRATOR, help="a decision: the orchestrating session's "
+                                                   "own, or the owner's, relayed")
     decision.add_argument("--decision", required=True)
     decision.add_argument("--reason", required=True)
+    decision.add_argument("--by", default=ORCHESTRATOR, help="who decided: owner or orchestrator")
+    decision.add_argument("--resolves", type=int, default=None,
+                          help="the seq of the run the decision settles")
+    decision.add_argument("--next", dest="next_step", default=None,
+                          help="the step the decision directs next")
+    decision.add_argument("--kind", default=None, help="the review kind when --next is review")
     args = parser.parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
@@ -1105,11 +1250,19 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         if args.command == "log":
             for entry in last_entries(path, args.last):
                 print(json.dumps(entry, ensure_ascii=False))
+        elif args.command == "denials":
+            entry = next((e for e in read_log(path) if e.get("seq") == args.seq), None)
+            if entry is None:
+                raise StepError(f"{args.change}'s workflow log has no seq {args.seq}")
+            for shown in denial_report(path.parent, entry):
+                print(shown)
         elif args.kind == "round":
-            line = note_round(path, parse_sections(args.sections), args.by)
+            line = note_round(path, parse_sections(args.sections), args.by, args.after)
             print(json.dumps(line, ensure_ascii=False))
         else:
-            line = note_orchestrator(path, args.decision, args.reason)
+            line = note_orchestrator(path, args.decision, args.reason, by=args.by,
+                                     resolves=args.resolves, next_step=args.next_step,
+                                     kind=args.kind)
             print(json.dumps(line, ensure_ascii=False))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

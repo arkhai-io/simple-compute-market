@@ -14,7 +14,8 @@ Delivers the structured outcome every unattended run ends with and the log the
 wrapper alone writes (D3; requirement "Unattended step runs end with a structured
 outcome").
 
-- [x] 1.1 Add `scripts/change_outcome.schema.json`: the five outcomes —
+- [x] 1.1 Add the outcome schema, now `.agents/change-outcome.schema.json` (added
+      under `scripts/`, moved at round 1, 02 O3): the five outcomes —
       `finished` (with `next`), `question` (with `awaiting`), `returned` (with
       `return_to` and `evidence`), `blocked` (with `blocked_on`), `stopped` (with
       `reason` and `denials`) — each carrying the step's `message`. D3's example
@@ -85,6 +86,19 @@ the log; extend it as the wrapper grows. Its contract cites the delta's heading
 "Unattended step runs end with a structured outcome", which reaches
 `openspec/specs/change-workflow/spec.md` at archive.
 
+Round 1 fixes (triage of records 02, 04, 07, and 24, at `82ca2c94`). 04 F3
+(A+): `note_orchestrator` takes `by`, `resolves` (the `seq` of a step's run in
+the log, refused otherwise), `next_step` (a known step), and `kind` (with
+`next = review` only); the command line takes `--by`, `--resolves`, `--next`,
+`--kind`. X1: `note_round` takes `after`, and `note round --after <N>`, for a
+round recorded after the fact; a negative or non-integer `after` is refused. The
+schema's `denials` is described as a field of any outcome. Unit
+(`test_run_change_step.py`): a decision line with each field, each refusal, a
+decision that may resolve only a step's run, the command line's new options, a
+round given its `after`. The round line for sections 1–5 (`--sections 1,2,3,4,5
+--after 1 --by owner`) is the orchestrator's to record after this commit; it was
+not recorded here.
+
 ## 2. Running a Claude Code step through the wrapper
 
 Delivers the headless run, its resume, its permissions, and its event stream (D1,
@@ -92,14 +106,15 @@ D6, D7; the wrapper side of D12 and 01 F5; requirements "Unattended step runs en
 with a structured outcome" and "Unattended runs are held to their step's
 permissions").
 
-- [x] 2.1 Add `scripts/change_steps.toml` with D6's table: each step's skill and
+- [x] 2.1 Add the step table, now `.claude/change-steps.toml` (added under
+      `scripts/`, moved at round 1, 02 O2), with D6's table: each step's skill and
       its allow and deny rules, including design's `git worktree add` from dev and
       edits under that worktree's `openspec/` (D5), and validation's guarded push
       as the only push.
       Done. A `[common]` row adds read-only Git, `find_change.py`, the log
       reader, `make round-view-closed`, and `make check-change-index` to every
       step, and denies `git push`, history rewrites, opening or closing the
-      round view, and editing `scripts/change_steps.toml` or `.claude/`, the one
+      round view, and editing the step table or `.claude/`, the one
       settings source an unattended run loads, so no step widens its own or a
       later step's permissions; each `[steps.<step>]` row names its skill, and planning's names
       `resume_from = "design"` (D8). Beyond D6's table: closeout may edit
@@ -263,6 +278,34 @@ outcome". Section 3
 adds the `review` step to this module's `Wrapper` and `main`, absorbing
 `run_change_review.py`; reuse `next_transcript`'s numbering rule there, and note
 that the review's `.log` transcripts and records share the numbering.
+
+Round 1 fixes. 02 O2 and 02 O3: the table is `.claude/change-steps.toml` and the
+schema `.agents/change-outcome.schema.json` (the moves, `STEP_TABLE`, `SCHEMA`,
+and common's deny were the orchestrator's, committed as `6abaa3ef` and
+`82ca2c94`; the docstring, the Makefile comment, the skills' citations, the
+documents, and the tests are this round's); `check_doc_citations.py` verifies
+`.agents/` paths too, so the skills' citation of the schema stays checked, with
+`AGENTS.md`'s rule and the Makefile comment saying so. X2: `Stream` gathers
+`permission_denials` over every `result` event, keyed by `tool_use_id`, and
+takes each denial's `decision_reason_type` from the `permission_denied` system
+event with that id as `reason`; a run woken for a second turn by a background
+task no longer loses its first turn's denials. X3 and X5 (option 2):
+`run_outcome` logs the step's own outcome with the run's denials on every line,
+and no longer turns a finished run with a denial into `stopped`; the appended
+prompt says one command per Bash call, a denied chain rerun one command at a
+time, independent work finished before a stop, the exact call named, nothing
+done by another tool. D6a: `denials <change> <seq>` prints each denial on a run's
+line with its reason and the tool calls the run made after it, from the
+transcript. X4 and 07 A1: the table's rules — the read-only utilities and
+`find` without its writing actions on `common`, `make round-view-closed*`,
+`gh run view *` on validate, validate's bare `Edit` deny removed — were the
+orchestrator's edits; the tests here match the chained command of log line 1,
+`gh run view`, each utility, each writing `find`, the guard with a variable, and
+validate's record `Write` allowed with no `Edit` of a tracked file (an `Edit`
+rule covers every editing tool, so the test's matcher does too). Unit: denials
+gathered over two turns with the reason; a finished run with a denial logged
+finished; the `denials` report, with no denial, no transcript, and no such seq;
+every outcome logged with `denials`.
 
 ## 3. Reviews and the `make` targets through the wrapper
 
@@ -455,7 +498,9 @@ prerequisite halts").
       comments, which grep does poorly, or building the name indirectly, which
       would evade the check rather than answer it); until then it is this
       section's proposal, and `AGENTS.md`'s description of the check ("rejects
-      … `tasks.md` references") is true except for that one line.
+      … `tasks.md` references") is true except for that one line. Settled at
+      round 1 (02 O1): the exemption stands, as a named rule of the check's
+      Python port.
 - [x] 4.2 The owner results: a round view open (D9, 01 F3); a prerequisite whose
       directory is not on the branch (D5, 01 F2); a design-gating dependency not
       archived (01 F1); a design-gating dependency archived on this branch, the
@@ -529,6 +574,33 @@ save a record of the owner's reading even when the owner has no notes ("No
 notes."), since that record is how the computation knows the round view happened;
 without one it names the round view again.
 
+Round 1 fixes. 04 F3: `pending` no longer cuts the log at the latest
+orchestrator line; a run waits until a decision line `resolves` its `seq`, so a
+decision about one step's run leaves another's question waiting. 04 F1: a
+decision with `next` routes to that step until a run of it (of its `kind`, for a
+review) is logged after the decision — `directed`, after the pending rule — so a
+confirmed return reaches the phase's step, whose entry check sets the status. 04
+F2 (both): a pre-closeout or closeout review whose gate did not pass is repeated
+once `HEAD` differs from its reviewed commit (the record's last `reviewed-commit`
+marker) in more than changes' records, `fixed_since`, through the wrapper's
+`_changed_since` (injected in tests); for pre-closeout, `validate` first while
+the validation does not clear `HEAD`; otherwise the owner, who may direct a
+repeat review with a decision line. X2/X3 (option 2): a run that ended other
+than `stopped` with denials on its line waits like a stop, for the orchestrator's
+reading. X1: the rules read a round recorded after the fact by its `after`. By
+hand, after the fixes: the router on this change was not run; the call
+(`python3 scripts/change_next_step.py orchestrate-change-workflow`) was denied to
+this triage session, as was `run_change_step.py denials … 3`. Unit
+(`test_change_next_step.py`, 80 tests): a stop waits until a decision resolves
+it and a decision naming no run clears nothing; a validation question waits
+beside a resolved review stop; a finished run with a denial waits until read; a
+confirmed return routes to design and an unconfirmed one to the owner; a
+directed step that ran is no longer directed; a failed pre-closeout gate with
+`HEAD` at the reviewed commit waits, with `HEAD` moved goes to validate then to
+the review again, and with only records changed waits; a failed closeout gate
+with a fix goes to the review again; a directed repeat review; a round recorded
+after the fact owns the records above its `after`.
+
 ## 5. The leaf skills report through the wrapper
 
 Delivers D12, D13's skill changes, and D5's design path; the skills' text only, as
@@ -538,7 +610,7 @@ D12 limits it.
       unattended: each "stop and ask the owner" ends its turn with a `question`
       outcome; a denied tool ends it `stopped` with its reason, never a question
       or a workaround; its last turn ends with an outcome matching
-      `scripts/change_outcome.schema.json`. Discussion steps (design, planning,
+      the outcome schema. Discussion steps (design, planning,
       triage) end each reply with its `message`. `change-validate` §5's
       environmental remedy is a `question`; `change-closeout`'s point needing a
       code edit is `returned` to implementation (D8). Interactive use is unchanged.
@@ -599,7 +671,7 @@ D12 limits it.
       `make check-agent-skills`, `make check-comment-hygiene`, `make
       check-packaging` (after the fixes): passed. `make
       test`: passed, before the read's fixes, which touched only the skills and
-      `scripts/change_steps.toml`; `test_run_change_step.py` passed after them
+      the step table; `test_run_change_step.py` passed after them
       (179). The read found, all fixed: no step would accept a return to
       planning or implementation (the entry checks above); design's opening
       still limited its edits; design's prerequisite stops were `question`s by
@@ -631,6 +703,68 @@ every leaf skill ending each unattended turn with an outcome; the stops the
 skills only say "stop" at are mapped generally, not one by one, so the pilot
 should watch for a stop that ends as the wrong outcome.
 
+Round 1 fixes. X3 and X5: every skill's "A denied tool stops the step" bullet
+says one command per Bash call, a denied chain rerun one command at a time,
+independent work finished before the stop, the exact call named and never the
+tool, nothing done by another tool; the seven citations name
+`.agents/change-outcome.schema.json` (02 O3). 04 F1: `change-plan` section 3
+step 1 sets `in design` interactively and ends `returned` unattended, leaving the
+status. 04 F2: `change-triage`'s gate section says what the computation does with
+a fix commit after a failed gate. 07 A2: `change-validate` section 2 says a
+running part prints a line per step and where its step logs are.
+`make check-agent-skills`: passed.
+
+Fixes concerning no section. 02 O1: `scripts/check_comment_hygiene.py` is a
+direct port of the Makefile's shell target — the same two scans, file types,
+exclusions (`.claude/` among them, unchanged, so the step table now under it is
+outside the change-name scan), patterns, and the one exemption as a named rule
+(`EXEMPT`: the `TASKS_FILE` definition line of `scripts/change_next_step.py`);
+the target is one line calling it; the script and its test are scanned like any
+file, so the pattern is written as a pattern and the test builds its samples at
+run time. `make check-comment-hygiene` before the port: both scans OK; after:
+both scans OK. Unit (`test_check_comment_hygiene.py`, 32 tests): each pattern,
+each file type and excluded directory, the exemption and a second mention, the
+change names with and without dates and the `archive` filter, each file type and
+exclusion of the name scan, the command's output and exit status. 07 A2:
+`validate_slice.py` prints a flushed line as each step starts (its command and
+log) and ends (result and seconds), through an injected `echo`; its only output
+was the final summary. Unit (`test_validate_slice.py`): the lines of a local
+part that fails at `test`; the flushed print. 02 O3: `check_doc_citations.py`
+verifies `.agents/` paths (unit: a resolving and an absent `.agents/` citation,
+a `.claude/` one not checked).
+
+Round 1 checks. Focused suites (unit, `uv run --no-project --with pytest`):
+`test_run_change_step.py`, `test_change_next_step.py`,
+`test_check_comment_hygiene.py`, `test_check_doc_citations.py`,
+`test_validate_slice.py`: 344 passed together before the fresh-context check,
+346 after its fixes. `make test`: passed, every suite, `scripts/tests` included,
+before the fresh-context fixes, which touched only `run_change_step.py`,
+`change_next_step.py`, and their tests; the focused suites passed after them.
+`make check-comment-hygiene`: passed, both scans, before the port and after it
+and after every later edit. `make check-agent-skills`, `make check-change-index`,
+`make check-packaging`, `openspec validate orchestrate-change-workflow --strict`:
+passed. `make check-doc-citations CHANGE=orchestrate-change-workflow` reports
+five citations, all of what the change removes or has not yet written:
+`scripts/run_change_review.py` (design, proposal, tasks) and its test (tasks),
+which section 3 deleted and 8.10 resolves, and
+`.agents/skills/change-orchestrate/SKILL.md` (6.1), which section 6 creates;
+nothing else. The router and the `denials` subcommand are proven by their unit
+tests; running them by hand on this change was denied to this triage session.
+Fresh-context check of the diff against `82ca2c94` (a subagent, read-only,
+reading the worktree since `git diff` was denied to it): comment hygiene,
+import placement, test seams, and public-repository discipline satisfied; it
+found, and this round fixed, three things — `denials` on a review's line, which
+has no transcript, now reports "recorded no denial" rather than refusing; a
+triage run's phase is read from the review or validation it followed, so a
+design-phase triage that stopped no longer holds implementation (two tests); a
+fixture run id in a test looked like a real pipeline run and is now obviously a
+fixture. Declined: distinguishing a Git error from "not an ancestor" in
+`fixed_since` (both are read as a fix having landed) — `_changed_since` is the
+wrapper's existing seam with that contract, and a Git error there surfaces at
+the next validation, which refuses an unreadable `HEAD`; and the credential-
+helper test's `PATH` patching in `test_validate_slice.py`, which predates this
+change.
+
 ## 6. The orchestrating session
 
 Delivers `change-orchestrate` (D2, D7's notifications, D8, D9, D10, D13's round
@@ -647,8 +781,16 @@ owner").
       `note`; open the round view, save the owner's notes verbatim as the next
       `NN-implementation-owner.md`, then close it; start validation and the
       implementation review side by side; send a push notification on `question`,
-      `stopped`, or a long step finishing; read each denial against the step's
-      row and propose a grant or a tracked table edit; when the script is
+      `stopped`, or a long step finishing; read each denial as D6a says — from
+      the run's line, never the step's message; by the harness's reason, a gap
+      or a forbidden action; `run_change_step.py denials <change> <seq>` for the
+      calls after it, a later call doing the denied work being a workaround; for
+      a gap the narrowest rule, as a one-run grant or a tracked table edit; the
+      reading recorded as the decision line resolving the run, `by:
+      orchestrator`, a forbidden or workaround reading going to the owner —;
+      record each decision, its own or the owner's, as a line naming the run it
+      resolves and any step it directs (a confirmed return, a repeat review);
+      when the script is
       unclassified, decide routing or recovery itself and record an
       `orchestrator` line, or bring the matter to the owner. It commits nothing,
       passes no gate, answers no design question, and advances only its change.
@@ -672,10 +814,12 @@ section records what they showed about the orchestrator.
 - [ ] 7.2 Record here the evidence `design.md`'s Pilot section names: every
       `stopped` outcome and its denials, every `orchestrator` line and the state
       the script could not classify, the relay's latency in the design
-      discussion, whether validation's background fetch survived a question, and
-      whether `--resume` applied a granted rule.
+      discussion, whether validation's background fetch survived a question,
+      whether `--resume` applied a granted rule, and the `reason` value a denial
+      by a deny rule records (D6a reads any value but `mode` as not a gap until
+      it is known).
 - [ ] 7.3 Each allow-list gap the pilot found is a proposed edit to
-      `scripts/change_steps.toml`, committed by the owner; each script gap is a
+      `.claude/change-steps.toml`, committed by the owner; each script gap is a
       rule added to `change_next_step.py` with its test; each is noted here.
 - [ ] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
 
@@ -719,7 +863,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       - `docs/agents/change-workflow.md` — the "Skills" table gains
         `change-orchestrate`, `make plan`, and `UNATTENDED=1`; a new "Orchestrating
         a change" section: starting and resuming, agreeing a round, answering and
-        taking over a step, maintaining `scripts/change_steps.toml`; "The review
+        taking over a step, maintaining `.claude/change-steps.toml`; "The review
         directory" gains `workflow.jsonl` and the step transcripts.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed

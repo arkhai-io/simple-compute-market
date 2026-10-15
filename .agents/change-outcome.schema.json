@@ -43,7 +43,7 @@
       "minLength": 1
     },
     "denials": {
-      "description": "stopped: the tool calls the run was denied, as the run recorded them.",
+      "description": "Any outcome: the tool calls the run was denied, as the run's own record lists them, each with the harness's reason; the wrapper sets this on every outcome, and it is required on stopped.",
       "type": "array",
       "items": {"type": "object"}
     }
