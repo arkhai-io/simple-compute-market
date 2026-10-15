@@ -95,8 +95,35 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     assert fake._available("gpu-host-1") == 2
 
 
+_ACCEPTED_ESCROW_PROPOSAL = {
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "aa" * 20,
+    "fields": {"token": "0x" + "cc" * 20},
+    "expiration_unix": 1_800_000_000,
+}
+
+
 @pytest.mark.asyncio
-async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch):
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(
+            {
+                "settlement_data": {"accepted_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+                "buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL,
+            },
+            id="accepted proposal recorded",
+        ),
+        pytest.param(
+            {"buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+            id="buyer's opening only",
+        ),
+    ],
+)
+async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch, recorded):
+    """A refund materializes the accepted escrow proposal, never the buyer's
+    opening: only the accepted one carries the authorized release condition."""
+
     class FakeDb:
         def __init__(self):
             self.listing_updates = []
@@ -118,12 +145,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
                 "seller_principal": Ed25519Signer(b"\x52" * 32).identity.model_dump(
                     mode="json"
                 ),
-                "buyer_escrow_proposal": {
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "aa" * 20,
-                    "fields": {"token": "0x" + "cc" * 20},
-                    "expiration_unix": 1_800_000_000,
-                },
+                **recorded,
                 "agreed_price": 42,
                 "agreed_duration_seconds": 3600,
             }
@@ -185,6 +207,17 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         ),
     )
 
+    if "settlement_data" not in recorded:
+        assert result.actions == [
+            {
+                "action": "refund",
+                "status": "failed",
+                "reason": "accepted_escrow_proposal_unavailable",
+            }
+        ]
+        fake_codec.refund_claimed.assert_not_awaited()
+        assert db.escrow_updates == []
+        return
     assert result.actions == [
         {
             "action": "refund",

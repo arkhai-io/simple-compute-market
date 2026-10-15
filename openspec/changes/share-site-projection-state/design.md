@@ -373,8 +373,10 @@ Secrets is owed. Accepted scope beyond the original proposal.
   the buyer configures, and refuses a listing advertising no condition. `escrow_shape_guard`
   rejects a listing advertising no condition on the proposal's chain
   (`release_condition_not_advertised`) and `accept_exact_listing` likewise
-  (`exact_listing:release_condition_not_advertised`); both still pass a proposal carrying no
-  escrow address or the zero placeholder, and a listing accepting no escrow.
+  (`exact_listing:release_condition_not_advertised`). The guard still passes a proposal
+  carrying no escrow address or the zero placeholder, and a listing accepting no escrow;
+  `accept_exact_listing` rejects those as `exact_listing:escrow_not_in_accepted_set`, as it
+  did before.
 
   An empty seller wallet (Section 6's handoff) needs no rule of its own: a recipient condition
   with an empty recipient cannot be encoded, so materialization refuses it as

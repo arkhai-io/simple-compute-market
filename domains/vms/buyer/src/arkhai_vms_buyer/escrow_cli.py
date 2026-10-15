@@ -302,6 +302,23 @@ def reclaim_cmd(
     console.print(Panel(result, title="Reclaim complete", border_style="green"))
 
 
+def _refuse_without_release_condition(log: object, reason: str) -> None:
+    """Stop escrow creation that has no accepted release condition to use.
+
+    A seller settles an escrow only under the release condition it accepted, so
+    an escrow created under any other would never be released to it; refusing
+    here leaves nothing on chain.
+    """
+    error = (
+        f"Cannot create the escrow: {reason}. The seller's accepted escrow "
+        "proposal names the release condition it settles under; re-run "
+        "negotiation so it is captured."
+    )
+    log.event("escrow_release_condition_missing", error=error)
+    typer.secho(error, err=True, fg=typer.colors.RED)
+    raise typer.Exit(3)
+
+
 @escrow_app.command("create")
 def create_cmd(
     run_id: str = typer.Option(
@@ -515,6 +532,9 @@ def create_cmd(
             EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
         ]
     elif deal.accepted_escrow_proposal is not None:
+        # Local, as this module's other Alkahest imports are: importing the kit
+        # costs the CLI about 0.4 s, and only escrow creation needs it.
+        from market_alkahest.proposals import ReleaseConditionError
         from market_alkahest.schemas import EscrowProposal
 
         proposal = EscrowProposal(**deal.accepted_escrow_proposal)
@@ -522,37 +542,22 @@ def create_cmd(
             chain_name=chain.chain_name,
             addr_config_path=chain.alkahest_addr_config,
         )
-        escrow_terms_list = build_terms(
-            proposal,
-            seller_wallet or "",
-            float(deal.agreed_amount),
-            int(effective_duration_seconds),
-        )
+        try:
+            escrow_terms_list = build_terms(
+                proposal,
+                seller_wallet or "",
+                float(deal.agreed_amount),
+                int(effective_duration_seconds),
+            )
+        except ReleaseConditionError as exc:
+            _refuse_without_release_condition(log, str(exc))
     else:
-        from market_alkahest.schemas import EscrowProposal
-        from market_alkahest.alkahest import get_erc20_escrow_obligation_default
-        import time as _time
-
-        escrow_address = get_erc20_escrow_obligation_default(
-            chain.chain_name,
-            config_path=chain.alkahest_addr_config or None,
-        )
-        proposal = EscrowProposal(
-            chain_name=chain.chain_name,
-            escrow_address=escrow_address,
-            fields={"token": chain.token_contract},
-            literal_fields={"token": chain.token_contract},
-            expiration_unix=int(_time.time()) + expiration_seconds,
-        )
-        build_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain.chain_name,
-            addr_config_path=chain.alkahest_addr_config,
-        )
-        escrow_terms_list = build_terms(
-            proposal,
-            seller_wallet or "",
-            float(deal.agreed_amount),
-            int(effective_duration_seconds),
+        # An escrow is created only under the release condition the seller
+        # accepted; with neither accepted terms nor an accepted proposal there
+        # is none to create it under, and none is assumed.
+        _refuse_without_release_condition(
+            log,
+            "the run-log records no accepted escrow terms or proposal",
         )
 
     create_escrow = make_create_escrow_fn(

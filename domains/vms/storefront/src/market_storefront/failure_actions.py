@@ -155,16 +155,23 @@ async def _refund_from_escrow_proposal(
     buyer_evm_address: str,
     thread: dict[str, Any],
 ) -> dict[str, Any] | None:
-    # The accepted proposal carries the release condition the escrow was
-    # created under, which materialization requires; the buyer's opening may
-    # name none.
+    # Only the accepted proposal carries the release condition the seller
+    # authorized and the escrow was created under; the buyer's opening is not
+    # a substitute, so a deal that recorded none is refused rather than refunded
+    # from it.
     settlement_data = thread.get("settlement_data")
     proposal_raw = (
         settlement_data.get("accepted_escrow_proposal")
         if isinstance(settlement_data, dict)
         else None
-    ) or thread.get("buyer_escrow_proposal")
+    )
     if not isinstance(proposal_raw, dict):
+        if isinstance(thread.get("buyer_escrow_proposal"), dict):
+            return {
+                "action": "refund",
+                "status": "failed",
+                "reason": "accepted_escrow_proposal_unavailable",
+            }
         return None
     if not ctx.escrow_uid or not hasattr(db, "load_escrow"):
         return {"action": "refund", "status": "skipped", "reason": "escrow_uid_unknown"}

@@ -978,3 +978,22 @@ async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
     data = obligation["params"]["obligation_data"]
     assert data["arbiter"].lower() == authorized["arbiter"].lower()
     assert data["demand"] == "0x" + encode_recipient_demand(SELLER_WALLET).hex()
+
+
+async def test_a_condition_no_escrow_can_be_settled_under_refuses_the_round(
+    tmp_path,
+) -> None:
+    """A listing derived for an empty seller wallet authorizes a recipient
+    condition paying no one; the plan cannot be materialized, so the round is
+    refused as the listing's release condition, and nothing is accepted."""
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime, demands=[_recipient_condition("")])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        with pytest.raises(StorefrontClientError) as refused:
+            await _open_at_the_listed_rate(app, escrow_address=_UNPINNED)
+
+    assert refused.value.status_code == 409
+    assert "release_condition_unreadable" in str(refused.value)
+    _nothing_accepted(runtime)

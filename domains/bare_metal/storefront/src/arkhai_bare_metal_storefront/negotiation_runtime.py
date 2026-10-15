@@ -712,6 +712,10 @@ def build_bare_metal_negotiation_runtime(
             )
         except BareMetalSettlementPlanError as exc:
             raise BareMetalNegotiationRefusal(str(exc)) from exc
+        except ReleaseConditionError as exc:
+            # An authorized condition the codecs cannot encode, such as one
+            # paying an empty seller wallet, refuses like any other.
+            raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
         response = {
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts
         }

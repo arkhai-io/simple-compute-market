@@ -63,16 +63,16 @@ def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
 def test_accepted_artifacts_settle_under_the_listings_condition(monkeypatch):
     """The accepted escrow is materialized under the listing's authorized
     release condition, and the seller's configured wallet is passed with it."""
-    import apicredits_storefront.settlement_stages as sn
-
     captured: dict = {}
 
     def _fake_artifacts(**kwargs):
         captured.update(kwargs)
         return {"proposal": {}}
 
-    monkeypatch.setattr(sn, "accepted_escrow_artifacts_from_proposal", _fake_artifacts)
-    monkeypatch.setattr(sn.settings.wallet, "address", "0xSeLLeR0000")
+    monkeypatch.setattr(
+        settlement_stages, "accepted_escrow_artifacts_from_proposal", _fake_artifacts
+    )
+    monkeypatch.setattr(settlement_stages.settings.wallet, "address", "0xSeLLeR0000")
 
     condition = {
         "chain_name": "anvil",
@@ -80,7 +80,7 @@ def test_accepted_artifacts_settle_under_the_listings_condition(monkeypatch):
         "demand_data": {"recipient": "0x" + "55" * 20},
     }
 
-    sn.build_api_credit_accepted_artifacts(
+    settlement_stages.build_api_credit_accepted_artifacts(
         buyer_principal=_BUYER_PRINCIPAL,
         seller_principal=_SELLER_PRINCIPAL,
         proposal={

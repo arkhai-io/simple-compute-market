@@ -291,8 +291,10 @@ class VmAlkahestSellerStage:
         selected = agreement.get("settlement")
         if not isinstance(selected, Mapping) or selected.get("mechanism") != self.mechanism:
             raise ValueError("accepted Agreement does not select Alkahest")
+        # Only the accepted proposal carries the release condition the seller
+        # authorized; the buyer's opening is not a substitute for it.
         data = thread.get("settlement_data") or {}
-        proposal = data.get("accepted_escrow_proposal") or thread.get("buyer_escrow_proposal")
+        proposal = data.get("accepted_escrow_proposal")
         if not isinstance(proposal, dict) or "chain_name" not in proposal:
             raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
         return proposal

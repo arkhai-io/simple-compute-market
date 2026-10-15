@@ -18,7 +18,7 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import escrow_terms_from_settlement_plan
-from market_alkahest.proposals import validate_selected_escrow_plan
+from market_alkahest.proposals import ReleaseConditionError, validate_selected_escrow_plan
 from market_alkahest.schemas import (
     EscrowProposal,
     EscrowTerms,
@@ -107,9 +107,11 @@ class AlkahestBuyerStage:
         its release condition is the one the listing authorizes on its chain.
         """
         entry = self.accepted_entry(selected)
-        # The demand is compared as the arbiter's codec encodes it, which the
-        # chain's address book resolves; with no configured chain the listing's
-        # condition cannot be read, and the plan is refused.
+        # The demand is compared as the arbiter's codec encodes it, resolved
+        # from the arbiter's address through the configured chain's address
+        # book, or the SDK's deployment addresses for a public chain that names
+        # none. The local development chain has no SDK addresses, so there an
+        # unconfigured chain leaves the condition unreadable and the plan refused.
         chain = common.buyer_chains().get(str(entry.get("chain_name") or ""))
         addr_config_path = (
             chain.alkahest_address_config_path if chain is not None else None
@@ -362,6 +364,24 @@ def _accepted_provision_inputs(deal) -> tuple[str | None, int]:
     return (ssh_public_key, accepted.duration_seconds)
 
 
+def _refuse_without_release_condition(log: Any, reason: str) -> None:
+    """End a resumed settlement that has no accepted release condition to use.
+
+    The seller settles the escrow only under the release condition it accepted;
+    one created under any other would never be released to it, so nothing is
+    created.
+    """
+    error = (
+        f"Cannot create the escrow: {reason}. The seller's accepted escrow "
+        "proposal names the release condition it settles under; re-run "
+        "negotiation so it is captured."
+    )
+    log.event("escrow_release_condition_missing", error=error)
+    log.end("error", error=error)
+    typer.secho(error, err=True, fg=typer.colors.RED)
+    raise typer.Exit(3)
+
+
 def _resume_alkahest(context: BuyerResumeContext) -> dict:
     run_id, deal, log, signer = context.run_id, context.deal, context.log, context.signer
     resolve_seller_principals = context.resolve_seller_principals
@@ -464,18 +484,24 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             escrow_terms_list = [
                 EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
             ]
+        elif deal.accepted_escrow_proposal is None:
+            _refuse_without_release_condition(
+                log, "the run-log records no accepted escrow terms or proposal"
+            )
         else:
             proposal = EscrowProposal(**deal.accepted_escrow_proposal)
-        if deal.accepted_escrow_terms is None:
             build_terms = make_buyer_payment_escrow_terms_fn(
                 chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
             )
-            escrow_terms_list = build_terms(
-                proposal,
-                seller_wallet,
-                int(deal.agreed_amount),
-                int(effective_duration),
-            )
+            try:
+                escrow_terms_list = build_terms(
+                    proposal,
+                    seller_wallet,
+                    int(deal.agreed_amount),
+                    int(effective_duration),
+                )
+            except ReleaseConditionError as exc:
+                _refuse_without_release_condition(log, str(exc))
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,
             rpc_url=chain.rpc_url,
