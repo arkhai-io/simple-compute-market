@@ -9,7 +9,7 @@ from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store
 
-from tests.integration.credit_negotiation import FakeCapacity, seed_listing
+from tests.integration.credit_negotiation import FakeCapacity, anvil_chain, seed_listing
 
 
 @pytest.fixture
@@ -44,5 +44,6 @@ async def db(tmp_path):
         identity=Identity(agent_url="http://test-seller:8002"),
     )
     await seed_listing(client)
-    yield client
+    with anvil_chain():
+        yield client
     thread_module._thread_store = None

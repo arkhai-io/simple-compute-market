@@ -11,12 +11,17 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
-from arkhai_bare_metal_storefront.settlement import BareMetalSettlementPlanError
+from arkhai_bare_metal_storefront.settlement import (
+    BareMetalSettlementPlanError,
+    build_bare_metal_settlement_plan,
+)
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 from storefront_client import StorefrontClient, StorefrontClientError
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import (
     AuthenticatedResponse,
     Eip191Signer,
@@ -95,7 +100,7 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         # Openings recheck each listing against the site that published it.
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
-        seller_evm_address="0x3333333333333333333333333333333333333333",
+        seller_evm_address=SELLER_WALLET,
         settlement_composition=alkahest_composition(
             SELLER_SIGNER,
             wallet="0x" + "33" * 20,
@@ -112,7 +117,30 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
     )
 
 
-async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
+#: The seller wallet the listing's release condition pays.
+SELLER_WALLET = "0x3333333333333333333333333333333333333333"
+#: A recipient other than the seller wallet.
+BUYER_RECIPIENT = "0x" + "77" * 20
+
+
+def _recipient_condition(recipient: str) -> dict:
+    return {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ),
+        "demand_data": {"recipient": recipient},
+    }
+
+
+#: The release condition a seeded listing authorizes, which a buyer naming a
+#: pinned escrow selects, as the buyer builds its proposal from the listing.
+AUTHORIZED = [_recipient_condition(SELLER_WALLET)]
+
+
+async def _insert_listing(
+    runtime: BareMetalStorefrontRuntime, *, demands: list[dict] | None = AUTHORIZED
+) -> None:
     await runtime.db.upsert_bare_metal_listing(
         listing_id="listing-1",
         status="open",
@@ -141,6 +169,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
             },
         ],
+        demands=demands,
     )
 
 
@@ -194,6 +223,7 @@ async def _negotiate(client: StorefrontClient, *, payload: dict | None = None) -
         chain_name="anvil",
         escrow_address=ESCROW,
         proposal_fields={"token": TOKEN},
+        demands=AUTHORIZED,
     )
 
 
@@ -446,6 +476,7 @@ def _escrow_proposal(amount: int) -> dict:
         "escrow_address": ESCROW,
         "fields": {"amount": str(amount), "token": TOKEN},
         "literal_fields": {"token": TOKEN},
+        "demand": AUTHORIZED[0],
         "expiration_unix": int(time.time()) + 3600,
     }
 
@@ -460,6 +491,7 @@ async def _open_countered(buyer: StorefrontClient) -> dict:
         chain_name="anvil",
         escrow_address=ESCROW,
         proposal_fields={"token": TOKEN},
+        demands=AUTHORIZED,
     )
     assert opened["action"] == "counter"
     return opened
@@ -829,3 +861,120 @@ async def test_a_thread_without_its_opening_message_is_not_resumed(tmp_path) -> 
 
     assert refused.value.status_code == 409
     assert "opening message" in str(refused.value)
+
+
+# ---------------------------------------------------------------------------
+# The release condition an accepted plan uses
+# ---------------------------------------------------------------------------
+
+def _materializing_runtime(path: str, *, policies=None) -> BareMetalStorefrontRuntime:
+    """A storefront that materializes accepted plans with its real plan builder."""
+    return replace(
+        _runtime(path),
+        plan_builder=build_bare_metal_settlement_plan,
+        chain_config_paths={"anvil": str(anvil_address_book_path())},
+        seller_evm_address=SELLER_WALLET,
+        negotiation_policies=policies,
+        capacity_client=SourceSites(SourceSite()),
+    )
+
+
+async def _open_at_the_listed_rate(
+    app, *, escrow_address: str = ESCROW, demands: list[dict] | None = None
+) -> dict:
+    async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+        return await buyer.negotiate_new(
+            listing_id="listing-1",
+            initial_amount=100,
+            provision_terms=_opening()["provision_terms"],
+            token=TOKEN,
+            chain_name="anvil",
+            escrow_address=escrow_address,
+            proposal_fields={"token": TOKEN},
+            demands=demands,
+        )
+
+
+def _nothing_accepted(runtime: BareMetalStorefrontRuntime) -> None:
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM negotiation_threads "
+            "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+        ).fetchone()[0] == 0
+
+
+async def test_a_substituted_recipient_is_refused_without_the_shape_guard(
+    tmp_path,
+) -> None:
+    runtime = _materializing_runtime(
+        str(tmp_path / "storefront.db"), policies=["listed_price"]
+    )
+    await _insert_listing(runtime, demands=[_recipient_condition(SELLER_WALLET)])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        with pytest.raises(StorefrontClientError) as refused:
+            await _open_at_the_listed_rate(
+                app, demands=[_recipient_condition(BUYER_RECIPIENT)]
+            )
+
+    assert refused.value.status_code == 409
+    assert "release_condition" in str(refused.value)
+    _nothing_accepted(runtime)
+
+
+async def test_a_listing_authorizing_no_condition_accepts_none(tmp_path) -> None:
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime, demands=None)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        with pytest.raises(StorefrontClientError) as refused:
+            await _open_at_the_listed_rate(
+                app, demands=[_recipient_condition(BUYER_RECIPIENT)]
+            )
+
+    assert refused.value.status_code == 409
+    assert "release_condition" in str(refused.value)
+    _nothing_accepted(runtime)
+
+
+async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
+    tmp_path,
+) -> None:
+    """The default chain's shape guard finds no escrow address to compare and
+    skips, so materialization alone refuses the buyer's condition."""
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    await _insert_listing(runtime, demands=[_recipient_condition(SELLER_WALLET)])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        with pytest.raises(StorefrontClientError) as refused:
+            await _open_at_the_listed_rate(
+                app,
+                escrow_address=_UNPINNED,
+                demands=[_recipient_condition(BUYER_RECIPIENT)],
+            )
+
+    assert refused.value.status_code == 409
+    assert "release_condition" in str(refused.value)
+    _nothing_accepted(runtime)
+
+
+async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
+    tmp_path,
+) -> None:
+    """An unpinned opening naming no condition, as the lane's buyer sends it."""
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    authorized = _recipient_condition(SELLER_WALLET)
+    await _insert_listing(runtime, demands=[authorized])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        accepted = await _open_at_the_listed_rate(app, escrow_address=_UNPINNED)
+
+    assert accepted["action"] == "accept"
+    (obligation,) = accepted["settlement_plan"]["obligations"]
+    data = obligation["params"]["obligation_data"]
+    assert data["arbiter"].lower() == authorized["arbiter"].lower()
+    assert data["demand"] == "0x" + encode_recipient_demand(SELLER_WALLET).hex()

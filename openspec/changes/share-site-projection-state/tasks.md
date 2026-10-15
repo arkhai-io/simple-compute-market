@@ -927,7 +927,7 @@ fails closed, and the escrow-shape guard fails closed (D14d; `negotiation-protoc
 Alkahest obligation uses exactly the release condition its listing authorizes"). Touches
 `kit/alkahest`, `kit/policy`, and both domains' tests.
 
-- [ ] 7.1 Reproduce first: write these tests and run them against the unfixed code before
+- [x] 7.1 Reproduce first: write these tests and run them against the unfixed code before
       7.2, recording the failing run in the task note (the section commits them passing):
       through each domain's seller
       negotiation runtime and plan materialization, a buyer naming the listing's arbiter
@@ -937,7 +937,39 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       `tests/integration/test_negotiate_controller.py` (application integration, typed
       client). Bare metal: `tests/test_http_negotiation.py` (application integration,
       typed client). Kit: `kit/alkahest/tests/unit/test_plans.py`.
-- [ ] 7.2 `kit/alkahest/src/market_alkahest/alkahest.py`
+      Done; run against the unfixed code (the kit at 0.5.0) before any fix, then committed
+      passing. Bare metal (application integration, real app through the typed
+      `StorefrontClient`, real plan builder over the anvil address book):
+      `tests/test_http_negotiation.py` gains four cases. Unfixed, 3 failed, 1 passed: a
+      substituted recipient under the chain `listed_price` (no shape guard) was accepted
+      with a plan whose demand paid the buyer's recipient; a listing advertising no
+      condition, under the default chain, was accepted paying the buyer's recipient; an
+      unpinned (zero-address) proposal, whose shape check the default guard skips, was
+      accepted paying the buyer's recipient. That is correction 9 reproduced. The fourth,
+      an unpinned opening naming no condition (the lane's opening), passed: it settled under
+      the seller wallet's recipient condition, through the fallback. VM (application
+      integration, typed client): `tests/integration/test_negotiate_controller.py` gains
+      `TestReleaseConditionAuthorization`'s four cases. **Differed:** VM prepends the shape
+      guard to every configured chain, so "no guard configured" is a seller-round hook
+      injected into the fixture's runtime that accepts whatever is proposed. Unfixed, 3
+      failed, 1 passed, and VM never used the buyer's condition: its Alkahest stage rebuilds
+      the escrow from the listing entry, so a substituted recipient beside a selection was
+      accepted and silently replaced by the listing's condition; a listing advertising none
+      was accepted under the recipient fallback paying the seller wallet; an unpinned
+      proposal naming a substituted condition, under the default chain, was accepted under
+      the listing's. Each should have refused (spec: a selection the listing does not
+      authorize rejects the round; a listing authorizing none fails closed). Kit (unit):
+      `test_plans.py` gains five cases over the existing API; unfixed, 4 failed and 1 (the
+      selected condition winning over an `arbiter` literal) passed: a proposal selecting no
+      condition was materialized under the recipient fallback, including to a recipient
+      named in its literal fields; an `arbiter`/`demand` stated among its literal fields
+      was materialized as its condition; `escrow_proposal_from_accepted_entry` built a
+      proposal with no condition for a listing advertising none, or only on another chain;
+      `accepted_escrow_artifacts_from_proposal` recorded the failure beside artifacts with
+      no plan instead of refusing. A sixth (an empty recipient refuses) was added after the
+      fix. The substituted-recipient check at kit level needs the new authorization entry
+      point, so it is in 7.4's `test_release_authorization.py`.
+- [x] 7.2 `kit/alkahest/src/market_alkahest/alkahest.py`
       (`materialize_escrow_terms_from_proposal`) and `proposals.py`
       (`escrow_proposal_from_accepted_entry`, `validate_selected_escrow_plan`,
       `accepted_escrow_artifacts_from_proposal`): a selected condition must equal one the
@@ -947,14 +979,87 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       to the buyer's recipient goes. The domains' plan builders
       (`domains/bare_metal/storefront/src/settlement.py`, VM's settlement stages) reach it
       unchanged in signature.
-- [ ] 7.3 `kit/policy/src/market_policy/scalar_policies.py`'s `escrow_shape_guard` (and
+      Done, `arkhai-kit-alkahest` 0.6.0. `alkahest.py`: `ReleaseConditionError` (a
+      `ValueError`, message `release_condition_<reason>: …`) and `encode_release_condition`,
+      which encodes a condition's arbiter and demand data through the codec its arbiter's
+      address resolves to on the chain; `materialize_escrow_terms_from_proposal` takes the
+      obligation's `arbiter` and `demand` from the proposal's selected condition only,
+      refusing none (`_unselected`), several (`_ambiguous`), or one it cannot encode
+      (`_unreadable`); the recipient fallback and the `arbiter`/`demand`-literal path go, and
+      `seller_wallet_address` is no longer read (kept in the signature). `proposals.py`:
+      `authorized_release_conditions(listing, chain_name=…)` reads the listing's `demands`
+      (list or JSON text, chain-scoped or unscoped) and refuses none on the chain
+      (`_not_advertised`) or an unreadable entry (`_unreadable`);
+      `authorized_release_condition(listing, chain_name=…, selected=…)` returns the
+      listing's form of a selected condition equal in arbiter and demand data (hex compared
+      case-insensitively), else refuses (`_not_authorized`), or the first authorized one
+      with no selection; `selected_release_condition(proposal)`;
+      `authorize_escrow_proposal(proposal, listing=…)` returns the proposal under exactly
+      that condition, whatever its escrow address; `escrow_proposal_from_accepted_entry`
+      gains `demand=` and builds under the authorized condition, so a buyer building against
+      a listing advertising none now fails there too; `validate_selected_escrow_plan` gains
+      `addr_config_path` and compares the plan's demand bytes as well as its arbiter;
+      `accepted_escrow_artifacts_from_proposal` raises `ReleaseConditionError` instead of
+      recording it. **Differed:** the plan builders keep their signatures by receiving an
+      already-authorized proposal: each domain authorizes where its seller accepts, outside
+      its policy chain. VM's Alkahest seller stage passes the buyer's selected condition to
+      `escrow_proposal_from_accepted_entry`, and the runtime turns the refusal into the
+      round's 409. Bare metal authorizes the escrow carrier at the opening (after the policy
+      decides to counter or accept), so the thread pins the authorized proposal its
+      settlement verification re-materializes, and again in `build_artifacts` before the
+      plan builder; the Agreement's option and `accepted_escrow_proposal` carry it. The
+      API-credit storefront (not named by the plan, but it materializes buyers' escrow
+      carriers the same way) authorizes in `build_api_credit_accepted_artifacts` and on its
+      settle path before verification, which now passes the listing. VM's refund
+      (`failure_actions.py`) reads the accepted escrow proposal before the buyer's, since
+      the buyer's opening may name no condition. The VM buyer's plan check reads the
+      selected chain's address book from its `[chains.<name>]`. The empty-wallet question
+      (Section 6's handoff) is settled by the fail-closed rule: a recipient condition with
+      an empty recipient cannot be encoded, so it refuses as `_unreadable`; derivation and
+      publication still emit it (recorded in `design.md` D14d as delivered, with the owner
+      question of refusing it at startup).
+- [x] 7.3 `kit/policy/src/market_policy/scalar_policies.py`'s `escrow_shape_guard` (and
       `accept_exact_listing`'s same pattern): a listing advertising no condition for the
       proposal's chain rejects with its own reason instead of skipping the check.
-- [ ] 7.4 Tests. The 7.1 reproductions now refuse, with no obligation accepted.
+      Done: `escrow_shape_guard` rejects `release_condition_not_advertised: …` and
+      `accept_exact_listing` `exact_listing:release_condition_not_advertised`. Both still
+      pass a proposal carrying no escrow address or the zero placeholder, and a listing
+      accepting no escrow, so the status probes' zero-address proposal still decides. The
+      package keeps version 0.4.0: `kit/negotiation-runtime` pins it exactly, and no
+      consumer needs a new name from it; its rebuilt wheel reaches every environment through
+      reinit.
+- [x] 7.4 Tests. The 7.1 reproductions now refuse, with no obligation accepted.
       `kit/policy/tests/unit/test_escrow_shape_guard.py` (new, unit): the guard's
       fail-closed and matching cases. VM's `tests/unit/test_escrow_fields_policy.py` and
       bare metal's `tests/test_negotiation.py` updated where they relied on the skip.
-- [ ] 7.5 Bump versions and refresh locks. Validation: `make -C kit test-alkahest
+      Done. The seven reproductions (three VM, three bare metal, the kit's) refuse with a
+      `release_condition_*` 409 and no thread recording an Agreement or plan; the positive
+      cases settle under the listing's condition. Kit (unit): `test_release_authorization.py`
+      (new, 20 cases): no selection takes the listing's condition, a case-differing
+      selection is kept in the listing's form, a substituted recipient, arbiter, or demand
+      data is refused, an unpinned escrow is held all the same, no condition on the chain
+      (absent, null, empty, another chain only) and seven unreadable forms refuse, JSON and
+      unscoped demands are read, two selected conditions are refused, and
+      `escrow_proposal_from_accepted_entry` under its `demand=`.
+      `test_selected_escrow_plan.py`: a substituted demand and a listing with no, another
+      chain's, or an unreadable condition are refused. `test_escrow_kind_codec.py`'s four
+      amount cases select a condition instead of stating arbiter literals. Policy (unit):
+      `kit/policy/tests/unit/test_escrow_shape_guard.py` (new, 17 cases). VM:
+      `test_escrow_fields_policy.py`'s listings advertise a condition their proposals
+      select, plus both policies' fail-closed cases; `test_negotiate_controller.py`'s
+      seeded listings authorize the configured wallet's condition and its pinned openings
+      select it; `test_sync_negotiation_seller_round_hook.py` and
+      `test_buyer_selection_negotiation.py` (the buyer's configured chain names the address
+      book) likewise. Bare metal: `test_negotiation.py` (and a new default-chain refusal of
+      a listing advertising none), `test_http_negotiation.py`, `test_http_settlement.py`,
+      and `test_negotiation_runtime.py`, whose builder is shown receiving the listing's form
+      of the condition. API credits (application integration, the runtime over a real
+      database): `test_sync_negotiation.py` gains the refusal of a substituted recipient and
+      of a listing advertising none under a seller hook accepting anything; its seeded
+      listing, the shared proposal, `test_settlement_fulfillment.py`, and the unit
+      artifacts tests carry a condition; the API-credit buyer's `test_negotiate_cli.py`
+      listing advertises one.
+- [x] 7.5 Bump versions and refresh locks. Validation: `make -C kit test-alkahest
       test-policy`, `make test-storefront`, `make test-bare-metal`, `make test-vms-buyer`
       (the buyer's `validate_selected_escrow_plan` caller), `make check-architecture`,
       `make check-packaging`, `make test-apicredits` (the API-credit storefront composes
@@ -962,6 +1067,71 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_non_erc20_settlement`,
       `e2e_bare_metal_mock_deal`, and the API-credit lane's `e2e_credits_deal` and
       `e2e_credits_payment_deal`.
+      Done. `arkhai-kit-alkahest` 0.6.0; the VM, bare-metal, and API-credit storefronts and
+      the VM buyer require `>=0.6.0` (they use its new names). `arkhai-kit-policy` keeps
+      0.4.0 (7.3). `make lock` relocked every project but the three PyTorch-index ones; VM
+      storefront's and VM buyer's locks were edited by hand with the version, wheel-name,
+      and specifier substitutions uv wrote into bare metal's lock for the same package
+      (three edits each; the VM buyer's specifier is new, matching its new floor);
+      `kit/policy` locks no alkahest. Evidence: `make -k test` ran every pytest suite and
+      every non-Python suite (Helm render checks, deployment packaging, the middleware
+      ports) and passed; it stopped only at the reinit of the three PyTorch-index
+      projects, run frozen with the rebuilt wheels reinstalled: `kit/policy` 80 passed
+      (unit), VM buyer 197 passed (unit), VM storefront unit 1026 passed, 1 skipped, and
+      integration 418 passed (application integration; `test_alkahest` against Anvil
+      included). Within `make -k test`: `kit/alkahest` 251 passed (unit), bare metal
+      134 + 322 + 11 + 40 passed (domain, storefront, buyer, adapter), and
+      `make test-apicredits`'s suites all passed (domain 41, service 72, storefront 146,
+      buyer 24, sample app 1, middleware 8). `make check-packaging` (architecture rules
+      included), `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), and `openspec validate
+      --strict` pass. The pipeline was not run for this section.
+
+Section 7 notes:
+
+- End-to-end scenarios, read against each scenario's opening: `e2e_deal` (a selection
+  beside an unpinned escrow carrier naming no condition, so the listing's recipient
+  condition is used, as before); `e2e_deal_buyer_cli` and `e2e_buy` (the `market` buyer
+  builds its proposal from the listing's condition and now checks the plan's demand bytes
+  through its `[chains.anvil]` address book, which the scenarios' buyer configuration
+  names); `e2e_non_erc20_settlement` (its proposals name the listing's recipient condition,
+  lowercased, which the case-insensitive comparison accepts). `multi_registry` opens
+  without a selection and stops at the seller's counter, so it materializes nothing.
+  Bare-metal lane: `e2e_bare_metal_mock_deal`, whose unpinned opening names no condition:
+  the opening now pins the listing's recipient condition, the same bytes the scenario's
+  escrow is created under, so the deal is unchanged. API-credit lane: `e2e_credits_deal`
+  (its buyer selects the listing's condition); `e2e_credits_payment_deal` creates no
+  escrow. No scenario sends an unauthorized condition, and none was added: the refusals
+  are application-integration evidence only. The pipeline was not run.
+
+Section 7 handoff:
+
+- The authorization lives in `market_alkahest.proposals` (`authorize_escrow_proposal`,
+  `authorized_release_condition`, `selected_release_condition`, `ReleaseConditionError`,
+  re-exported there from `alkahest.py`), and each domain calls it where its seller
+  accepts. A new domain or acceptance path that materializes a buyer's escrow carrier must
+  authorize it first; materialization alone refuses a proposal selecting no condition but
+  cannot tell a buyer's selection from an authorized one.
+- Seller verification paths materialize a stored proposal: VM reads the accepted escrow
+  proposal (settlement data) first, bare metal's thread pins the authorized proposal at
+  the opening, and the API-credit settle path authorizes the stored proposal against the
+  current listing — so an API-credit listing whose condition changed between acceptance and
+  settle refuses settlement, which is fail-closed but not the committed plan; the
+  API-credit storefront rebuilds its plan at settle from current configuration, as before.
+- Materialization failures other than a release condition (an unknown escrow contract,
+  say) are still recorded as `accepted_escrow_terms_error`; VM and API credits log them at
+  debug and accept with no plan, as before this section. Bare metal refuses them.
+- Open for the owner, beside Section 6's oracle-gated question: an empty seller wallet still
+  derives and publishes a recipient condition with no recipient, which every deal now
+  refuses as `release_condition_unreadable`; refusing it at startup would need the wallet
+  at composition, which every storefront has.
+- `escrow_verification.verify_escrow_for_settlement` still computes an
+  `effective_recipient` from the proposal; it now reaches only its injected
+  `build_obligation_data_fn` test seam and the legacy no-proposal path, not
+  materialization. Left as it is.
+- Section 17's promotion should carry D14d's "As delivered (Section 7)" paragraph to the
+  negotiation-protocol requirement's explanation (its spec is written by the archive) and
+  name `market_alkahest.proposals` as the place the invariant is held.
 
 ## 8. VM composes the shared projection state
 

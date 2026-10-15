@@ -8,6 +8,7 @@ that grants no unfunded quota hold — runs against a temporary SQLite database.
 
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +27,7 @@ from market_policy.seller_round import SellerRoundResult
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
+    CONDITION,
     FakeCapacity,
     SELLER_PRINCIPAL,
     payment_option,
@@ -407,3 +409,59 @@ async def test_accept_revalidates_the_current_trusted_listing_option(db, fake_ca
             actor_principal=BUYER_PRINCIPAL,
             actor_role="buyer",
         )
+
+
+async def _accept_as_proposed(*, history, **_round):
+    """A seller policy that accepts the buyer's escrow as it stands."""
+    proposal = dict(history[-1].proposal)
+    return SellerRoundResult(
+        our_amount=300,
+        strategy_label="listed_price",
+        direction="maximize",
+        chain_label="accept_as_proposed",
+        decision=NegotiationDecision(action="accept", proposal=proposal),
+        intermediate={"uses_scalar_amount": True},
+    )
+
+
+@pytest.mark.parametrize(
+    ("demands", "reason"),
+    [
+        pytest.param(
+            [CONDITION], "release_condition_not_authorized", id="substituted recipient"
+        ),
+        pytest.param([], "release_condition_not_advertised", id="listing authorizes none"),
+    ],
+)
+async def test_an_unauthorized_release_condition_is_refused_whatever_the_policy(
+    db, fake_capacity, key_records, demands, reason
+):
+    """With a seller policy that accepts anything, the escrow is still held to
+    the listing's release condition, and nothing is accepted."""
+    await db.update_listing(listing_id="L-tok", demands=demands)
+    substituted = proposal(300).model_copy(
+        update={
+            "demand": {**CONDITION, "demand_data": {"recipient": "0x" + "77" * 20}}
+        }
+    )
+
+    with pytest.raises(OfferUnfulfillableError, match=reason):
+        await build_api_credit_negotiation_runtime(
+            _DOMAIN, seller_round_hook=_accept_as_proposed
+        ).start(
+            repository=db,
+            listing_id="L-tok",
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+            proposal=substituted,
+            terms=terms(3),
+            seller_agent_url="http://seller:8002",
+            buyer_agent_url="http://buyer:9000",
+            actor_principal=BUYER_PRINCIPAL,
+        )
+
+    with sqlite3.connect(db.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM negotiation_threads "
+            "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+        ).fetchone()[0] == 0

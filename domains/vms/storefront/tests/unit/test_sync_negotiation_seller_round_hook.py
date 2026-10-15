@@ -177,6 +177,15 @@ async def db(tmp_path, monkeypatch):
         max_duration_seconds=7200,
         storefront_url="http://seller:8001",
         seller_principal=_SELLER,
+        # The release condition the accepted plan settles under: the address
+        # book's recipient arbiter, paying the seller.
+        demands=[
+            {
+                "chain_name": "anvil",
+                "arbiter": "0x" + "33" * 20,
+                "demand_data": {"recipient": "0x" + "44" * 20},
+            }
+        ],
     )
 
     async def resolve_capacity_binding(repository, listing_id):

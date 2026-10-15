@@ -15,8 +15,14 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_policy.negotiation_middleware import (
+    NegotiationDecision,
+    their_last_proposal,
+)
+from market_policy.seller_round import SellerRoundResult
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from storefront_client import StorefrontClient, StorefrontClientError
 from market_capacity_publication import publication_binding
@@ -43,6 +49,23 @@ _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
 _EXPECTED_PUBLISHERS = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _RECIPIENT = "0x" + "33" * 20
+
+
+def _recipient_condition(recipient: str) -> dict:
+    """The recipient release condition on the anvil chain paying ``recipient``."""
+    return {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ),
+        "demand_data": {"recipient": recipient},
+    }
+
+
+#: The release condition a seeded listing authorizes: the recipient arbiter
+#: paying the seller wallet the fixture configures. A buyer naming a pinned
+#: escrow selects it, as the buyer builds its proposal from the listing.
+_AUTHORIZED = [_recipient_condition(_RECIPIENT)]
 
 
 def _vm_provision(duration_seconds: int = 3600) -> dict:
@@ -78,6 +101,8 @@ _SITE_POOLS: list[dict] = []
 _SITE_REQUESTS: list[list[str]] = []
 # The fixture's application, for tests that also drive it as an administrator.
 _APPS: list[FastAPI] = []
+# Builds the fixture's negotiation runtime with other seller-round hooks.
+_RUNTIME_BUILDERS: list = []
 # A deterministic development key for these tests only; never used on any network.
 _ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
 
@@ -141,6 +166,7 @@ async def _upsert_bound_listing(
     capacity_backing: str = "backed",
     escrow_address: str = "0x" + "11" * 20,
     literal_fields: dict | None = None,
+    demands: list[dict] | None = _AUTHORIZED,
 ) -> None:
     _declare_source(
         listing_id,
@@ -208,6 +234,7 @@ async def _upsert_bound_listing(
         max_duration_seconds=max_duration_seconds,
         storefront_url="http://seller:8001",
         seller_principal=_SELLER_SIGNER.identity,
+        demands=demands,
     )
 
 
@@ -317,14 +344,18 @@ async def client(db, monkeypatch):
         capacity_binding_for_listing,
     )
     registration = db.domain_registry.resolve_mode("vm")
-    _container.resolved_negotiation_runtime = (
-        _negotiation_runtime.build_vm_negotiation_runtime(
+
+    def build_runtime(**hooks):
+        return _negotiation_runtime.build_vm_negotiation_runtime(
             registration.contract,
             registry=db.domain_registry,
             binding=registration.binding,
             capacity_runtime=capacity_runtime,
+            **hooks,
         )
-    )
+
+    _RUNTIME_BUILDERS[:] = [build_runtime]
+    _container.resolved_negotiation_runtime = build_runtime()
     transport = httpx.ASGITransport(app=app)
     from unittest.mock import patch as _patch
 
@@ -391,6 +422,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -403,7 +435,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-missing-selection", initial_amount=5000,
                 provision_terms=_vm_provision(), token=_TOKEN, chain_name="anvil",
-                escrow_address="0x" + "11" * 20,
+                escrow_address="0x" + "11" * 20, demands=_AUTHORIZED,
             )
         assert error.value.status_code == 409
         assert "settlement_mechanism_required" in str(error.value)
@@ -427,6 +459,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -446,6 +479,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
 
@@ -587,6 +621,7 @@ class TestNegotiateNew:
                 literal_fields=literals,
                 rates=[],
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
         _assert_canonical_owners(result)
 
@@ -713,6 +748,7 @@ class TestUnbackedListingNegotiation:
                 literal_fields={"token": _TOKEN},
                 rates=[],
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
 
         assert result["action"] == "accept"
@@ -765,6 +801,7 @@ class TestAdministrativeAcceptance:
                 chain_name="anvil",
                 escrow_address="0x" + "11" * 20,
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
             assert opened["action"] == "counter"
             negotiation_id = opened["negotiation_id"]
@@ -849,3 +886,137 @@ class TestAcceptanceRechecksTheSource:
         result = await c.negotiate_continue(negotiation_id, action="exit")
 
         assert result["action"] == "exit"
+
+
+#: A recipient other than the seller wallet the listing's condition pays.
+_BUYER_RECIPIENT = "0x" + "77" * 20
+
+
+async def _accept_as_proposed(*, listing, history, **_round):
+    """A seller policy that accepts the buyer's proposal as it stands."""
+    proposal = their_last_proposal(history)
+    return SellerRoundResult(
+        our_amount=5000,
+        strategy_label="maximize",
+        direction="maximize",
+        chain_label="accept_as_proposed",
+        decision=NegotiationDecision(action="accept", proposal=dict(proposal)),
+        intermediate={"uses_scalar_amount": True},
+    )
+
+
+class TestReleaseConditionAuthorization:
+    """An accepted plan uses exactly the condition the listing authorizes.
+
+    Each case opens at the listed rate, so the seller would accept at once and
+    materialize the plan; the refusal must come before any agreement or plan is
+    recorded, whatever seller policies run.
+    """
+
+    @staticmethod
+    def _without_seller_policy() -> None:
+        """Run negotiation with a seller hook that accepts whatever is proposed.
+
+        VM prepends the escrow-shape guard to every configured chain, so a seller
+        without it is a seller-round hook of its own.
+        """
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            seller_round_hook=_accept_as_proposed
+        )
+
+    async def _open(self, c, db, listing_id: str, **proposal):
+        return await c.negotiate_new(
+            listing_id=listing_id,
+            settlement_selection=await _selection(db, listing_id),
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_expiration_unix=1_800_000_000,
+            **proposal,
+        )
+
+    @staticmethod
+    def _nothing_accepted(db) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM negotiation_threads "
+                "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+            ).fetchone()[0] == 0
+
+    async def test_a_substituted_recipient_is_refused_without_the_shape_guard(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-substituted", demands=[_recipient_condition(_RECIPIENT)]
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            self._without_seller_policy()
+            await self._open(
+                c, db, "rc-substituted",
+                escrow_address="0x" + "11" * 20,
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_a_listing_authorizing_no_condition_accepts_none(self, client, db):
+        c, db = client
+        await _upsert_bound_listing(db, "rc-unauthorized", demands=None)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            self._without_seller_policy()
+            await self._open(
+                c, db, "rc-unauthorized",
+                escrow_address="0x" + "11" * 20,
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
+        self, client, db
+    ):
+        """Under the default seller chain the shape guard finds no escrow
+        address to compare and skips, so materialization alone refuses the
+        buyer's condition."""
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-unpinned", demands=[_recipient_condition(_RECIPIENT)]
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open(
+                c, db, "rc-unpinned",
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
+        self, client, db
+    ):
+        c, db = client
+        authorized = _recipient_condition(_RECIPIENT)
+        await _upsert_bound_listing(db, "rc-default", demands=[authorized])
+
+        self._without_seller_policy()
+        result = await self._open(
+            c, db, "rc-default",
+            escrow_address="0x" + "11" * 20,
+        )
+
+        assert result["action"] == "accept"
+        (obligation,) = result["settlement_plan"]["obligations"]
+        data = obligation["params"]["obligation_data"]
+        assert data["arbiter"].lower() == authorized["arbiter"].lower()
+        assert data["demand"] == "0x" + encode_recipient_demand(_RECIPIENT).hex()

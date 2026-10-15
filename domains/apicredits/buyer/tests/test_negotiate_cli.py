@@ -34,6 +34,11 @@ _ENTRY = {
     "literal_fields": {"token": _TOKEN},
     "rates": [{"field": "amount", "per": "token", "value": "100"}],
 }
+#: The release condition the Alkahest listing advertises, which the buyer selects.
+_CONDITION = {
+    "chain_name": "anvil", "arbiter": "0x" + "ef" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
 
 
 @pytest.fixture
@@ -87,6 +92,7 @@ def surface(monkeypatch, tmp_path):
             "publisher_id": "publisher", "publisher_principals": trust.model_dump(mode="json"),
             "settlement_options": [option.model_dump(mode="json")],
             "accepted_escrows": [_ENTRY] if mechanism == "alkahest.v1" else [],
+            "demands": [_CONDITION] if mechanism == "alkahest.v1" else [],
         }
         monkeypatch.setattr(common, "fetch_listing_dict", lambda *a, **kw: dict(listing))
         monkeypatch.setattr("core_buyer.orchestration.fetch_listing_dict", lambda *a, **kw: dict(listing))

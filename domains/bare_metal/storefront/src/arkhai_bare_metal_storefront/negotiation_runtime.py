@@ -43,6 +43,7 @@ from market_core.schemas import (
     compute_rate_total,
     Agreement,
 )
+from market_alkahest.proposals import ReleaseConditionError, authorize_escrow_proposal
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -284,6 +285,16 @@ def _escrow_proposal(proposal: Mapping[str, Any] | None) -> EscrowProposal:
         ) from exc
 
 
+def _authorized_escrow(
+    proposal: EscrowProposal, listing: Mapping[str, Any]
+) -> EscrowProposal:
+    """``proposal`` under the release condition ``listing`` authorizes, or a refusal."""
+    try:
+        return authorize_escrow_proposal(proposal, listing=listing)
+    except ReleaseConditionError as exc:
+        raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
+
+
 def _seller_reference_amount(
     accepted: AcceptedEscrow | None,
     *,
@@ -482,11 +493,20 @@ def build_bare_metal_negotiation_runtime(
             listing_source=request.listing_source,
         )
         state = dict(result.intermediate or {})
+        pinned: dict[str, Any] | None = None
+        if len(request.history) == 1 and result.decision.action in ("accept", "counter"):
+            # The thread pins the opening escrow under the release condition
+            # the listing authorizes, so acceptance and settlement verification
+            # materialize that condition; a selection the listing does not
+            # authorize refuses the opening, whatever the policy decided.
+            pinned = _authorized_escrow(opening, request.listing_record).model_dump(
+                mode="json", exclude_none=True
+            )
         return RoundEvaluation(
             our_amount=int(result.our_amount),
             strategy_label=result.strategy_label,
             decision=result.decision,
-            pinned_proposal=None,
+            pinned_proposal=pinned,
             uses_scalar_amount=bool(state.get("uses_scalar_amount", True)),
             buyer_amount=buyer_amount,
             domain_state=state,
@@ -676,9 +696,12 @@ def build_bare_metal_negotiation_runtime(
             raise NegotiationStateError(
                 "an exact-option negotiation is accepted only when it opens"
             )
+        proposal = _authorized_escrow(
+            _escrow_proposal(acceptance.pinned_proposal), acceptance.listing_record
+        )
         try:
             artifacts = plan_builder(
-                proposal=acceptance.pinned_proposal,
+                proposal=proposal,
                 agreed_amount=acceptance.agreed_amount,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
@@ -692,12 +715,14 @@ def build_bare_metal_negotiation_runtime(
         response = {
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts
         }
-        response.setdefault("accepted_escrow_proposal", acceptance.pinned_proposal)
+        response.setdefault(
+            "accepted_escrow_proposal",
+            proposal.model_dump(mode="json", exclude_none=True),
+        )
         # The negotiated escrow is recorded as the Agreement's selected option,
         # so settlement dispatches it through its seller entry like any other.
         settlement = legacy_alkahest_option(
-            _escrow_proposal(acceptance.pinned_proposal),
-            response.get("settlement_plan") or {},
+            proposal, response.get("settlement_plan") or {}
         )
         return _with_agreement(
             acceptance, response, settlement=settlement, data_dispatch=data_dispatch

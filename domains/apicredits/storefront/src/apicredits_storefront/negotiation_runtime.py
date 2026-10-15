@@ -12,6 +12,7 @@ from typing import Any
 
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
+from market_alkahest.proposals import ReleaseConditionError
 from market_core import MarketDomainContract
 from market_core.schemas import (
     Agreement,
@@ -577,14 +578,19 @@ def _build_response_artifacts(
         if accepted:
             return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
         return {"settlement_selection": artifacts["settlement_selection"]}
-    artifacts = build_api_credit_accepted_artifacts(
-        buyer_principal=acceptance.buyer_principal,
-        seller_principal=acceptance.seller_principal,
-        proposal=acceptance.pinned_proposal,
-        agreed_amount=acceptance.agreed_amount,
-        uses_scalar_amount=acceptance.uses_scalar_amount,
-        listing=acceptance.listing_record,
-    )
+    try:
+        artifacts = build_api_credit_accepted_artifacts(
+            buyer_principal=acceptance.buyer_principal,
+            seller_principal=acceptance.seller_principal,
+            proposal=acceptance.pinned_proposal,
+            agreed_amount=acceptance.agreed_amount,
+            uses_scalar_amount=acceptance.uses_scalar_amount,
+            listing=acceptance.listing_record,
+        )
+    except ReleaseConditionError as exc:
+        # An escrow the listing authorizes no condition for, or a condition it
+        # does not authorize, refuses the round before anything is recorded.
+        raise OfferUnfulfillableError(str(exc)) from exc
     if accepted:
         return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
     accepted_proposal = artifacts.get("accepted_escrow_proposal")

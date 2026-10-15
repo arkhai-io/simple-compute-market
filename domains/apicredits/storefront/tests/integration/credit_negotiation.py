@@ -6,8 +6,14 @@ used on any network; the token and escrow addresses are placeholders.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
+from unittest.mock import patch
 
+import apicredits_storefront.utils.config as storefront_config
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_config.config_loader import ChainConfig
 from market_core.schemas import (
     EscrowProposal,
     ProvisionTerms,
@@ -26,6 +32,27 @@ SELLER_PRINCIPAL = SELLER_SIGNER.identity
 TOKEN = "0x" + "01" * 20
 ESCROW = "0x" + "11" * 20
 LISTING_ID = "L-tok"
+SELLER_WALLET = "0x" + "33" * 20
+#: The release condition the seeded listing authorizes: the development chain's
+#: recipient arbiter paying the seller wallet. The buyer's proposal selects it.
+CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": get_recipient_arbiter("anvil", config_path=str(anvil_address_book_path())),
+    "demand_data": {"recipient": SELLER_WALLET},
+}
+
+
+@contextmanager
+def anvil_chain():
+    """The storefront's anvil chain, naming the address book the condition uses."""
+    chain = ChainConfig(
+        name="anvil",
+        rpc_url="http://anvil.test",
+        chain_id=31337,
+        alkahest_address_config_path=str(anvil_address_book_path()),
+    )
+    with patch.dict(storefront_config.CHAINS, {"anvil": chain}, clear=True):
+        yield
 
 
 PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
@@ -64,6 +91,7 @@ def proposal(amount: int) -> EscrowProposal:
         fields={"token": TOKEN, "amount": amount},
         literal_fields={"token": TOKEN},
         rates=[{"field": "amount", "per": "token", "value": "100"}],
+        demand=CONDITION,
         expiration_unix=1_800_000_000,
     )
 
@@ -164,6 +192,7 @@ async def seed_listing(client) -> None:
             }
         ],
         settlement_options=[],
+        demands=[CONDITION],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://test-seller:8002",

@@ -49,6 +49,7 @@ from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
+from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from seeded_threads import seed_thread
 from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
@@ -930,6 +931,13 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
         escrow_verifier=verifier,
         capacity_client=SourceSites(),
     )
+    condition = {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ),
+        "demand_data": {"recipient": runtime.seller_evm_address},
+    }
     await db.upsert_bare_metal_listing(
         listing_id="listing-1",
         status="open",
@@ -956,6 +964,9 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
             }
         ],
+        # The release condition the plan settles under, which the buyer selects:
+        # the development chain's recipient arbiter paying the seller wallet.
+        demands=[condition],
     )
     opened = await runtime.negotiation_runtime.start(
         repository=db,
@@ -968,6 +979,7 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
             "escrow_address": ESCROW_ADDRESS,
             "fields": {"amount": "100", "token": TOKEN},
             "literal_fields": {"token": TOKEN},
+            "demand": condition,
             "expiration_unix": int(time.time()) + 3600,
         },
         terms={

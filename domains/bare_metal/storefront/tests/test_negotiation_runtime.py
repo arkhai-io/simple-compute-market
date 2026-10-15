@@ -23,6 +23,12 @@ SELLER = Eip191Signer(bytes.fromhex("11" * 32)).identity
 ESCROW = "0x1111111111111111111111111111111111111111"
 TOKEN = "0x2222222222222222222222222222222222222222"
 WALLET = "0x3333333333333333333333333333333333333333"
+#: The release condition the listing advertises.
+CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": "0x" + "44" * 20,
+    "demand_data": {"recipient": WALLET},
+}
 TERMS = {
     "kind": "bare_metal.v2",
     "version": 1,
@@ -65,6 +71,7 @@ async def _listing(db: SQLiteClient) -> None:
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
             }
         ],
+        demands=[CONDITION],
     )
 
 
@@ -105,6 +112,7 @@ async def test_an_accepted_escrow_is_planned_from_verifications_inputs(tmp_path)
             "escrow_address": ESCROW,
             "fields": {"amount": "100", "token": TOKEN},
             "literal_fields": {"token": TOKEN},
+            "demand": {**CONDITION, "arbiter": CONDITION["arbiter"].upper().replace("0X", "0x")},
             "expiration_unix": int(time.time()) + 3600,
         },
         terms=TERMS,
@@ -114,6 +122,8 @@ async def test_an_accepted_escrow_is_planned_from_verifications_inputs(tmp_path)
 
     assert opened["action"] == "accept"
     (call,) = calls
+    # The builder plans the escrow under the listing's form of the condition.
+    assert call["proposal"].demand.model_dump(exclude_none=True) == CONDITION
     assert call["seller_wallet_address"] == WALLET
     assert call["chain_config_paths"] == {"anvil": "/addresses.json"}
     assert call["duration_seconds"] == 3600

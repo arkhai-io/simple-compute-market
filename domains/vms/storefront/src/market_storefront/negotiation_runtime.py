@@ -25,6 +25,7 @@ from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_alkahest.proposals import ReleaseConditionError
 from market_arkhai_payments import PaymentSellerStage
 from market_capacity_publication import CapacityRuntime
 from market_core import MarketDomainContract
@@ -465,16 +466,21 @@ def _accepted_settlement_artifacts(
         seller_wallet_address=get_evm_wallet_address() or None,
         chain_config_paths=_chain_config_paths(),
     )
-    artifacts = stage.accepted_artifacts(
-        domain=domain, context=context, listing=listing, selection=selection,
-        option=option,
-        build_selection=lambda: _accepted_selection_artifacts(
-            dispatch, selection=selection.model_dump(), option=option,
-            agreed_amount=agreed_amount, duration_seconds=duration_seconds,
-            listing=listing, provision_terms=provision_terms,
-            buyer_principal=buyer_principal, seller_principal=seller_principal,
-        ),
-    )
+    try:
+        artifacts = stage.accepted_artifacts(
+            domain=domain, context=context, listing=listing, selection=selection,
+            option=option,
+            build_selection=lambda: _accepted_selection_artifacts(
+                dispatch, selection=selection.model_dump(), option=option,
+                agreed_amount=agreed_amount, duration_seconds=duration_seconds,
+                listing=listing, provision_terms=provision_terms,
+                buyer_principal=buyer_principal, seller_principal=seller_principal,
+            ),
+        )
+    except ReleaseConditionError as exc:
+        # No accepted escrow without the release condition its listing
+        # authorizes: the acceptance is refused before anything is recorded.
+        raise OfferUnfulfillableError(str(exc)) from exc
     artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
     artifacts["_agreement_settlement_option"] = dict(option)
     return artifacts

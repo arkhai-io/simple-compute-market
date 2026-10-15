@@ -103,13 +103,26 @@ class AlkahestBuyerStage:
         """Check the seller's plan funds the escrow the selection names.
 
         The seller materializes the selected entry into a concrete escrow
-        obligation, so its parameters are the escrow's, not the option's.
+        obligation, so its parameters are the escrow's, not the option's, and
+        its release condition is the one the listing authorizes on its chain.
         """
         entry = self.accepted_entry(selected)
+        # The demand is compared as the arbiter's codec encodes it, which the
+        # chain's address book resolves; with no configured chain the listing's
+        # condition cannot be read, and the plan is refused.
+        chain = common.buyer_chains().get(str(entry.get("chain_name") or ""))
+        addr_config_path = (
+            chain.alkahest_address_config_path if chain is not None else None
+        )
 
         def validate(plan):
             try:
-                validate_selected_escrow_plan(plan, listing=dict(listing), entry=entry)
+                validate_selected_escrow_plan(
+                    plan,
+                    listing=dict(listing),
+                    entry=entry,
+                    addr_config_path=addr_config_path,
+                )
             except ValueError as exc:
                 raise RuntimeError(str(exc)) from exc
 

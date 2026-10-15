@@ -17,12 +17,15 @@ from arkhai_vms_settlement import (
     token_resource_from_accepted_escrow,
 )
 from arkhai_vms_settlement.fulfillment import reconcile_or_submit_compute_fulfillment
-from arkhai_vms_settlement.proposals import escrow_proposal_from_accepted_entry
 from core_storefront import build_domain_settlement_artifacts
 from core_storefront.models.settle_models import AgreementSettleResponse
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from market_alkahest import RELEASE_MODELS
+from market_alkahest.proposals import (
+    escrow_proposal_from_accepted_entry,
+    selected_release_condition,
+)
 from market_arkhai_payments import (
     MandatePolicyError,
     PaymentSettlementData,
@@ -114,9 +117,13 @@ class VmAlkahestSellerStage:
         entry = option.get("params", {}).get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow")
+        # The escrow settles under the listing's authorized condition, and a
+        # condition the buyer's proposal selects beside its option must be that
+        # one: the selection names the option, never the condition.
         proposal = escrow_proposal_from_accepted_entry(
             listing=dict(listing), entry=dict(entry),
             expiration_unix=selection.expiration_unix,
+            demand=selected_release_condition(context.proposal),
         )
         artifacts = build_domain_settlement_artifacts(
             domain, replace(context, proposal=proposal), build_plan=self.build_plan,

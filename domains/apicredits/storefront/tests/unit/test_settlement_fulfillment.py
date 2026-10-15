@@ -552,6 +552,11 @@ async def settled_db(tmp_path, monkeypatch):
     )
     token = "0x" + "01" * 20
     escrow_addr = "0x" + "11" * 20
+    condition = {
+        "chain_name": "anvil",
+        "arbiter": "0x" + "33" * 20,
+        "demand_data": {"recipient": "0x" + "22" * 20},
+    }
     await upsert_bound_listing(
         client,
         listing_id="L-tok",
@@ -567,6 +572,8 @@ async def settled_db(tmp_path, monkeypatch):
                 "rates": [{"field": "amount", "per": "token", "value": "100"}],
             }
         ],
+        # The address book's recipient arbiter paying the seller wallet.
+        demands=[condition],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://seller:8002",
@@ -585,6 +592,7 @@ async def settled_db(tmp_path, monkeypatch):
             fields={"token": token, "amount": 300},
             literal_fields={"token": token},
             rates=[{"field": "amount", "per": "token", "value": "100"}],
+            demand=condition,
             expiration_unix=1_800_000_000,
         ),
         terms=ProvisionTerms(

@@ -901,6 +901,68 @@ def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
         )
 
 
+class ReleaseConditionError(ValueError):
+    """An escrow cannot be settled under the release condition it was offered.
+
+    The condition is an arbiter and its demand data. A seller materializes an
+    obligation only under one its listing authorizes for the chain, so a
+    selection the listing does not authorize, a listing authorizing none, and a
+    condition that cannot be read or encoded all refuse before anything is
+    accepted. The message starts with a ``release_condition_*`` reason.
+    """
+
+
+def encode_release_condition(
+    chain_name: str,
+    condition: Any,
+    *,
+    config_path: str | None,
+) -> tuple[str, str]:
+    """The obligation's ``arbiter`` and hex ``demand`` for one release condition.
+
+    ``condition`` is a demand mapping or model (``arbiter``, ``demand_data``).
+    The arbiter's codec is resolved from its deployed address on ``chain_name``,
+    so an arbiter the chain's address book does not name cannot be encoded.
+    Raises ``ReleaseConditionError``.
+    """
+    if hasattr(condition, "model_dump"):
+        condition = condition.model_dump(exclude_none=True)
+    if not isinstance(condition, dict):
+        raise ReleaseConditionError(
+            "release_condition_unreadable: a release condition must be an object"
+        )
+    arbiter = condition.get("arbiter")
+    if not isinstance(arbiter, str) or not arbiter:
+        raise ReleaseConditionError(
+            "release_condition_unreadable: the release condition names no arbiter"
+        )
+    demand_data = condition.get("demand_data")
+    if not isinstance(demand_data, dict):
+        raise ReleaseConditionError(
+            "release_condition_unreadable: the release condition's demand_data "
+            "must be an object"
+        )
+    try:
+        kind = address_to_slot(chain_name, arbiter, config_path=config_path)
+    except ValueError as exc:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: arbiter {arbiter!r} on chain "
+            f"{chain_name!r} cannot be resolved: {exc}"
+        ) from exc
+    if not kind:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: {arbiter!r} is no arbiter the "
+            f"address book of chain {chain_name!r} names"
+        )
+    try:
+        demand = get_arbiter_codec(kind).encode_demand_data(demand_data)
+    except ValueError as exc:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: the {kind} demand cannot be encoded: {exc}"
+        ) from exc
+    return arbiter, "0x" + demand.hex()
+
+
 def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
     if not kind:
         return False
@@ -927,12 +989,17 @@ def materialize_escrow_terms_from_proposal(
     has not already placed a concrete value in ``fields``. ``agreed_amount``
     is authoritative for the flat ``amount`` field because proposals can carry
     stale round amounts while settlement receives the final negotiated total.
+
+    The obligation's ``arbiter`` and ``demand`` come only from the proposal's
+    selected release condition, which a seller has authorized against its
+    listing (``market_alkahest.proposals.authorize_escrow_proposal``). A
+    proposal selecting none, or one the codecs cannot encode, raises
+    ``ReleaseConditionError``. ``seller_wallet_address`` is not read.
     """
     from market_alkahest.schemas import (
         EscrowTerms,
         RateValue,
         accepted_demands,
-        accepted_recipient_address,
         compute_rate_total,
     )
 
@@ -977,51 +1044,24 @@ def materialize_escrow_terms_from_proposal(
     ):
         obligation_data["amount"] = int(agreed_amount)
 
+    # The release condition is the proposal's selected demand and nothing
+    # else: a seller authorizes it against its listing before materializing,
+    # and an arbiter or demand stated among the escrow's fields, or a
+    # recipient implied by them, is never a condition of the obligation.
     demands = accepted_demands(proposal)
-    if demands:
-        if len(demands) > 1:
-            raise ValueError(
-                "proposal demands[] is deprecated and may contain at most one "
-                "selected demand; listing demands[] remains the allowed-options list"
-            )
-        first = demands[0]
-        arbiter_address = first.get("arbiter")
-        if not isinstance(arbiter_address, str) or not arbiter_address:
-            raise ValueError("demands[0].arbiter is required")
-        demand_data = first.get("demand_data")
-        if not isinstance(demand_data, dict):
-            raise ValueError("demands[0].demand_data must be an object")
-        resolved_kind = address_to_slot(
-            proposal.chain_name,
-            arbiter_address,
-            config_path=addr_config_path,
+    if len(demands) > 1:
+        raise ReleaseConditionError(
+            "release_condition_ambiguous: a proposal selects at most one "
+            "release condition; listing demands[] remains the allowed-options list"
         )
-        if not resolved_kind:
-            raise ValueError(
-                f"Cannot resolve arbiter codec for demand arbiter "
-                f"{arbiter_address!r} on chain {proposal.chain_name!r}"
-            )
-        codec = get_arbiter_codec(resolved_kind)
-        obligation_data["arbiter"] = arbiter_address
-        obligation_data["demand"] = "0x" + codec.encode_demand_data(demand_data).hex()
-    elif "arbiter" not in obligation_data or "demand" not in obligation_data:
-        recipient = accepted_recipient_address(proposal) or seller_wallet_address
-        if not recipient:
-            raise ValueError(
-                "Escrow proposal must carry demands, arbiter+demand literals, "
-                "or a recipient fallback"
-            )
-        codec = get_arbiter_codec("recipient_arbiter")
-        agreement = AgreementContext(
-            recipient=recipient,
-            agreed_amount=int(agreed_amount or obligation_data.get("amount") or 0),
-            duration_seconds=duration_seconds,
+    if not demands:
+        raise ReleaseConditionError(
+            "release_condition_unselected: the proposal names no release "
+            "condition to materialize the escrow under"
         )
-        obligation_data["arbiter"] = codec.resolve_address(
-            proposal.chain_name,
-            config_path=addr_config_path,
-        )
-        obligation_data["demand"] = "0x" + codec.encode_demand(agreement).hex()
+    obligation_data["arbiter"], obligation_data["demand"] = encode_release_condition(
+        proposal.chain_name, demands[0], config_path=addr_config_path
+    )
 
     return [EscrowTerms(
         maker="buyer",
