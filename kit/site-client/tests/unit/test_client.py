@@ -1,4 +1,8 @@
-"""Authenticated v2 contracts for both site-capacity clients."""
+"""Authenticated v2 contracts for both site-capacity clients.
+
+Every signer seed here (a repeated byte) is a deterministic development key that
+must never be used on a public network.
+"""
 
 from __future__ import annotations
 import time

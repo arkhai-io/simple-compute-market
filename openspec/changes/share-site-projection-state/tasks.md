@@ -412,7 +412,7 @@ principals rotate with bounded overlap"). Touches `kit/site-client`,
       `ComputeProvisioningAuthenticationError`; `AuthorityTrust` is exported from the
       package. The two clients each define the alias rather than share one: they share no
       package but `kit/identity`, which this section does not touch.
-- [ ] 4.3 `core/storefront/src/core_storefront/identity_authority.py` (or a sibling module
+- [x] 4.3 `core/storefront/src/core_storefront/identity_authority.py` (or a sibling module
       it owns): the resolution VM performs in
       `domains/vms/storefront/src/middleware/service_peer_auth.py`'s
       `_allowed_service_principals` and `initialize_service_peer_identities` moves here, so
@@ -424,7 +424,9 @@ principals rotate with bounded overlap"). Touches `kit/site-client`,
       `ServicePeerConfigs` mapping (peer ID to role, site, configured principals — the shape
       VM's `get_service_peer_configs()` returns, so each storefront passes its own
       configuration in): `seed_service_peers` (VM's seeding, moved verbatim, still raising
-      `AuthError`), `require_one_service_peer_per_site` (the startup refusal Sections 10.1 and
+      `AuthError`; the middleware now reads `get_service_peer_configs()` on the event loop
+      as an argument rather than inside the worker thread, an in-memory Dynaconf read),
+      `require_one_service_peer_per_site` (the startup refusal Sections 10.1 and
       12.1 call, raising `ServicePeerConfigurationError` that names every site bound to no
       peer or to several), `site_active_principals` (VM's `_allowed_service_principals`,
       moved verbatim, for callbacks), and `site_trusted_authorities`, the provider 4.1 and
@@ -433,7 +435,7 @@ principals rotate with bounded overlap"). Touches `kit/site-client`,
       its configuration and `_allowed_service_principals` is gone; the middleware still
       reads `get_service_peer_configs` through its own module, so the tests that patch it
       there are unchanged.
-- [ ] 4.4 Tests (unit). `kit/site-client/tests/unit/test_client.py`: a provider is read per
+- [x] 4.4 Tests (unit). `kit/site-client/tests/unit/test_client.py`: a provider is read per
       response, so a rotation that ends its overlap is honored without rebuilding the
       client; the existing fixed-set tests pass unchanged. The provisioning client's unit
       suite: the same. `core/storefront/tests/unit/test_identity_authority.py`: peer
@@ -469,9 +471,9 @@ principals rotate with bounded overlap"). Touches `kit/site-client`,
       pins of it follow; VM's storefront declares `arkhai-core-storefront>=0.13.0`, since its
       middleware imports the new module. `make lock` relocked every project except the three
       PyTorch-index ones (refused here, as in 2.6). Neither `kit/policy` nor the VM buyer
-      names a bumped package; VM storefront's lock was edited by hand with exactly the ten
+      names a bumped package; VM storefront's lock was edited by hand with exactly the nine
       version, wheel-name, and specifier substitutions uv wrote into bare metal's lock for
-      the same packages, plus its own core floor; `make check-packaging` passes with it
+      the same packages, plus its own core floor (ten edits); `make check-packaging` passes with it
       (16.6 relocks it). `make check-architecture` (in `check-packaging`), `make
       check-comment-hygiene` pass; `make check-doc-citations
       CHANGE=share-site-projection-state` reports nothing. `make -k test`: every suite that
@@ -497,9 +499,17 @@ Section 4 handoff:
   capacity-runtime cache key (`repr` of the authorities) must stop carrying principals,
   as 10.2 says, since a provider's `repr` names a function, not the trust.
 - The provider must be built after `seed_service_peers` has run, and is read synchronously
-  per response: a short local SQLite read on the event loop, as admin authentication
-  already does. If that ever shows, wrap the read rather than make the client async-only:
-  the provisioning client's sync variant shares `SigningBase._verify`.
+  per response: two SQLite connections on the event loop. Core's storefront database does
+  not run in WAL mode, so a read that meets a writer's commit can wait out `sqlite3`'s busy
+  timeout and block the loop; the callback path, by contrast, reads in a worker thread.
+  10.2 resolves this before composing the provider (see its text): verification is
+  synchronous and the provisioning client's sync variant shares `SigningBase._verify`, so
+  the provider itself must not block, not the client be made async-only.
+- VM tests still patch `market_storefront.middleware.service_peer_auth.get_service_peer_configs`
+  (`tests/unit/test_service_peer_identity.py`, `tests/integration/test_admin_api.py`,
+  `tests/publication_app.py`), a module-level patch `TESTING.md` rules out. It predates this
+  change and 4.3 kept the seam so those tests stay unchanged; Section 10, which recomposes
+  VM's per-site trust, should inject the peer configuration instead and retire the patch.
 - `require_one_service_peer_per_site(peers, site_ids)` is the startup refusal (10.1, 12.1);
   callers name their sites. It does not refuse a peer bound to a site that is not
   configured, which nothing has asked for.
@@ -737,7 +747,12 @@ configuration.
       gives each site's `CapacitySite` the provider of that site's peer's active
       principals (4.1, 4.3) instead of the shared `[provisioning.identity]` set, and the
       runtime's cache key stops carrying principals. `[provisioning.identity]` remains
-      only for `build_fulfillment_client` and `services/fulfillment_service.py`.
+      only for `build_fulfillment_client` and `services/fulfillment_service.py`. The
+      provider is read synchronously on the event loop per response, so it must not block
+      on SQLite: hold each peer's principal records in memory, loaded at seeding and
+      reloaded when an identity rotation, completion, or retirement commits, and evaluate
+      `active_principals(now)` over them at each call (still "at verification time", D14b);
+      bare metal's 12.2 composes the same provider.
 - [ ] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
       `src/startup.py`, and the lane overlays use `settlement_servicing_interval_seconds`; a
       configuration stating `claims_sweep_interval` refuses startup naming its replacement;

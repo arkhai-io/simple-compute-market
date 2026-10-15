@@ -1,4 +1,8 @@
-"""The family client signs every request and verifies every response."""
+"""The family client signs every request and verifies every response.
+
+Every signer seed here (a repeated byte) is a deterministic development key that
+must never be used on a public network.
+"""
 
 import json
 import time
