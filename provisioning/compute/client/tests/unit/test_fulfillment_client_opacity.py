@@ -182,8 +182,6 @@ async def test_schedule_begin_send_no_placement_fields() -> None:
 
     for sent in handler.requests:
         if sent.content:
-            import json
-
             body = json.loads(sent.content)
             assert body.get("resource_id") in (None, ""), (
                 f"{sent.url.path} sent a non-null resource_id: {body}"
