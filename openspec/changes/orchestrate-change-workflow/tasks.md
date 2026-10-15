@@ -270,7 +270,7 @@ Delivers D11 and D1's unattended targets: the review runner absorbed into the
 wrapper, with a run-specific success (01 F4), and `UNATTENDED=1` on every step's
 target, with planning's new target (D8).
 
-- [ ] 3.1 Move `scripts/run_change_review.py`'s behaviour into
+- [x] 3.1 Move `scripts/run_change_review.py`'s behaviour into
       `run_change_step.py`'s `review` step: the reviewer-session marker, resuming
       the reviewer's session, the transcript, claiming a numbered record per run
       and removing it when the reviewer fails or its review is invalid, and the
@@ -280,17 +280,108 @@ target, with planning's new target (D8).
       `scripts/tests/test_run_change_review.py`'s cases to
       `scripts/tests/test_run_change_step.py`, and delete the old script and test
       file. Unit: a failed run beside an existing `01-design.md` logs `stopped`.
-- [ ] 3.2 `Makefile`: `make review` and `make design-review` call the wrapper's
+      Done. The review code moved as it was, into `run_change_step.py`, under a
+      `review <change> --kind …` command taking the old options; `ReviewError` is
+      now a `StepError`, the Codex runner type is `CodexRunner`, and the numbering
+      rule is one helper, `next_number`, shared with section 2's transcripts.
+      `review_and_log` logs the outcome: `finished` (`next: triage`) with
+      `record` (the published file's name), `kind`, the reviewed commit, and the
+      session as `codex:<id>`, all read back from the markers this run's record
+      ends with; any `ReviewError`, including a refusal before the reviewer
+      starts, is `stopped` with its message as the reason and `HEAD` as the
+      commit; a reviewer that cannot start (`codex` missing) or is interrupted
+      is logged `stopped` with `HEAD` too, and an interrupt is then re-raised,
+      as `run` does. The session and commit are the last markers in the record,
+      since a review may quote an earlier record's; `prior_session` likewise
+      takes the last session marker, where the old runner took the first. A
+      review's `stopped` line has no `exit_status` or `transcript` field: the
+      runner's reason names Codex's exit ("the reviewer exited N") and the
+      transcript, and the review keeps its own `.log` transcript naming. Codex's
+      progress and the "Review written to <record>" line (now the file's name,
+      not its repository path) go to stderr, so stdout carries only the outcome
+      line; a unit test shows that for a stopped review, not a published one,
+      since `main` runs the module's review functions rather than an injected
+      runner. All 54 tests of the old file moved (`reviewer.` → `step.`; the
+      Codex session fixture renamed `CODEX_SESSION`); `make review`'s now
+      expects the wrapper's command, and the three `make -n` tests run through
+      the new `_make_n`, clear of inherited variables. The old script and test
+      file are deleted. The permanent spec's Evidence
+      line cited the deleted script and now names `run_change_step.py review`,
+      so the citation resolves. Unit, new: a published review logged
+      `finished` with its record, commit, and session; a failed run beside an
+      earlier record of its kind logged `stopped`, no `record`; a pre-closeout
+      review refused before it runs, an interrupted review, and the command's
+      non-zero exit, each `stopped`; a review quoting earlier markers logged with
+      its own; a reviewer that cannot start logged `stopped` with `HEAD`.
+- [x] 3.2 `Makefile`: `make review` and `make design-review` call the wrapper's
       `review` step with their current arguments; `make design`, `make triage`,
       `make implement` (with `SECTION`/`SECTIONS`), `make validate`,
       `make closeout`, and `make archive-cleanup` run the wrapper when
       `UNATTENDED=1` and are unchanged otherwise; add `make plan CHANGE=<change>`
       after `make design`, interactive by default, its unattended form resuming
       the design step's session from the log (D8).
-- [ ] 3.3 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
+      Done. `STEP_RUN` names the wrapper's `run`; each target chooses with
+      `$(if $(filter 1,$(UNATTENDED)),…)`, its interactive form unchanged.
+      `implement` passes `--sections` from `SECTIONS`, else `SECTION`; `validate`
+      passes `HELM_ALL_SCENARIOS=1` as `--arguments`; `make plan` takes `FRESH=1`
+      (only `1`, as `UNATTENDED`) for `--fresh` (2.2) and is added to `.PHONY`. Unit (`make -n`, with
+      `MAKEFLAGS` and the step variables cleared from the environment, since a
+      calling make passes its own command-line variables down): every step
+      target's interactive and unattended commands, implementation's sections,
+      planning's `FRESH` (and `FRESH=0` not fresh), validation's
+      `HELM_ALL_SCENARIOS`, and `make review`; the suite also passes with
+      `UNATTENDED=1` exported.
+- [x] 3.3 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
       (unit); `make test`; `make -n` of each target with and without
       `UNATTENDED=1`, recorded here; one real `make review KIND=design` on a
       scratch copy of a change, confirming the record, marker, and outcome line.
+      Unit: `uv run --no-project --with pytest pytest -q
+      scripts/tests/test_run_change_step.py`, 175 passed, then 178 after the
+      fresh-context fixes, which ran with the focused suite and
+      `make check-comment-hygiene` only.
+      `make check-comment-hygiene`, `make check-packaging`: passed. `make test`:
+      passed, `scripts/tests` included.
+      `make -n` (with `CHANGE=X`, after `find_change.py` and `round_view.py`):
+      `design` → `claude "/change-design X"`, unattended
+      `python3 scripts/run_change_step.py run design "X"`; likewise `plan`,
+      `triage`, `validate`, `closeout`, `archive-cleanup`, and `implement`;
+      `implement SECTIONS=1-3` → `claude "/change-implement X sections 1-3"`,
+      unattended `… run implement "X" --sections "1-3"`; `SECTION=2` →
+      `section 2`, `--sections "2"`; `plan UNATTENDED=1 FRESH=1` → `… run plan
+      "X" --fresh`; `validate UNATTENDED=1 HELM_ALL_SCENARIOS=1` → `… run
+      validate "X" --arguments "with HELM_ALL_SCENARIOS=1"`; `review KIND=design`
+      → `python3 scripts/run_change_step.py review "X" --kind "design" --base
+      "dev" --model "gpt-6-sol" --effort "high"`.
+      Real review: `make -C <scratch worktree> review CHANGE=scratch-orchestrate
+      KIND=design`, the worktree of 2.5 with this section's `scripts/` files and
+      `Makefile` copied in: exit 0; Codex published `reviews/06-design.md`
+      (numbered after section 2's five plan transcripts), its transcript
+      `transcripts/06-design.log`, the record ending
+      `<!-- reviewer-session: 01a13f09-… -->` and
+      `<!-- reviewed-commit: 979b4ec1… -->`, and logged
+      `{"seq": 5, "step": "review", "session": "codex:01a13f09-…", "commit":
+      "979b4ec1…", "kind": "design", "record": "06-design.md", "outcome":
+      "finished", "next": "triage", "message": "06-design.md written; triage is
+      next"}`. The worktree's `HEAD` is still `979b4ec1`, with these files as
+      uncommitted copies; the reviewed commit is that `HEAD`. It was a fresh
+      reviewer: continuing an earlier reviewer's session was not exercised, nor
+      did the run show what stdout held beyond the log line `make` printed.
+      `make check-doc-citations CHANGE=orchestrate-change-workflow` now reports
+      `scripts/run_change_review.py` and its test as missing: only this change's
+      `design.md`, `proposal.md`, and `tasks.md` cite them, describing what the
+      change removes. Closeout's citation check (8.10) has to resolve those, by
+      the narrative compression (8.4) rewording them or by the owner accepting
+      them as the change's record of what it removed.
+
+Handoff. Deleting `run_change_review.py` meant editing the permanent
+`openspec/specs/change-workflow/spec.md` Evidence line now, not at closeout: the
+Evidence section sits outside any requirement, so the delta cannot carry it, and
+a citation of a deleted file is a blocking defect. 8.9's promotion record should
+list it. Reviews stayed module functions (`run_review`, `review_and_log`) rather
+than joining `Wrapper`, as section 2's handoff suggested: the Codex runner,
+transcript, and numbering are their own, and moving them would have rewritten the
+moved tests. `docs/agents/change-workflow.md` does not yet name `make plan`,
+`UNATTENDED=1`, or the workflow log; 8.9 owns that.
 
 ## 4. The next-step computation
 
@@ -436,6 +527,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         taking over a step, maintaining `scripts/change_steps.toml`; "The review
         directory" gains `workflow.jsonl` and the step transcripts.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
+      - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
+        from `scripts/run_change_review.py` to `run_change_step.py review` in
+        section 3, when the script was deleted; record it here.
       - `openspec/specs/README.md` and `docs/development/ARCHITECTURE.md` — no
         change: no new capability or companion, and the workflow is contributor
         process.

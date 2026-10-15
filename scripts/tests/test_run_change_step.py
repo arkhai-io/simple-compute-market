@@ -5,9 +5,12 @@ from __future__ import annotations
 import fnmatch
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Sequence
 
 import pytest
 
@@ -742,3 +745,669 @@ def test_a_backwards_section_range_is_refused(tmp_path: Path,
     assert step.main(["run", "implement", CHANGE, "--sections", "3-1"], root=tmp_path,
                      wrapper=_wrapper(tmp_path, FakeClaude())) == 1
     assert "runs backwards" in capsys.readouterr().err
+
+
+# Reviews: run read-only in Codex, published only when they are reviews.
+
+# The commit each review is told it reviews; HEAD is injected, never read from Git.
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+FINDING = """### F1 — The override has no carrier
+
+- **Lens:** architecture
+- **Basis:** evidence
+- **Severity:** blocking
+- **Evidence:** `kit/pool-overrides/records.py:43`
+
+The record has no field for it.
+
+**Suggested action:** Choose one.
+"""
+
+
+def _review(kind: str = "design", findings: str = FINDING) -> str:
+    return (f"# {kind.capitalize()} review — {CHANGE}\n\n## Summary\n\nWhat it does.\n\n"
+            "## Assessment\n\nSound.\n\n## Questions\n\n### consistency — Is it consistent?\n\n"
+            f"Yes.\n\n## Findings\n\n{findings}\n## Readiness\n\nNot yet.\n")
+
+
+def _repository(tmp_path: Path, *records: str) -> Path:
+    reviews = tmp_path / "openspec/changes" / CHANGE / "reviews"
+    reviews.mkdir(parents=True)
+    for name in records:
+        (reviews / name).parent.mkdir(parents=True, exist_ok=True)
+        (reviews / name).write_text("x", "utf-8")
+    return tmp_path
+
+
+def _writing(text: str, status: int = 0, calls: list[list[str]] | None = None,
+             session: str = "s-1"):
+    def runner(command: Sequence[str], log: Path) -> int:
+        if calls is not None:
+            calls.append(list(command))
+        log.write_text(f"--------\nsession id: {session}\n--------\nsession output\n", "utf-8")
+        Path(command[command.index("--output-last-message") + 1]).write_text(text, "utf-8")
+        return status
+    return runner
+
+
+def _reviews(root: Path) -> Path:
+    return root / "openspec/changes" / CHANGE / "reviews"
+
+
+def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+
+    path = step.run_review(CHANGE, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
+
+    assert path == _reviews(root) / f"01-{kind}.md"
+    assert path.read_text("utf-8") == (_review().rstrip("\n") + "\n\n<!-- reviewer-session: s-1 -->\n"
+                                       f"<!-- reviewed-commit: {HEAD} -->\n")
+    assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
+    assert sorted(p.name for p in _reviews(root).iterdir()) == [path.name, "transcripts"]
+
+
+def test_numbering_follows_records_and_transcripts(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "01-design.log", "02-validation.log", "transcripts/03-implementation.log")
+
+    path = step.run_review(CHANGE, "implementation", root=root,
+                               runner=_writing(_review("implementation")), head=lambda _: HEAD)
+
+    assert path.name == "04-implementation.md"
+
+
+def test_reviewer_runs_read_only_with_the_skill(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "pre-closeout", base="main", model="m1", effort="high", root=root,
+                        unvalidated=True, runner=_writing(_review("pre-closeout"), calls=calls), head=lambda _: HEAD)
+
+    command = calls[0]
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert command[command.index("--model") + 1] == "m1"
+    assert command[command.index("--config") + 1] == 'model_reasoning_effort="high"'
+    assert command[-1] == ("Use the change-review skill. Review kind: pre-closeout. "
+                           f"Change: {CHANGE}. Base: main.")
+
+
+def test_design_review_names_no_base(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls), head=lambda _: HEAD)
+
+    assert "Base:" not in calls[0][-1]
+    assert "--model" not in calls[0]
+    assert "--config" not in calls[0]
+
+
+def test_a_review_with_no_findings_is_accepted(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    path = step.run_review(CHANGE, "design", root=root,
+                               runner=_writing(_review(findings="None: the change needs none.\n")), head=lambda _: HEAD)
+
+    assert path.is_file()
+
+
+@pytest.mark.parametrize("text,status,reason", [
+    ("", 0, "empty"),
+    (_review(), 1, "exited 1"),
+    ("ERROR: the model is not supported\n", 0, "title"),
+    (_review().replace("## Questions", "## Notes"), 0, "missing section '## Questions'"),
+    (_review().replace("- **Basis:** evidence\n", ""), 0, "F1 has no Basis"),
+    (_review().replace("blocking", "urgent"), 0, "F1 has Severity 'urgent'"),
+    (_review("implementation"), 0, "title"),
+])
+def test_output_that_is_not_a_review_publishes_nothing(
+    tmp_path: Path, text: str, status: int, reason: str
+) -> None:
+    root = _repository(tmp_path)
+
+    with pytest.raises(step.ReviewError, match=reason):
+        step.run_review(CHANGE, "design", root=root, runner=_writing(text, status), head=lambda _: HEAD)
+
+    assert [p.name for p in _reviews(root).iterdir()] == ["transcripts"]
+    assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
+
+
+def test_rejected_output_is_kept_with_its_transcript(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    with pytest.raises(step.ReviewError):
+        step.run_review(CHANGE, "design", root=root, runner=_writing("ERROR: refused\n"), head=lambda _: HEAD)
+
+    rejected = _reviews(root) / "transcripts" / "01-design.rejected.md"
+    assert rejected.read_text("utf-8") == "ERROR: refused\n"
+
+
+@pytest.mark.parametrize("change,kind", [("missing", "design"), ("archive", "design"), ("../x", "design"),
+                                         (CHANGE, "triage")])
+def test_unknown_change_or_kind_is_refused(tmp_path: Path, change: str, kind: str) -> None:
+    root = _repository(tmp_path)
+
+    with pytest.raises(step.ReviewError):
+        step.run_review(change, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
+
+
+def test_a_closeout_review_of_an_archived_change_is_recorded_in_the_archive(tmp_path: Path) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-14-{CHANGE}"
+    archived.mkdir(parents=True)
+
+    path = step.run_review(CHANGE, "closeout", root=tmp_path,
+                               runner=_writing(_review("closeout")), head=lambda _: HEAD)
+
+    assert path == archived / "reviews" / "01-closeout.md"
+
+
+def test_a_closeout_review_of_an_active_change_is_refused(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    with pytest.raises(step.ReviewError, match="not archived"):
+        step.run_review(CHANGE, "closeout", root=root, head=lambda _: HEAD,
+                            runner=_writing(_review("closeout"), calls=calls))
+
+    assert calls == []
+    assert not (_reviews(root) / "transcripts").exists()
+
+
+def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    path = step.run_review(CHANGE, "design", root=root,
+                               runner=_writing(_review(), calls=calls, session="first"), head=lambda _: HEAD)
+
+    command = calls[0]
+    assert command[:4] == ["codex", "exec", "resume", "first"]
+    assert command[command.index("--config") + 1] == 'sandbox_mode="read-only"'
+    assert "01-design" in command[-1] and "triage records" in command[-1]
+    assert path.stem == "02-design"
+    assert path.read_text("utf-8").count("<!-- reviewer-session: first -->\n") == 1
+
+
+def test_fresh_starts_a_new_reviewer(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "design", fresh=True, root=root,
+                        runner=_writing(_review(), calls=calls, session="second"), head=lambda _: HEAD)
+
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+def test_a_review_of_another_kind_does_not_continue(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), session="first"), head=lambda _: HEAD)
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "implementation", root=root,
+                        runner=_writing(_review("implementation"), calls=calls), head=lambda _: HEAD)
+
+    assert "resume" not in calls[0]
+
+
+def test_an_external_review_is_never_continued(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "01-design-external.md").write_text(_review(), "utf-8")
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls), head=lambda _: HEAD)
+
+    assert "resume" not in calls[0]
+
+
+CODEX_SESSION = """Reading additional input from stdin...
+OpenAI Codex v0.157.0
+--------
+workdir: /repo
+model: gpt-6-sol
+sandbox: read-only
+session id: abc
+--------
+user
+Use the change-review skill.
+codex
+I'll load the guidance first.
+exec
+/bin/bash -lc 'cat AGENTS.md' in /repo
+ succeeded in 0ms:
+# Repository Engineering Guidance
+exec
+/bin/bash -lc 'rg missing' in /repo
+ exited 1 in 4ms:
+codex
+# Design review — shape-bounds
+one
+two
+three
+four
+five
+tokens used
+83,133
+# Design review — shape-bounds
+"""
+
+
+def _shown(text: str) -> list[str]:
+    progress = step.Progress()
+    shown = [out for line in text.splitlines(keepends=True) for out in progress.feed(line)]
+    return shown + progress.close()
+
+
+def test_progress_shows_commands_and_messages_not_file_contents() -> None:
+    shown = _shown(CODEX_SESSION)
+
+    assert shown[:3] == ["model: gpt-6-sol", "sandbox: read-only", "session id: abc"]
+    assert "» I'll load the guidance first." in shown
+    assert "$ cat AGENTS.md" in shown
+    assert "  ✗ exited 1 in 4ms:" in shown
+    assert not any("Repository Engineering Guidance" in line for line in shown)
+    assert not any("Use the change-review skill" in line for line in shown)
+    assert shown[-1] == "tokens used: 83,133"
+
+
+def test_progress_cuts_long_messages_short() -> None:
+    shown = _shown(CODEX_SESSION)
+
+    review = [line for line in shown if line.startswith("» ") and "load the guidance" not in line]
+    assert review[0] == "» # Design review — shape-bounds"
+    assert review[-1] == "» … (2 more lines in the transcript)"
+    assert len(review) == step.Progress.MESSAGE_LINES + 1
+
+
+def test_progress_always_shows_errors() -> None:
+    assert _shown("model: m\nERROR: the model is not supported\n") == [
+        "model: m", "ERROR: the model is not supported"]
+
+
+def test_a_record_written_during_the_run_takes_the_earlier_number(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "01-design.log")
+    inner = _writing(_review("implementation"))
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        # A validation started beside the review publishes its record meanwhile.
+        (_reviews(root) / "02-validation.md").write_text("x", "utf-8")
+        return inner(command, log)
+
+    path = step.run_review(CHANGE, "implementation", root=root, runner=runner, head=lambda _: HEAD)
+
+    assert path.name == "03-implementation.md"
+    assert (_reviews(root) / "transcripts" / "03-implementation.log").is_file()
+    assert not list((_reviews(root) / "transcripts").glob("pending-*"))
+
+
+
+def _validation(commit: str, result: str) -> str:
+    return (f"# Validation — {CHANGE} — {commit[:12]}\n\n- **Commit:** {commit} on feat/x\n"
+            f"- **Result:** {result} — why\n")
+
+
+@pytest.mark.parametrize("records, reason", [
+    ({}, "no validation record"),
+    ({"03-validation.md": _validation("f" * 40, "passed")}, "not HEAD"),
+    ({"03-validation.md": _validation(HEAD, "inconclusive")}, "inconclusive, not passed"),
+    ({"03-validation.md": _validation(HEAD, "passed"),
+      "05-validation.md": _validation(HEAD, "failed")}, "05-validation.md's result is failed"),
+])
+def test_a_pre_closeout_review_needs_a_passing_validation_of_head(
+    tmp_path: Path, records: dict[str, str], reason: str
+) -> None:
+    root = _repository(tmp_path)
+    for name, text in records.items():
+        (_reviews(root) / name).write_text(text, "utf-8")
+    calls: list[list[str]] = []
+
+    with pytest.raises(step.ReviewError, match=reason):
+        step.run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                            runner=_writing(_review("pre-closeout"), calls=calls))
+
+    assert calls == []
+
+
+def test_a_passing_validation_of_head_admits_a_pre_closeout_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(HEAD, "passed"), "utf-8")
+
+    path = step.run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                               runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "04-pre-closeout.md"
+
+
+VALIDATED = "f" * 40
+RECORDS = f"openspec/changes/{CHANGE}"
+
+
+@pytest.mark.parametrize("changed, reason", [
+    ([f"{RECORDS}/interventions.jsonl", f"{RECORDS}/reviews/05-validation.triage.md"], None),
+    ([], None),
+    ([f"{RECORDS}/interventions.jsonl", f"{RECORDS}/notes.txt"], f"also changes {RECORDS}/notes.txt"),
+    (["openspec/changes/other/interventions.jsonl", "openspec/changes/other/reviews/01-review.txt"],
+     None),
+    (["openspec/changes/other/notes.jsonl"], "also changes openspec/changes/other/notes.jsonl"),
+    (["openspec/changes/interventions.jsonl"], "also changes openspec/changes/interventions.jsonl"),
+    (["openspec/changes/archive/interventions.jsonl"], "also changes openspec/changes/archive/"),
+    (None, "not HEAD"),
+])
+def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(
+    tmp_path: Path, changed: list[str] | None, reason: str | None
+) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(VALIDATED, "passed"), "utf-8")
+    compared: list[tuple[str, str]] = []
+
+    def changed_since(_: Path, commit: str, head: str) -> list[str] | None:
+        compared.append((commit, head))
+        return changed
+
+    problem = step.validation_problem(_reviews(root), HEAD, root, changed_since)
+
+    assert compared == [(VALIDATED, HEAD)]
+    if reason is None:
+        assert problem is None
+    else:
+        assert problem is not None and reason in problem
+
+
+def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (_reviews(root) / "03-validation.md").write_text(_validation(VALIDATED, "passed"), "utf-8")
+
+    path = step.run_review(
+        CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+        changed_since=lambda *_: [f"{RECORDS}/interventions.jsonl"],
+        runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "04-pre-closeout.md"
+
+
+def test_the_paths_changed_since_are_read_from_git(tmp_path: Path) -> None:
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (tmp_path / "ledger.jsonl").write_text("1\n", "utf-8")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    (tmp_path / "ledger.jsonl").write_text("1\n2\n", "utf-8")
+    (tmp_path / "név.md").write_text("x", "utf-8")
+    git("add", ".")
+    git("commit", "-qm", "records")
+    head = git("rev-parse", "HEAD")
+
+    assert sorted(step._changed_since(tmp_path, base, head)) == ["ledger.jsonl", "név.md"]
+    git("mv", "ledger.jsonl", "moved.jsonl")
+    git("commit", "-qm", "rename")
+
+    assert sorted(step._changed_since(tmp_path, head, git("rev-parse", "HEAD"))) == [
+        "ledger.jsonl", "moved.jsonl"]
+    assert step._changed_since(tmp_path, head, base) is None
+    assert step._changed_since(tmp_path, "e" * 40, head) is None
+
+
+def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    path = step.run_review(CHANGE, "pre-closeout", root=root, unvalidated=True,
+                               head=lambda _: HEAD, runner=_writing(_review("pre-closeout")))
+
+    assert path.name == "01-pre-closeout.md"
+
+
+def test_an_implementation_review_never_waits_for_validation(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    path = step.run_review(CHANGE, "implementation", root=root, head=lambda _: HEAD,
+                               runner=_writing(_review("implementation")))
+
+    assert path.name == "01-implementation.md"
+
+
+def test_make_review_passes_the_override() -> None:
+    command = "\n".join(_make_n("review", f"CHANGE={CHANGE}", "KIND=pre-closeout",
+                                "UNVALIDATED=1"))
+
+    assert "scripts/run_change_step.py review" in command and "--unvalidated" in command
+
+
+def test_make_closeout_opens_the_closeout_skill() -> None:
+    command = "\n".join(_make_n("closeout", f"CHANGE={CHANGE}", keep_checks=True))
+
+    assert "scripts/find_change.py" in command and "--active" not in command
+    assert f"\"/change-closeout {CHANGE}\"" in command
+
+
+def test_make_archive_cleanup_takes_only_an_archived_change() -> None:
+    command = "\n".join(_make_n("archive-cleanup", f"CHANGE={CHANGE}", keep_checks=True))
+
+    assert "scripts/find_change.py --archived" in command
+    assert f"\"/change-archive-cleanup {CHANGE}\"" in command
+
+
+def test_an_interrupted_run_still_numbers_its_transcript(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        log.write_text("partial\n", "utf-8")
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        step.run_review(CHANGE, "design", root=root, runner=runner, head=lambda _: HEAD)
+
+    transcripts = _reviews(root) / "transcripts"
+    assert [p.name for p in transcripts.iterdir()] == ["01-design.log"]
+
+
+@pytest.mark.parametrize("record, admitted", [
+    (f"- **Commit:** {HEAD[:12]} on feat/x\n- **Result:** passed — why\n", True),
+    (f"- **Commit:** `{HEAD}` on feat/x\n- **Result:** passed — why\n", False),
+    (f"- **Commit:** {HEAD} on feat/x\n- **Result:** **passed**\n", False),
+])
+def test_the_validation_record_lines_are_read_exactly(
+    tmp_path: Path, record: str, admitted: bool
+) -> None:
+    reviews = _reviews(_repository(tmp_path))
+    (reviews / "02-validation.md").write_text(record, "utf-8")
+
+    assert (step.validation_problem(reviews, HEAD) is None) is admitted
+
+
+def test_a_claimed_name_is_never_overwritten(tmp_path: Path) -> None:
+    reviews = _reviews(_repository(tmp_path))
+    taken = reviews / "03-validation.md"
+    taken.write_text("another writer's record", "utf-8")
+    proposals = iter([taken, reviews / "04-validation.md"])
+
+    claimed = step.claim_record(reviews, "validation", propose=lambda *_: next(proposals))
+
+    assert claimed.name == "04-validation.md"
+    assert taken.read_text("utf-8") == "another writer's record"
+
+
+def test_an_interrupted_run_leaves_no_empty_record(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def runner(command: Sequence[str], log: Path) -> int:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        step.run_review(CHANGE, "design", root=root, runner=runner, head=lambda _: HEAD)
+
+    assert sorted(p.name for p in _reviews(root).iterdir()) == ["transcripts"]
+
+
+def test_the_proposed_number_advances_past_a_record_written_meanwhile(tmp_path: Path) -> None:
+    reviews = _reviews(_repository(tmp_path, "01-design.log"))
+    (reviews / "02-validation.md").write_text("another writer's record", "utf-8")
+
+    claimed = step.claim_record(reviews, "validation")
+
+    assert claimed.name == "03-validation.md"
+    assert (reviews / "02-validation.md").read_text("utf-8") == "another writer's record"
+
+
+# The workflow targets, interactive and unattended.
+
+def _make_n(*arguments: str, keep_checks: bool = False) -> list[str]:
+    """`make -n` of a target, with no step variable inherited from the caller.
+
+    A make that ran these tests passes its own command-line variables down through
+    MAKEFLAGS, so those are dropped too.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
+                          "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
+                          "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
+                            cwd=Path(__file__).resolve().parents[2], capture_output=True,
+                            text=True, check=True, env=env).stdout
+    return [line for line in output.splitlines() if keep_checks
+            or ("find_change.py" not in line and "round_view.py" not in line)]
+
+
+@pytest.mark.parametrize("target,interactive,unattended", [
+    ("design", 'claude "/change-design X"', 'run design "X"'),
+    ("plan", 'claude "/change-plan X"', 'run plan "X"'),
+    ("triage", 'claude "/change-triage X"', 'run triage "X"'),
+    ("validate", 'claude "/change-validate X"', 'run validate "X"'),
+    ("closeout", 'claude "/change-closeout X"', 'run closeout "X"'),
+    ("archive-cleanup", 'claude "/change-archive-cleanup X"', 'run archive-cleanup "X"'),
+    ("implement", 'claude "/change-implement X"', 'run implement "X"'),
+])
+def test_a_step_target_is_interactive_unless_unattended(
+        target: str, interactive: str, unattended: str) -> None:
+    assert _make_n(target, "CHANGE=X") == [interactive]
+    assert _make_n(target, "CHANGE=X", "UNATTENDED=1") == [
+        f"python3 scripts/run_change_step.py {unattended}"]
+
+
+@pytest.mark.parametrize("variable,interactive,unattended", [
+    ("SECTION=2", "section 2", '--sections "2"'),
+    ("SECTIONS=1-3", "sections 1-3", '--sections "1-3"'),
+])
+def test_implementation_targets_pass_their_sections(
+        variable: str, interactive: str, unattended: str) -> None:
+    assert _make_n("implement", "CHANGE=X", variable) == [
+        f'claude "/change-implement X {interactive}"']
+    assert _make_n("implement", "CHANGE=X", variable, "UNATTENDED=1") == [
+        f'python3 scripts/run_change_step.py run implement "X" {unattended}']
+
+
+def test_unattended_planning_may_start_fresh_and_validation_take_every_scenario() -> None:
+    assert _make_n("plan", "CHANGE=X", "UNATTENDED=1", "FRESH=1") == [
+        'python3 scripts/run_change_step.py run plan "X" --fresh']
+    assert _make_n("validate", "CHANGE=X", "UNATTENDED=1", "HELM_ALL_SCENARIOS=1") == [
+        'python3 scripts/run_change_step.py run validate "X" '
+        '--arguments "with HELM_ALL_SCENARIOS=1"']
+
+
+def test_make_review_runs_the_wrappers_review() -> None:
+    assert _make_n("review", "CHANGE=X", "KIND=design") == [
+        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
+        '--model "gpt-6-sol" --effort "high"  ']
+
+
+# A review's outcome in the workflow log.
+
+def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+
+    line = step.review_and_log(CHANGE, kind, root=root, clock=_clock,
+                               runner=_writing(_review(), session="codex-1"),
+                               head=lambda _: HEAD)
+
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "review",
+                    "session": "codex:codex-1", "commit": HEAD, "kind": "design",
+                    "record": f"01-{kind}.md", "outcome": "finished", "next": "triage",
+                    "message": f"01-{kind}.md written; triage is next"}
+
+
+def test_a_failed_review_beside_an_earlier_record_is_logged_stopped(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+    (_reviews(root) / f"01-{kind}.md").write_text(_review(), "utf-8")
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock,
+                               runner=_writing("ERROR: refused\n"), head=lambda _: HEAD)
+
+    assert (line["outcome"], line["commit"], line["session"]) == ("stopped", HEAD, None)
+    assert line["reason"].startswith("the reviewer produced no review")
+    assert "record" not in line
+
+
+def test_a_review_refused_before_it_runs_is_logged_stopped(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    line = step.review_and_log(CHANGE, "pre-closeout", root=root, clock=_clock,
+                               runner=_writing(_review("pre-closeout")), head=lambda _: HEAD)
+
+    assert line["outcome"] == "stopped"
+    assert "no validation record" in line["reason"]
+
+
+def test_an_interrupted_review_is_logged_stopped(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def runner(command, log: Path) -> int:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=runner,
+                            head=lambda _: HEAD)
+
+    line = step.read_log(step.log_path(root, CHANGE))[-1]
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the review did not finish: KeyboardInterrupt")
+
+
+def test_the_review_command_exits_non_zero_when_it_stops(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path)
+
+    assert step.main(["review", CHANGE, "--kind", "closeout"], root=root) == 1
+
+    captured = capsys.readouterr()
+    assert "not archived" in captured.err
+    assert json.loads(captured.out)["outcome"] == "stopped"
+
+
+def test_a_review_quoting_an_earlier_records_markers_is_logged_with_its_own(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    quoted = _review().replace("The record has no field for it.",
+                               "The earlier record ends `<!-- reviewer-session: old -->` and "
+                               f"`<!-- reviewed-commit: {'e' * 40} -->`.")
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock,
+                               runner=_writing(quoted, session="new"), head=lambda _: HEAD)
+
+    assert (line["session"], line["commit"]) == ("codex:new", HEAD)
+
+
+def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def missing(command, log: Path) -> int:
+        raise FileNotFoundError("codex")
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=missing,
+                               head=lambda _: HEAD)
+
+    assert (line["outcome"], line["commit"]) == ("stopped", HEAD)
+    assert line["reason"] == "the review did not finish: FileNotFoundError: codex"
+
+
+def test_planning_starts_fresh_only_for_fresh_1() -> None:
+    assert _make_n("plan", "CHANGE=X", "UNATTENDED=1", "FRESH=0") == [
+        'python3 scripts/run_change_step.py run plan "X"']

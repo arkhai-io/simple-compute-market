@@ -419,7 +419,7 @@ a skill MUST resolve.
   `change-triage/`, `change-implement/`, `change-validate/`, `change-closeout/`, and
   `change-archive-cleanup/`, linked for each harness and held by
   `make check-agent-skills` (`scripts/check_agent_skills.py`).
-- Review records: `make review` (`scripts/run_change_review.py`); finding a change
+- Review records: `make review` (`scripts/run_change_step.py review`); finding a change
   by name, active or archived: `scripts/find_change.py`.
 - Validation: `make validate-local` and `make validate-helm`
   (`scripts/validate_slice.py`); run selection for the validated commit:
