@@ -24,7 +24,7 @@ outcome").
       Done. One object schema with `outcome` and `message` required and an
       `allOf` of `if`/`then` per outcome, not a top-level `oneOf`, since
       `--json-schema` hands Claude Code an object schema (a premise section 2's
-      hand run confirms, not yet tested); `additionalProperties`
+      hand runs proved wrong for a top-level `allOf`; see 2.5); `additionalProperties`
       is false, so a step cannot set a field the wrapper records; `return_to` is
       one of `design`, `planning`, `implementation`; `next` is free text, since
       routing is `change_next_step.py`'s (D14), not the step's. The scripts run on
@@ -92,11 +92,48 @@ D6, D7; the wrapper side of D12 and 01 F5; requirements "Unattended step runs en
 with a structured outcome" and "Unattended runs are held to their step's
 permissions").
 
-- [ ] 2.1 Add `scripts/change_steps.toml` with D6's table: each step's skill and
+- [x] 2.1 Add `scripts/change_steps.toml` with D6's table: each step's skill and
       its allow and deny rules, including design's `git worktree add` from dev and
       edits under that worktree's `openspec/` (D5), and validation's guarded push
       as the only push.
-- [ ] 2.2 `run_change_step.py run <step> <change>`: `claude -p` with the step's
+      Done. A `[common]` row adds read-only Git, `find_change.py`, the log
+      reader, `make round-view-closed`, and `make check-change-index` to every
+      step, and denies `git push`, history rewrites, opening or closing the
+      round view, and editing `scripts/change_steps.toml` or `.claude/`, the one
+      settings source an unattended run loads, so no step widens its own or a
+      later step's permissions; each `[steps.<step>]` row names its skill, and planning's names
+      `resume_from = "design"` (D8). Beyond D6's table: closeout may edit
+      `AGENTS.md`, since 8.9 promotes to it, and run `python3 scripts/check_*`;
+      implementation and triage may also run `make dist*`, `make reinit*`,
+      `uv sync*`, `make -C * test*`, and `uv run` only for pytest (a bare
+      `uv run *` would run `git push` past the deny); triage denies
+      `make run-e2e` as implementation does; validation may run
+      `make check-push-ready` and `make dist-clean`, and denies `Edit`,
+      `git add`, `docker push`, and `helm push`; design and planning deny every `git commit`, not only code's,
+      since the owner commits design-phase work (D10). `docker *`, `kubectl *`,
+      and `helm *` stay broad for validation, as D6 allows them, so D6's
+      "editing tracked files" denial rests on `Edit` and the narrow `Write`
+      alone: a container with a mount, or `make dist-clean`, is not ruled out.
+      The subagent tool is `Task` and there is no `TodoWrite` in Claude Code
+      2.1.300 (the hand run's `init` event lists the tools), so the table names
+      `Task`. Unit: the table
+      names each Claude Code step (review is Codex's); matching sample commands
+      against each step's rules by glob, no step but validation is allowed
+      `git push`, `uv run git push`, `make push-branch`, or `make run-e2e`;
+      `docker push`, or `helm push`; every step may run `make round-view-closed`
+      and none may open or close the view; no step may edit the table or
+      `.claude/`; validation denies `make lock`, `git commit`, and `Edit`; a
+      table with a row lacking a skill, an unknown key, step, or table, a rule
+      list given as a string, or a `resume_from` naming no row is refused. The
+      glob matching approximates Claude Code's rule matching. The hand runs
+      (2.5) show only that Claude Code starts with `common`'s and planning's
+      rules, from an earlier version of the table; no rule was seen to allow or
+      deny a call there, and every other step's rules have never been passed to
+      Claude Code. Untested: design's `git worktree add` rule and its
+      `../*-proposal/` edit rules, which reach outside the working directory;
+      the pilot exercises them only if its design is blocked on a prerequisite.
+      The rules are a first seed: the pilot's denials refine them (7.3).
+- [x] 2.2 `run_change_step.py run <step> <change>`: `claude -p` with the step's
       skill prompt, `--permission-mode dontAsk`, the step's rules from
       `change_steps.toml`, the outcome schema through `--json-schema`, and
       `--output-format stream-json --verbose`; record the session id; append the
@@ -106,20 +143,126 @@ permissions").
       from the step's account (D3, 01 F5). Unit (fake runner and fake stream): each
       outcome is logged with session and commit; a crash, an empty and a malformed
       outcome each log `stopped`; denials are taken from the stream.
-- [ ] 2.3 `run_change_step.py resume <change> --answer <text> [--allow <rule>]`:
+      Done. The command is `claude -p <prompt>` with the prompt straight after
+      `-p` (the rule lists are variadic), `--setting-sources project` so the
+      owner's own allow rules never widen a step's, and `--append-system-prompt`
+      saying the run is unattended and how to end a turn (section 5 puts the same
+      into the skills). The skill is invoked as `/change-<step> <change>`, with
+      `--sections` (implementation's, `2`, `1-3`, or `1,3`; logged as a list)
+      and free `--arguments`. Claude Code is given the schema without its
+      top-level `allOf` (`harness_schema`), since the API refuses a top-level
+      combinator in a tool's input schema; the wrapper checks the full schema at
+      the end. A run that ends `is_error` is also logged `stopped`. Each line adds
+      `exit_status` and `transcript`; `run` exits 1 when the line is `stopped`.
+      Unit (`test_run_change_step.py`, fake runner and fake stream): the command's
+      flags, rules, and schema; each outcome logged with session and commit;
+      crash, no outcome, error result, and malformed outcome each `stopped`;
+      denials from the stream replacing the step's, and kept for a failed run;
+      implementation's sections; planning resuming design's session, or starting
+      fresh without one; review refused as not a Claude Code step.
+      After the fresh-context check: a runner that raises (`claude` missing, an
+      interrupt) still logs `stopped`, `exit_status` null, and an interrupt is
+      re-raised after the line is written; planning resumes the latest session
+      of design or planning, and `--fresh` starts it anew (D8's offer of a fresh
+      session), but refuses to resume past a design or planning run that
+      recorded no session, as `resume` does; only implementation takes
+      `--sections`, and a backwards range is refused; a run denied any tool is
+      logged `stopped` naming the denials, whatever it answered, since the delta
+      requires it and a step that carried on may have worked around the denial;
+      progress goes to stderr, so stdout carries only the outcome line. Each is
+      unit-tested, except that `_run_claude` kills a `claude` process still
+      running when reading its output fails, which is the subprocess boundary
+      itself.
+- [x] 2.3 `run_change_step.py resume <change> --answer <text> [--allow <rule>]`:
       resume the last session of the step with `--resume <id>` and the owner's
       answer, with any rule granted for that one run (D6). Unit: the resumed
       command carries the session and the granted rule, and the next run of the
       step does not.
-- [ ] 2.4 Event stream and progress (D7): write the stream to
+      Done. It resumes the latest log line of a Claude Code step (orchestrator
+      notes are skipped), and refuses when that line names no session, since a
+      run that crashed before reporting one is the step's last act, not the one
+      before it. The answer is sent as "The owner's answer: …", so one starting
+      with `-` is never read as a flag. It logs the outcome under that step,
+      carries its `sections`, and records any `granted` rules on the resumed
+      run's line. Unit: as the task names, plus an implementation resumed keeps
+      its sections, nothing to resume, a last run with no session, and an empty
+      answer are refused, and each run of a resumed discussion claims its own
+      transcript.
+- [x] 2.4 Event stream and progress (D7): write the stream to
       `reviews/transcripts/NN-<step>.jsonl`, numbered after every record in
       `reviews/` and `reviews/transcripts/`, and a progress file beside it with
       one line per tool call and its time. Unit: the transcript's number follows
       existing records, and the progress file lists the fake stream's tool calls.
-- [ ] 2.5 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
+      Done. The transcript is claimed by exclusive create before the run, and
+      every line of the merged output is written to it, events or not; the
+      progress file is `NN-<step>.progress`, one `HH:MM:SSZ <tool> <summary>` line
+      per tool call, also echoed to the terminal. Unit: as the task names, plus a
+      line that is not an event is kept in the transcript and not read.
+- [x] 2.5 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
       (unit); `make test`; one hand run of `run_change_step.py run plan` on a
       scratch copy of a change, recorded here with its outcome line, to confirm the
       `claude -p` flags the unit tests assume.
+      Unit: `uv run --no-project --with pytest pytest -q
+      scripts/tests/test_run_change_step.py`, 87 passed before the fresh-context
+      fixes. `make test`: passed, including `scripts/tests`, on the tree before the two schema fixes the hand runs forced (`$schema` draft-07, `harness_schema`), which touched only `run_change_step.py`, the schema, and their test; the focused suite passed after them.
+      `make check-comment-hygiene`: passed. The fresh-context fixes ran after
+      `make test`; the focused suite passed after them (94), as did
+      `make check-packaging`: passed. A second fresh-context check followed; its
+      fixes (the table's pushes and self-edits, validating the step table,
+      denied runs ending `stopped`, killing a run whose output fails) ran with
+      the focused suite (105 passed) and `make check-comment-hygiene`, not with
+      `make test` or `make check-packaging` again: they touched only
+      `run_change_step.py`, `change_steps.toml`, and the test.
+      Hand runs (Claude Code 2.1.300), in a detached worktree of `979b4ec1` with
+      this section's scripts as they stood before both fresh-context checks
+      copied in (`claude_command`'s flags unchanged since, the table since
+      narrowed) and this change copied as
+      `scratch-orchestrate`, with no index row, so the plan's entry check could
+      not pass:
+      1. `exit 1`, logged `stopped` by the wrapper, twice (log seq 1 and 2,
+         transcripts 01 and 03; the first was the run the auto-mode check
+         reported as denied, which had in fact run): Claude Code refused
+         `"$schema"` draft 2020-12 ("no schema with key or ref"). The schema now
+         declares draft-07, which has `if`/`then`.
+      2. `exit 1`, logged `stopped`: "API Error: 400 … input_schema does not
+         support oneOf, allOf, or anyOf at the top level". The premise in 1.1's
+         note was wrong; hence `harness_schema`.
+      3. Exit 0, 4 turns, $0.29. The skill ran from the `/change-plan` prompt,
+         one compound Bash call (`cd …; for f in …; do cat $f; done`) was denied
+         under `dontAsk`, and the step ended with its own `stopped` outcome as
+         the appended prompt directs, read from the `result` event's
+         `structured_output`:
+         `{"seq": 4, "step": "plan", "session": "551cffba-…", "commit":
+         "979b4ec1…", "exit_status": 0, "transcript": "transcripts/05-plan.jsonl",
+         "outcome": "stopped", "message": "Planning for scratch-orchestrate
+         stopped before it began. A Bash call was denied … no index row …",
+         "reason": "This Bash call was denied in don't-ask mode: …", "denials":
+         [{"tool_name": "Bash", "tool_use_id": "toolu_01QJ…", "tool_input":
+         {"command": "cd openspec/changes/scratch-orchestrate; for f in …"}}]}`.
+         The step's own `denials` had a different shape (`tool`, `command`); the
+         logged ones are the stream's `permission_denials`, as D3 requires.
+      Confirmed: the flag order, that Claude Code accepts `--setting-sources
+      project` (not that the owner's own allow rules are then excluded, which
+      this project's settings, holding no permissions, could not show), the
+      stream's
+      `session_id`, `result`, `structured_output`, `permission_denials`, and
+      `is_error` fields, and a slash-command prompt invoking the skill. Not
+      confirmed here: `--resume` (no question to answer), and whether a
+      granted rule applies to a resumed turn (a Risk the pilot checks).
+
+Handoff. A plain read-only Bash call (`ls -R …; grep -n …`) ran under `dontAsk`
+though no rule names `ls` or `grep`: Claude Code appears to allow commands it
+classes read-only on its own, while a `cd …; for …` compound was denied. The
+pilot should expect denials of that shape and seed rules from them (7.3). The
+scratch worktree's transcripts also hold `02-plan.jsonl`, empty, owned by root,
+and with no log line, written at 11:44 local, between the first hand run and the
+second; this session started no run then, and its origin is unexplained. A
+claimed transcript with no line is what a wrapper killed outright (SIGKILL,
+which no handler sees) still leaves: D14's "step that died before writing an
+outcome". Section 3
+adds the `review` step to this module's `Wrapper` and `main`, absorbing
+`run_change_review.py`; reuse `next_transcript`'s numbering rule there, and note
+that the review's `.log` transcripts and records share the numbering.
 
 ## 3. Reviews and the `make` targets through the wrapper
 

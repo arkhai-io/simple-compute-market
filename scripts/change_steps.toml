@@ -1,0 +1,128 @@
+# The skill and permissions of each step of an OpenSpec change when it runs
+# unattended, through scripts/run_change_step.py.
+#
+# An unattended run uses Claude Code's `dontAsk` permission mode with only the
+# project's settings loaded: a tool call no `allow` rule names is denied and
+# recorded in the run's `permission_denials` (a plain read-only shell command such
+# as `ls` has been seen to run without a rule, so Claude Code appears to allow
+# what it classes read-only), so a step needing a tool it was not
+# given ends `stopped` instead of waiting on a prompt nobody will answer. `deny`
+# rules win over `allow` rules; they are the "never" lines of each step's skill,
+# and a push other than validation's guarded `make push-branch` is denied to
+# every step.
+#
+# Interactive runs of a step do not read this file: the owner's own permission
+# settings apply to them, with prompts. A step's permissions change here, by the
+# owner, as a tracked change, and no step may edit this file or the project's
+# Claude Code settings; a rule the owner grants for one resumed run is passed on
+# that run's command line and noted on its log line, never added here.
+#
+# Rules use Claude Code's permission rule syntax. Each step's rules are its own
+# plus `common`'s. Contract: openspec/specs/change-workflow/spec.md, "Unattended
+# runs are held to their step's permissions".
+
+# Every step reads the repository and its history, and checks the change index.
+[common]
+allow = [
+  "Read", "Glob", "Grep", "Skill",
+  "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
+  "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
+  "Bash(git merge-base*)",
+  "Bash(python3 scripts/find_change.py*)",
+  "Bash(python3 scripts/run_change_step.py log*)",
+  "Bash(make round-view-closed)", "Bash(make check-change-index)",
+]
+deny = [
+  "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
+  "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
+  "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
+  "Edit(scripts/change_steps.toml)", "Write(scripts/change_steps.toml)",
+  "Edit(.claude/**)", "Write(.claude/**)",
+]
+
+# Design writes the change's documents and commits nothing; the owner commits
+# design-phase work. A design blocked on a prerequisite writes the
+# prerequisite's proposal in a worktree on a new branch from dev, never on the
+# blocked branch.
+[steps.design]
+skill = "change-design"
+allow = [
+  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(git worktree add ../*-proposal -b propose-* dev)",
+  "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
+]
+deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
+
+# Planning resumes the design step's session, which holds the design's context.
+[steps.plan]
+skill = "change-plan"
+resume_from = "design"
+allow = [
+  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+]
+deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
+
+# Triage fixes what the owner accepts and commits it, so it has implementation's
+# rules beside design's.
+[steps.triage]
+skill = "change-triage"
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
+  "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+
+[steps.implement]
+skill = "change-implement"
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
+  "Bash(make dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+
+# Validation never changes the commit: it writes only its own record, and its
+# one push is the guarded push of the change's branch.
+[steps.validate]
+skill = "change-validate"
+allow = [
+  "Write(openspec/changes/**/reviews/*-validation.md)",
+  "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(make push-branch)",
+  "Bash(make run-e2e)", "Bash(make round-e2e-baseline)", "Bash(make fetch-e2e-logs*)",
+  "Bash(make dist-clean)",
+  "Bash(gh run list*)", "Bash(gh auth status*)",
+  "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
+]
+deny = ["Edit", "Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
+        "Bash(docker push*)", "Bash(helm push*)"]
+
+# Closeout changes documentation only; a part that needs code returns the change
+# to implementation.
+[steps.closeout]
+skill = "change-closeout"
+allow = [
+  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Edit(AGENTS.md)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(python3 scripts/check_*)",
+  "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)"]
+
+# Archive cleanup drafts the pull request; the owner creates it.
+[steps.archive-cleanup]
+skill = "change-archive-cleanup"
+allow = [
+  "Edit(openspec/changes/README.md)",
+  "Write(openspec/changes/**/reviews/pull-request.md)",
+  "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]

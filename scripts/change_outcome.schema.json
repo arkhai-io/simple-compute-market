@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Change step outcome",
   "description": "The structured outcome an unattended step of an OpenSpec change ends its turn with. Contract: openspec/specs/change-workflow/spec.md.",
   "type": "object",
