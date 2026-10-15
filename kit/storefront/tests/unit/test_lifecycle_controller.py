@@ -23,6 +23,7 @@ for the test to release it. Nothing here waits on time.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from datetime import UTC, datetime
 
@@ -623,10 +624,16 @@ class _ObservedLock(asyncio.Lock):
             await asyncio.wait_for(self._attempted.wait(), timeout=1)
 
 
-def _watched_logger(handler: logging.Handler) -> logging.Logger:
-    """A logger of the test's own, so the watcher sees only this controller."""
+_WATCHED_LOGGERS = itertools.count()
 
-    logger = logging.getLogger(f"{__name__}.{id(handler)}")
+
+def _watched_logger(handler: logging.Handler) -> logging.Logger:
+    """A logger of the test's own, so the watcher sees only this controller.
+
+    Each call names a new logger, so a handler never attaches to one another test used.
+    """
+
+    logger = logging.getLogger(f"{__name__}.watched{next(_WATCHED_LOGGERS)}")
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
     return logger

@@ -287,13 +287,17 @@ moved.
       stage being in `run`; a disclosed exception keeping its message; the clock stamping
       outcomes; `enter_stage` outside a cycle and an unknown stage; a cancelled timer
       keeping its last outcome; a step-only loop with no state; and `clear_loops`
-      dropping outcomes before `start_loops` restarts. The tests reach the controller only
-      through public seams: waiting on and for a cycle through an observed lock injected
-      with `cycle_lock_factory` (a constructor parameter, as `disclosed_errors` and `clock`
-      are) that counts acquisitions, a timer's first gate read through the controller's
-      injected logger, and timer handles from `start_loops`; none yields and hopes.
-      `make -C kit test-capacity-publication`: 93 passed, two new over `CapacityRuntime`
-      and parked fake feeds with an observed cursor lock: a site's step waits for that
+      dropping outcomes before `start_loops` restarts. The new tests synchronize through
+      seams rather than yields: an observed lock injected with `cycle_lock_factory` (a
+      constructor parameter, as `disclosed_errors` and `clock` are) that counts
+      acquisitions, a timer's first gate read through the controller's injected logger,
+      and timer handles from `start_loops`. Two exceptions remain: the shared fixtures'
+      teardown and the snapshot test's `_ended` helper read the controller's private
+      `_handles`, as the pre-existing tests do; and the two wake-while-held tests wait on
+      the controller's real 50 ms held poll after resume, bounded by `wait_for`.
+      `make -C kit test-capacity-publication`: 93 passed, two new over parked fake feeds
+      with an observed cursor lock (one through `CapacityRuntime`, one calling
+      `site_events_poller` directly with the runtime's client and reconcile hook): a site's step waits for that
       site's poll and not another's; a poller that queued behind a step while a pause
       landed reads no feed. Each mutation was checked by swapping the module and
       restoring it: with the controller's lock removed the two serialization tests fail;
@@ -645,7 +649,10 @@ fifteen test files, mechanically.
       `refresh_after_topology_error` go, and so does VM's `_RemoteProjectionClient`, which
       2.2 copied into the kit rather than moved. Rename the module if only explanations remain, and
       fix the docstring in `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`
-      that names it.
+      that names it. Once the poller registers through `register_loop`, remove
+      `SiteProjectionState.run` and its tests unless something else calls it: it reads its
+      gate once and can then wait on a family's lock, the gap Section 3 closed for the
+      controller's timer and the capacity-event poller.
 - [ ] 8.6 Tests build their own state over `tests/fake_site.py`'s fake aggregate and inject
       it through the container, never patching a module (`TESTING.md` "Mocking
       convention"): `tests/unit/services/test_site_projection_cache.py`,
@@ -1009,8 +1016,8 @@ storefront's configuration reaches it through its configuration system"; `design
 - [ ] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
-      network policy blocks that index, so Sections 2 onward edited those locks by hand and
-      ran their suites in frozen environments.
+      network policy blocks that index, so each section that bumps a package one of them
+      locks edits that lock by hand, and their suites run in frozen environments.
 
 ## 17. Closeout
 

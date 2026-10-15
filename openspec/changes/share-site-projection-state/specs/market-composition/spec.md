@@ -41,7 +41,8 @@ A storefront loop whose cycle can fail MUST record each cycle's outcome with the
 controller, whether its timer or an operator's step ran the cycle: when it finished,
 whether it completed, and, for a failure, the stage that failed and its error. Each
 invocation MUST record exactly one terminal outcome, including one that raised, and a
-preview MUST record none. A recorded error MUST carry the exception's type and MUST carry its
+preview MUST record none; a step cancelled while it waits for the loop's lock records a
+cancelled outcome naming no stage, because no stage began. A recorded error MUST carry the exception's type and MUST carry its
 message only when the storefront's own configuration or publication error raised it, so no
 credential, secret, or private URL reaches status. The controller MUST be the one place a loop's cycle runs: a loop
 registers its step and its interval, the controller's timer runs the step through the same
