@@ -811,7 +811,10 @@ the source, not the derivation.
       takes `section` and `chains` overrides. VM (application integration, real app and
       lifespan): `tests/integration/test_release_model_startup.py` — a section stating
       both the oracle-gated and the interruptible model, enabled or not, refuses startup
-      with `ReleaseModelError` before any database, container service, or loop exists.
+      with `ReleaseModelError` with no database client created, no database file written,
+      and no loop started. **Corrected (re-review):** it first asserted the container's
+      client, which is set only after the build; with the signer's credential supplied it
+      now fails when the early `require_vm_release_model(domain)` call is removed.
 - [x] 6.6 Bump versions and refresh locks. Validation: `make -C kit test-alkahest`,
       `make test-storefront`, `make test-bare-metal`, `make check-architecture`,
       `make check-packaging`, `make test`. End-to-end: `e2e_deal`, `e2e_non_erc20_settlement`
@@ -877,14 +880,42 @@ the source, not the derivation.
       advertises the recipient arbiter paying that wallet. The API-credit buyer builds its
       proposal from the listing with `escrow_proposal_from_accepted_entry`, which now
       selects that demand; materialization then encodes the recipient arbiter for the seller
-      wallet, the same condition its fallback used before, and the buyer's suites pass.
-      Tests, application integration through the typed client:
-      `tests/integration/test_alkahest_release_conditions.py` — a listing published from
-      quota is read by a buyer's `StorefrontClient.get_listing` advertising the recipient
-      arbiter from the anvil address book paying the configured wallet (it fails with the
-      demands left empty); and the composition startup builds refuses `interruptible`,
-      naming it. `test_publish_reconcile.py`'s composition double returns no conditions;
-      `tests/unit/test_settlement_fulfillment.py` constructs the stage with its models.
+      wallet, the same condition its fallback used before. **Corrected (re-review):** the
+      buyer suites passing was not evidence of that when first recorded, since no buyer test
+      then carried a demand. The evidence is code reading, Section 7's
+      `domains/apicredits/buyer/tests/test_negotiate_cli.py` Alkahest case (its listing
+      advertises a condition, which the buyer's settlement stage selects through
+      `escrow_proposal_from_accepted_entry`), and the pending `e2e_credits_deal` run for
+      `market credits buy`, which no test covers.
+      **Behaviour changes:** a caller-supplied escrow on a chain the storefront does not
+      configure now refuses `publish_from_quota` with "accepted escrow names chain …,
+      which this storefront does not configure under [chains]" (before, it published an
+      escrow nothing could settle). With `[wallet].address` unset, a listing still derives
+      and publishes a recipient condition with no recipient, consistent with Section 7:
+      materialization refuses every deal under it as `release_condition_unreadable`.
+      **Amended (re-review):** the release-model check is
+      `require_api_credit_release_model`, which `_build_api_credit_services` calls first,
+      before the signer, administrators, registry trust, Alkahest clients, or database, as
+      well as the composition. The publish-from-quota route gains a typed client:
+      `src/listing_publication.py` holds the route's request and response models (moved
+      from the controller), its path and operation, `seller_resource` (which the seller
+      authentication middleware now uses too), and `ApiCreditListingClient` and
+      `SyncApiCreditListingClient` over the core client's `authenticated_request`.
+      Tests, application integration through the typed client, the real app and lifespan:
+      `tests/integration/test_alkahest_release_conditions.py` — the seller publishes from
+      quota through `ApiCreditListingClient` into the listing service startup composed,
+      and a buyer's `StorefrontClient.get_listing` reads the recipient arbiter from the
+      anvil address book paying the configured wallet (it fails with the demands left
+      empty); and startup refuses `interruptible`, enabled or disabled, naming it, with no
+      database client created and no database file written (both fail with the early check
+      removed). The test keeps two existing seams, patched as the suite's other tests patch
+      them: `capacity_client.build_capacity_runtime` (the quota site) and the server's
+      `_startup_tasks` (credits preflight and timer loops); removing them would need the
+      listing service to take its capacity runtime by injection, a larger refactor. Unit:
+      `tests/unit/test_listing_publication_client.py` — the sync and async clients share
+      their methods and sign the same seller request. `test_publish_reconcile.py`'s
+      composition double returns no conditions; `tests/unit/test_settlement_fulfillment.py`
+      constructs the stage with its models.
       `make test-apicredits`: storefront 143 passed, and every other API-credit suite
       (buyer, domain, service, middleware) passed. End-to-end (API-credit lane):
       `e2e_credits_deal` (its seeded listing now advertises the condition, and its buyer

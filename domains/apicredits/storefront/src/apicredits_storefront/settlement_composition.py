@@ -152,15 +152,25 @@ class ApiCreditsSettlementComposition:
 
         Accepted escrows are the Alkahest publication form, so each one's chain
         gets the condition the Alkahest mechanism derives from the configured
-        section, the seller wallet, and that chain's address book.
+        section, the seller wallet, and that chain's address book. An escrow on
+        a chain this storefront does not configure is refused, since nothing
+        could settle it. An unset wallet still derives a condition, with no
+        recipient; materialization refuses every deal under it as unreadable.
         """
         chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
         if not chain_names:
             return []
+        chains = self.mechanism_resources["chains"]
+        unconfigured = sorted(name for name in chain_names if name not in chains)
+        if unconfigured:
+            raise ValueError(
+                f"accepted escrow names chain {unconfigured[0]!r}, which this "
+                "storefront does not configure under [chains]"
+            )
         return release_conditions(
             self.settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
             chain_names=chain_names,
-            chains=self.mechanism_resources["chains"],
+            chains=chains,
             wallet_address=self.seller_wallet_address,
         )
 
@@ -252,6 +262,24 @@ class ApiCreditsSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
+def require_api_credit_release_model(settlement_config: Any = None) -> None:
+    """Refuse a configured Alkahest release model API credits cannot deliver.
+
+    A configured section owns the deals accepted under it, enabled or not, so
+    its release model must be one the Alkahest entry declares. With no
+    ``settlement_config``, the storefront's own configuration is resolved.
+    """
+    if settlement_config is None:
+        settlement_config = build_storefront_settlement_registry().resolve(
+            storefront_config.settlement_config_mapping(), role="seller"
+        )
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    if alkahest_section is not None:
+        require_deliverable_release_model(
+            alkahest_section, SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models
+        )
+
+
 def build_api_credit_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -267,13 +295,7 @@ def build_api_credit_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
-    if alkahest_section is not None:
-        # A configured section owns the deals accepted under it, enabled or
-        # not, so its release model must be one API credits delivers.
-        require_deliverable_release_model(
-            alkahest_section, SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models
-        )
+    require_api_credit_release_model(settlement_config)
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path, apply_migrations=False
     )

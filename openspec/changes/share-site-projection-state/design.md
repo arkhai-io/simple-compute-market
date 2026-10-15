@@ -333,12 +333,15 @@ Secrets is owed. Accepted scope beyond the original proposal.
   create request before its options are built, and its refresh compares them there, so a
   builder output VM ignored would be a second derivation path. Each domain's input is the
   chains its Alkahest publication names: VM's compiled clauses, which keeps its output
-  unchanged; bare metal's and API credits' Alkahest options as built (API credits' accepted
-  escrows, which are its Alkahest publication form). VM can therefore advertise a condition
-  for a chain whose option readiness suppressed; that condition authorizes nothing, because no
-  option exists to select. The API-credit storefront delivers `recipient` only and bare metal
-  `recipient` and `oracle_gated`; each composition refuses another configured model at
-  startup, naming it. A section stating both the oracle-gated and the interruptible model
+  unchanged; bare metal's Alkahest options as built; and API credits' accepted escrows that
+  survive the backing filter, its Alkahest publication form, whether its clauses built them or
+  its caller supplied them (an escrow on a chain the storefront does not configure is refused).
+  VM can therefore advertise a condition for a chain whose option readiness suppressed; that
+  condition authorizes nothing, because no option exists to select. The API-credit storefront
+  delivers `recipient` only and bare metal `recipient` and `oracle_gated`; each storefront
+  refuses another configured model at startup, naming it, before it opens its database (VM
+  and API credits check first in their service composition; bare metal at its settlement
+  composition, which precedes its database). A section stating both the oracle-gated and the interruptible model
   refuses startup in every storefront composing Alkahest, VM included, enabled or not, since
   one escrow has one arbiter.
 
