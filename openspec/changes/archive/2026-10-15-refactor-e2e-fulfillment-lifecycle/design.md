@@ -313,9 +313,10 @@ so the closeout review sees them:
    `test_full_deal.py` only by inheritance. The pointer is reachable, not
    false, and neither comment names a change or a migration.
 2. `provisioning/compute/client/tests/unit/test_fulfillment_client_opacity.py`
-   imports `json` inside its request-inspection loop although the module
+   imported `json` inside its request-inspection loop although the module
    already imports it at top level. No circular import or lazy-load reason
-   applies; the local line is redundant and can be deleted.
+   applied. Fixed at the owner's direction in closeout review 01's triage
+   (F2): the local line is deleted, and the package's unit suite passes.
 
 ### Closeout dispositions
 

@@ -457,7 +457,7 @@ The third sequence is the architecture-layer check and the directory moves it ma
 
 | Change | Status | Depends on | Notes | Acceptance boundary |
 |---|---|---|---|---|
-| [`refactor-e2e-fulfillment-lifecycle`](archive/2026-10-15-refactor-e2e-fulfillment-lifecycle/) | in closeout | — | Closeout 2026-10-15 on E2E run 38741626285 (`dev`): stages 08b–11b of both VM full-deal scenarios and both non-ERC20 settlement cases passed against the composed stack. No spec deltas; archived with `--skip-specs` | Scenarios assert on fulfillment identity rather than provisioning job identity, and the affected stages execute and pass against live services |
+| [`refactor-e2e-fulfillment-lifecycle`](archive/2026-10-15-refactor-e2e-fulfillment-lifecycle/) | in closeout | — | Closeout gate passed 2026-10-15 on external closeout review 01, triaged with its one code fix; awaiting archive cleanup. Evidence: E2E run 38741626285 (`dev`), stages 08b–11b of both VM full-deal scenarios and both non-ERC20 settlement cases. No spec deltas; archived with `--skip-specs` | Scenarios assert on fulfillment identity rather than provisioning job identity, and the affected stages execute and pass against live services |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | `configure-pypi-trusted-publishing` | Activation condition: a named external consumer, compatibility profile, and release owner | Activate only for a named external consumer, compatibility profile, and release owner |
 
 ## Lesser goal — Agent-driven issue-discovery harness
