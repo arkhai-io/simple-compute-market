@@ -68,7 +68,7 @@ from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = Path(__file__).resolve().parent / "change_outcome.schema.json"
-STEP_TABLE = Path(__file__).resolve().parent / "change_steps.toml"
+STEP_TABLE = ROOT / ".claude" / "change-steps.toml"
 CHANGES = Path("openspec/changes")
 LOG = "workflow.jsonl"
 TRANSCRIPTS = "transcripts"

@@ -38,7 +38,6 @@ deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
   "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
   "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
-  "Edit(scripts/change_steps.toml)", "Write(scripts/change_steps.toml)",
   "Edit(.claude/**)", "Write(.claude/**)",
 ]
 
