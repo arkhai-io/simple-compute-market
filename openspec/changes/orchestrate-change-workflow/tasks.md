@@ -14,14 +14,33 @@ Delivers the structured outcome every unattended run ends with and the log the
 wrapper alone writes (D3; requirement "Unattended step runs end with a structured
 outcome").
 
-- [ ] 1.1 Add `scripts/change_outcome.schema.json`: the five outcomes —
+- [x] 1.1 Add `scripts/change_outcome.schema.json`: the five outcomes —
       `finished` (with `next`), `question` (with `awaiting`), `returned` (with
       `return_to` and `evidence`), `blocked` (with `blocked_on`), `stopped` (with
       `reason` and `denials`) — each carrying the step's `message`. D3's example
       lines validate against it; unit tests in
       `scripts/tests/test_run_change_step.py` check each outcome's required fields
       and reject an unknown outcome.
-- [ ] 1.2 Add `scripts/run_change_step.py` with the log's writer and reader: append
+      Done. One object schema with `outcome` and `message` required and an
+      `allOf` of `if`/`then` per outcome, not a top-level `oneOf`, since
+      `--json-schema` hands Claude Code an object schema (a premise section 2's
+      hand run confirms, not yet tested); `additionalProperties`
+      is false, so a step cannot set a field the wrapper records; `return_to` is
+      one of `design`, `planning`, `implementation`; `next` is free text, since
+      routing is `change_next_step.py`'s (D14), not the step's. The scripts run on
+      the standard library, so `run_change_step.py` carries a small validator for
+      exactly the keywords the schema uses and raises on any other, so a schema
+      edit it cannot enforce fails loudly — an unknown keyword or `type`. The
+      outcome parts of D3's example lines 13 and 20 conform (tested with their
+      wording paraphrased, the wrapper's fields stripped); line 22, a
+      wrapper-written `stopped`, shows no `message`, but `message` is
+      required on every outcome and section 2's wrapper writes one on its own
+      `stopped` lines, so every outcome line in the log conforms. Unit
+      (`test_run_change_step.py`): each outcome valid; each required field,
+      `message` included, missing from each outcome reported; unknown outcome,
+      undefined field, and a `return_to` that is not earlier rejected; an
+      unenforceable keyword or type raises.
+- [x] 1.2 Add `scripts/run_change_step.py` with the log's writer and reader: append
       one line to the change's `reviews/workflow.jsonl` with `seq`, `at`, the step,
       its session and commit; read the last lines. Its `note` operation appends the
       orchestrator's `round` (D13) and `orchestrator` (D14) lines, so the wrapper is
@@ -30,8 +49,41 @@ outcome").
       `seq` increases across appends and notes, a malformed line is reported with
       its line number rather than skipped, and a note without its required fields
       is refused.
-- [ ] 1.3 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
+      Done. `record_outcome` validates and appends; `append_entry` holds an
+      exclusive `flock` from reading the last `seq` to writing, because validation
+      and review append side by side. A `round` line's `sections` lists the
+      round's sessions, each a list of section ids (`1,2;3` on the command line);
+      an id is an integer or a string, since plans name sections like `5B`; it
+      requires `by`. An `orchestrator` line requires `decision` and `reason`. The
+      command line has `note <change> round|orchestrator` and
+      `log <change> [--last N]`. A reader takes a shared lock, so a line being
+      appended is never read half-written; a last line saved without its newline
+      is not joined to the next; a run's `extra` fields may not repeat its step,
+      session, commit, or outcome fields, nor set `seq` or `at`. Unit: everything
+      the task names, an archived change's log found by name included, plus a
+      refused line leaves the log unwritten, an unknown step and repeated run
+      fields are refused, a missing final newline, and the command line's note,
+      log, and unknown-change paths.
+- [x] 1.3 Verification: `uv run pytest -q scripts/tests/test_run_change_step.py`
       (unit); `make test`.
+      `uv run --no-project --with pytest pytest -q
+      scripts/tests/test_run_change_step.py` (unit): 54 passed; `scripts/` has no
+      project, so `--no-project`, as `make test-release-tooling` runs it.
+      `make test`: passed, including `scripts/tests` through
+      `test-release-tooling`, before the fresh-context fixes, which touched only
+      `run_change_step.py` and its test; the focused suite passed after them.
+      `make check-packaging`, `make check-comment-hygiene`: passed. End-to-end:
+      no scenario in `e2e-tests/` covers this section, as the plan's preamble
+      says; it is contributor tooling.
+
+Handoff. Section 2 builds on `record_outcome(path, step, outcome, session=,
+commit=, extra=)`, `append_entry`, `read_log`, and `log_path`, and should write
+its own `stopped` lines through `record_outcome` with a `message` (the reason),
+so every outcome line conforms. `StepError` is the error `main` reports; section 2
+adds `run` and `resume` subcommands to `main`. The module docstring describes only
+the log; extend it as the wrapper grows. Its contract cites the delta's heading
+"Unattended step runs end with a structured outcome", which reaches
+`openspec/specs/change-workflow/spec.md` at archive.
 
 ## 2. Running a Claude Code step through the wrapper
 
