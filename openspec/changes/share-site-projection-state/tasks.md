@@ -644,7 +644,7 @@ its release conditions"). Touches `kit/alkahest`, VM's and bare metal's storefro
 metal still reads its settlement configuration from its present source; Section 11 changes
 the source, not the derivation.
 
-- [ ] 6.1 `kit/alkahest/src/market_alkahest/` (a new `release_conditions.py`, exported):
+- [x] 6.1 `kit/alkahest/src/market_alkahest/` (a new `release_conditions.py`, exported):
       the derivation now in `domains/vms/storefront/src/services/publication_terms.py`
       (`_recipient_demands_for_chains`, `_heartbeat_oracle_demands_for_chains`,
       `_splitter_demands_for_chains`, `_demands_for_chains`), taking the
@@ -652,19 +652,65 @@ the source, not the derivation.
       returning one release condition per chain. It is built with the Alkahest publication
       option (`settlement_config.py`'s `alkahest_option_builder` or the registration), so
       every domain composing Alkahest gets it.
-- [ ] 6.2 Release-model declaration: a domain's Alkahest seller stage declares the models it
+      Done: `kit/alkahest/src/market_alkahest/release_conditions.py`, exported from the
+      package. `release_conditions(config, *, chain_names, chains, wallet_address)`
+      returns one `{chain_name, arbiter, demand_data}` per chain in chain-name order,
+      refusing a chain `chains` does not configure; `config` is the typed
+      `AlkahestSettlementConfig` section (none selects `recipient`), and each chain is a
+      mapping or an object whose `alkahest_address_config_path` names its address book,
+      so VM's `ChainConfig` objects and bare metal's chain mappings both serve.
+      `publication_release_conditions(config, clauses, ...)` derives for the chains the
+      Alkahest clauses publish on and skips other mechanisms. Beside them:
+      `configured_release_model`, the three model constants, `RELEASE_MODELS`,
+      `ReleaseModelError` (a `ValueError`), and `require_deliverable_release_model`
+      (6.2). The refusals are VM's, unchanged in wording: oracle-gated with no trusted
+      oracle, the trusted oracle equal to the wallet, and the oracle-gated and
+      interruptible models together. **Differed:** the conditions are not emitted by
+      `alkahest_option_builder`. VM derives a listing's `demands` into its create
+      request before the listing service builds its options, and refresh compares them
+      there, so a builder output VM ignored would be a second derivation path; instead
+      each domain calls the kit's one function where it builds the listing (VM's
+      publication terms, bare metal's composition where it builds the options, 6.4).
+- [x] 6.2 Release-model declaration: a domain's Alkahest seller stage declares the models it
       can deliver (`recipient`, `oracle_gated`, `interruptible`); composition refuses a
       configured model the domain does not declare, naming it. VM declares all three
       (`src/settlement_stages.py`'s `VmAlkahestSellerStage`); bare metal declares `recipient`
       and `oracle_gated` (`src/settlement_stages.py`, `src/settlement_composition.py`).
-- [ ] 6.3 VM: `publication_terms.py` reads the kit's derivation and keeps no derivation of
+      Done. VM: `VmAlkahestSellerStage.release_models` is a required keyword field, as
+      `fulfils_through_capacity` is; `vm_seller_stages` declares `RELEASE_MODELS`;
+      `build_vm_settlement_composition` checks a configured section, enabled or not,
+      against the domain's Alkahest entry. Bare metal: a new `AlkahestStage(SellerStage)`
+      carries `release_models` (`recipient`, `oracle_gated`);
+      `BareMetalStorefrontSettlementComposition.__post_init__` checks a configured
+      section; `build_runtime_from_environment` re-raises `ReleaseModelError` naming the
+      model, where any other refusal of the settlement root still reads "must be strict
+      shared settlement config". **Consequence:** a VM section stating both the
+      oracle-gated and the interruptible model now refuses VM's startup at composition;
+      before, VM started and every Alkahest candidate failed publication.
+- [x] 6.3 VM: `publication_terms.py` reads the kit's derivation and keeps no derivation of
       its own; `demands_for_publication_clauses` and its caller in
       `services/publication_loop.py` are unchanged in output.
-- [ ] 6.4 Bare metal: `src/publication_composition.py` takes the kit's derivation and stops
+      Done: `demands_for_publication_clauses(clauses, *, wallet_address)` keeps its
+      signature and its caller; it resolves the typed `[Settlement.alkahest]` section
+      through the storefront's registry and calls `publication_release_conditions` over
+      `CHAINS`. The four private derivation functions go, and so does each VM stage's
+      `publication_chains`, whose only caller was that derivation.
+- [x] 6.4 Bare metal: `src/publication_composition.py` takes the kit's derivation and stops
       reading `BARE_METAL_STOREFRONT_DEMANDS`; remove it from `compose.bare-metal.yml` and
       `tests/test_publication_cli.py`. Startup refuses `interruptible` (spec scenario "A
       domain is configured for a release model it cannot deliver").
-- [ ] 6.5 Tests. `kit/alkahest/tests/unit/test_release_conditions.py` (new, unit): each
+      Done: `BareMetalStorefrontSettlementComposition.publication_payload` loses its
+      `demands` parameter and derives the conditions itself, through the kit's
+      `release_conditions`, for the chains of the Alkahest escrows it built, from its
+      configured section, `resources["wallet"]` (the seller address), and
+      `resources["chains"]`. `publication_composition.py` no longer reads
+      `BARE_METAL_STOREFRONT_DEMANDS`; `compose.bare-metal.yml` and
+      `tests/test_publication_cli.py` drop it. **Differed:** the derivation sits in the
+      settlement composition, which holds the section, wallet, and chains, rather than in
+      `publication_composition.py`; and it covers only Alkahest options actually built
+      (a ready mechanism), whereas VM derives from its clauses whatever their readiness,
+      as before. Startup refuses `interruptible` (6.2).
+- [x] 6.5 Tests. `kit/alkahest/tests/unit/test_release_conditions.py` (new, unit): each
       model's condition per chain, the oracle-gated wallet-as-oracle refusal, the
       mutual-exclusion refusal, and the undeclared-model refusal. VM's
       `tests/unit/test_heartbeat_gated_listings.py` moves its derivation cases to the kit
@@ -672,11 +718,101 @@ the source, not the derivation.
       typed client): `tests/test_publication_cycle.py` — a listing with an Alkahest option
       advertises the recipient arbiter paying the seller wallet on its chain;
       `tests/test_app_composition.py` — startup refuses `interruptible`.
-- [ ] 6.6 Bump versions and refresh locks. Validation: `make -C kit test-alkahest`,
+      Done. Kit (unit, `make -C kit test-alkahest`: 222 passed, 19 of them
+      `test_release_conditions.py`): each model's condition per chain (recipient with
+      and without a section, oracle-gated naming the first oracle, interruptible with an
+      explicit refund authority and falling back to the wallet), one condition per chain
+      in order, no chain deriving nothing, an unconfigured chain refused, the oracle-less
+      and wallet-as-oracle refusals, the mutual-exclusion refusal through all three
+      entry points, each section's model, a declared model returned, an undeclared model
+      refused by name, an unknown declared model refused, and publication deriving per
+      Alkahest clause chain and nothing for a non-Alkahest clause. Arbiters come from
+      address books the tests write, so no SDK default is assumed. VM:
+      `test_heartbeat_gated_listings.py` loses its seven derivation cases to the kit and
+      keeps the listing-marking and plan cases; application integration, through the
+      typed client, `tests/integration/test_publication_loop.py` gains
+      `test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller`, a
+      backed pool published by the loop advertising the recipient arbiter from the anvil
+      address book paying the configured wallet (`tests/publication_app.py`'s wallet
+      constant becomes the public `SELLER_WALLET`). Three unit files that construct
+      `VmAlkahestSellerStage` pass `release_models`. Bare metal:
+      `tests/test_publication_cycle.py` gains
+      `test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller`,
+      which runs the cycle with the real `publication_payload_builder` over a runtime
+      holding the real Alkahest composition and option builder (the token's metadata
+      cached under a temporary `XDG_CACHE_HOME`, so no chain is asked) and reads the
+      registry body's `demands`; with the derivation replaced by `()` it fails.
+      **Differed (level):** that file is the cycle's public API against a real database
+      with site and registry doubles, which its own docstring says is not application
+      integration; no typed-client route reaches a payload's terms more directly.
+      `tests/test_app_composition.py` (application startup): the app's lifespan, given a
+      runtime factory composing an interruptible section, refuses with
+      `ReleaseModelError` naming the model and installs no storefront; an oracle-gated
+      section composes. `tests/test_runtime_environment.py`: the environment path
+      refuses `interruptible`, enabled or disabled, naming the model rather than calling
+      the root malformed. `tests/settlement_compositions.py`'s `alkahest_composition`
+      takes `section` and `chains` overrides.
+- [x] 6.6 Bump versions and refresh locks. Validation: `make -C kit test-alkahest`,
       `make test-storefront`, `make test-bare-metal`, `make check-architecture`,
       `make check-packaging`, `make test`. End-to-end: `e2e_deal`, `e2e_non_erc20_settlement`
       (VM lane), and `e2e_bare_metal_mock_deal` (bare-metal lane, whose listing now
       advertises its condition).
+      Done: `arkhai-kit-alkahest` 0.5.0; VM's storefront raises its floor to `>=0.5.0`
+      and bare metal's states it, both importing the new module. `make lock` relocked
+      every project but the three PyTorch-index ones (refused here, as in 2.6). Two of
+      those lock the kit: VM storefront's lock was edited by hand with the version,
+      wheel-name, and specifier substitutions uv wrote into bare metal's lock for the same
+      package (three edits), and VM buyer's with the version and wheel name (two);
+      `kit/policy` does not lock it (16.6 relocks both). Evidence: `make -C kit
+      test-alkahest` (unit) 222 passed; VM storefront in its frozen environment with the
+      rebuilt kit reinstalled, unit 1024 passed, 1 skipped (seven fewer: the derivation
+      cases moved to the kit) and integration 412 passed (one new; `test_alkahest`
+      against Anvil included); `make test-bare-metal` 134 + 316 + 11 + 40 passed (five
+      new); VM buyer (frozen) 197 passed; `kit/policy` (frozen) 63 passed. `make -k test`:
+      56 pytest runs and every non-Python suite passed, `test-deployment-packaging` and
+      the Helm render checks included; it stopped only at the reinit of the three
+      PyTorch-index projects, run frozen above. `make check-packaging` (architecture
+      rules included), `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), and `openspec validate
+      --strict` pass. The pipeline was not run for this section.
+      **Correction (end-to-end):** every VM-lane scenario whose storefront publishes
+      through its loop derives its listings' `demands` through the kit now, and every VM
+      startup runs the release-model check: `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`,
+      `e2e_non_erc20_settlement`, `multi_registry`, `e2e_listing_shapes`,
+      `e2e_compute_dynamic_listings`, `e2e_pool_declared_modes`, `e2e_vm_introduction`.
+      In the bare-metal lane, `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`,
+      and `e2e_bare_metal_introduction` publish listings that now advertise the
+      recipient arbiter from the lane's anvil address book paying the lane's seller
+      wallet. The mock deal's opening names the zero escrow address and no demand, so
+      `escrow_shape_guard` still skips it (Section 7 changes that) and materialization
+      still falls back to the recipient arbiter for the seller wallet, which is the
+      advertised condition and the one the scenario's escrow is created under, so the
+      deal itself is unchanged.
+
+Section 6 handoff:
+
+- Every published Alkahest option now comes with a listing `demands` entry for its chain
+  in both domains, derived by `market_alkahest.release_conditions`; Section 7 can treat a
+  listing without one for the proposal's chain as unauthorized. Bare metal derives only
+  for Alkahest options actually built; VM derives from its clauses whatever the
+  mechanism's readiness, as it did before, so a VM listing may advertise a condition for
+  a chain whose option readiness suppressed.
+- The kit does not refuse an empty seller wallet: a recipient condition would carry
+  `recipient: ""`. VM's output for such a configuration is therefore unchanged; bare metal
+  never reaches it (its runtime requires the EVM address with any Alkahest section, and
+  its derivation runs only for a built option). Section 7's "a missing or invalid
+  advertised condition fails closed" is where to decide whether that is invalid.
+- Bare metal's `_release_conditions` reads `resources["wallet"]` as the seller address
+  string and `resources["chains"]` as a mapping of chain name to a mapping carrying
+  `alkahest_address_config_path`. Section 11, moving settlement and chains to
+  `[Settlement]`, `[Wallet]`, and `[Chains.<name>]`, must keep those shapes or adapt it;
+  the kit accepts chain objects as well.
+- `tests/settlement_compositions.py`'s `alkahest_composition` takes `section` and `chains`
+  overrides; its default section's `address_config_path` names a file absent outside the
+  image, which blocks Alkahest readiness, so a test that needs a built Alkahest option
+  passes `section={"address_config_path": None}` and a chain with an address book, as
+  `test_publication_cycle.py`'s new case does (with the token's metadata cached under a
+  temporary `XDG_CACHE_HOME` and a chain ID no other test uses).
 
 ## 7. The release-condition invariant holds without seller policy
 

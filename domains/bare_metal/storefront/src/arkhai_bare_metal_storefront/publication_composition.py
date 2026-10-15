@@ -55,9 +55,6 @@ def publication_payload_builder(
     clauses = tuple(
         SettlementPublicationClause.model_validate(item) for item in clauses_raw
     )
-    demands = _json_env(environ, "BARE_METAL_STOREFRONT_DEMANDS")
-    if not isinstance(demands, list):
-        raise RuntimeError("BARE_METAL_STOREFRONT_DEMANDS must be a JSON list")
     max_duration = configured_max_duration_seconds(environ)
     if max_duration is None:
         raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
@@ -98,7 +95,6 @@ def publication_payload_builder(
         return await composition.publication_payload(
             candidate=candidate,
             clauses=admissible,
-            demands=demands,
             max_duration_seconds=candidate.get(
                 "override_max_duration_seconds", max_duration
             ),

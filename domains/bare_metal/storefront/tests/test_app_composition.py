@@ -6,6 +6,7 @@ from importlib.metadata import entry_points
 
 import pytest
 from fastapi import APIRouter
+from market_alkahest import ReleaseModelError
 from market_core import DomainCapability
 from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
 from core_storefront.domain_registry import StorefrontDomainRegistryError
@@ -287,4 +288,48 @@ async def test_a_root_that_enables_no_payment_reports_settlement_unconfigured(
     assert health["checks"]["commercial_settlement"] == "unconfigured"
     # A deliberate choice is reported, not counted as a degradation.
     assert health["status"] == "ok"
+    assert runtime.settlement_worker is not None
+
+
+async def test_startup_refuses_a_release_model_bare_metal_cannot_deliver(
+    tmp_path,
+) -> None:
+    def interruptible_runtime() -> BareMetalStorefrontRuntime:
+        return _direct_runtime(
+            tmp_path,
+            seller_evm_address="0x" + "33" * 20,
+            settlement_composition=alkahest_composition(
+                COMPOSITION_SIGNER,
+                wallet="0x" + "33" * 20,
+                chain_clients={"anvil": object()},
+                section={"interruptible": True},
+            ),
+        )
+
+    app = build_bare_metal_storefront_app(
+        registry=_registry(), runtime_factory=interruptible_runtime
+    )
+
+    with pytest.raises(ReleaseModelError, match="'interruptible' release model"):
+        async with app.router.lifespan_context(app):
+            pass
+    # Refused while composing its services: no storefront was ever installed.
+    assert getattr(app.state, "storefront_container", None) is None
+
+
+async def test_an_oracle_gated_release_model_is_delivered(tmp_path) -> None:
+    runtime = _direct_runtime(
+        tmp_path,
+        seller_evm_address="0x" + "33" * 20,
+        settlement_composition=alkahest_composition(
+            COMPOSITION_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+            section={
+                "oracle_gated": True,
+                "trusted_oracle_addresses": ["0x" + "cd" * 20],
+            },
+        ),
+    )
+
     assert runtime.settlement_worker is not None

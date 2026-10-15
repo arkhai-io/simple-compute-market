@@ -22,6 +22,7 @@ from core_storefront import build_domain_settlement_artifacts
 from core_storefront.models.settle_models import AgreementSettleResponse
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from market_alkahest import RELEASE_MODELS
 from market_arkhai_payments import (
     MandatePolicyError,
     PaymentSettlementData,
@@ -86,6 +87,11 @@ class VmAlkahestSellerStage:
     # fulfillment. Required of every VM seller stage, with no default, because
     # publication drops such a stage's options from an unbacked listing.
     fulfils_through_capacity: bool = field(kw_only=True)
+    # The Alkahest release models this entry can deliver, from
+    # market_alkahest.RELEASE_MODELS. Composition refuses a configured
+    # [Settlement.alkahest] model outside them, so a listing never advertises
+    # a release condition its deal could not honour.
+    release_models: frozenset[str] = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         chains = tuple(
@@ -100,13 +106,6 @@ class VmAlkahestSellerStage:
             if chains
             else {}
         )
-
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return {
-            str(clause.mechanism_input["chain"])
-            for clause in clauses
-            if isinstance(clause.mechanism_input.get("chain"), str)
-        }
 
     def accepted_artifacts(
         self, *, domain: Any, context: Any, listing: Mapping[str, Any],
@@ -405,9 +404,6 @@ class VmPaymentsSellerStage:
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
 
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return set()
-
     def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
         return build_selection()
 
@@ -692,9 +688,6 @@ class VmContactSellerStage:
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
 
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return set()
-
     def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
         return build_selection()
 
@@ -713,8 +706,10 @@ class VmContactSellerStage:
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
         {
+            # A VM listing may be a preemptible spot shape, so VM delivers every
+            # release model, the interruptible splitter included.
             "alkahest.v1": VmAlkahestSellerStage(
-                build_plan, fulfils_through_capacity=True
+                build_plan, fulfils_through_capacity=True, release_models=RELEASE_MODELS
             ),
             # A payment deal provisions its VM through capacity, like Alkahest.
             "arkhai.payments.v1": VmPaymentsSellerStage(fulfils_through_capacity=True),

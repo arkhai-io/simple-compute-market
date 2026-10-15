@@ -23,17 +23,12 @@ from arkhai_vms_listings.pricing_resolution import (
     configured_family_rate_problems as _configured_family_rate_problems,
 )
 from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
-from market_alkahest.alkahest import (
-    get_erc20_splitter,
-    get_recipient_arbiter,
-    get_trusted_oracle_arbiter,
-)
+from market_alkahest import ALKAHEST_CONFIG_KEY, publication_release_conditions
 from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
-from market_storefront.domain_runtime import build_vm_seller_stages
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
@@ -186,138 +181,6 @@ def retired_pricing_configuration_keys() -> list[str]:
     return found
 
 
-def _recipient_demands_for_chains(
-    chains: dict[str, Any],
-    chain_names: set[str],
-    recipient_address: str,
-) -> list[dict[str, Any]]:
-
-    demands: list[dict[str, Any]] = []
-    for name in sorted(chain_names):
-        chain = chains.get(name)
-        if chain is None:
-            continue
-        arbiter = get_recipient_arbiter(
-            chain.name,
-            config_path=chain.alkahest_address_config_path,
-        )
-        demands.append(
-            {
-                "chain_name": chain.name,
-                "arbiter": arbiter.lower(),
-                "demand_data": {"recipient": recipient_address.lower()},
-            }
-        )
-    return demands
-
-
-def _heartbeat_oracle_demands_for_chains(
-    chains: dict[str, Any],
-    chain_names: set[str],
-    oracle_address: str,
-) -> list[dict[str, Any]]:
-    """Oracle-gated plan shape: TrustedOracleArbiter demands.
-
-    Collection through these listings waits for the named third-party
-    oracle to ``arbitrate()`` true. First instantiation of lifecycle
-    work item I.5: the oracle is assumed to arbitrate true at end of
-    lease unless a dispute is raised (manual for now; the buyer's
-    signed heartbeats and the seller's persisted evidence inform
-    dispute handling). A plan shape, not a code path: only the
-    advertised demand changes; negotiation, materialization, and the
-    claims engine all flow through the same codec registry.
-    """
-
-    demands: list[dict[str, Any]] = []
-    for name in sorted(chain_names):
-        chain = chains.get(name)
-        if chain is None:
-            continue
-        arbiter = get_trusted_oracle_arbiter(
-            chain.name,
-            config_path=chain.alkahest_address_config_path,
-        )
-        demands.append(
-            {
-                "chain_name": chain.name,
-                "arbiter": arbiter.lower(),
-                "demand_data": {"oracle": oracle_address.lower(), "data": "0x"},
-            }
-        )
-    return demands
-
-
-def _splitter_demands_for_chains(
-    chains: dict[str, Any],
-    chain_names: set[str],
-    oracle_address: str,
-) -> list[dict[str, Any]]:
-    """Interruptible plan shape: splitter demands.
-
-    The splitter demand identifies who may declare the eventual refund
-    split. For the current VM spot MVP that can be the seller wallet;
-    the split itself is applied later on-chain when an interruption
-    occurs.
-    """
-
-    demands: list[dict[str, Any]] = []
-    for name in sorted(chain_names):
-        chain = chains.get(name)
-        if chain is None:
-            continue
-        arbiter = get_erc20_splitter(
-            chain.name,
-            config_path=chain.alkahest_address_config_path,
-        )
-        demands.append(
-            {
-                "chain_name": chain.name,
-                "arbiter": arbiter.lower(),
-                "demand_data": {"oracle": oracle_address.lower(), "data": "0x"},
-            }
-        )
-    return demands
-
-
-def _demands_for_chains(
-    chains: dict[str, Any],
-    chain_names: set[str],
-    wallet_address: str,
-) -> list[dict[str, Any]]:
-    """Published demand set per the seller's settlement posture."""
-
-    alkahest = settlement_config_mapping().get("alkahest", {})
-    if not isinstance(alkahest, dict):
-        alkahest = {}
-    interruptible = bool(alkahest.get("interruptible", False))
-    if alkahest.get("oracle_gated", False):
-        if interruptible:
-            raise ValueError(
-                "Settlement.alkahest oracle and interruptible policies "
-                "are mutually exclusive"
-            )
-        trusted = alkahest.get("trusted_oracle_addresses", [])
-        oracle = str(trusted[0] if isinstance(trusted, list) and trusted else "")
-        if not oracle:
-            raise ValueError(
-                "Settlement.alkahest.oracle_gated requires a trusted oracle"
-            )
-        if oracle.lower() == wallet_address.lower():
-            raise ValueError(
-                "Settlement.alkahest trusted oracle equals the storefront wallet"
-            )
-        return _heartbeat_oracle_demands_for_chains(chains, chain_names, oracle)
-    if interruptible:
-        trusted = alkahest.get("interruptible_oracle_addresses", [])
-        oracle = str(trusted[0] if isinstance(trusted, list) and trusted else "")
-        return _splitter_demands_for_chains(
-            chains,
-            chain_names,
-            oracle or wallet_address,
-        )
-    return _recipient_demands_for_chains(chains, chain_names, wallet_address)
-
-
 def listing_resource_for_candidate(res: dict[str, Any]) -> dict[str, Any]:
 
     alkahest = settlement_config_mapping().get("alkahest", {})
@@ -445,22 +308,17 @@ def demands_for_publication_clauses(
     *,
     wallet_address: str,
 ) -> list[dict[str, Any]]:
-    # Each seller entry names the chains its own clauses publish against.
-    chain_names: set[str] = set()
-    for mechanism, stage in build_vm_seller_stages().items():
-        chain_names.update(
-            stage.publication_chains(
-                [clause for clause in clauses if clause.mechanism == mechanism]
-            )
-        )
-    if not chain_names:
-        return []
+    """The release conditions a listing publishing ``clauses`` advertises.
 
-    unknown = chain_names.difference(CHAINS)
-    if unknown:
-        raise ValueError(
-            f"settlement clause references unknown chain {sorted(unknown)[0]!r}"
-        )
-    return _demands_for_chains(CHAINS, chain_names, wallet_address)
-
-
+    The Alkahest mechanism derives them from ``[Settlement.alkahest]``, the
+    seller wallet, and each chain's address book, one per chain an Alkahest
+    clause publishes on.
+    """
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(settlement_config_mapping(), role="seller")
+    return publication_release_conditions(
+        config.mechanism_config(ALKAHEST_CONFIG_KEY),
+        clauses,
+        chains=CHAINS,
+        wallet_address=wallet_address,
+    )

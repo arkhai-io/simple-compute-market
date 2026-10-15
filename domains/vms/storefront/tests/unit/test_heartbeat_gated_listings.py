@@ -1,8 +1,11 @@
-"""Heartbeat-gated plan shape: published demands + plan service terms."""
+"""Release-model plan shapes: the listing marking and each plan's service terms.
+
+The release conditions a listing advertises are the Alkahest mechanism's own
+derivation, tested in ``kit/alkahest/tests/unit/test_release_conditions.py``.
+"""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from market_alkahest.alkahest import (
@@ -12,155 +15,13 @@ from market_alkahest.alkahest import (
 )
 
 WALLET = "0x" + "ab" * 20
-ORACLE = "0x" + "cd" * 20
 ESCROW = "0x" + "11" * 20
 TOKEN = "0x" + "aa" * 20
 SPLITTER = "0x" + "44" * 20
 
-CHAINS = {
-    "base_sepolia": SimpleNamespace(
-        name="base_sepolia", alkahest_address_config_path=None
-    ),
-}
 
-
-def _settings(
-    *,
-    oracle_gated: bool = False,
-    trusted_oracle_addresses: list[str] | None = None,
-    interruptible: bool = False,
-    interruptible_oracle_addresses: list[str] | None = None,
-):
-    return {
-        "settlement": {
-            "alkahest": {
-                "oracle_gated": oracle_gated,
-                "trusted_oracle_addresses": trusted_oracle_addresses or [],
-                "interruptible": interruptible,
-                "interruptible_oracle_addresses": (
-                    interruptible_oracle_addresses or []
-                ),
-            }
-        }
-    }
-
-
-def _chains(config_path):
-    return {
-        "base_sepolia": SimpleNamespace(
-            name="base_sepolia", alkahest_address_config_path=str(config_path)
-        )
-    }
-
-
-def test_default_posture_publishes_recipient_demands():
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    with patch("market_storefront.utils.config.settings", _settings()):
-        demands = _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
-    assert len(demands) == 1
-    assert demands[0]["arbiter"] == get_recipient_arbiter("base_sepolia").lower()
-    assert demands[0]["demand_data"] == {"recipient": WALLET.lower()}
-
-
-def test_gated_posture_publishes_third_party_oracle_demands():
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(oracle_gated=True, trusted_oracle_addresses=[ORACLE]),
-    ):
-        demands = _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
-    assert demands[0]["arbiter"] == get_trusted_oracle_arbiter("base_sepolia").lower()
-    assert demands[0]["demand_data"] == {"oracle": ORACLE.lower(), "data": "0x"}
-
-
-def test_gated_posture_requires_an_oracle():
-    import pytest
-
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(oracle_gated=True),
-    ):
-        with pytest.raises(ValueError, match="requires a trusted oracle"):
-            _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
-
-
-def test_gated_posture_rejects_self_oracle():
-    """The party collecting cannot also be the party deciding collection."""
-    import pytest
-
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(oracle_gated=True, trusted_oracle_addresses=[WALLET]),
-    ):
-        with pytest.raises(ValueError, match="equals the storefront wallet"):
-            _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
-
-
-def test_interruptible_posture_publishes_splitter_demands(tmp_path):
-    import json
-
-    from market_alkahest.alkahest import _load_override_config_cached
-
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
-    path = tmp_path / "alkahest_override.json"
-    path.write_text(json.dumps(override), encoding="utf-8")
-    _load_override_config_cached.cache_clear()
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(interruptible=True),
-    ):
-        demands = _demands_for_chains(_chains(path), {"base_sepolia"}, WALLET)
-    assert demands[0]["arbiter"] == get_erc20_splitter(
-        "base_sepolia", config_path=str(path)
-    ).lower()
-    assert demands[0]["demand_data"] == {"oracle": WALLET.lower(), "data": "0x"}
-
-
-def test_interruptible_posture_allows_explicit_refund_authority(tmp_path):
-    import json
-
-    from market_alkahest.alkahest import _load_override_config_cached
-
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
-    path = tmp_path / "alkahest_override.json"
-    path.write_text(json.dumps(override), encoding="utf-8")
-    _load_override_config_cached.cache_clear()
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(
-            interruptible=True,
-            interruptible_oracle_addresses=[ORACLE],
-        ),
-    ):
-        demands = _demands_for_chains(_chains(path), {"base_sepolia"}, WALLET)
-    assert demands[0]["demand_data"] == {"oracle": ORACLE.lower(), "data": "0x"}
-
-
-def test_interruptible_and_oracle_gated_are_mutually_exclusive():
-    import pytest
-
-    from market_storefront.services.publication_terms import _demands_for_chains
-
-    with patch(
-        "market_storefront.utils.config.settings",
-        _settings(
-            oracle_gated=True,
-            trusted_oracle_addresses=[ORACLE],
-            interruptible=True,
-        ),
-    ):
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
+def _settings(*, interruptible: bool = False):
+    return {"settlement": {"alkahest": {"interruptible": interruptible}}}
 
 
 def test_interruptible_listing_resource_is_marked():

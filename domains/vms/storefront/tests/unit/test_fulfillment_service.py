@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_alkahest import RELEASE_MODELS
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
@@ -205,7 +206,9 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
         negotiation_id=lifecycle.evidence.negotiation_id
     )
     with pytest.raises(RuntimeError, match="contract reverted"):
-        await VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery(
+        await VmAlkahestSellerStage(
+            None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+        ).continue_delivery(
             evidence=lifecycle.evidence,
             db=client,
             delivery=delivery,

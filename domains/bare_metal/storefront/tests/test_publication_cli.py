@@ -33,7 +33,6 @@ ENVIRON = {
         [REGISTRY.identity.model_dump(mode="json")]
     ),
     "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": "[]",
-    "BARE_METAL_STOREFRONT_DEMANDS": "[]",
     "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
 }
 

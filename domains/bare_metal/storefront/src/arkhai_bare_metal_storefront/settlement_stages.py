@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from core_storefront.models.settle_models import (
@@ -708,6 +708,19 @@ class SellerStage:
         self, agreement: Mapping[str, Any], payment_stage: Any
     ) -> Mapping[str, Any] | None:
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class AlkahestStage(SellerStage):
+    """The Alkahest entry, which also declares the release models it delivers.
+
+    ``release_models`` names, from ``market_alkahest.RELEASE_MODELS``, the
+    conditions a bare-metal escrow may be released under. Composition refuses a
+    configured ``[Settlement.alkahest]`` model outside them, so a listing never
+    advertises a condition its deal could not honour.
+    """
+
+    release_models: frozenset[str] = field(kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)

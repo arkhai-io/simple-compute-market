@@ -14,7 +14,7 @@ from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.models.system_models import ProjectionFamilyStatus
-from market_alkahest import create_alkahest_registration
+from market_alkahest import ReleaseModelError, create_alkahest_registration
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
@@ -784,6 +784,10 @@ def build_runtime_from_environment(
             settlement_config,
             resources={"marketplace_signer": signer, "claimant_principal": principal},
         )
+    except ReleaseModelError as exc:
+        # A well-formed section asking for a release model bare metal cannot
+        # deliver: the refusal names the model rather than calling it malformed.
+        raise RuntimeError(str(exc)) from exc
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"

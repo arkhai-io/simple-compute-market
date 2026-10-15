@@ -103,7 +103,9 @@ REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
 SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
-_WALLET = "0x" + "33" * 20
+#: The storefront's configured seller wallet; a development value, never used
+#: on a public network.
+SELLER_WALLET = "0x" + "33" * 20
 _TOKEN = "0x" + "22" * 20
 _ESCROW_ADDRESS = "0x" + "11" * 20
 
@@ -514,7 +516,7 @@ async def publication_app(
         stack.enter_context(
             settings_overrides(
                 enable_registry_discovery=registries,
-                **{"wallet.address": _WALLET},
+                **{"wallet.address": SELLER_WALLET},
             )
         )
         # Replaced rather than overridden: an override merges into the test

@@ -30,8 +30,10 @@ from arkhai_bare_metal.fixtures.publication_view import (
     build_bare_metal_publication_view,
 )
 from core_storefront.publication_runner import PublicationPayload
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_capacity_publication import BoundListing, PublicationBinding
-from market_identity import create_signer
+from market_identity import TrustedIdentitySet, create_signer
 from market_resource_pools_contracts.backing import BACKED
 from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 from market_site_client.fixtures.resource_pools import (
@@ -44,9 +46,14 @@ from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contra
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
 from arkhai_bare_metal_storefront.pool_overrides import accepted_site_projection
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
+from arkhai_bare_metal_storefront.publication_composition import (
+    publication_payload_builder,
+)
 from arkhai_bare_metal_storefront.publication_service import build_publication_runtime
+from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from settlement_compositions import alkahest_composition
 
 REGISTRY_URL = "https://registry.example"
 STOREFRONT_URL = "https://seller.example"
@@ -1054,3 +1061,94 @@ async def test_a_dry_run_reports_closes_and_refreshes_and_applies_neither(db):
     assert _row_counts(db) == before
     assert storefront.listing("site-a", "pool-2", "r2")[1] == "open"
     assert storefront.stored(kept)["max_duration_seconds"] == 3600
+
+
+# -- settlement terms ------------------------------------------------------
+
+# Development values only; never used on any public network. The chain ID is
+# one no other test resolves a token on, because resolved token metadata is
+# held per chain for the life of the process.
+SELLER_WALLET = "0x" + "33" * 20
+DEAL_TOKEN = "0x" + "22" * 20
+DEAL_CHAIN_ID = 424242
+
+
+async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller(
+    db, tmp_path, monkeypatch
+):
+    # The deal token's metadata is cached where the option builder reads it,
+    # so the real Alkahest option builds without a chain to ask.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    tokens = tmp_path / "cache" / "arkhai" / "tokens"
+    tokens.mkdir(parents=True)
+    (tokens / f"{DEAL_CHAIN_ID}.json").write_text(
+        json.dumps(
+            {
+                DEAL_TOKEN: {
+                    "symbol": "USDC",
+                    "contract_address": DEAL_TOKEN,
+                    "decimals": 6,
+                    "chain_id": DEAL_CHAIN_ID,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    address_book = str(anvil_address_book_path())
+    domain = get_market_domain_contract()
+    signer = create_signer("ed25519", b"\x21" * 32)
+    runtime = BareMetalStorefrontRuntime(
+        db=db,
+        domain=domain,
+        seller_principal=signer.identity,
+        admin_principals=TrustedIdentitySet(identities=(signer.identity,)),
+        storefront_url=STOREFRONT_URL,
+        marketplace_signer=signer,
+        seller_evm_address=SELLER_WALLET,
+        settlement_composition=alkahest_composition(
+            signer,
+            wallet=SELLER_WALLET,
+            chain_clients={"anvil": object()},
+            section={"address_config_path": None},
+            chains={
+                "anvil": {
+                    "rpc_url": "http://anvil.test",
+                    "chain_id": DEAL_CHAIN_ID,
+                    "alkahest_address_config_path": address_book,
+                }
+            },
+        ),
+    )
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.terms = publication_payload_builder(
+        runtime,
+        {
+            "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": json.dumps(
+                [
+                    {
+                        "mechanism": "alkahest.v1",
+                        "asset": DEAL_TOKEN,
+                        "rate": "1",
+                        "per": "hour",
+                        "mechanism_input": {
+                            "chain": "anvil",
+                            "escrow_kind": "erc20_escrow_obligation_default",
+                        },
+                    }
+                ]
+            ),
+            "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
+        },
+    )
+
+    await storefront.run()
+
+    body = storefront.registries.sent[0][3]
+    assert [escrow["chain_name"] for escrow in body["accepted_escrows"]] == ["anvil"]
+    assert body["demands"] == [
+        {
+            "chain_name": "anvil",
+            "arbiter": get_recipient_arbiter("anvil", config_path=address_book).lower(),
+            "demand_data": {"recipient": SELLER_WALLET.lower()},
+        }
+    ]

@@ -216,6 +216,20 @@ def test_alkahest_inputs_without_a_section_are_refused(
         build_runtime_from_environment()
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_a_release_model_bare_metal_cannot_deliver_is_refused_by_name(
+    environment, monkeypatch, enabled
+):
+    root = json.loads(_settlement(alkahest=enabled))
+    root["alkahest"]["interruptible"] = True
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_SETTLEMENT", json.dumps(root))
+    for name, value in ALKAHEST_INPUTS.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match="'interruptible' release model"):
+        build_runtime_from_environment()
+
+
 def test_a_disabled_section_is_still_configured():
     # Disabled sections still own recovery for their accepted obligations.
     root = json.loads(_settlement(alkahest=False))

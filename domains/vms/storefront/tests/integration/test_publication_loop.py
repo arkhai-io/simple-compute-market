@@ -20,6 +20,8 @@ import sqlite3
 from dataclasses import asdict
 
 import pytest
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_storefront import lifecycle
 from market_storefront.startup import _start_publication_loop
@@ -28,6 +30,7 @@ from tests._settings_overrides import settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
 from tests.publication_app import (
     BUYER_SIGNER,
+    SELLER_WALLET,
     SITE,
     pool,
     publication_app,
@@ -121,6 +124,26 @@ async def test_an_unbacked_source_with_only_capacity_mechanisms_publishes_nothin
 
     assert await _listings(capacity_world) == {}
     assert result["counts"] == {"refuse": 2}
+
+
+async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller(
+    capacity_world,
+):
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+
+    await _cycle(capacity_world)
+
+    (listing,) = (await _listings(capacity_world)).values()
+    assert [escrow["chain_name"] for escrow in listing["accepted_escrows"]] == ["anvil"]
+    assert listing["demands"] == [
+        {
+            "chain_name": "anvil",
+            "arbiter": get_recipient_arbiter(
+                "anvil", config_path=str(anvil_address_book_path())
+            ).lower(),
+            "demand_data": {"recipient": SELLER_WALLET.lower()},
+        }
+    ]
 
 
 async def test_a_dry_run_reports_the_cycle_and_changes_nothing(world):

@@ -22,6 +22,11 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    require_deliverable_release_model,
+)
 from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
@@ -851,6 +856,14 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    alkahest_stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    if alkahest_section is not None and alkahest_stage is not None:
+        # A configured section owns the deals accepted under it, enabled or
+        # not, so its release model must be one this domain delivers.
+        require_deliverable_release_model(
+            alkahest_section, alkahest_stage.release_models
+        )
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
         "clients": dict(alkahest_clients),
@@ -858,7 +871,6 @@ def build_vm_settlement_composition(
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
     }
-    alkahest_section = settlement_config.mechanism_config("alkahest")
     if alkahest_section is not None and (
         bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
     ):

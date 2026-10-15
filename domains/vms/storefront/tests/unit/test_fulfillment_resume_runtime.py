@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_alkahest import RELEASE_MODELS
 
 from market_storefront.services.fulfillment_resume_runtime import converge_delivery_once
 from market_storefront.settlement_stages import VmAlkahestSellerStage
@@ -230,7 +231,9 @@ async def test_post_physical_convergence_records_ready_and_claim():
             connection_details={"host": "203.0.113.1", "port": 2222, "user": "tenant"},
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
             continuation=partial(
-                VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery,
+                VmAlkahestSellerStage(
+                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
                 submit=submit,
@@ -283,7 +286,9 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
             connection_details={},
             authentication=None,
             continuation=partial(
-                VmAlkahestSellerStage(None, fulfils_through_capacity=True).continue_delivery,
+                VmAlkahestSellerStage(
+                    None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                ).continue_delivery,
                 evidence=vm_delivery_evidence(),
                 db=db,
                 submit=submit,
