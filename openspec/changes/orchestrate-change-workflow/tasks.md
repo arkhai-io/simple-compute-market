@@ -534,7 +534,7 @@ without one it names the round view again.
 Delivers D12, D13's skill changes, and D5's design path; the skills' text only, as
 D12 limits it.
 
-- [ ] 5.1 Every `change-*` skill under `.agents/skills/` gains how it runs
+- [x] 5.1 Every `change-*` skill under `.agents/skills/` gains how it runs
       unattended: each "stop and ask the owner" ends its turn with a `question`
       outcome; a denied tool ends it `stopped` with its reason, never a question
       or a workaround; its last turn ends with an outcome matching
@@ -542,16 +542,94 @@ D12 limits it.
       triage) end each reply with its `message`. `change-validate` §5's
       environmental remedy is a `question`; `change-closeout`'s point needing a
       code edit is `returned` to implementation (D8). Interactive use is unchanged.
-- [ ] 5.2 `change-plan` sizes a section as a coherent, verifiable slice and drops
+      Done as one "Running unattended" section in each skill, before its step 1,
+      opening "Run interactively … this section does not apply", rather than an
+      edit at each of the skills' 38 stops: a stop to ask, tell, or wait for the
+      owner is a `question` (what was found, the options, a recommendation); a
+      plain stop (a guard refusing, `HEAD` moving) is `stopped` with no denials;
+      a denied tool is `stopped` with the calls as seen, which the wrapper
+      replaces, never a workaround or a question; each skill then names its own
+      ends — design `finished` to its review or `blocked` on a prerequisite (its
+      exact change name); planning's presentation a `question`, then `finished`,
+      and an exposed design question `returned` to design, status untouched;
+      triage's findings and gate `question`s, and a closeout fix needing code
+      `returned` to implementation; implementation `finished`, a wrong plan
+      `returned` to design or planning with nothing committed, an external input
+      or an oversized section a `question`; validation's environmental remedy a
+      `question` (§5) taking only the action named; closeout's points
+      `question`s and a code edit `returned` to implementation; archive
+      cleanup `finished`, an already-archived row included. Design, planning,
+      and triage say every reply is a turn, its `message` the reply in full.
+      `change-review` says only that nothing changes: Codex's final message is
+      the review, and the wrapper derives the outcome. A `returned` outcome
+      leaves the status; so that the step started next can accept the change,
+      `change-plan`'s entry check now takes a change whose return from
+      implementation the owner confirmed, and `change-implement`'s one `in
+      closeout` whose return the owner confirmed, each setting its own phase.
+- [x] 5.2 `change-plan` sizes a section as a coherent, verifiable slice and drops
       "one section per session" from its description and handoff;
       `change-implement` implements the sections it was given, drops §8's
       question, and keeps the warning about a growing session as advice (D13).
-- [ ] 5.3 `change-design` gains the prerequisite path: shape the prerequisite with
+      Done. `change-plan`: its description, its section-sizing bullet (a coherent
+      slice one verification point proves; the plan says nothing of sessions,
+      rounds, or harnesses, which the owner decides before implementation), its
+      plan check, and its handoff (rounds the owner agrees). `change-implement`:
+      its description and title, its opening (a session implements the sections
+      it was given; a growing session is the owner's to weigh), the oversized
+      section's wording, and step 8, which goes on through the sections given
+      and then stops and reports, recommending a fresh session when it is
+      large, with no question.
+- [x] 5.3 `change-design` gains the prerequisite path: shape the prerequisite with
       the owner, write it in a worktree on a new branch from dev, end `blocked`;
       after dev is merged in, keep the change `in design` with the dependency
       gating design; on release, drop only the dependency (D5, D5a).
-- [ ] 5.4 Verification: `make check-agent-skills`; a fresh-context read of each
+      Done as "When the design needs another change first", under step 4, in
+      five steps: shape the prerequisite's requirements and initial proposal
+      with the owner; write it in `git worktree add ../<prerequisite>-proposal -b
+      propose-<prerequisite> dev`, with its `ready for design` row, checked by
+      `make -C ../<prerequisite>-proposal check-change-index`; the owner commits
+      and opens its pull request, and the design halts (`blocked`); once dev
+      is merged in, record the dependency gating design, keep `in design`, and
+      halt again (`blocked`); once the prerequisite is archived and merged in,
+      drop only the dependency on the owner's word. Step 1's entry check names
+      the release, and the opening's list of edits allowed before the design is
+      settled includes the prerequisite's proposal and dependency.
+- [x] 5.4 Verification: `make check-agent-skills`; a fresh-context read of each
       edited skill against D12, recording anything it found.
+      `make check-agent-skills`, `make check-comment-hygiene`, `make
+      check-packaging` (after the fixes): passed. `make
+      test`: passed, before the read's fixes, which touched only the skills and
+      `scripts/change_steps.toml`; `test_run_change_step.py` passed after them
+      (179). The read found, all fixed: no step would accept a return to
+      planning or implementation (the entry checks above); design's opening
+      still limited its edits; design's prerequisite stops were `question`s by
+      the general rule (now `blocked`, step 4's too, so a stale question does
+      not come back once the dependency is released); `blocked_on` must be the
+      exact name `change_next_step.py` resolves; closeout's `evidence` named
+      nothing recorded; `change-review`'s note contradicted itself; plain stops
+      and `denials` were unmapped; archive cleanup's already-archived stop;
+      implementation's oversized section; triage's closeout fix needing code,
+      which runs steps an unattended triage may not; implementation's and
+      validation's `next`; implementation's title; "section N" where those
+      skills say "step N". And commands the skills call for that the step table
+      denied, now allowed: archive cleanup's `make check-*` (it runs
+      `make check-doc-citations`), design's `make -C ../*-proposal
+      check-change-index`, bare `openspec validate`, `instructions`, `list`,
+      `show`, and `status` for every step, and `openspec archive` for closeout.
+      End-to-end: none, as the plan's preamble says.
+
+Handoff. The permanent `openspec/specs/change-workflow/spec.md` Purpose still
+says "implementation one section per fresh session", and the delta does not reach
+it, since it is not a requirement: 8.9 should rewrite it with the renamed
+requirement. The design step's `../*-proposal/` rules and `make -C` rule are
+untested; the pilot reaches them only if its design is blocked on a prerequisite.
+Under orchestration, D5a's release is the orchestrator's (6.1): the design skill's
+own release step is the interactive path. The orchestrator must answer a
+`returned` outcome by having the owner confirm it and then starting the step
+returned to, whose entry check now accepts it. Section 6's skill can rely on
+every leaf skill ending each unattended turn with an outcome; the stops the
+skills only say "stop" at are mapped generally, not one by one, so the pilot
+should watch for a stop that ends as the wrong outcome.
 
 ## 6. The orchestrating session
 

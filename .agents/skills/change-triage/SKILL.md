@@ -31,6 +31,38 @@ round (`make round-view`), the branch points at its base, and a fix committed th
 would squash the round into it; ask the owner to run `make round-done` first.
 Record `HEAD`: it is the base the fixes are made against.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make triage UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
+  `reason` naming the call and why the step needed it, and `denials` listing the
+  calls as you saw them; the wrapper replaces them with the run's own record. Never
+  work around a denial, with another tool or otherwise, and never ask about it as a
+  question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **Every reply is a turn.** This step is a discussion: each reply to the owner
+  ends its turn with an outcome, the reply in full as its `message` — `question`
+  while you wait for the owner's answer or disposition. The orchestrating session
+  shows the owner every message and resumes this session with each reply.
+- **The end is an outcome.** Each finding you present (step 3) and the gate
+  (step 6) is a `question`. When the dispositions are recorded, the accepted
+  fixes committed, and the gate answered, end with `finished`, `next` naming what
+  the gate's answer leads to. At a closeout triage, a finding whose fix needs code
+  ends with `returned`, `return_to` `implementation`, and `evidence` naming the
+  triage file: a correction is designed, implemented, and validated through those
+  steps, which an unattended triage may not run.
+
 ## 1. Find the review and load the context
 
 The change's directory is what `python3 scripts/find_change.py <change>` prints:

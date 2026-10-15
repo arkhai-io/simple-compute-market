@@ -23,6 +23,32 @@ it, the port-forwards, and the wheelhouse in `.dist`. The scripts stop
 port-forwards and uninstall the release without asking. One change is validated at
 a time; nothing else should be building in the checkout while you run.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make validate UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
+  `reason` naming the call and why the step needed it, and `denials` listing the
+  calls as you saw them; the wrapper replaces them with the run's own record. Never
+  work around a denial, with another tool or otherwise, and never ask about it as a
+  question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** An environmental failure (section 5) is a
+  `question` naming the evidence and the remedy, awaiting the owner's word; once
+  answered, take only the action the answer names, and rerun the part. When the
+  record is written, end with `finished`, `next` naming triage, or the
+  implementation review when it has not landed.
+
 ## 1. Check that this commit may be validated
 
 `make validate` refuses while the owner's round view is open (`make round-view`):

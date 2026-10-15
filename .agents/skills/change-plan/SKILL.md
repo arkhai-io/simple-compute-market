@@ -1,6 +1,6 @@
 ---
 name: change-plan
-description: Write or amend the implementation plan — tasks.md — for an OpenSpec change whose design has passed its review, sized so each section is implemented in one fresh session and ending with the closeout task. Use when a change is `ready for planning` or `in planning` in openspec/changes/README.md, or when the owner says "plan <change>" or "proceed to planning", typically continuing the design session.
+description: Write or amend the implementation plan — tasks.md — for an OpenSpec change whose design has passed its review, its sections coherent, verifiable slices, and ending with the closeout task. Use when a change is `ready for planning` or `in planning` in openspec/changes/README.md, or when the owner says "plan <change>" or "proceed to planning", typically continuing the design session.
 ---
 
 # Planning an OpenSpec change
@@ -18,6 +18,39 @@ the change's files before a task depends on it.
 Planning has three outcomes: the owner accepts the plan, the owner redirects it, or
 planning returns the change to design.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make plan UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
+  `reason` naming the call and why the step needed it, and `denials` listing the
+  calls as you saw them; the wrapper replaces them with the run's own record. Never
+  work around a denial, with another tool or otherwise, and never ask about it as a
+  question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **Every reply is a turn.** This step is a discussion: each reply to the owner
+  ends its turn with an outcome, the reply in full as its `message` — `question`
+  while you wait for the owner's answer or disposition. The orchestrating session
+  shows the owner every message and resumes this session with each reply.
+- **The end is an outcome.** Presenting the plan (section 6) is a `question`
+  awaiting the owner's acceptance. Once the owner accepts and the status is set
+  (section 7), end with `finished`, `next` naming the agreement of the first
+  implementation round.
+- **A return to design is proposed, not made.** When planning exposes a design
+  question (section 3), end with `returned`, `return_to` `design`, and `evidence`
+  naming where you recorded what planning found; leave the status as it is. The
+  owner confirms the return, and the design step then sets the status.
+
 ## 1. Check that planning may start
 
 Read the evidence from the files, even if this session held the design discussion:
@@ -26,7 +59,9 @@ happened elsewhere. Read the change's row in `openspec/changes/README.md` — st
 `Depends on`, notes — and the change's latest design review and its triage in
 `reviews/`. Then confirm:
 
-- The change's status is `ready for planning` or `in planning`.
+- The change's status is `ready for planning` or `in planning`, or the owner has
+  confirmed implementation's return of the change to planning, in which case set
+  it to `in planning`.
 - The latest design review's triage records its gate as passed, or the owner's
   waiver of that review is recorded (section 3).
 - No dependency in the row's `Depends on` gates `design` or `planning` and is
@@ -89,9 +124,12 @@ design.
 - opens with one line on what it delivers and the decisions (`D<n>`) and
   requirements it implements;
 - names the files and packages it touches;
-- is sized to be implemented in one fresh session without the session compacting:
-  a section that crosses several package layers, or needs more tasks than one
-  session can hold in mind with the guidance documents, is split;
+- is a coherent slice that can be verified, sized by what it changes and what
+  proves it: a section that crosses several package layers, or whose tasks one
+  verification point cannot prove together, is split. The plan says nothing of
+  sessions or rounds: how many sections a session implements, and how many are
+  reviewed together, the owner decides before implementation starts, whether or
+  not a coding harness implements them;
 - ends at a verification point — the focused suites that prove it, each named with
   its level as `docs/development/TESTING.md` defines them (unit, library
   integration, application integration through the typed client, system), at the
@@ -140,7 +178,7 @@ Before presenting it:
 - no open question has its answer prescribed by a task
   (`openspec/README.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point, its covering end-to-end scenarios or a
-  statement that none covers it, and a size one session can hold;
+  statement that none covers it, and a size its verification point can prove;
 - `openspec validate <change> --strict` passes, and
   `make check-doc-citations CHANGE=<change>` reports only files the change will
   create.
@@ -168,5 +206,5 @@ When the owner accepts the plan, set the change's `Status` to
 `ready for implementation`. Planning has no review gate of its own: its sizing and
 closeout are examined by the first implementation review.
 
-Implementation starts in a new session, one section per session, with
-`change-implement`.
+Implementation starts in a new session with `change-implement`, in rounds of
+sections the owner agrees before it starts.

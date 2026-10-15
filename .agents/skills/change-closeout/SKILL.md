@@ -23,6 +23,33 @@ code — a part that would need a code edit stops closeout and returns the chang
 implementation. That also means closeout runs no test suites and owes no new
 validation.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make closeout UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
+  `reason` naming the call and why the step needed it, and `denials` listing the
+  calls as you saw them; the wrapper replaces them with the run's own record. Never
+  work around a denial, with another tool or otherwise, and never ask about it as a
+  question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** Each point this skill puts to the owner is a
+  `question`. A part that would need a code edit ends with `returned`,
+  `return_to` `implementation`, and `evidence` naming the closeout task's notes,
+  where you recorded what needs the edit; closeout never edits code. The owner
+  confirms the return, and implementation then sets the status. When the archive is committed, end with `finished`,
+  `next` naming the closeout review.
+
 ## 1. Check that closeout may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does

@@ -31,6 +31,8 @@ allow = [
   "Bash(python3 scripts/find_change.py*)",
   "Bash(python3 scripts/run_change_step.py log*)",
   "Bash(make round-view-closed)", "Bash(make check-change-index)",
+  "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
+  "Bash(openspec show *)", "Bash(openspec status*)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
@@ -50,6 +52,7 @@ allow = [
   "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
+  "Bash(make -C ../*-proposal check-change-index)",
   "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
@@ -111,8 +114,8 @@ skill = "change-closeout"
 allow = [
   "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
   "Edit(AGENTS.md)",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
-  "Bash(python3 scripts/check_*)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
+  "Bash(make check-*)", "Bash(python3 scripts/check_*)",
   "Bash(git add *)", "Bash(git commit *)",
 ]
 deny = ["Bash(make push-branch*)"]
@@ -123,6 +126,6 @@ skill = "change-archive-cleanup"
 allow = [
   "Edit(openspec/changes/README.md)",
   "Write(openspec/changes/**/reviews/pull-request.md)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]

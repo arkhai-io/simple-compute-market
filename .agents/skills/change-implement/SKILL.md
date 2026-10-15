@@ -1,18 +1,47 @@
 ---
 name: change-implement
-description: Implement one section of an OpenSpec change's tasks.md in a fresh session — load the guidance, the change, and that section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit the section for review. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
+description: Implement the sections of an OpenSpec change's tasks.md a session is given, in a fresh session — load the guidance, the change, and each section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit each section on its own for review. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
 ---
 
-# Implementing one section of an OpenSpec change
+# Implementing the sections of an OpenSpec change
 
 The section is the unit of work: each is implemented, checked, handed off, and
-committed on its own. By default a session implements one section and stops,
-because compliance with the repository's guidance degrades as a session grows and
-collapses after it compacts. The owner may direct a session to carry on into later
-sections — by naming several when the session starts, or by saying to continue
-after one is committed — and decides when the accumulated sections are reviewed.
-Either way, everything the next session needs goes back into the change's files
-before a section is committed.
+committed on its own. A session implements the sections it was given, in order:
+the owner decides, before implementation starts, how many sections a session
+implements and how many are reviewed together. Compliance with the repository's
+guidance degrades as a session grows and collapses after it compacts, which is the
+owner's to weigh in giving a session several sections; say so when a session grows
+large. Either way, everything the next session needs goes back into the change's
+files before a section is committed.
+
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make implement UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`scripts/change_outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied tool stops the step.** If a tool call is denied, end with `stopped`,
+  `reason` naming the call and why the step needed it, and `denials` listing the
+  calls as you saw them; the wrapper replaces them with the run's own record. Never
+  work around a denial, with another tool or otherwise, and never ask about it as a
+  question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** When the sections you were given are committed,
+  end with `finished`, `next` naming what the round needs next. When the plan is
+  wrong (step 4), commit nothing from the section and end with `returned`,
+  `return_to` `design` or `planning`, and `evidence` naming the section's notes,
+  leaving the status as it is: the owner confirms the return, and the step started
+  then sets it. An external input the change cannot supply, and a section far
+  larger than its plan once its handoff is recorded (step 4), are each a
+  `question`.
 
 ## 1. Check that this section may start
 
@@ -22,7 +51,8 @@ before a section is committed.
   ask the owner.
 - **Status.** The change's row in `openspec/changes/README.md` is
   `ready for implementation` or `in implementation`, and no dependency in its
-  `Depends on` gates implementation while unlanded.
+  `Depends on` gates implementation while unlanded. A change `in closeout` whose
+  return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
   section's. `make round-view-closed` passes: while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
@@ -102,8 +132,8 @@ the design does not make, do not guess and do not work around it:
 
 If the section turns out far larger than its plan — many more files or layers than
 it names — stop at a coherent, verified point instead, record the handoff, and tell
-the owner the section was sized wrong. A section that cannot finish in one session
-is a planning defect, not a reason to let the session compact.
+the owner the section was sized wrong. A section far larger than its plan is a
+planning defect, not a reason to let the session compact.
 
 ## 5. Check before committing
 
@@ -150,15 +180,15 @@ says what it delivers. Do not push; pushing belongs to validation.
 
 ## 8. Continue or stop
 
-When the owner named a range and sections remain in it, go on to the next one, from
-step 1, without waiting — unless this section stopped for a plan or design problem,
-or its checks could not be made to pass, which ends the range. Before starting the
-next section, re-read the section and its earlier sections' notes; and if the
-session has compacted, re-read every document in step 2.
+When sections you were given remain, go on to the next one, from step 1, without
+waiting — unless this section stopped for a plan or design problem, or its checks
+could not be made to pass, which ends the sections. Before starting the next
+section, re-read the section and its earlier sections' notes; and if the session
+has compacted, re-read every document in step 2.
 
-Otherwise report, and ask whether to continue into the next section in this session
-or stop here for validation and review. Say how large the session has grown if you
-can tell, and recommend a fresh session when it is large: the owner decides.
+When the sections you were given are committed, stop and report. Say how large the
+session has grown if you can tell; when it is large, recommend that the next
+sections start in a fresh session.
 
 ## 9. Report
 
