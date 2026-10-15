@@ -55,7 +55,8 @@ buyer-chosen arbiter unchecked.
   per-pool terms, a pool resolving none being held and reported (in bare metal, also one with
   no positive maximum lease duration). Both report each loop's state
   and publication's last cycle in system status; the loop controller serializes each loop's
-  timer cycle and step through one `run_cycle` boundary and records one sanitized outcome per
+  timer cycle and step through one `run_cycle` boundary, for every storefront's loops, the
+  API-credit storefront's included, and records one sanitized outcome per
   cycle. Bare metal also reports its
   per-site derivation summary.
 - **Bare-metal configuration on VM's conventions.** The bare-metal storefront reads
@@ -65,8 +66,9 @@ buyer-chosen arbiter unchecked.
   moves to `kit/config`. Site trust comes from each site's durable service peer in both
   storefronts: responses and callbacks are verified against the same active, rotating
   principals, and bare metal adopts durable service-peer state, written as fresh schema since
-  it has never been deployed outside the development cluster. VM's `claims_sweep_interval`
-  becomes `settlement_servicing_interval_seconds`, and the old key refuses startup.
+  it has never been deployed outside the development cluster. VM's and the API-credit
+  storefront's `claims_sweep_interval` becomes `settlement_servicing_interval_seconds`, and the
+  old key refuses startup.
 - **Alkahest release conditions for every domain.** Listing `demands` are derived by
   `kit/alkahest` from `[Settlement.alkahest]` for every domain, each domain declares the
   release models it can deliver, and `kit/alkahest`'s plan materialization uses exactly the
@@ -106,7 +108,9 @@ None.
   `kit-owned-listing-and-fulfillment-lifecycles`.
 - Retiring VM's admin projection refresh route, which `kit-owned-storefront-shell` decides.
 - Extracting the storefronts' typed configuration models into a kit.
-- API credits, whose storefront holds no per-site projection state.
+- API credits' publication and projections: its storefront holds no per-site projection state.
+  Its loops move onto the controller's cycle boundary and its interval key is renamed, because
+  it shares the controller and the servicing worker.
 - A pool-override write's live check against the site, which stays live: its requirement is
   that a write is judged against the site's current projection.
 
@@ -123,6 +127,8 @@ None.
 - `domains/vms/storefront`: consumers onto the injected state; the step; per-site trust;
   startup refusal; lifecycle status; the generator's section list; demand derivation removed;
   the interval key rename.
+- `domains/apicredits/storefront`: loops registered with step and interval; the interval key
+  rename.
 - `domains/bare_metal/storefront`: publication, recheck, overrides, lifecycle steps, server
   startup, status, configuration loading, typed models, CLI commands, a packaged
   `settings.toml`, durable service-peer identity state, and a reservation binding that pins the

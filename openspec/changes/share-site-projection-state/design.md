@@ -235,9 +235,12 @@ records its cycle's outcome through and a snapshot of states and last outcomes (
 - the controller's `run_cycle(name)` is the one place a cycle runs, under that loop's lock,
   recording its outcome in a `finally`; a loop registers its step and its interval, and the
   timer the controller starts is a gate, `run_cycle`, wait loop over the same operation, so the
-  timer and an operator's step never run a cycle concurrently (03 F3); every VM and bare-metal
-  loop moves onto it, replacing bare metal's `publication_lock` and giving VM's publication, and
-  every other loop, the serialization it lacks; a held loop runs no timer cycles, so a step
+  timer and an operator's step never run a cycle concurrently (03 F3); every VM, bare-metal, and
+  API-credit loop moves onto it, replacing bare metal's `publication_lock` and giving VM's
+  publication, and every other loop, the serialization it lacks, and the controller keeps no
+  other way to run a loop (P1: the API-credit storefront shares the controller, so leaving its
+  loops on self-gating tasks would keep a second loop form and the step-and-timer race; rejected,
+  scoping the requirement to the compute storefronts and recording the gap); a held loop runs no timer cycles, so a step
   taken while held never waits. The per-site capacity-event pollers that
   `run_capacity_event_pollers` fans out are the one exception in shape: each site's feed
   cursor has its own lock, which the capacity-events step takes per site;
@@ -336,8 +339,10 @@ Secrets is owed. Accepted scope beyond the original proposal.
 - **C4. Intervals use VM's keys and defaults.** `[capacity].poll_interval = 5`,
   `[capacity].publication_interval_seconds = 30`, `negotiation_watchdog_interval`,
   `negotiation_timeout_seconds`. Settlement servicing uses bare metal's clearer
-  `settlement_servicing_interval_seconds`, which VM adopts in place of
-  `claims_sweep_interval`. Payment reconciliation, with no VM key, uses
+  `settlement_servicing_interval_seconds`, which VM and the API-credit storefront adopt in place
+  of `claims_sweep_interval` (P2: both feed the same kit servicing worker, so one name holds in
+  every storefront; the API-credit chart has no generated schema, so its startup refusal is the
+  guard there; rejected, leaving the API-credit storefront on the old key). Payment reconciliation, with no VM key, uses
   `payment_reconciliation_interval`. A storefront whose configuration states
   `claims_sweep_interval` refuses to start, naming its replacement, and the generated values
   schema refuses it in an agent's `config`; `DEPLOYMENT_AND_CONFIG.md`'s rollback note says an
