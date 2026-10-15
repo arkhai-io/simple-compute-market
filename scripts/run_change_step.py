@@ -67,7 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = Path(__file__).resolve().parent / "change_outcome.schema.json"
+SCHEMA = ROOT / ".agents" / "change-outcome.schema.json"
 STEP_TABLE = ROOT / ".claude" / "change-steps.toml"
 CHANGES = Path("openspec/changes")
 LOG = "workflow.jsonl"
