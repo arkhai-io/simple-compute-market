@@ -58,7 +58,7 @@ holds and their reasons, including a site whose projection generation its domain
 
 Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains resource-granular inside the provisioning site authority, which applies each pool provider's host requirement.
 
-A storefront SHALL hold one per-site projection state for its process, holding the resource-pool and capacity-bucket projections of every configured site, and every publication source, listing-source check, override status, and status report in the process SHALL read that one state rather than querying a site per listing type. It SHALL load both projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection; this holds for a refresh of every site at once as for a poll. Topology-sensitive authoritative errors MAY trigger one coalesced drift check of every held family but SHALL NOT automatically retry a state-changing request. A resource-pool generation change observed by polling or a drift check SHALL wake publication.
+A storefront that derives listings from site projections SHALL hold one per-site projection state for its process, holding the resource-pool and capacity-bucket projections of every configured site, and every publication source, listing-source check, override status, and status report in the process SHALL read that one state rather than querying a site per listing type. It SHALL load both projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale, without counting as a confirmation of it, rather than representing an empty projection; this holds for a poll an operator invokes as for a timed one. Topology-sensitive authoritative errors MAY trigger one coalesced drift check of every held family but SHALL NOT automatically retry a state-changing request. A resource-pool generation change observed by a poll, timed or operator-invoked, or by a drift check SHALL wake publication; a refresh an operation runs to reconcile inline SHALL NOT.
 
 Projection-backed candidate derivation SHALL be a storefront's only listing-candidate path. A storefront SHALL NOT retain a local, non-projection physical-inventory table as an alternative source, and SHALL NOT expose a configuration option selecting between projection-backed and local derivation.
 
@@ -67,8 +67,9 @@ Projection-backed candidate derivation SHALL be a storefront's only listing-cand
 - **THEN** it retains that generation as stale without replacing the other independently versioned projection
 
 #### Scenario: An operator refreshes every site during an outage
-- **WHEN** an operator refreshes every site's projections while one site cannot be reached
+- **WHEN** an operator invokes a projection poll of every site while one site cannot be reached, with the lifecycle loops held or not
 - **THEN** that site keeps its last generation, reported stale, and its listings keep deriving from it rather than becoming unknown
+- **AND** a resource-pool change at any other site wakes publication
 
 #### Scenario: A refused reservation reveals drift
 - **WHEN** a site refuses a state-changing request with a topology-sensitive error
@@ -261,9 +262,11 @@ these hold:
 
 It MUST refuse with the availability reason when the held projection's bare-metal view
 shows the Physical Resource unavailable, and as retryable when the projection it holds for
-the site has no value, when that generation's bare-metal views are refused, or when no site
-authority is configured. Availability read from a held projection may lag the site by up to
-one poll; admission at the site remains authoritative.
+the site has no value, is stale, or has a generation whose bare-metal views are refused, or
+when no site authority is configured. Only a freshly confirmed generation, one whose most
+recent poll succeeded, confirms a listing, so the availability and declarations a recheck
+relies on lag the site by at most one poll interval; admission at the site remains
+authoritative.
 
 #### Scenario: A declaration shrinks beneath its listing
 
@@ -283,11 +286,95 @@ one poll; admission at the site remains authoritative.
   storefront does not hold
 - **THEN** the opening is refused as retryable, and the site is not called
 
+#### Scenario: The held generation is stale
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose site's most recent
+  projection poll failed, so the storefront holds only an earlier generation
+- **THEN** the opening is refused as retryable, and the earlier generation confirms nothing
+
 #### Scenario: The held generation is refused
 
 - **WHEN** a buyer opens a negotiation on a bare-metal listing whose site's held generation
   carries a bare-metal view naming a different pool than its container
 - **THEN** the opening is refused as retryable
+
+### Requirement: The seller's inventory guard checks a listing against its own source
+
+Before every seller decision in a negotiation round, and before a buyer's or an
+administrator's acceptance, the storefront MUST recheck every published field of the
+listing that is sourced from its declaration or pool against that source: the listing's
+own site and pool or Physical Resource, never a resource elsewhere. A categorical field
+MUST equal its source and a quantity MUST fit the declared capacity. Fields whose
+authority is the storefront are not rechecked. A buyer's exit MUST NOT be rechecked.
+
+The storefront MUST additionally check that the listing's published quantity is
+available only for a capacity-backed listing. For an unbacked listing it MUST NOT
+consult availability or contact a site authority.
+
+A declared-match failure MUST be reported with a reason distinct from an availability
+failure, so a buyer and an operator can tell a shape the seller no longer declares
+from capacity that is temporarily taken. A source the storefront cannot confirm MUST be
+refused as retryable, distinct from both, for a seller decision that would counter or
+accept and for any acceptance; a seller decision that independently rejects or exits
+keeps its own reason.
+
+
+A source the storefront derives from site projections is confirmed only by a freshly confirmed
+generation of its site's resource-pool projection, one whose most recent poll succeeded and that
+the listing's domain accepts. A site whose projection is not held, is stale, or holds a
+generation the domain refuses cannot confirm the listing, and the check refuses as retryable.
+Publication may still derive from a stale generation, holding listings through an outage; a
+source check may not.
+
+#### Scenario: An unbacked listing matches its declaration
+
+- **WHEN** a buyer negotiates against an unbacked listing whose published fields match its enabled source declaration
+- **THEN** the declared match passes without any availability read or site call
+
+#### Scenario: A declaration no longer supports its listing
+
+- **WHEN** a buyer negotiates against a listing whose source declaration has shrunk below, or been disabled beneath, its published shape
+- **THEN** seller policy rejects with a declared-match reason rather than an availability reason
+
+#### Scenario: Matching capacity exists only elsewhere
+
+- **WHEN** a listing's own source no longer supports it but another pool or site holds matching available capacity
+- **THEN** seller policy rejects the listing
+
+#### Scenario: A backed listing matches but capacity is taken
+
+- **WHEN** a capacity-backed listing matches its declaration but its published quantity is not available
+- **THEN** seller policy rejects with the availability reason
+
+#### Scenario: A fungible listing matches one member
+
+- **WHEN** a buyer negotiates against a listing derived from a fungible pool whose enabled members declare different counts
+- **THEN** the declared match passes only if some single enabled member has equal categorical attributes and declares at least the published quantity
+
+#### Scenario: A dry-run evaluation applies the same checks
+
+- **WHEN** a seller evaluates a proposal against a listing without opening a negotiation
+- **THEN** the evaluation applies the same declared match and, for a capacity-backed listing only, the same availability check as a negotiation round
+
+#### Scenario: An acceptance follows a change at the source
+
+- **WHEN** a buyer accepts a seller's counter, or an administrator force-accepts, after the listing's source stopped supporting it or its capacity was taken
+- **THEN** the acceptance is refused with the declared-match or availability reason and nothing is recorded
+
+#### Scenario: The source cannot be confirmed
+
+- **WHEN** the listing's site cannot be reached, does not verify, or has not supplied the projection the storefront reads
+- **THEN** an opening or round the seller would counter or accept, and any acceptance, is refused as retryable and nothing is recorded
+
+#### Scenario: A buyer exits while the source cannot be confirmed
+
+- **WHEN** a buyer exits a negotiation whose listing's site cannot be reached
+- **THEN** the exit is recorded without a site call
+
+#### Scenario: An unbacked listing's site is stale
+
+- **WHEN** a buyer negotiates against an unbacked listing whose site's most recent projection poll failed
+- **THEN** the round is refused as retryable, although the retained generation still declares the listing's source
 
 ### Requirement: Bare metal joins the site-scoped pool-override store
 
@@ -383,31 +470,71 @@ it holds for the override's site. A site whose projection the storefront does no
   the override's site, including just after a restart
 - **THEN** the override is reported as unknown
 
+### Requirement: Site authority principals rotate with bounded overlap
+
+A storefront MUST require proofs from both the active and replacement principals over the same bounded rotation statement. It MUST accept both only during the recorded overlap and MUST reject the old principal after expiry or explicit retirement.
+
+A storefront MUST verify a site authority's responses and its callbacks against the same
+durable, time-bounded set of active principals for that site, read when each is verified, so a
+rotation never leaves the two disagreeing. A durable record bound to a site authority, such as a
+reservation's selected site, MUST remain bound to it across an authorized rotation.
+
+#### Scenario: Rotation overlap is active
+
+- **WHEN** both principal proofs are valid and the overlap has not ended
+- **THEN** either principal authenticates that site authority
+
+#### Scenario: Rotation overlap has ended
+
+- **WHEN** the old principal signs after overlap expiry or retirement
+- **THEN** the storefront rejects it
+
+#### Scenario: A site's responses follow its rotation
+
+- **WHEN** a site authority's principal rotates and the overlap ends
+- **THEN** the storefront verifies that site's responses, as its callbacks, against the
+  replacement principal only, without a configuration change or a restart
+
+#### Scenario: A bare-metal storefront restarts after a rotation
+
+- **WHEN** a bare-metal storefront with a live reservation at a site restarts after that
+  site's principal was rotated
+- **THEN** it starts and keeps the reservation bound to that site
+
 ## ADDED Requirements
 
 ### Requirement: A storefront that cannot publish refuses to start
 
-A storefront that publishes listings MUST refuse to start, naming each problem, when its
-publication cannot be configured: no settlement publication clause; registry discovery
-enabled with no registry, or a registry without an authority pin; or, for a storefront
-whose domain requires a lease bound, no positive maximum lease duration. A storefront that
-only services deals already accepted is not a supported deployment.
+A storefront that derives listings from site projections MUST refuse to start, naming each
+problem, when publishing is impossible for the whole storefront: it has no registry to publish
+to, or a registry without its authority pin; it has no enabled settlement mechanism; or it has
+no configured site, or a site not bound to exactly one service peer. A storefront that only
+services deals already accepted is not a supported deployment. Settlement clauses and a lease
+bound MAY come from a pool's override or hint instead of the storefront's defaults, so missing
+defaults MUST NOT refuse startup; a pool that resolves no clauses, or no lease bound its domain
+requires, from any tier MUST be held and reported per site.
 
 #### Scenario: A bare-metal storefront has no registry
 
 - **WHEN** a bare-metal storefront starts with no `[registry].urls`
 - **THEN** it refuses to start, naming the missing registry, and starts no loop
 
-#### Scenario: A VM storefront has no publication clauses
+#### Scenario: No settlement mechanism is enabled
 
-- **WHEN** a VM storefront starts with an empty `[pricing].settlements`
-- **THEN** it refuses to start, naming the missing clauses
+- **WHEN** a VM storefront starts with no enabled settlement mechanism
+- **THEN** it refuses to start, naming the missing mechanism
 
-#### Scenario: A bare-metal storefront has no maximum lease duration
+#### Scenario: A storefront's terms live in its pools
 
-- **WHEN** a bare-metal storefront starts with `[pricing].default_max_duration_seconds`
-  absent or zero
-- **THEN** it refuses to start, naming the missing bound
+- **WHEN** a VM storefront starts with an empty `[pricing].settlements` while its pools'
+  overrides or hints state settlement clauses
+- **THEN** it starts and publishes those pools' listings
+
+#### Scenario: A bare-metal pool resolves no lease bound
+
+- **WHEN** a bare-metal storefront has no `[pricing].default_max_duration_seconds` and one
+  pool's override states no maximum duration
+- **THEN** that pool's listings are held and reported, and every other pool publishes
 
 ### Requirement: An Alkahest listing advertises its release conditions
 

@@ -104,33 +104,64 @@ composes bare-metal publication into the VM shell, overlaps Goal 3 and
 `kit/capacity-publication` gains `SiteProjectionState`, built once by the composition root
 over its aggregate capacity client, with one resource-pool and one capacity-bucket cache
 per configured site, held by VM's container and the bare-metal runtime and passed to every
-consumer. Its operations: `view(site, family)`, `values(family)` (held sites only, `[]`
-an authoritative empty), `status()`, `poll_once()` (the timer's cycle, also the first
-load), `refresh_site(site, families=None)` (never raises), `refresh_all()`, and
-`run(interval, gate, wait)`. Its constructor installs each site's topology-error handler
-and takes an `on_resource_pool_change` callback, the publication wake. Tests build their
-own instance over a fake aggregate. Rejected: a kit module-level registry, a process
+consumer. Its constructor installs each site's topology-error handler and takes an
+`on_resource_pool_change` callback, the publication wake. Tests build their own instance
+over a fake aggregate. Its interface (settled in design review, 01 F5 and 02 F4):
+
+```python
+RESOURCE_POOL = "resource_pool"
+CAPACITY_BUCKET = "capacity_bucket"
+
+def values(self, family: str) -> Mapping[str, list[dict]]:
+    """Site -> rows for every site holding a generation, stale included.
+    A site holding none is absent; a loaded empty site maps to []."""
+def view(self, site_id: str, family: str) -> ProjectionCacheView:
+    """State, identity, value, last error, and last confirmation of one site's family."""
+def status(self) -> dict[str, dict[str, ProjectionFamilyStatus]]
+async def poll_once(self) -> None          # the poller's cycle; also the first load
+async def refresh_site(self, site_id: str, *, families: Iterable[str] | None = None) -> None
+async def run(self, *, interval: float, gate, wait) -> None
+```
+
+Publication reads `values()`, which deliberately includes stale generations; a source check
+reads `view()` and confirms only from a `loaded` generation (D5). An unconfigured site given
+to `view` or `refresh_site` raises the kit's `CapacityBindingError`, as
+`CapacityRuntime.site_client` does; an unknown family raises `ValueError`. `refresh_site`
+never raises for a failed fetch: the cache keeps its last generation as `stale` with its
+error and does not advance its last confirmation. Rejected: a kit module-level registry, a process
 global that contradicts the instance-scoped loop controller and keeps the module patching
 `TESTING.md` rules out; and an instance with a VM module facade, leaving two ways to reach
 the state.
 
 ### D3. Refreshing every site keeps last-known generations
 
-`refresh_all()` force-refreshes every cache in place; a site whose fetch fails keeps its
-last generation as `stale`. VM's admin route `POST /api/v1/admin/capacity/projections/refresh`
-keeps its wire contract and reports honestly. Bare metal gains no such route. This
-closes the index's unowned item "the admin projection refresh … discards last-known
-generations". Retiring the route belongs to `kit-owned-storefront-shell`, where the
-question is recorded.
+The state is built once and never replaced, and every refresh updates caches in place; a
+site whose fetch fails keeps its last generation as `stale`. VM's admin route
+`POST /api/v1/admin/capacity/projections/refresh` is a manual invocation of the poller's
+cycle, `poll_once()`: it does not wait for a timer and runs whether or not the loops are
+held, keeps its wire contract, and reports honestly (02 F4). A version poll observes every
+change a forced snapshot would, because the resource-pool digest covers availability and
+views, so the state carries no separate force-refresh operation. Bare metal gains no such
+route. This closes the index's unowned item "the admin projection refresh … discards
+last-known generations". Retiring the route belongs to `kit-owned-storefront-shell`, where
+the question is recorded.
 
 ### D4. Every storefront holds both families; a topology error checks both
 
 Every composition holds the resource-pool and capacity-bucket families for every site. A
 verified topology-sensitive error triggers one coalesced drift check of every held family,
-and never retries the request. A resource-pool identity change observed by the poller or
-a drift check fires `on_resource_pool_change`; refreshes an operation runs itself (inline
-reconciliation, an admin refresh) do not, and an accepted override write wakes
-publication through its own hook. The compute storefront will eventually pull every
+and never retries the request. Each refresh path belongs to one category (02 F4):
+
+| Operation | Category | Wakes publication |
+|---|---|---|
+| Poller cycle, `site-projections` step, VM admin refresh route | poll-and-notify | on a resource-pool change |
+| Topology drift check | poll-and-notify | on a resource-pool change |
+| Inline reconciliation (admin reserve, fulfillment event, failure release) | refresh-and-reconcile | never |
+| Override write | refresh-and-wake | always, through the override service's hook |
+
+A wake never advances a held loop: a held publication loop stays held, and the wake makes it
+run promptly once resumed. A failed refresh in any category keeps the site's previous
+generation as `stale` with its error and never counts as a confirmation. The compute storefront will eventually pull every
 resource pool once for all listing types, so one uniform state is the shape to refactor
 from. Rejected: families chosen per composition (bare metal holding resource-pool only),
 a parameter that loses its last caller when storefronts merge.
@@ -146,22 +177,58 @@ generation instead of holding and would freeze every listing type at that site o
 domain's rule; and a neutral check in the kit, which would interpret opaque
 `publication_views`.
 
+**Only a freshly confirmed generation confirms a source check (01 F4 / 02 F1).** A held
+generation is in one of four conditions: none held, freshly confirmed (`loaded`: the most
+recent poll succeeded), stale (a retained generation whose latest poll failed), or refused by
+the reading domain. Publication reads any held generation, stale included, because holding a
+site's listings through an outage is its job. A listing-source check — before every seller
+decision and every acceptance, in both domains — confirms a listing only from a `loaded`
+generation its domain accepts; every other condition refuses as retryable, and an exit is
+never checked. The bound on the availability and provenance an opening relies on is
+therefore one poll interval. This closes VM's existing gap, whose check confirmed from any
+held generation including for unbacked listings, which have no admission backstop. Refusing a
+backed listing on stale data costs nothing in practice: a reservation that follows cannot
+reach a site that cannot be polled. Rejected: accepting unbounded staleness as policy; a
+configurable freshness window, a key an operator has no basis to tune; and bounding unbacked
+listings only through a new backing-delegate operation.
+
 ### D6. A storefront that cannot publish refuses to start; loop state reaches status
 
-Both storefronts refuse to start unless publication is configured: bare metal requires
-`[registry].urls` with matching `[registry.authorities]`, a non-empty
-`[pricing].settlements`, a positive `[pricing].default_max_duration_seconds`, a settlement
-composition, and at least one `[capacity.sites]` entry with exactly one service peer; VM
-requires a non-empty `[pricing].settlements` and, while `enable_registry_discovery` is
-true, registries. A storefront that services existing deals only is not supported. Each
-publication loop then always runs and catches a failing cycle, as VM's does.
+A storefront that derives listings from site projections refuses to start when publishing is
+impossible for the whole storefront (01 F2 / 02 F3): no registry to publish to, or a registry
+without its authority pin (while VM's `enable_registry_discovery` is true); no enabled
+settlement mechanism, so no option can ever be built; and, for bare metal, no configured site
+or a site without exactly one service peer. A storefront that services existing deals only is
+not supported. Settlement clauses and bare metal's lease bound are per-pool terms that a pool
+override or a pool's hint may supply in place of the storefront-wide defaults, so an empty
+`[pricing].settlements` or an absent `[pricing].default_max_duration_seconds` is not a
+startup refusal: a pool that resolves no clauses or no lease bound from any tier is held and
+reported in the per-site derivation status, as a pool override conflicting with
+configuration already is. Each publication loop always runs and catches a failing cycle, as
+VM's does. Rejected: requiring storefront-wide defaults, which refuses storefronts whose
+terms live in their pools; and proving at startup that some source resolves clauses, which
+makes startup depend on site availability.
 
-Both storefronts' system status gains a `lifecycle` section: the loop controller's
-per-loop states and publication's last cycle outcome (finish time, outcome, error). The
-kit controller gains an operation a loop records each cycle's outcome through and a
-snapshot of states and last outcomes; the timer and the `run-cycle` step record through
-the same call. Bare-metal status also reports the latest per-site derivation summary, as
-VM's `publication_derivation` does, so a refused generation is visible.
+Both storefronts' system status gains a `lifecycle` section: the loop controller's per-loop
+states and publication's last cycle outcome. The kit controller gains an operation each loop
+records its cycle's outcome through and a snapshot of states and last outcomes (02 F5):
+
+- the controller runs each loop's timer cycle and its step under one per-loop lock, so they
+  never run a cycle concurrently; this replaces bare metal's `publication_lock` and gives VM's
+  publication, and every other loop, the serialization it lacks; a held loop runs no timer
+  cycles, so a step taken while held never waits;
+- each invocation, timer or step, records exactly one terminal outcome, including one that
+  raised, naming the stage that failed (`compose`, `run`, or `converge`);
+- a recorded error carries the exception's type, and its message only when the exception is
+  one of the storefront's own configuration or publication errors, whose text names keys and
+  reasons rather than values; full detail stays in the log, so no credential, secret, or
+  private URL reaches status;
+- a preview records nothing;
+- an exited or cancelled loop stays distinct from a running loop whose last cycle failed.
+
+Bare-metal status also reports the latest per-site derivation summary, as VM's
+`publication_derivation` does, so a refused generation and a pool held for missing terms are
+visible.
 
 Rejected: starting the bare-metal loop only when configured, with publication reported
 unconfigured; and always starting a loop that fails every cycle.
@@ -184,13 +251,24 @@ Secrets is owed. Accepted scope beyond the original proposal.
   A key with no VM counterpart is named for its concept, never the domain. Rejected: a
   `[bare_metal]` namespace, which the merge would have to unwind; and extracting the
   typed configuration models now, which comes later.
-- **D14b. Per-site trust from the site's service peer, in both storefronts.** A site's
-  client trusts the principals of the one `[Identity.service_peers.<peer>]` bound to its
-  `site_id`, the same set its callbacks are checked against. Startup refuses a site with
-  no peer or more than one. `[provisioning.identity]` remains only for the provisioning
-  service client. VM gains per-site pinning, bare metal gains rotation sets, and site URLs
-  are public configuration as VM's are. Rejected: VM's shared set unchanged (a regression
-  for bare metal), and a new per-site table renaming VM's keys.
+- **D14b. Per-site trust from the site's durable service peer, in both storefronts.** Each
+  configured site is bound to exactly one `[Identity.service_peers.<peer>]`; startup refuses a
+  site with no peer or more than one. Configuration only seeds the peer: once initialized,
+  its principals are the durable identity state's, rotated through the two-proof rotation
+  route, as "Storefront authorization bindings are durable" requires. A site's client verifies
+  responses against that peer's currently active principals (`active_principals(now)`),
+  obtained at verification time through a provider `kit/site-client` accepts in place of a
+  fixed `TrustedIdentitySet` — the same set callbacks are checked against (01 F1). Bare metal
+  adopts core's durable service-peer state for its sites. A bare-metal reservation pins its
+  site's peer subject; the principal recorded on it is an audit record, so a restart after an
+  authorized rotation keeps its reservations. Bare metal has never been deployed outside the
+  development cluster, so these schema changes are written as fresh schema with no upgrade or
+  backfill logic. `[provisioning.identity]` remains only for the provisioning service client.
+  VM gains per-site pinning; bare metal gains rotation; site URLs are public configuration as
+  VM's are. Bare metal's administrators stay on configuration. Rejected: configuration as the
+  response trust set, which splits response and callback trust on every rotation and leaves
+  bare-metal rotation blocking restarts; durable trust for VM only; and a new per-site table
+  renaming VM's keys.
 - **D14c. The values-schema generator moves to `kit/config`.** The generic generator
   (field publicizing, secret refusal, sink typing, render, drift check) leaves
   `market_storefront.values_schema`; each storefront keeps only its section list, passes
@@ -206,11 +284,18 @@ Secrets is owed. Accepted scope beyond the original proposal.
   `publication_terms` into `kit/alkahest`, built with the Alkahest publication option for
   every domain. Each domain's Alkahest seller stage declares the release models it can
   deliver, and startup refuses a configured model the domain cannot (bare metal refuses
-  `interruptible`, tied to VM's spot listing shape). `escrow_shape_guard` fails closed: a
-  proposal naming a demand against a listing advertising none is rejected. A test
-  reproduces correction 9 before the fix and proves it closed. `BARE_METAL_STOREFRONT_DEMANDS`
-  goes. Rejected: dropping demands for bare metal (keeps the unchecked arbiter), copying
-  VM's derivation, a configured raw list, and a separate change for the fix.
+  `interruptible`, tied to VM's spot listing shape). The invariant holds where the plan is
+  materialized and validated in `kit/alkahest`, independently of any seller policy (02 F2):
+  every published Alkahest option has an authorized release condition for its chain; a buyer
+  cannot select an absent or different one; a selection matches the advertised arbiter and
+  its demand data, so a substituted recipient is refused; the materialized obligation uses
+  exactly the authorized condition; and a missing or invalid advertised condition fails
+  closed before any obligation is accepted. `escrow_shape_guard` stays as the early,
+  explained rejection, and fails closed on a listing advertising none. Tests reproduce
+  correction 9 through each domain's seller negotiation runtime and plan materialization
+  before the fix and prove it closed. `BARE_METAL_STOREFRONT_DEMANDS` goes. Rejected: dropping
+  demands for bare metal (keeps the unchecked arbiter), copying VM's derivation, a configured
+  raw list, a guard-only fix, and a separate change for the fix.
 
 ### Consequences and conventions
 
@@ -229,7 +314,12 @@ Secrets is owed. Accepted scope beyond the original proposal.
   `negotiation_timeout_seconds`. Settlement servicing uses bare metal's clearer
   `settlement_servicing_interval_seconds`, which VM adopts in place of
   `claims_sweep_interval`. Payment reconciliation, with no VM key, uses
-  `payment_reconciliation_interval`.
+  `payment_reconciliation_interval`. A storefront whose configuration states
+  `claims_sweep_interval` refuses to start, naming its replacement, and the generated values
+  schema refuses it in an agent's `config`; `DEPLOYMENT_AND_CONFIG.md`'s rollback note says an
+  older release ignores the new key and services at its 30-second default (01 F3). Rejected:
+  an alias for a transition, which needs a removal owner, and naming the old key while
+  ignoring it, which drops a customized cadence silently.
 - **C5. Bare-metal status reads held state.** `/health`'s `site_projections` comes from
   `status()` for both families and calls no site.
 - **C6. Bare-metal scenarios hold the loops** through an opt-in per-module fixture resumed
@@ -259,22 +349,27 @@ Secrets is owed. Accepted scope beyond the original proposal.
 - The compute storefront pulls every resource pool once for all listing types:
   `storefront-publication` ("Projection-backed listing candidate derivation").
 - A storefront never reads application settings from its environment: already in
-  `DEPLOYMENT_AND_CONFIG.md`; stated normatively in `deployment-state`.
+  `DEPLOYMENT_AND_CONFIG.md`; stated normatively in `deployment-state`; its mechanical check is
+  `check-storefront-environment-reads`'s.
 - A domain's tooling never writes another domain's artifact: `ARCHITECTURE.md`, as
   guidance no check enforces.
 - A storefront that cannot publish is not a supported deployment: `storefront-publication`.
 
-## Validation constraint
+## Validation tiers
 
-Helm rendering, chart deployment, and their debugging need an environment with Helm and a
-cluster; the cloud sessions this change is designed in have neither. Chart work is
-validated in a local session.
+Chart work is validated in three tiers, as `docs/development/TESTING.md`'s "Chart Render
+Tests" separates them (02 F6):
+
+- render tests run `helm template` and need the Helm binary but no cluster;
+- a real-loader check loads one rendered `storefront.json` with the bare-metal storefront's own
+  configuration loader, as VM's chart test does through `STOREFRONT_PYTHON`, and needs
+  neither; the bare-metal chart's plan requires it beside the render assertions, because a
+  schema-generated configuration can render and still fail the loader;
+- deployment and runtime debugging need a cluster, and run in a local session.
 
 ## Open questions
 
-1. **A mechanical check for environment reads.** Whether this change adds a compliance
-   target, beside `make check-architecture`, that refuses a storefront package reading
-   application settings directly from the environment (allowing the configuration
-   loader, `ARKHAI_IDENTITY_CREDENTIAL`, and `XDG_CONFIG_HOME`). Revisit at the start of
-   planning, before any task prescribes one; the API-credit storefront's own reads must
-   be inventoried first, since a repository-wide check would either cover or exempt it.
+None. A mechanical check that storefronts read no application settings from their environment
+was decided against in this change and given a change of its own,
+`check-storefront-environment-reads`, which carries the inventory taken in design review
+(02 §8.1).

@@ -32,29 +32,41 @@ buyer-chosen arbiter unchecked.
 - **Shared projection state.** `kit/capacity-publication` owns per-site projection state: one
   instance per storefront process over its aggregate capacity client, holding both
   projection families for every configured site, with its poller as a lifecycle loop, the
-  publication wake on a resource-pool generation change seen by the poller or a drift check,
-  per-site and in-place full refresh that keeps a failing site's last generation, a drift
-  check of every family on a topology error, and a per-site status. VM's
+  publication wake on a resource-pool generation change seen by a poll or a drift check,
+  per-site refresh and the poller's cycle on demand (VM's admin refresh route), both in place
+  and keeping a failing site's last generation, a drift check of every family on a topology
+  error, and a per-site status. VM's
   `site_projection_cache` is reduced to VM's `listing_cardinality_mode` explanations and its
   consumers take the injected instance. The `site-projections` step is the timer's cycle.
 - **Bare metal on held projections and a loop.** Bare-metal publication derives from the held
   projections, checks generation trust when it reads, runs as a timer-driven loop on the
   storefront's controller (held, stepped, and previewed), and holds a site whose projection is
-  not held. The opening recheck reads the held projection. Override writes refresh the site's
+  not held. The opening recheck reads the held projection. In both domains a listing-source
+  check confirms a listing only from a freshly confirmed generation, so a stale one refuses as
+  retryable while publication keeps holding through it. Override writes refresh the site's
   held projection and wake the loop; override status reads the held projection, and the
   durable accepted-generation table is frozen. The `publish` command becomes an API client.
-- **Startup refusal and loop status.** Both storefronts refuse to start without publication
-  configuration. Both report each loop's state and publication's last cycle in system
-  status; bare metal also reports its per-site derivation summary.
+- **Startup refusal and loop status.** Both storefronts refuse to start when publishing is
+  impossible for the whole storefront (no registry or authority pin, no enabled settlement
+  mechanism, no site or a site without exactly one service peer); clauses and lease bounds stay
+  per-pool terms, a pool resolving none being held and reported. Both report each loop's state
+  and publication's last cycle in system status; the loop controller serializes each loop's
+  timer cycle and step and records one sanitized outcome per cycle. Bare metal also reports its
+  per-site derivation summary.
 - **Bare-metal configuration on VM's conventions.** The bare-metal storefront reads
   `storefront.toml`, `storefront.json`, and `storefront.secrets.toml` under VM's key
   vocabulary; its chart renders `config` through unchanged with a Secret overlay and a
   generated values schema; Compose and the lane mount files. The values-schema generator
-  moves to `kit/config`. Site trust comes from each site's service peer in both storefronts.
-  VM's `claims_sweep_interval` becomes `settlement_servicing_interval_seconds`.
+  moves to `kit/config`. Site trust comes from each site's durable service peer in both
+  storefronts: responses and callbacks are verified against the same active, rotating
+  principals, and bare metal adopts durable service-peer state, written as fresh schema since
+  it has never been deployed outside the development cluster. VM's `claims_sweep_interval`
+  becomes `settlement_servicing_interval_seconds`, and the old key refuses startup.
 - **Alkahest release conditions for every domain.** Listing `demands` are derived by
   `kit/alkahest` from `[Settlement.alkahest]` for every domain, each domain declares the
-  release models it can deliver, and the escrow-shape guard fails closed.
+  release models it can deliver, and `kit/alkahest`'s plan materialization uses exactly the
+  authorized condition (arbiter and demand data) whatever seller policies run; the escrow-shape
+  guard fails closed as the early rejection.
 
 ## Capabilities
 
@@ -64,14 +76,15 @@ buyer-chosen arbiter unchecked.
   source; publication runs as a controllable loop in each dedicated compute storefront;
   bare-metal recheck, override writes, and override status read held projections; a site
   whose projection is not held holds its listings during a bare-metal cycle; loop state in
-  system status; a storefront that cannot publish refuses to start; Alkahest listings
-  advertise their release conditions.
+  system status; a storefront that cannot publish refuses to start; a listing-source check
+  confirms only from a freshly confirmed generation; site responses and callbacks share the
+  durable rotating trust set; Alkahest listings advertise their release conditions.
 - `market-composition`: per-site projection state is kit-owned and per process; a loop
   records each cycle's outcome with the controller.
 - `deployment-state`: the bare-metal seller role is configured through mounted files; a
   storefront reads no application settings from its environment.
-- `negotiation-protocol`: a selected release condition must be one the listing advertises,
-  including when it advertises none.
+- `negotiation-protocol`: an Alkahest obligation uses exactly the release condition its listing
+  authorizes, whatever seller policies run.
 
 ### New Capabilities
 
@@ -94,16 +107,20 @@ None.
 ## Impact
 
 - `kit/capacity-publication`: `SiteProjectionState` and its poller.
-- `kit/storefront`: per-cycle outcome recording and a status snapshot on the loop controller.
+- `kit/storefront`: per-loop serialization of timer cycle and step, per-cycle outcome
+  recording, and a status snapshot on the loop controller.
+- `kit/site-client`: a provider of a site's active principals in place of a fixed trust set.
 - `kit/config`: the values-schema generator.
-- `kit/alkahest`: demand derivation and per-domain release-model declaration.
+- `kit/alkahest`: demand derivation, per-domain release-model declaration, and the
+  release-condition invariant at plan materialization.
 - `kit/policy`: `escrow_shape_guard` fails closed.
 - `domains/vms/storefront`: consumers onto the injected state; the step; per-site trust;
   startup refusal; lifecycle status; the generator's section list; demand derivation removed;
   the interval key rename.
 - `domains/bare_metal/storefront`: publication, recheck, overrides, lifecycle steps, server
-  startup, status, configuration loading, typed models, CLI commands, and a packaged
-  `settings.toml`; the accepted-generation table frozen.
+  startup, status, configuration loading, typed models, CLI commands, a packaged
+  `settings.toml`, durable service-peer identity state, and a reservation binding that pins the
+  site's peer subject; the accepted-generation table frozen.
 - `helm/charts/bare-metal-storefront` and the umbrella: config pass-through, overlay,
   generated schema, render tests. `helm/charts/storefront`: the interval key rename.
 - `compose.bare-metal.yml`, `domains/bare_metal/compose.yml`, the root `Makefile`'s
@@ -113,7 +130,8 @@ None.
   `site_projections` gains the capacity-bucket family. Deployment: VM storefronts must
   configure publication and a service peer per site to start; VM's interval key is renamed.
   The bare-metal chart's values change shape; bare metal has no deployed release to migrate.
-- Validation of the chart work needs Helm and a cluster, so it runs in a local session.
+- Chart validation runs in three tiers: render tests (Helm, no cluster), a real-loader check of
+  a rendered `storefront.json`, and deployment in a local session with a cluster.
 
 ## Permanent documentation impact
 
@@ -161,6 +179,8 @@ and `docs/development/ROADMAP.md` (Goal 4's gap row, Goal 7's current state).
   admin projection refresh discarding last-known generations.
 - **Hands `kit-owned-storefront-shell`** the question of retiring VM's admin projection
   refresh route.
+- **Hands `check-storefront-environment-reads`** the mechanical check of the rule this change
+  states in `deployment-state`; that change depends on this one.
 - Depends on nothing open: `encapsulate-capacity-backing` (archived 2026-10-14) and
   `kit-owned-storefront-loop-lifecycle` (archived) supply the binding and the loop controller
   it builds on.
