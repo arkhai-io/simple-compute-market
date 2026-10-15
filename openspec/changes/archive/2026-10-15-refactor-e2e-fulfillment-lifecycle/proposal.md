@@ -104,9 +104,7 @@ See `design.md`'s Section 2 for the full trace.
 
 Both `test_multi_registry.py` and `test_buy_oneshot_buyer_cli.py` read in
 full: no legacy vocabulary, no dependency on how Sections 1-3 changed the
-other scenario files' use of `DealState`. No changes needed.`test_multi_registry.py`, `test_buy_oneshot_buyer_cli.py` -- no fulfillment-
-lifecycle vocabulary hits found during Section 1's inventory; confirm rather
-than assume they need no changes.
+other scenario files' use of `DealState`. No changes needed.
 
 ## Non-Goals
 
@@ -122,10 +120,30 @@ than assume they need no changes.
 
 ## Permanent documentation impact
 
-- [ ] No permanent documentation change for Section 1: this is test-suite
-      maintenance matching already-shipped production behavior, not new
-      observable behavior of its own.
-- [ ] Section 2/3 impact to be assessed when those sections are planned.
+- [x] No permanent documentation change. Section 1 is test-suite maintenance
+      matching already-shipped production behavior; Section 2 found the
+      teardown stages already implemented; Section 3 relocated a test tier and
+      added a mock-transport test, with its rationale in that test's own module
+      docstring; Section 4 changed nothing. Every destination is an existing
+      permanent heading or an in-code docstring; see the design-promotion
+      record in `design.md`.
+
+### Knowledge to promote
+
+- `fulfillment_id`, not `provisioning_job_id`, is the identity a scenario
+  captures at settlement and reuses through teardown — already stated by
+  `docs/development/ARCHITECTURE.md#identifiers` and
+  `core_storefront.models.settle_models.SettleStatusResponse`'s docstring.
+- Draining the mock executor and advancing fulfillment convergence are two
+  separately driven facts — the shared stage 09a docstring in
+  `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
+- Resource identity is confirmed through admin introspection at stage 09c,
+  never inferred from the buyer-facing path — the shared stage 09c docstring
+  and `openspec/specs/site-capacity/spec.md`'s "Capacity accounting is private
+  to the site authority".
+- A client's `transport` seam is how a boundary-opacity proof is written —
+  `docs/development/TESTING.md#2-integration-tests` and the module docstrings
+  of the two opacity tests.
 
 ## Dependencies and Related Changes
 

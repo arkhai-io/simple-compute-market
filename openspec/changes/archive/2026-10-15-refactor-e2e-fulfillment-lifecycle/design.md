@@ -238,3 +238,108 @@ No design questions anticipated -- confirm `test_multi_registry.py` and
 `test_buy_oneshot_buyer_cli.py` don't reference stale fulfillment-lifecycle
 vocabulary (Section 1's inventory found none, but that was a grep-based
 inventory, not a full read).
+
+## Closeout (2026-10-15)
+
+### Where the implementation lives now
+
+The sections above describe the code as it was written. Later changes moved
+it; the closeout review and anyone reading this archive should look here:
+
+- **Section 1's stages are shared.** Stages 08b, 09a, and 09c are
+  `Stage08b_SettlementSubmittedAndJobQueued`, `Stage09a_ProvisioningCompletes`,
+  and `Stage09c_LeaseRecorded` in
+  `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`, which
+  `test_full_deal.py` declares by subclassing, and `DealState` is that
+  helper's `ComputeDealState`. `test_full_deal_buyer_cli.py` keeps its own
+  copies of the three stages, and `test_non_erc20_settlement.py` its single
+  settlement-flow function. The convergence step is
+  `advance_fulfillment_convergence_cycle()`, which releases the watchdog's own
+  claims before stepping; it replaced `run_fulfillment_convergence_cycle()`
+  because a plain cycle cannot reach a row whose claim lease is still live
+  (`docs/development/TESTING.md#2-integration-tests`, "Pause the loop, then
+  advance it explicitly"). The sequence this change designed —
+  release the gate, `drain()`, advance convergence, assert `active` — is
+  otherwise unchanged, and 09c reads the lease through the compute family's
+  client and the site client, as noted under Section 1.
+- **Section 3's proof is two unit tests.** `core_storefront.capacity_remote`
+  and its `RemoteCapacityClient` no longer exist, so the single
+  mock-transport test at `core/storefront/tests/integration/` is gone with
+  them. Its two halves live beside the clients they prove:
+  `kit/site-client/tests/unit/test_opacity.py` drives
+  `SiteCapacityClient.reserve`/`commit` over a fake site's transport, and
+  `provisioning/compute/client/tests/unit/test_fulfillment_client_opacity.py`
+  drives `ComputeProvisioningClient.schedule_resource`/`begin_fulfillment`
+  over `httpx.MockTransport`, asserting that no request body carries a
+  placement field; each module docstring explains the split.
+  `core/storefront/tests/integration/` and its `testpaths` entry remain,
+  holding other integration tests. The retired cross-service tier and the
+  `test-vm-capacity-boundary` target stay removed.
+
+### End-to-end evidence
+
+E2E workflow run 38741626285, dispatched on `dev` at `a82a5b2` on 2026-10-15,
+succeeded on all three lanes. The VM lane reported 134 passed, 118 deselected,
+nothing failed or skipped: `test_full_deal.py` 31 of 31 stages,
+`test_full_deal_buyer_cli.py` 27 of 27, and `test_non_erc20_settlement.py`
+both cases (`native-token`, `erc1155`). Stages 08b, 09a, 09c, 10a, 10b, 11a,
+and 11b passed in both full-deal scenarios, which is the runtime confirmation
+Sections 1 and 2 left open. The run's artifacts could not be downloaded from
+the closeout environment (its network policy refuses the Actions artifact
+store), so the evidence was read from the job log through the GitHub API
+rather than through `make fetch-e2e-logs`; the last 5,000 lines of the VM
+job's log, which hold every result line from `test_full_deal.py` onward and
+the pytest summary, were read in full.
+
+### Found at closeout, left to a later code edit
+
+Closeout changes no code. Two things a code edit would tidy are recorded here
+so the closeout review sees them:
+
+1. `test_full_deal_buyer_cli.py`'s stage 09a docstring and
+   `test_non_erc20_settlement.py`'s convergence comment point at
+   "`test_full_deal.py`'s stage 09a" for the rationale, which now lives in the
+   shared `Stage09a_ProvisioningCompletes` docstring and reaches
+   `test_full_deal.py` only by inheritance. The pointer is reachable, not
+   false, and neither comment names a change or a migration.
+2. `provisioning/compute/client/tests/unit/test_fulfillment_client_opacity.py`
+   imports `json` inside its request-inspection loop although the module
+   already imports it at top level. No circular import or lazy-load reason
+   applies; the local line is redundant and can be deleted.
+
+### Closeout dispositions
+
+- **No pre-closeout review or triage exists.** The change predates the
+  review workflow; the owner directed closeout directly on the run above.
+- **Roadmap:** no goal affected. The change sits under the lesser goal
+  "End-to-end harness determinism", and nothing in `ROADMAP.md`'s current
+  state or gap tables describes the harness's assertions. No edit.
+- **Change index:** the row's status moved to `in closeout` with the run as
+  its note; the lesser goal has no dependency graph. The one row naming this
+  change in `Depends on`, `add-deterministic-regression-contract`, is left
+  for archive cleanup to release.
+- **Spec deltas:** none, so `openspec validate <change> --strict` is not run
+  (the validator rejects a change with no deltas) and the archive uses
+  `--skip-specs`.
+
+### Design-promotion record
+
+Every accepted decision, with the permanent place that states it now. None
+needed a permanent document written at closeout: each destination already
+said it, or the decision is test-suite structure whose home is the code's own
+docstrings.
+
+| Accepted decision | Classification | Permanent location |
+|---|---|---|
+| `fulfillment_id`, not `provisioning_job_id`, is captured at settlement and reused through teardown | Permanent, already stated | `docs/development/ARCHITECTURE.md#identifiers`; `core_storefront.models.settle_models.SettleStatusResponse`'s docstring |
+| Job completion (`drain()`) and fulfillment convergence (an explicit advance) are two separately driven facts; `drain()` stands in for waiting on one job by id in a single-job scenario | Permanent | `Stage09a_ProvisioningCompletes` docstring in `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`; the convergence rule it cites, `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; the step-versus-cycle rule, `docs/development/TESTING.md#2-integration-tests` |
+| Resource identity is confirmed at stage 09c through admin introspection, never inferred from the buyer-facing path | Permanent | `Stage09c_LeaseRecorded` docstring in the same helper; the opacity rule, `openspec/specs/site-capacity/spec.md`, "Capacity accounting is private to the site authority" |
+| `DealState.provisioning_job_id` removed; `fulfillment_id` produced at 08b and `reserved_resource_id` at 09c, each with one producer before any consumer | Permanent | `openspec/specs/test-compatibility/spec.md`, "Exact e2e state dependencies"; held by `e2e-tests/tests/unit/test_compute_deal_stages.py` |
+| Teardown stages 10a–11b needed no rewrite; the proposed sequence was already implemented | Change history | This document, "Section 2"; `pools-7-storefront-fulfillment-cutover` task 10.14's correction and resolution notes. The state chain itself is `openspec/specs/physical-provisioning/spec.md`, "Site-backed release lifecycle", and `docs/development/ARCHITECTURE.md#release` |
+| Stage 08b's failure masked every downstream stage, so "no e2e run exists" and this change's finding were one root cause | Change history | This document, "Section 2" |
+| A client's `transport` seam is the mechanism for a boundary-opacity proof, not a bespoke execution tier | Permanent | `docs/development/TESTING.md#2-integration-tests` (test setup pattern); the module docstrings of `kit/site-client/tests/unit/test_opacity.py` and `provisioning/compute/client/tests/unit/test_fulfillment_client_opacity.py` |
+| The genuine cross-service proof stays in `test_full_deal.py`; no second scenario duplicates it | Permanent | `docs/development/TESTING.md#4-system-integration-tests-end-to-end` and `#coverage-contract-between-levels` |
+| `core/storefront` discovers `tests/integration` | Permanent | `core/storefront/pyproject.toml` `testpaths`; `docs/development/TESTING.md#test-file-layout` |
+| The `cross_service/` tier and `test-vm-capacity-boundary` target are retired | Permanent, by absence | `docs/development/TESTING.md#test-file-layout` describes the only layout; nothing cites the retired paths |
+| Roadmap: no goal affected | Recorded | This section, "Closeout dispositions" |
+| Change index: row and campaign updated | Recorded | This section, "Closeout dispositions" |
