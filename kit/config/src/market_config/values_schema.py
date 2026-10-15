@@ -289,6 +289,8 @@ def config_definition(
     being silently ignored. A retired key may not be a field a typed section
     still has.
     """
+    # Sections are matched in any spelling, so two names differing only by case
+    # would claim the same keys; this refuses them before anything is built.
     any_case_fields(sections)
     definition: dict[str, Any] = {
         "type": "object",

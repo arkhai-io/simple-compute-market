@@ -581,19 +581,51 @@ Touches `kit/config`, VM's storefront, and the root `Makefile`.
       `test_values_schema.py` 29 passed, the drift test against the committed schemas
       unchanged; `make helm-values-schema` rewrote both files (new modification times)
       with no diff.
-- [ ] 5.4 Bump `kit/config`'s version, declare it where VM imports it, refresh the locks.
+- [x] 5.4 Bump `kit/config`'s version, declare it where VM imports it, refresh the locks.
       Validation: `make -C kit test-config`, `make test-storefront`,
       `make helm-values-schema` with no diff, `make -C helm test-render`,
       `make check-architecture`, `make check-packaging`, `make test`. End-to-end: none.
-      **Stopped here (session ended by the owner, 2026-10-15).** 5.1–5.3 are implemented and
-      committed unverified as a work-in-progress commit: `kit/config` is bumped and declared,
-      locks refreshed (VM storefront's by hand), and `make helm-values-schema` regenerated both
-      committed schemas with no diff. Not yet run: VM storefront unit and integration in its
-      frozen environment, `make -C helm test-render` with `STOREFRONT_PYTHON`, `make
-      check-packaging`, `make -k test`, `make check-comment-hygiene`, `make
-      check-doc-citations`; nor the fresh-context compliance review. The next session runs
-      these, fixes what they report, checks 5.4, and amends the WIP commit into the section
-      commit.
+      Done: `arkhai-kit-config` 0.3.0; VM declares `arkhai-kit-config>=0.3.0`. `make lock`
+      relocked every project but the three PyTorch-index ones (refused here, as in 2.6); VM
+      storefront's lock was edited by hand with the version, wheel-name, and specifier
+      substitutions uv wrote for the same package elsewhere (16.6 relocks it); neither
+      `kit/policy` nor the VM buyer locks `kit/config` differently. Evidence, after `make
+      dist` and reinstalling the rebuilt internal wheels into the frozen environments:
+      `make -C kit test-config` (unit) 155 passed; VM storefront (frozen, `UV_FROZEN=1`) unit
+      1031 passed, 1 skipped (five fewer than before: the generic cases moved to the kit),
+      integration 411 passed, `test_alkahest` against Anvil included; `make
+      helm-values-schema` (which runs `uv run --frozen --no-sync`, so VM's lock is not
+      re-resolved) rewrote both schemas with no diff; `make -C helm test-render` with
+      `STOREFRONT_PYTHON` set to VM's environment passed, the loader check
+      (`test_rendered_document_loads_with_the_storefront_loader`) run, not skipped; `make
+      check-packaging` (architecture rules included), `make check-comment-hygiene`, and
+      `make check-doc-citations CHANGE=share-site-projection-state` pass, the last reporting
+      nothing. `make -k test`: 50 pytest runs and every non-Python suite passed; it stopped
+      only at the reinit of `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer`,
+      whose frozen runs are VM storefront's above, `kit/policy` 63 passed, and VM buyer 197
+      passed. No repository typing target exists; `mypy` run ad hoc on the kit module and on
+      VM's `values_schema.py` (settlement registrations against the kit's
+      `SettlementSection` protocol) reports no issues. End-to-end: none — the generator
+      changes only the Helm values schemas, which the pipeline's Compose lanes never render.
+
+Section 5 handoff:
+
+- Bare metal's generator (16.1) is a module like VM's `market_storefront.values_schema`: its
+  `DEFINITION`, `ROLE`, `SCHEMA_FILES` (only `helm/charts/bare-metal-storefront/values.schema.json`),
+  `RETIRED_KEYS`, a `build_definition` over the kit's fragments, and `main` delegating to
+  `market_config.values_schema.main`; the root `Makefile`'s `helm-values-schema` gains a second
+  line running it in bare metal's environment with `--root ../../..`.
+- `sink_typed_section` takes the delivery kit's `SINK_KEY` and the `[Delivery]` section's own
+  settings from its caller, because `kit/config` may not import `kit/delivery`. VM states those
+  settings as `_DELIVERY_SETTINGS`, by hand, one per key of `RESERVED_SECTION_KEYS`; bare metal
+  will need the same three. If a second copy looks wrong at 16.1, the natural home for their
+  schema is `kit/delivery` beside `RESERVED_SECTION_KEYS`, which both storefronts already import.
+- `RETIRED_KEYS` is empty; 10.3 adds `claims_sweep_interval` and regenerates both schemas. A
+  retired key a typed section still has is refused at generation, so retire a key only once
+  its model no longer carries it.
+- The VM drift test still runs only in VM's environment (`make test-storefront`), which this
+  container builds frozen; `make helm-values-schema` uses `--frozen --no-sync` and so runs
+  there unchanged.
 
 Orchestration handoff (for the next session): sections run one at a time through a fresh
 implementer agent following `.agents/skills/change-implement/SKILL.md`, then a fresh-context
