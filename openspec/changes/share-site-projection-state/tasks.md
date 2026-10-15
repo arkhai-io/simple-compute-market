@@ -391,13 +391,23 @@ shared resolution of a site's service peer (D14b; `storefront-publication` "Site
 principals rotate with bounded overlap"). Touches `kit/site-client`,
 `provisioning/compute/client`, and `core/storefront`; composes into no storefront yet.
 
-- [ ] 4.1 `kit/site-client/src/market_site_client/client.py`: `_AuthenticatedSiteClient`
+- [x] 4.1 `kit/site-client/src/market_site_client/client.py`: `_AuthenticatedSiteClient`
       and both public clients accept, in place of a fixed `TrustedIdentitySet`, a provider
       read at each response's verification. A fixed set remains accepted as a constant
       provider, so callers that pin one (registries, tests) are unchanged.
-- [ ] 4.2 `provisioning/compute/client/src/compute_provisioning_client/base.py` and
+      Done: `expected_authorities` is an `AuthorityTrust` (exported), a `TrustedIdentitySet`
+      or a zero-argument callable returning one. The provider is synchronous and is called
+      once per response, inside `_verify_response`, on an async client's event loop too, so
+      it should read only local state. A provider that raises, or returns anything but a
+      trusted set, fails that response with `SiteCapacityAuthenticationError` carrying the
+      response's status; anything else at construction is a `TypeError`.
+- [x] 4.2 `provisioning/compute/client/src/compute_provisioning_client/base.py` and
       `client.py`: the same, because bare metal's per-site provisioning client verifies the
       same site authority's responses.
+      Done, the same shape in `SigningBase` (both variants), failing closed with
+      `ComputeProvisioningAuthenticationError`; `AuthorityTrust` is exported from the
+      package. The two clients each define the alias rather than share one: they share no
+      package but `kit/identity`, which this section does not touch.
 - [ ] 4.3 `core/storefront/src/core_storefront/identity_authority.py` (or a sibling module
       it owns): the resolution VM performs in
       `domains/vms/storefront/src/middleware/service_peer_auth.py`'s
@@ -406,16 +416,94 @@ principals rotate with bounded overlap"). Touches `kit/site-client`,
       state, refusing a site bound to no peer or to more than one, and a site's currently
       active principals (`active_principals(now)`) for both response verification and
       callbacks. VM's middleware calls it; its behavior is unchanged.
+      Done in a sibling module, `core_storefront/service_peers.py`, over a
+      `ServicePeerConfigs` mapping (peer ID to role, site, configured principals — the shape
+      VM's `get_service_peer_configs()` returns, so each storefront passes its own
+      configuration in): `seed_service_peers` (VM's seeding, moved verbatim, still raising
+      `AuthError`), `require_one_service_peer_per_site` (the startup refusal Sections 10.1 and
+      12.1 call, raising `ServicePeerConfigurationError` that names every site bound to no
+      peer or to several), `site_active_principals` (VM's `_allowed_service_principals`,
+      moved verbatim, for callbacks), and `site_trusted_authorities`, the provider 4.1 and
+      4.2 accept: it re-reads the peer's durable state at every call and returns the
+      primary first. VM's `initialize_service_peer_identities` is now a one-line call with
+      its configuration and `_allowed_service_principals` is gone; the middleware still
+      reads `get_service_peer_configs` through its own module, so the tests that patch it
+      there are unchanged.
 - [ ] 4.4 Tests (unit). `kit/site-client/tests/unit/test_client.py`: a provider is read per
       response, so a rotation that ends its overlap is honored without rebuilding the
       client; the existing fixed-set tests pass unchanged. The provisioning client's unit
       suite: the same. `core/storefront/tests/unit/test_identity_authority.py`: peer
       seeding, the no-peer and two-peer refusals, and active principals through a rotation.
       VM's `tests/unit/test_service_peer_identity.py` passes unchanged.
-- [ ] 4.5 Bump the three packages' versions and refresh the locks. Validation:
+      Done (unit): `make -C kit test-site-client` 57 passed, 8 new — one client of each kind,
+      under both signature schemes, follows a rotation from the old principal through the
+      overlap to the replacement alone with the provider read once per response; a raising
+      provider and one returning no set each fail the response closed; a non-set,
+      non-callable is refused at construction. With the provider called once at
+      construction instead (module swapped, then restored) six of them fail.
+      `make test-compute-provisioning-client` 50 passed, 5 new — the same rotation and
+      failing-provider cases through the async and the sync client, and the construction
+      refusal. **Differed (level):** the core cases are library integration, in
+      `core/storefront/tests/integration/test_service_peers.py` (new), not
+      `tests/unit/test_identity_authority.py`, because they run against a real SQLite
+      database and `TESTING.md` puts such library tests in `integration/`; the existing unit
+      file is untouched. `make test-core` (core storefront 211 passed, 2 skipped; 9 new):
+      seeding once and idempotently, a new peer with two principals refused, a seeded peer's
+      site kept, reseeding after a rotation keeping durable principals and refusing
+      configuration that no longer covers them, the startup refusal naming each problem
+      site, no-peer and two-peer sites authenticating nothing, active principals through an
+      overlap and per site, the provider following a rotation through to retirement with
+      no rebuild, and a disabled peer authenticating nothing. VM's
+      `test_service_peer_identity.py` passes unchanged (below).
+- [x] 4.5 Bump the three packages' versions and refresh the locks. Validation:
       `make -C kit test-site-client`, `make test-compute-provisioning-client`,
       `make test-core`, `make test-storefront`, `make check-architecture`,
       `make check-packaging`, `make test`. End-to-end: none until Sections 10 and 12.
+      Done: `arkhai-kit-site-client` 0.11.0, `arkhai-compute-provisioning-client` 0.7.0,
+      `arkhai-core-storefront` 0.13.0. **Also bumped:** `arkhai-kit-capacity-publication`
+      0.8.2, because it pins core exactly (`==0.13.0` now), and the three storefronts' exact
+      pins of it follow; VM's storefront declares `arkhai-core-storefront>=0.13.0`, since its
+      middleware imports the new module. `make lock` relocked every project except the three
+      PyTorch-index ones (refused here, as in 2.6). Neither `kit/policy` nor the VM buyer
+      names a bumped package; VM storefront's lock was edited by hand with exactly the ten
+      version, wheel-name, and specifier substitutions uv wrote into bare metal's lock for
+      the same packages, plus its own core floor; `make check-packaging` passes with it
+      (16.6 relocks it). `make check-architecture` (in `check-packaging`), `make
+      check-comment-hygiene` pass; `make check-doc-citations
+      CHANGE=share-site-projection-state` reports nothing. `make -k test`: every suite that
+      ran passed, `test-deployment-packaging` and the Helm render checks included; the three
+      PyTorch-index projects cannot reinit here and were run in their frozen environments
+      with the rebuilt wheels reinstalled: VM storefront unit 1036 passed, 1 skipped
+      (`test_service_peer_identity.py` among them, unchanged), integration 411 passed (its
+      callback-authentication cases in `test_admin_api.py` go through the moved
+      resolution); `kit/policy` 63 passed; VM buyer 197 passed.
+      **Correction (end-to-end):** the provider is composed nowhere until Sections 10 and 12,
+      but VM's seeding and callback resolution now run in core: every VM-lane scenario seeds
+      the storefront's service peers at startup, and those whose deal receives provisioning
+      callbacks (`e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `e2e_non_erc20_settlement`,
+      `e2e_compute_dynamic_listings`) authenticate them through it. The pipeline was not run
+      for this section. No bare-metal or API-credit scenario reaches it.
+
+Section 4 handoff:
+
+- `site_trusted_authorities(db_path, peers, site_id)` is the provider Sections 10.2 and
+  12.2 pass as a site's `expected_authorities`. `kit/capacity-publication`'s
+  `CapacitySite.expected_authorities` is typed `Any` and passed straight to
+  `SiteCapacityClient`, so a provider goes through `CapacitySite` with no kit change; VM's
+  capacity-runtime cache key (`repr` of the authorities) must stop carrying principals,
+  as 10.2 says, since a provider's `repr` names a function, not the trust.
+- The provider must be built after `seed_service_peers` has run, and is read synchronously
+  per response: a short local SQLite read on the event loop, as admin authentication
+  already does. If that ever shows, wrap the read rather than make the client async-only:
+  the provisioning client's sync variant shares `SigningBase._verify`.
+- `require_one_service_peer_per_site(peers, site_ids)` is the startup refusal (10.1, 12.1);
+  callers name their sites. It does not refuse a peer bound to a site that is not
+  configured, which nothing has asked for.
+- `seed_service_peers` and the per-site resolution raise `AuthError`, as VM's did; a
+  composition root turning a seeding error into a named startup refusal wraps it.
+- VM's `_callback` still requires exactly one configured service peer for the
+  service-role status read, a VM rule left in VM; bare metal's status read (12.3) chooses
+  its own.
 
 ## 5. The values-schema generator in `kit/config`
 

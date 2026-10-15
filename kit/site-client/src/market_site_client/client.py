@@ -3,6 +3,8 @@
 Every request uses the market-identity v2 envelope.  The injected signer is the
 configured seller/storefront identity; responses are accepted only from the
 bounded trusted set of site-authority principals acting with the ``service`` role.
+That set is either fixed when the client is built or read from a provider at
+each response's verification.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, TypeAlias
 
 import httpx
 from market_identity import (
@@ -41,6 +43,14 @@ ROLE_HEADER = "X-Market-Role"
 REQUEST_ID_HEADER = "X-Market-Request-ID"
 TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
+
+
+#: The site-authority principals a response must come from: a fixed set, or a
+#: provider called at each response's verification. A provider lets trust that
+#: rotates in durable state reach a long-lived client without rebuilding it.
+#: It is called synchronously, on an async client's event loop too, so it
+#: should read only local state.
+AuthorityTrust: TypeAlias = TrustedIdentitySet | Callable[[], TrustedIdentitySet]
 
 
 class SiteCapacityClientError(Exception):
@@ -207,7 +217,7 @@ class _AuthenticatedSiteClient:
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float,
         transport: httpx.AsyncBaseTransport | None,
@@ -218,9 +228,13 @@ class _AuthenticatedSiteClient:
             raise TypeError("signer must implement market_identity.Signer")
         if caller_role not in {"seller", "admin"}:
             raise ValueError("caller_role must be 'seller' or 'admin'")
-        if not isinstance(expected_authorities, TrustedIdentitySet):
+        if not (
+            isinstance(expected_authorities, TrustedIdentitySet)
+            or callable(expected_authorities)
+        ):
             raise TypeError(
-                "expected_authorities must be a market_identity.TrustedIdentitySet"
+                "expected_authorities must be a market_identity.TrustedIdentitySet "
+                "or a callable returning one"
             )
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
@@ -291,6 +305,29 @@ class _AuthenticatedSiteClient:
         self._request_contexts[request_id] = context
         return dict(headers)
 
+    def _current_authorities(self, status_code: int) -> TrustedIdentitySet:
+        """The principals this response must come from, read now.
+
+        A provider that fails, or returns anything but a trusted set, fails the
+        response closed, as an untrusted signer would.
+        """
+
+        if isinstance(self._expected_authorities, TrustedIdentitySet):
+            return self._expected_authorities
+        try:
+            authorities = self._expected_authorities()
+        except Exception as exc:
+            raise SiteCapacityAuthenticationError(
+                "site-authority trust could not be resolved",
+                status_code=status_code,
+            ) from exc
+        if not isinstance(authorities, TrustedIdentitySet):
+            raise SiteCapacityAuthenticationError(
+                "site-authority trust provider returned no trusted identity set",
+                status_code=status_code,
+            )
+        return authorities
+
     def _verify_response(
         self,
         response: httpx.Response,
@@ -334,7 +371,7 @@ class _AuthenticatedSiteClient:
             now=int(time.time()),
             max_skew=self._max_timestamp_skew,
             expected_role="service",
-            expected_principals=self._expected_authorities,
+            expected_principals=self._current_authorities(response.status_code),
             expected_method=method,
             expected_operation=operation,
             expected_resource=resource,
@@ -431,7 +468,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -519,7 +556,7 @@ class SiteCapacityClient(_AuthenticatedSiteClient):
         self,
         base_url: str,
         signer: Signer,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,

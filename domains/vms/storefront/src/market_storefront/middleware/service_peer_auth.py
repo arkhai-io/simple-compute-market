@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -19,11 +18,8 @@ from core_storefront.auth import (
     authenticate_request,
     signed_response_headers,
 )
-from core_storefront.identity_authority import (
-    SERVICE_PEER_AUTHORITY,
-    StorefrontIdentityAuthority,
-)
-from market_identity import EMPTY_BODY, Identity
+from core_storefront.service_peers import seed_service_peers, site_active_principals
+from market_identity import EMPTY_BODY
 
 import market_storefront.container as _container
 from market_storefront.utils.config import get_service_peer_configs
@@ -56,44 +52,7 @@ def initialize_service_peer_identities(
 ) -> None:
     """Idempotently materialize configured service-peer trust pins."""
 
-    timestamp = int(time.time()) if now is None else now
-    authority = StorefrontIdentityAuthority(db_path)
-    for peer_id, (role, site_id, principals) in get_service_peer_configs().items():
-        try:
-            status = authority.status(
-                authority=SERVICE_PEER_AUTHORITY,
-                subject=peer_id,
-            )
-        except KeyError:
-            if len(principals.identities) != 1:
-                raise AuthError(
-                    "A new service peer requires exactly one primary principal"
-                ) from None
-            status = authority.register_service_peer(
-                peer_id=peer_id,
-                role=role,
-                site_id=site_id,
-                principal=principals.identities[0],
-                now=timestamp,
-            )
-        conn = sqlite3.connect(db_path)
-        try:
-            durable_peer = conn.execute(
-                "SELECT role, site_id FROM service_peers WHERE peer_id=?",
-                (peer_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if durable_peer != (role, site_id):
-            raise AuthError(
-                "Service-peer config role/site differs from durable identity state"
-            )
-        configured = frozenset(principals.identities)
-        active = status.active_principals(timestamp)
-        if status.primary not in configured or not active.issubset(configured):
-            raise AuthError(
-                "Service-peer config does not cover durable active identities"
-            )
+    seed_service_peers(db_path, get_service_peer_configs(), now=now)
 
 
 def _storefront_signer():
@@ -145,56 +104,6 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
     return ServiceCallback("POST", operation, resource, site_id, body)
 
 
-def _allowed_service_principals(
-    *, db_path: str, site_id: str, now: int
-) -> frozenset[Identity]:
-    configured = [
-        peer_id
-        for peer_id, (role, configured_site, _principal) in
-        get_service_peer_configs().items()
-        if role == "service" and configured_site == site_id
-    ]
-    if len(configured) != 1:
-        raise AuthError(
-            "Provisioning site must have exactly one configured service peer"
-        )
-    configured_peer_id = configured[0]
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute(
-            """
-            SELECT role, site_id, principal_scheme, principal_identifier, status
-            FROM service_peers WHERE peer_id=?
-            """,
-            (configured_peer_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        raise AuthError("Configured provisioning service peer is not materialized")
-    role, durable_site, scheme, identifier, peer_status = row
-    if role != "service" or durable_site != site_id:
-        raise AuthError("Provisioning service peer binding differs from public config")
-    if peer_status != "active":
-        raise AuthError("Provisioning service peer is not active")
-    try:
-        status = StorefrontIdentityAuthority(db_path).status(
-            authority=SERVICE_PEER_AUTHORITY,
-            subject=configured_peer_id,
-        )
-    except KeyError as exc:
-        raise AuthError("Provisioning service peer trust binding is incomplete") from exc
-    durable_primary = Identity(scheme=scheme, identifier=identifier)
-    if status.primary != durable_primary:
-        raise AuthError(
-            "Provisioning service peer row differs from its durable primary binding"
-        )
-    principals = status.active_principals(now)
-    if not principals:
-        raise AuthError("Provisioning service peer has no active principal")
-    return principals
-
-
 async def _authenticate(
     *, request: Request, callback: ServiceCallback
 ) -> AuthenticatedPrincipal:
@@ -203,9 +112,10 @@ async def _authenticate(
         raise AuthError("Storefront identity state is unavailable", status_code=503)
     now = int(time.time())
     allowed = await asyncio.to_thread(
-        _allowed_service_principals,
-        db_path=db.db_path,
-        site_id=callback.site_id,
+        site_active_principals,
+        db.db_path,
+        get_service_peer_configs(),
+        callback.site_id,
         now=now,
     )
     return await authenticate_request(
