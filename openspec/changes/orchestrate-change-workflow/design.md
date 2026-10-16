@@ -65,7 +65,7 @@ question, or stopped with no decision line resolving it: with validation and the
 review run side by side (D9) the log's last run is not necessarily the one that
 asked, and an answer sent to the last run reached a finished validation (45 R1).
 The computation's `owner` result carries the waiting run's `seq`, and
-`make next CHANGE=<change>` prints the result in plain form; there is no
+`make change-next CHANGE=<change>` prints the result in plain form; there is no
 `make resume`, since the owner reruns a step supervised rather than resuming one
 by hand.
 
@@ -128,8 +128,13 @@ decision about a stopped review silence a validation question waiting beside it.
 `reads` is distinct from `resolves` because a run can be denied a call and still
 end with a question or a proposed return: its denials are read first, and its
 question is answered or its return decided after, so a reading settles nothing of
-the outcome; a stopped run is read and resolved by one line, and a line that
-resolves a run counts as having read it (28 F1). A directed review names its
+the outcome, and a line that resolves a run counts as having read it (28 F1). A
+stopped run is read the same way, and its reading resolves nothing: a stop the
+owner recovers is resumed by its `seq` with a one-run grant (D6a), and the resumed
+run's line is then the step's latest, so the stop is history; only a stop that is
+not recovered — the step rerun fresh, fixed first, or abandoned — is settled by a
+`resolves` line, since the wrapper refuses to resume a run a line has resolved
+(52 F1). A directed review names its
 `kind`, without which the computation could name no review; a directed step of
 any other kind is a confirmed return and resolves the returned run, which would
 otherwise wait ahead of the directive; a repeat review after a failed gate names
@@ -213,7 +218,7 @@ the results that wait for the owner:
 orchestrator runs that step and never routes on its own reading. The transitions
 are already fixed by each skill's entry check and handoff; in code they are
 testable under `scripts/tests`, and the owner can run the same command by hand,
-or `make next CHANGE=<change>` for it in plain form. A task list whose numbered
+or `make change-next CHANGE=<change>` for it in plain form. A task list whose numbered
 task sits under another section's heading is not routed on: the script answers
 `unclassified` naming the task and the heading, as the backstop to
 `make check-tasks CHANGE=<change>`, which the skills that act on the list —
@@ -309,8 +314,15 @@ allowed and the first round's validation and triage stopped on chains of exactly
 those (07 A1); `make round-view-closed` is matched with a trailing variable (X4);
 and every step may run the next-step computation, so a step can see where the
 change stands. No row admits a shell loop: `bash -c` cannot be allowed without
-allowing any command, so a step waits on a background command through the
-harness's notification or a read-only `tail` (29 A2).
+allowing any command (29 A2). A step waits on a background command inside one
+Bash call, with a blocking read-only `tail -f … | grep -m1` on the line the
+command prints when it ends, repeated when the call times out, and never by
+ending its turn: under the wrapper a turn's end is an outcome, and the harness's
+notification of a finished background task arrives only after the turn, so a
+turn ended with work in flight is logged as a stop (41 A1). The background
+command runs as written, with no shell redirect of its output: a redirect is a
+write no rule admits, and the harness keeps the output in a file the `tail`
+reads (54 A1).
 
 The allow-lists turn each skill's "never" lines into rules the harness enforces:
 validation's "never changes the commit" stops being an instruction only. A run that
@@ -343,11 +355,13 @@ missing `echo`; X5). The reading, in `change-orchestrate`:
    A deny-rule denial is never granted for one run: the grant cannot override it.
 4. The reading is recorded as a decision line that `reads` the run, `by:
    orchestrator`, its `decision` beginning `gap:`, `forbidden:`, or `workaround:`
-   with the call and the rule. A stopped run's reading is the line that also
-   resolves it; a run that ended with a question or a proposed return is answered
-   or decided after its reading, which settles nothing of its outcome (28 F1). A
-   forbidden or workaround reading goes to the owner, whose disposition is a
-   second line, `by: owner`.
+   with the call and the rule. The reading settles nothing of the run's outcome
+   (28 F1): a run that ended with a question or a proposed return is answered or
+   decided after it, and a stopped run is recovered after it — resumed by its
+   `seq` with the one-run grant of step 3, which the wrapper refuses for a run a
+   line has resolved — or, when it is not recovered, settled by a `resolves` line
+   (52 F1). A forbidden or workaround reading goes to the owner, whose disposition
+   is a second line, `by: owner`.
 
 A run that went on past a denial waits in the computation like a stop, until a
 line reads it, so the reading happens whether or not the orchestrator was awake
@@ -365,8 +379,14 @@ validation drives Docker, the cluster, and the push.
 The wrapper runs each step with `--output-format stream-json --verbose`, writes the
 stream to `reviews/transcripts/NN-<step>.jsonl` beside the review transcripts, and
 keeps a short progress file of each tool call and its time. The orchestrator
-answers "how is it going?" from the progress file; the owner can read it in another
-terminal. When a step ends `question` or `stopped`, or a long step finishes, the
+answers "how is it going?" from the progress file; the owner follows it in another
+terminal with `make change-watch CHANGE=<change>`, which moves to each new step's
+progress file as it starts. Whenever the orchestrator starts a long-running
+unattended turn — validation, implementation, a review, closeout, or a discussion
+step resumed for a turn that applies fixes or runs the checks — it says so and
+gives that command (55 O2): the harness's task panel shows nothing for a wrapper
+run, and following one from inside the orchestrating session is left to a later
+change. When a step ends `question` or `stopped`, or a long step finishes, the
 orchestrator sends a push notification; Remote Control lets the owner answer from
 elsewhere.
 
@@ -510,9 +530,44 @@ Beside the amendments above, each under its finding's label:
 - **29 A1** — the record rules take the `Edit(path)` form, since `Write(path)`
   allow rules are not honoured; this corrects X4's cause, whose `Edit` deny
   removal was harmless; see D6.
-- **29 A2** — validation waits on a background part through the harness's
-  notification or a read-only `tail`, never a shell loop; no rule for `bash -c`;
-  see D6.
+- **29 A2** — validation waits on a background part through a read-only `tail`,
+  never a shell loop; no rule for `bash -c`; see D6. Its other option, the
+  harness's notification, was superseded by 41 A1.
+
+### Decisions at the third implementation round's triage
+
+- **39 F1** — a task whose leading `N.` is not its `## N.` heading's fails
+  `make check-tasks CHANGE=<change>`, run by the skills that act on the list at
+  their entry checks (`change-plan` after writing the plan); the computation uses
+  the same function as its backstop in the implementation phase; see D14.
+- **39 F2** — unread denials wait whatever the phase, before any step runs; a
+  question, return, or block waits only in its phase; see D14.
+- **39 F3** — task 6.1 reworded around `reads` and `resolves`, with the question
+  and return cases and the repeat-review exception; see D3, D6a.
+- **41 A1** — validation waits on a background part inside one Bash call with a
+  blocking read-only `tail`, repeated when the call times out, never by ending
+  the turn; the Helm part runs in the foreground; see D6 (carried into the design
+  at the fourth round, 52 F2).
+- **45 R1 (option 2)** — a resume names its run by `seq`, and the wrapper refuses
+  a run that is not waiting; the computation's `owner` result carries the `seq`;
+  `make change-next` prints the computation in plain form; no `make resume`; see
+  D1.
+
+### Decisions at the fourth implementation round's triage
+
+- **52 F1** — a stopped run's reading `reads` it and resolves nothing; a recovered
+  stop is resumed with the one-run grant, and the resumed run supersedes it; a
+  stop not recovered is settled by `resolves`; see D3, D6a.
+- **52 F2** — D6's waiting rule corrected to 41 A1's; the third round's decisions
+  recorded above.
+- **55 O1** — `make next` and `make watch` renamed `make change-next` and `make
+  change-watch`; see D1, D7.
+- **55 O2** — the orchestrator gives `make change-watch` on starting any
+  long-running unattended turn; the harness's panel deferred; see D7.
+- **55 O3 (option 2)** — bash completion of change names and review kinds on the
+  workflow targets is task 6.4 of this change, and a line of the proposal.
+- **54 A1** — the background fetch runs with no shell redirect; see D6 and
+  `change-validate` section 2.
 
 ## Risks / Trade-offs
 

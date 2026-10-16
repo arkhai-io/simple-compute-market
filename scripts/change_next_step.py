@@ -254,11 +254,13 @@ def _owner(reason: str, **extra: Any) -> Result:
 def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
     """The owner result for a step whose last run waits on the owner, if it does.
 
-    A stopped run waits for the decision that resolves it, its denials on the
-    result. Any other run whose denials are not yet `read` waits for their
-    reading first, whatever its outcome: a run can be denied a call and still
-    ask a question or propose a return, and the reading answers neither, so the
-    question or return waits after it as it would without the denial.
+    A stopped run waits, its denials on the result, until a decision resolves it
+    or its resumed run supersedes it; its reading alone settles nothing, since
+    the resume is refused for a resolved run. Any other run whose denials are
+    not yet `read` waits for their reading first, whatever its outcome: a run
+    can be denied a call and still ask a question or propose a return, and the
+    reading answers neither, so the question or return waits after it as it
+    would without the denial.
     """
     step, outcome = entry.get("step"), entry.get("outcome")
     if outcome == "stopped":
@@ -525,9 +527,10 @@ class Computation:
         implementation. Unread denials wait whatever the phase, since the step
         that recorded them may be the one that moved the change on — a triage
         passing a design gate sets the status to the next phase in the same run
-        — and the reading is owed before any step runs; a stopped run's reading
-        is the line that resolves it, in any phase. The result names the waiting
-        run's `seq`, which a resume must give.
+        — and the reading is owed before any step runs; a stopped run with
+        denials waits, in any phase, until a line resolves it or its resumed run
+        supersedes it as its step's latest. The result names the waiting run's
+        `seq`, which a resume must give.
         """
         log = self.state.log
         decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]

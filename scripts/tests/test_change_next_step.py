@@ -766,6 +766,23 @@ def test_a_stopped_run_is_not_cleared_by_its_reading_alone(tmp_path: Path) -> No
     assert (resolved["step"], resolved["kind"]) == ("review", "implementation")
 
 
+def test_a_read_stop_waits_until_its_resumed_run_supersedes_it(tmp_path: Path) -> None:
+    # A stop recovered with a one-run grant: its reading leaves it waiting, and
+    # the resumed run's line, not a resolves line, is what moves the change on.
+    root = _repository(tmp_path, "in implementation")
+    _implemented_round(root)
+    _record(root, "02-implementation-owner.md")
+    run = _log(root, "validate", STOPPED)
+
+    _decide(root, "gap: proposed Bash(make lock) as a one-run grant", reads=run["seq"])
+    read = _next(root)
+    _log(root, "validate", FINISHED, granted=["Bash(make lock)"])
+    resumed = _next(root)
+
+    assert (read["step"], read["seq"]) == ("owner", run["seq"]) and "stopped" in read["reason"]
+    assert resumed["step"] != "owner"
+
+
 def test_a_decision_that_resolves_a_question_ends_its_wait(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _implemented_round(root)

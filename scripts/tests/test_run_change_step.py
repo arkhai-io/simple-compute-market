@@ -758,16 +758,23 @@ def test_a_resume_names_the_waiting_run_not_the_last(tmp_path: Path) -> None:
         wrapper.resume(CHANGE, finished["seq"], "Agreed.")
 
 
-def test_a_stopped_run_is_resumed_with_a_grant_and_not_again(tmp_path: Path) -> None:
-    claude = FakeClaude((_event_lines(VALID["stopped"], session="v-1"), 0),
+def test_a_stopped_run_is_read_then_resumed_with_a_grant_and_not_again(
+        tmp_path: Path) -> None:
+    # The orchestrating session's order: the stop's denial is read first, by a
+    # line that resolves nothing, and the grant resumes the read run; a line
+    # that resolved it would have made the resume refuse it.
+    denied = [{"tool_name": "Bash", "tool_input": {"command": "make lock"}}]
+    claude = FakeClaude((_event_lines(VALID["stopped"], denials=denied, session="v-1"), 0),
                         (_event_lines(VALID["finished"], session="v-1"), 0))
     wrapper = _wrapper(tmp_path, claude)
     stopped = wrapper.run("validate", CHANGE)
+    step.note_orchestrator(step.log_path(tmp_path, CHANGE),
+                           "gap: proposed Bash(make lock) as a one-run grant", "r",
+                           reads=stopped["seq"])
 
     line = wrapper.resume(CHANGE, stopped["seq"], "Go on.", ["Bash(make lock)"])
-    step.note_orchestrator(step.log_path(tmp_path, CHANGE), "rerun it", "r",
-                           resolves=stopped["seq"])
 
+    assert _option(claude.commands[1], "--resume") == "v-1"
     assert (line["step"], line["granted"]) == ("validate", ["Bash(make lock)"])
     assert line["seq"] != stopped["seq"]
     with pytest.raises(step.StepError, match="latest run"):

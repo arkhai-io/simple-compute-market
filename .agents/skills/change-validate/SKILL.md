@@ -95,6 +95,9 @@ The pipeline is by far the slowest part, so it runs while everything else does:
    never fetches its earlier run — then for it to finish, and downloads its logs
    under `.snapshot/e2e-logs/<run-id>/`. Its last lines name the run and its
    conclusion; a successful fetch means the logs arrived, not that the run passed.
+   Run it as written, with no shell redirect of its output: a redirect is a
+   write no rule admits unattended, and the harness keeps a background command's
+   output in a file, which is what the wait below reads.
 
 Run long commands in the background and wait for them to finish, rather than
 inside a call that will time out. Wait inside one Bash call, with a blocking

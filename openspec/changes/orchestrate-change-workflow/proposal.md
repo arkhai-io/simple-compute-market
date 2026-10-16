@@ -48,6 +48,8 @@ proposal deferred can be built on them.
 - The orchestrator opens and closes the round view, notifies the owner when a step
   needs them, and records each step's event stream as a transcript.
 - The orchestrator never passes a gate and never answers a design question.
+- Bash completion of change names and review kinds on the workflow's `make`
+  targets, as a script the owner sources.
 - Piloted on `fix-resource-pool-provider-at-creation`, from `ready for design`
   through archive cleanup, on this change's branch.
 

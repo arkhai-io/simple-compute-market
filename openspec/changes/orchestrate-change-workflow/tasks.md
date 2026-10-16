@@ -865,15 +865,16 @@ stopped fixture with denials now use a crash without any. 45 R1: `resume`
 takes a mandatory `--seq` and refuses a seq that is not a step's run, not its
 step's latest run, resolved by a decision line, or ended other than with a
 question or a stop; the computation's `owner` result carries the waiting run's
-`seq`; `make next CHANGE=<change>` prints the computation in plain form
-(`--plain`); no `make resume`. 39 F3: 6.1's denial and decision clauses
+`seq`; `make next CHANGE=<change>` (renamed `make change-next` at round 4, 55 O1)
+prints the computation in plain form (`--plain`); no `make resume`. 39 F3: 6.1's
+denial and decision clauses
 rewritten around `reads` and `resolves`. 41 A1: `change-validate` section 2
 says to wait on a background part inside one Bash call with a blocking
 read-only `tail`, repeated when it times out, never by ending the turn, and to
 run the Helm part in the foreground. The orchestrator's table edit,
 `Bash(git check-ignore*)` on common (log seq 46), is carried here. Design: D1
-(a resume names its run; `make next`), D14 (the phase-blind reading; the
-task-list backstop). 8.9 names `make next` and `make check-tasks` for the
+(a resume names its run; `make change-next`), D14 (the phase-blind reading; the
+task-list backstop). 8.9 names `make change-next` and `make check-tasks` for the
 contributor guide.
 
 Round 3 checks. Focused suites (unit, `uv run --no-project --with pytest`):
@@ -913,6 +914,51 @@ this session, both `python3 -c` scans the orchestrator read at seq 50; neither
 was needed, the suites and `make check-tasks` proving what they would have
 shown.
 
+Round 4 fixes (triage of 52-implementation, 54-validation, and
+55-implementation-owner, all of `e8c1723f`). 52 F1: the documents said a stopped
+run's denial reading is the line that also resolves it, and `resume` refuses a
+resolved run, so the one-run grant D6a prescribes could never be used; D3, D6a
+step 4, 6.1, and the docstrings of `note_orchestrator`, `pending`, and
+`_waiting` now say a stop's reading resolves nothing, a recovered stop is
+resumed with the grant and its resumed run supersedes it, and a stop not
+recovered is settled by `resolves`; no behaviour changed; the grant test is
+rewritten in that order (stop, `reads` line, resume with the grant, a second
+resume refused) and the router gains a test that a read stop waits for the
+owner until its resumed run moves the change on. 52 F2: D6's waiting rule is
+41 A1's (a blocking read-only `tail` inside one Bash call, repeated on timeout,
+never the harness's notification), the 29 A2 record notes the supersession, and
+the third round's decisions are recorded in `design.md`. 55 O1: `make next` and
+`make watch` are `make change-next` and `make change-watch`, in the Makefile,
+D1, D7, D14, and 8.9. 55 O2: 6.1 and D7 say the orchestrating session gives
+`make change-watch CHANGE=<change>` on starting any long-running unattended
+turn, a discussion step resumed for fixes or checks included; no wrapper
+change. 55 O3: task 6.4, bash completion of change names, and a line in the
+proposal. 54 A1: `change-validate` section 2 says the background fetch runs
+with no shell redirect; D6 says why. The index row's notes name the fourth
+round.
+
+Round 4 checks. Focused suites (unit, `uv run --no-project --with pytest`):
+`test_run_change_step.py`, `test_change_next_step.py`, `test_check_tasks.py`,
+312 passed. `make test`: passed, every suite; `scripts/tests` 943 passed.
+`make check-comment-hygiene`, `make check-agent-skills`, `make
+check-change-index`, `make check-tasks`, `make check-packaging`, `openspec
+validate orchestrate-change-workflow --strict`: passed. `make
+check-doc-citations CHANGE=orchestrate-change-workflow`: the same five
+citations as rounds 1–3, all of what the change removes or has not yet written;
+nothing else. Fresh-context check of the diff against `e8c1723f` (a read-only
+subagent, which could run the suites and the hygiene check): comment hygiene,
+consistency across the repository, test order and level, and
+public-repository discipline satisfied; `resume` and `pending()` confirmed to
+behave as the new wording says. It found one thing, fixed: `pending()`'s
+docstring said every stopped run waits in any phase, where only one with
+denials does. Nits taken: `_waiting`'s docstring reflowed and worded like
+`pending()`'s; 6.1's grammar. Declined: asserting the step the router names
+after the resumed run, since the test proves the stop's release and the step
+named after is other tests' subject. Three calls were denied to this session:
+two `ls` of bash-completion's files outside the repository, read by the
+orchestrator at seq 63, and a `python3 -c` computing the router's answer for
+that nit; none was needed.
+
 ## 6. The orchestrating session
 
 Delivers `change-orchestrate` (D2, D7's notifications, D8, D9, D10, D13's round
@@ -935,11 +981,17 @@ owner").
       calls after it, a later call doing the denied work being a workaround; for
       a gap the narrowest rule, as a one-run grant or a tracked table edit; the
       reading recorded as a decision line that `reads` the run, `by:
-      orchestrator`, and resolves it only when it stopped, a run that asked or
-      proposed a return being answered or decided after its reading; a forbidden
-      or workaround reading going to the owner —; resume a waiting run by its
-      `seq`, the one the computation's `owner` result names, never the log's
-      last run; record each decision, its own or the owner's, as D3's line:
+      orchestrator`, and resolves nothing: a run that asked or proposed a
+      return is answered or decided after its reading, and a stopped run is
+      resumed after it with the one-run grant, or, when it is not recovered,
+      settled by a `resolves` line (52 F1); a forbidden or workaround reading
+      going to the owner —; resume a waiting run by its `seq`, the one the
+      computation's `owner` result names, never the log's last run; on starting
+      any long-running unattended turn — validation, implementation, a review,
+      closeout, or a discussion step resumed for a turn that applies fixes or
+      runs the checks — say so and give `make change-watch CHANGE=<change>`,
+      which follows the step in another terminal (55 O2); record each decision,
+      its own or the owner's, as D3's line:
       `resolves` the run it settles and no other, `reads` the run whose denials
       it read, `next` the step it directs with `kind` for a review — a confirmed
       return resolves the returned run, a repeat review after a failed gate
@@ -953,6 +1005,17 @@ owner").
       read of the skill against D2, D8–D10, D13, D14, and the delta's
       orchestrating-session requirement, recording anything it found. The working
       evidence is section 7.
+- [ ] 6.4 Bash completion of change names on the workflow targets (55 O3):
+      `scripts/completions/make-change.bash`, sourced by the owner from
+      `~/.bashrc`, wrapping bash-completion's `make` completion with
+      `_init_completion -n =` (bash splits words at `=`) so that `CHANGE=`
+      completes from the directories under `openspec/changes/` — from
+      `openspec/changes/archive/`, date prefix stripped, when the target on the
+      line is `archive-cleanup` — and `KIND=` from the four review kinds, and
+      defers to `_make` for everything else; a test in `scripts/tests/` that runs
+      bash with `COMP_WORDS` and `COMP_CWORD` set and asserts `COMPREPLY`,
+      skipped where bash-completion is not installed; the sourcing line in
+      `docs/agents/change-workflow.md` is 8.9's.
 
 ## 7. Pilot
 
@@ -1014,11 +1077,12 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the proposal landing on dev first); update "Current limits" with one change
         at a time and gates never passed by the orchestrator.
       - `docs/agents/change-workflow.md` — the "Skills" table gains
-        `change-orchestrate`, `make plan`, `UNATTENDED=1`, `make next`, and
-        `make check-tasks`; a new "Orchestrating
-        a change" section: starting and resuming, agreeing a round, answering and
-        taking over a step, maintaining `.claude/change-steps.toml`; "The review
-        directory" gains `workflow.jsonl` and the step transcripts.
+        `change-orchestrate`, `make plan`, `UNATTENDED=1`, `make change-next`,
+        `make change-watch`, and `make check-tasks`; a new "Orchestrating
+        a change" section: starting and resuming, agreeing a round, following a
+        running step, answering and taking over a step, maintaining
+        `.claude/change-steps.toml`, and sourcing the completion script (6.4);
+        "The review directory" gains `workflow.jsonl` and the step transcripts.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
         from `scripts/run_change_review.py` to `run_change_step.py review` in

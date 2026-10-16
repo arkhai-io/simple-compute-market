@@ -339,7 +339,9 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     nothing it does not name. They differ because a run denied a call can still
     end with a question or a proposed return, whose denials are read before the
     question is answered or the return decided; a reading alone leaves such an
-    outcome waiting, and a stopped run is read and resolved by one line.
+    outcome waiting. A stopped run is read the same way: a reading that also
+    resolved it would make `resume` refuse the one-run grant that recovers it,
+    so a stop is resolved only when it is not recovered.
     `next_step` names the step the decision directs — the step a confirmed
     return goes to, the review the owner asked for again — which the next-step
     computation names until that step has run. A directed review takes its
