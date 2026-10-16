@@ -85,10 +85,11 @@ fulfillment capabilities; the contract reaches a storefront through a
 `market.storefront_contributions` registration, or a one-domain executable
 composes it directly, and the buyer capability reaches the `market` CLI
 through a `market.buyer_domains` registration. A registry filter
-specification, a provisioning adapter, and any resource service sit beside
-the contract and plug into their own hosts. The bottom row names the
-packages that supply each part in the three reference domains. The
-diagram's source is
+specification and any resource service sit beside the contract. The bottom
+row names the packages that supply each part: the compute domain is one
+family with a shared vocabulary, provisioning capabilities, and provisioning
+service, and two sub-domains, VMs and bare metal, each with its own
+provisioning adapter; API credits stands alone. The diagram's source is
 [`../development/diagrams/domain-anatomy.drawio`](../development/diagrams/domain-anatomy.drawio);
 the SVG beside it is the export and also opens in draw.io.
 
