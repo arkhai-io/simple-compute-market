@@ -313,14 +313,14 @@ Delivers D11 and D1's unattended targets: the review runner absorbed into the
 wrapper, with a run-specific success (01 F4), and `UNATTENDED=1` on every step's
 target, with planning's new target (D8).
 
-- [x] 3.1 Move `scripts/run_change_review.py`'s behaviour into
+- [x] 3.1 Move the retired `run_change_review.py`'s behaviour into
       `run_change_step.py`'s `review` step: the reviewer-session marker, resuming
       the reviewer's session, the transcript, claiming a numbered record per run
       and removing it when the reviewer fails or its review is invalid, and the
       pre-closeout validation check. The outcome is `finished` naming the record
       this run published and the reviewed commit, otherwise `stopped` with the
       runner's reason; an earlier record never counts. Move
-      `scripts/tests/test_run_change_review.py`'s cases to
+      the retired `test_run_change_review.py`'s cases to
       `scripts/tests/test_run_change_step.py`, and delete the old script and test
       file. Unit: a failed run beside an existing `01-design.md` logs `stopped`.
       Done. The review code moved as it was, into `run_change_step.py`, under a
@@ -410,7 +410,7 @@ target, with planning's new target (D8).
       reviewer: continuing an earlier reviewer's session was not exercised, nor
       did the run show what stdout held beyond the log line `make` printed.
       `make check-doc-citations CHANGE=orchestrate-change-workflow` now reports
-      `scripts/run_change_review.py` and its test as missing: only this change's
+      `run_change_review.py` (retired) and its test as missing: only this change's
       `design.md`, `proposal.md`, and `tasks.md` cite them, describing what the
       change removes. Closeout's citation check (8.10) has to resolve those, by
       the narrative compression (8.4) rewording them or by the owner accepting
@@ -755,7 +755,7 @@ and after every later edit. `make check-agent-skills`, `make check-change-index`
 `make check-packaging`, `openspec validate orchestrate-change-workflow --strict`:
 passed. `make check-doc-citations CHANGE=orchestrate-change-workflow` reports
 five citations, all of what the change removes or has not yet written:
-`scripts/run_change_review.py` (design, proposal, tasks) and its test (tasks),
+`run_change_review.py` (retired; design, proposal, tasks) and its test (tasks),
 which section 3 deleted and 8.10 resolves, and
 `.agents/skills/change-orchestrate/SKILL.md` (6.1), which section 6 creates;
 nothing else. The router and the `denials` subcommand are proven by their unit
@@ -966,7 +966,7 @@ line, D14's backstop, never passing a gate; requirements "An orchestrating
 session advances one change" and "Discussion steps stay conversations with the
 owner").
 
-- [ ] 6.1 Add `.agents/skills/change-orchestrate/SKILL.md`, linked from
+- [x] 6.1 Add `.agents/skills/change-orchestrate/SKILL.md`, linked from
       `.claude/skills/` and `.codex/skills/`: on every start and after compaction,
       run `change_next_step.py` and read the log's last lines; run the step it
       names through the wrapper; relay each discussion message and resume with the
@@ -999,13 +999,13 @@ owner").
       unclassified, decide routing or recovery itself and record an
       `orchestrator` line, or bring the matter to the owner. It commits nothing,
       passes no gate, answers no design question, and advances only its change.
-- [ ] 6.2 `Makefile`: `make orchestrate CHANGE=<change>`, after `make design`,
+- [x] 6.2 `Makefile`: `make orchestrate CHANGE=<change>`, after `make design`,
       opening `claude "/change-orchestrate <change>"`.
-- [ ] 6.3 Verification: `make check-agent-skills`; `make test`; a fresh-context
+- [x] 6.3 Verification: `make check-agent-skills`; `make test`; a fresh-context
       read of the skill against D2, D8–D10, D13, D14, and the delta's
       orchestrating-session requirement, recording anything it found. The working
       evidence is section 7.
-- [ ] 6.4 Bash completion of change names on the workflow targets (55 O3):
+- [x] 6.4 Bash completion of change names on the workflow targets (55 O3):
       `scripts/completions/make-change.bash`, sourced by the owner from
       `~/.bashrc`, wrapping bash-completion's `make` completion with
       `_init_completion -n =` (bash splits words at `=`) so that `CHANGE=`
@@ -1016,6 +1016,39 @@ owner").
       bash with `COMP_WORDS` and `COMP_CWORD` set and asserts `COMPREPLY`,
       skipped where bash-completion is not installed; the sourcing line in
       `docs/agents/change-workflow.md` is 8.9's.
+
+Section 6 evidence and handoff. The skill is shared through both
+harness links; `make check-agent-skills` passes. The Make target uses the general
+change finder so an archived change can resume its closeout review or cleanup.
+The completion tests exercise real Bash, its installed word-reassembly helper,
+and make completion against fixture directories (library integration, no
+application); 11 passed with `uv run --no-project --with pytest pytest -q
+scripts/tests/test_make_change_completion.py`. Unlike the plan's assumed `_make`,
+this installation uses `_comp_cmd_make`; the wrapper supports either name and
+the tests exercise both dispatch paths, the legacy name through an adapter to
+the installed implementation. Missing bash-completion skips the suite. End-to-end:
+no marker in `e2e-tests/` exercises this section; section 7's pilot remains the
+working evidence, including actual push-notification availability and session
+relaying. Sourcing instructions remain with 8.9. The scoped citation check now
+passes: retired review-tool filenames are explicitly historical names rather
+than citations to deleted paths; earlier completed tasks and their history stay
+in place. `make -n orchestrate CHANGE=orchestrate-change-workflow` prints the
+general change lookup and the expected interactive Claude invocation; it does
+not start a session. `bash -n scripts/completions/make-change.bash`,
+`make check-comment-hygiene`, `make check-change-index`, `make check-tasks`, and
+`openspec validate orchestrate-change-workflow --strict`: passed. Fresh-context
+check of the diff against `823d9996`, all untracked files and both links included:
+no findings against the required guidance, D2, D8–D10, D13, D14, or the delta;
+no overstated evidence claims; nothing to fix or decline. `make test`: passed,
+every included suite, with 954 passed in `scripts/tests` (the completion suite's
+11 included). `make check-packaging`: passed, including wheel builds, lock,
+Python-version, project-layout, and architecture checks. Both commands first
+failed because the sandbox mounted the existing uv cache read-only; rerunning
+with cache access passed, without changing dependencies or locks. The index
+notes now name section 6's pending review; its status stays `in implementation`.
+No pilot run, live notification, or discussion resume is claimed here. The
+pilot must confirm those behaviours and collect the evidence 7.2 names; all
+permanent-documentation promotion remains at 8.9.
 
 ## 7. Pilot
 
@@ -1085,7 +1118,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         "The review directory" gains `workflow.jsonl` and the step transcripts.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
-        from `scripts/run_change_review.py` to `run_change_step.py review` in
+        from `run_change_review.py` (retired) to `run_change_step.py review` in
         section 3, when the script was deleted; record it here.
       - `openspec/specs/README.md` and `docs/development/ARCHITECTURE.md` — no
         change: no new capability or companion, and the workflow is contributor

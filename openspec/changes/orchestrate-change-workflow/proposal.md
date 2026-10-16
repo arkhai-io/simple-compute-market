@@ -116,7 +116,7 @@ proposal deferred can be built on them.
 reports when run unattended; `change-plan`'s and `change-implement`'s section
 sizing; `change-design`'s prerequisite path), the workflow `make` targets and a new
 `make orchestrate`, new scripts (`scripts/run_change_step.py`, absorbing
-`scripts/run_change_review.py`; `scripts/change_next_step.py`;
+`run_change_review.py` (retired); `scripts/change_next_step.py`;
 `scripts/check_comment_hygiene.py`, a port of the Makefile's check) with their
 tests, the outcome schema (`.agents/change-outcome.schema.json`) and the step
 permission table (`.claude/change-steps.toml`),

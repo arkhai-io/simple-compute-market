@@ -4,7 +4,7 @@ Each step of a change is a leaf skill under `.agents/skills/`, started by the ow
 through its `make` target. Every target but one opens an interactive Claude Code
 session: `make design`, `make implement`, `make triage`, `make validate`,
 `make closeout`, and `make archive-cleanup` each run `claude "/change-<step>
-<change>"`. Only `make review` runs unattended: `scripts/run_change_review.py` runs
+<change>"`. Only `make review` runs unattended: `run_change_review.py` (retired) runs
 `codex exec` in a read-only sandbox, keeps its transcript under
 `reviews/transcripts/`, and records the reviewer's session in the review file as
 `<!-- reviewer-session: ID -->` so the next review resumes it.

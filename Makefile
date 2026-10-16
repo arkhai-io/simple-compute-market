@@ -19,7 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
-.PHONY: check-agent-skills review design-review design plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -906,6 +906,10 @@ STEP_RUN = python3 scripts/run_change_step.py run
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
+
+orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude "/change-orchestrate $(CHANGE)"
 
 plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
