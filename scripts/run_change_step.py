@@ -4,8 +4,10 @@
 `run` starts the step's skill as a headless Claude Code session (`claude -p`),
 held to the step's permissions in `.claude/change-steps.toml` under the `dontAsk`
 permission mode, told to end its turn with an outcome matching the outcome schema,
-and streaming its events. `resume` continues the last session with the owner's
-answer, optionally granting a rule for that one run. Either way the run's event
+and streaming its events. `resume` continues the session of a waiting run, named
+by its line in the log, with the owner's answer, optionally granting a rule for
+that one run; with steps run side by side the last run is not necessarily the one
+that asked, so the run is never inferred. Either way the run's event
 stream is kept as `reviews/transcripts/NN-<step>.jsonl`, with a progress file of
 its tool calls beside it, and its outcome is appended to the workflow log. A run
 that crashes, ends without an outcome, or ends with one the schema rejects is
@@ -728,8 +730,13 @@ class Wrapper:
         return self._turn(step, rules, log, step_prompt(rules, change, arguments),
                           session=session, extra=extra)
 
-    def resume(self, change: str, answer: str, granted: Sequence[str] = ()) -> Entry:
-        """Resume the last step session with the owner's answer.
+    def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
+        """Resume the step session of the run at `seq` with the owner's answer.
+
+        The run is named, never inferred: with steps run side by side, the log's
+        last run is not necessarily the one that asked. It must be waiting — its
+        step's latest run, ended with a question, or stopped with no decision
+        line resolving it — since an answer to any other run has nowhere to go.
 
         A granted rule applies to this run alone: it is passed on this command line
         and noted on this run's log line, never added to the step table, so the
@@ -739,13 +746,27 @@ class Wrapper:
             raise StepError("a resumed step needs the owner's answer")
         steps = load_steps(self.steps_path)
         log = log_path(self.root, change)
-        previous = last_run(log, list(steps))
+        entries = read_log(log)
+        previous = next((e for e in entries if e.get("seq") == seq), None)
         if previous is None:
-            raise StepError(f"{change} has no step session in its workflow log to resume")
+            raise StepError(f"{change}'s workflow log has no seq {seq}")
+        step = previous.get("step")
+        if step not in steps:
+            raise StepError(f"seq {seq} is a {step} line, not the run of a step that can be "
+                            "resumed")
+        latest = last_run(log, [step])
+        if latest is None or latest["seq"] != seq:
+            raise StepError(f"seq {seq} is not {step}'s latest run, so it no longer waits")
+        resolved = {e.get("resolves") for e in entries if e.get("outcome") == ORCHESTRATOR}
+        if seq in resolved:
+            raise StepError(f"seq {seq} ended {previous.get('outcome')} and a decision line "
+                            "resolves it, so it no longer waits")
+        if previous.get("outcome") not in ("question", "stopped"):
+            raise StepError(f"seq {seq} ended {previous.get('outcome')}, not with a question "
+                            "or a stop, so it is not waiting for an answer")
         if not previous.get("session"):
-            raise StepError(f"{change}'s last {previous['step']} run (seq {previous['seq']}) "
-                            "recorded no session to resume; run the step again")
-        step = previous["step"]
+            raise StepError(f"{change}'s {step} run (seq {seq}) recorded no session to "
+                            "resume; run the step again")
         extra = {"sections": previous["sections"]} if previous.get("sections") else {}
         if granted:
             extra["granted"] = list(granted)
@@ -1207,8 +1228,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                      help="text added to the skill's invocation after the change")
     run.add_argument("--fresh", action="store_true",
                      help="start a fresh session for a step that resumes another's")
-    resume = commands.add_parser("resume", help="resume the last step with the owner's answer")
+    resume = commands.add_parser("resume", help="resume a waiting run with the owner's answer")
     resume.add_argument("change")
+    resume.add_argument("--seq", type=int, required=True,
+                        help="the waiting run's line in the workflow log")
     resume.add_argument("--answer", required=True)
     resume.add_argument("--allow", action="append", default=[],
                         help="a permission rule granted for this run alone")
@@ -1275,7 +1298,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "resume":
-            line = wrapper.resume(args.change, args.answer, args.allow)
+            line = wrapper.resume(args.change, args.seq, args.answer, args.allow)
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "log":

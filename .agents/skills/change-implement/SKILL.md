@@ -64,6 +64,9 @@ the session, and every turn ends with an outcome matching
   section's. `make round-view-closed` passes: while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
+- **Task list.** `make check-tasks CHANGE=<change>` passes. A task numbered for
+  one section under another section's heading means a heading was lost in an
+  edit, and the sections cannot be read until it is restored.
 - **Section.** The owner names it, or it is the first section with unchecked tasks.
   An earlier section with unchecked tasks is unfinished: that is the section, unless
   the owner says otherwise. When the owner names a range ("sections 1-3"), work them

@@ -97,10 +97,16 @@ The pipeline is by far the slowest part, so it runs while everything else does:
    conclusion; a successful fetch means the logs arrived, not that the run passed.
 
 Run long commands in the background and wait for them to finish, rather than
-inside a call that will time out. Wait through the harness's notification that
-the background command ended, or a read-only `tail` of its output, never a
-shell loop: `bash -c` has no allow rule unattended and will not get one, since
-no rule admits a loop without admitting any command. A running part prints one
+inside a call that will time out. Wait inside one Bash call, with a blocking
+read-only `tail -f … | grep -m1` on the command's output matching the line it
+prints when it ends — a part's result line, the fetch's run-and-conclusion line
+— never by ending the turn: under the wrapper a turn's end is an outcome, so a
+turn ended with a part in flight is logged as a stop. A single call blocks for
+at most ten minutes, and the pipeline can take longer, so when the `tail` times
+out, repeat it, still without ending the turn. Never a shell loop: `bash -c` has
+no allow rule unattended and will not get one, since no rule admits a loop
+without admitting any command. The Helm part finishes within one call, so it
+runs in the foreground. A running part prints one
 line as each step starts and one as it ends, so its output shows how far it has
 got; each step's log is in the attempt's directory under `.snapshot/validation/`,
 named when the part starts.

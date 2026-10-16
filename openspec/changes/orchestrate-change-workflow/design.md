@@ -59,7 +59,15 @@ A question from the step is a resume, never a restart: the step ends its turn wi
 `question` outcome, the orchestrator puts it to the owner, and resumes the same
 session with the answer, so the step keeps its history and carries on. This is the
 proxy every "stop and ask the owner" in a skill goes through when it runs
-delegated.
+delegated. The resume names the run it answers, by its `seq` in the log, and the
+wrapper refuses a run that is not waiting — its step's latest run, ended with a
+question, or stopped with no decision line resolving it: with validation and the
+review run side by side (D9) the log's last run is not necessarily the one that
+asked, and an answer sent to the last run reached a finished validation (45 R1).
+The computation's `owner` result carries the waiting run's `seq`, and
+`make next CHANGE=<change>` prints the result in plain form; there is no
+`make resume`, since the owner reruns a step supervised rather than resuming one
+by hand.
 
 Rejected: a subagent of the orchestrator's session — no allow-lists, since its
 prompts reach the owner, but it cannot be started by hand through `make`, cannot be
@@ -188,8 +196,11 @@ the results that wait for the owner:
 - a prerequisite gating `design` is archived on this branch: `owner`, proposing the
   release (D5a);
 - a step's latest run went on past a denied tool: `owner`, carrying the denials,
-  until a decision line reads that run (D6a); its question or return then waits
-  as below;
+  until a decision line reads that run (D6a), whatever phase the change is in
+  now — the run may be the one that moved it on, a triage passing a design gate
+  sets the next phase's status in the same run (39 F2) — while a question,
+  return, or block waits only in the phase it was raised in; its question or
+  return then waits as below;
 - a step's latest run asked, returned, was blocked, or stopped: `owner`, until
   its session is resumed with the answer or a decision line resolves that run
   (D3); a decision that names `next` routes to that step until it has run, which
@@ -201,7 +212,14 @@ the results that wait for the owner:
   a pre-closeout one once the fix is validated (04 F2). The
 orchestrator runs that step and never routes on its own reading. The transitions
 are already fixed by each skill's entry check and handoff; in code they are
-testable under `scripts/tests`, and the owner can run the same command by hand.
+testable under `scripts/tests`, and the owner can run the same command by hand,
+or `make next CHANGE=<change>` for it in plain form. A task list whose numbered
+task sits under another section's heading is not routed on: the script answers
+`unclassified` naming the task and the heading, as the backstop to
+`make check-tasks CHANGE=<change>`, which the skills that act on the list —
+implementation and closeout at their entry checks, planning after writing the
+plan — run first (39 F1: a heading lost in an edit handed section 6's tasks to
+section 5, and the script named sections 1–5 to implement again).
 
 When the script fails — an error, a state it cannot classify, files and log that
 disagree — the orchestrator receives its output and the inputs it read, works out

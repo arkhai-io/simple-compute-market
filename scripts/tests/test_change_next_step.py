@@ -142,13 +142,25 @@ def test_a_finished_design_discussion_goes_to_its_review(tmp_path: Path) -> None
 
 def test_a_design_question_waits_for_the_owner(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
-    _log(root, "design", QUESTION)
+    run = _log(root, "design", QUESTION)
 
     result = _next(root)
 
     assert (result["step"], result["resume"], result["awaiting"]) == ("owner", "design",
                                                                       "a choice")
     assert "Which option?" in result["reason"]
+    # The run a resume must name.
+    assert result["seq"] == run["seq"]
+
+
+def test_a_task_under_another_sections_heading_is_not_routed_on(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation",
+                       tasks=TASKS.replace("## 3. Third\n\n", ""))
+
+    result = _next(root)
+
+    assert result["step"] == "unclassified"
+    assert "3.1 sits under `## 2. Second`" in result["reason"]
 
 
 def test_a_design_gate_not_passed_returns_to_design(tmp_path: Path) -> None:
@@ -535,6 +547,19 @@ def test_the_command_prints_the_result(tmp_path: Path,
     assert nxt.main(["missing"], root=root) == 1
 
 
+def test_plain_prints_the_result_as_lines(tmp_path: Path,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    root = _repository(tmp_path, "in design")
+    run = _log(root, "design", {**QUESTION, "denials": [{"tool_name": "Bash"}]})
+
+    assert nxt.main([CHANGE, "--plain"], root=root) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "step: owner" and lines[1].startswith("reason: the design step ended")
+    assert lines[2:] == ['denials: [{"tool_name": "Bash"}]', "outcome: question",
+                         f"seq: {run['seq']}"]
+
+
 # The round view, read from Git as round_view keeps it.
 
 def _git(cwd: Path, *args: str) -> str:
@@ -567,6 +592,8 @@ def test_a_round_view_opened_and_closed_in_git_is_seen_and_then_not(tmp_path: Pa
 
 STOPPED = {"outcome": "stopped", "message": "Denied.", "reason": "denied",
            "denials": [{"tool_name": "Bash"}]}
+# A run that ended without an outcome, as the wrapper logs it: no denial to read.
+CRASHED = {"outcome": "stopped", "message": "exit 1", "reason": "exit 1", "denials": []}
 
 
 def _implemented_round(root: Path) -> None:
@@ -806,7 +833,7 @@ def test_a_blocked_step_other_than_design_waits_for_the_owner(tmp_path: Path) ->
 
 def test_a_design_reviews_stopped_run_does_not_hold_implementation(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
+    step.record_outcome(step.log_path(root, CHANGE), "review", CRASHED, session=None,
                         commit=HEAD, extra={"kind": "design"})
     _round(root, [[2]])
 
@@ -817,10 +844,94 @@ def test_a_design_triages_stopped_run_does_not_hold_implementation(tmp_path: Pat
     root = _repository(tmp_path, "in implementation")
     step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
                         commit=HEAD, extra={"kind": "design"})
-    _log(root, "triage", STOPPED)
+    _log(root, "triage", CRASHED)
     _round(root, [[2]])
 
     assert _next(root)["step"] == "implement"
+
+
+# Unread denials wait whatever the phase: the run that recorded them may be the
+# one that moved the change on, and the reading is owed before any step runs.
+
+def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for planning")
+    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                        commit=HEAD, extra={"kind": "design"})
+    run = _log(root, "triage", {**FINISHED, "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+
+    assert (unread["step"], unread["seq"], unread["denials"]) == (
+        "owner", run["seq"], [{"tool_name": "Bash"}])
+    assert "denied 1 tool call" in unread["reason"]
+    assert read["step"] == "plan"
+
+
+def test_a_pre_closeout_triages_denials_are_read_before_closeout_starts(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for closeout")
+    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                        commit=HEAD, extra={"kind": "pre-closeout"})
+    run = _log(root, "triage", {**FINISHED, "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+
+    assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
+    assert read["step"] == "closeout"
+
+
+def test_a_stopped_design_run_with_denials_holds_until_a_line_resolves_it(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _log(root, "design", STOPPED)
+    _round(root, [[2]])
+
+    held = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+    _decide(root, "rerun it", resolves=run["seq"])
+
+    assert (held["step"], held["seq"]) == ("owner", run["seq"]) and "stopped" in held["reason"]
+    assert read["step"] == "owner" and "stopped" in read["reason"]
+    assert _next(root)["step"] == "implement"
+
+
+def test_a_plans_denials_are_read_before_implementation_starts(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    run = _log(root, "plan", {**FINISHED, "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+
+    assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
+    assert "denied 1 tool call" in unread["reason"]
+    assert read["step"] == "owner" and "agree the next implementation round" in read["reason"]
+
+
+def test_an_earlier_phases_question_with_denials_waits_only_for_their_reading(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for planning")
+    run = _log(root, "design", {**QUESTION, "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+
+    assert (unread["step"], unread["seq"]) == ("owner", run["seq"])
+    assert read["step"] == "plan"
+
+
+def test_a_status_that_never_routes_on_sections_ignores_a_malformed_list(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "blocked in closeout",
+                       tasks=TASKS.replace("## 3. Third\n\n", ""))
+
+    assert _next(root)["step"] == "owner"
 
 
 def test_a_triage_with_no_review_before_it_holds_any_phase(tmp_path: Path) -> None:

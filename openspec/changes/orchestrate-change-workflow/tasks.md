@@ -833,6 +833,88 @@ allowed tool instead: a shell append to the ledger (`printf >>`) and a `sed` on
 a test file, both edits the step's `Edit` rule admits; a third, a `make test`
 chained with a redirect and `echo`, was rerun as plain `make test`.
 
+Round 3 fixes, sections 2, 4, and 5 (review 39 and validation 41 of `3e9566af`,
+and the orchestrator's observation R1 from the workflow log, triaged in
+`reviews/39-implementation.triage.md`, `41-validation.triage.md`, and
+`45-implementation-owner.triage.md`). 39 F1: the round-2 notes' rewrite had
+dropped this section 6's heading, so the computation read 6.1–6.3 as section
+5's and named sections 1–5 to implement again; the heading is restored, and a
+task list is checked before anything acts on it: `scripts/check_tasks.py`
+(`make check-tasks CHANGE=<change>`) fails on a numbered task that sits under
+another section's `## N.` heading, naming the task and the heading, only under
+a recognised heading so a list in another format passes; `change-implement` and
+`change-closeout` run it at their entry checks and `change-plan` after writing
+the plan; and, as recommended, the computation uses the same function as its
+backstop, answering `unclassified` naming the task, since a skill that skipped
+the check or an edit after it would otherwise reach the router; the backstop
+applies in the implementation phase, the one routed on sections, so a deferred
+or blocked change with a malformed list still gets its owner result. The check
+reports the same defect in one other change, outside this one and left alone:
+`never-strand-the-host-on-passthrough` (a task of 5 under `## 5a.`). The
+orchestrator's scan had also named `repair-storefront-alkahest-configuration`,
+whose tasks of 5 sit under an unnumbered deferred-work heading after
+`## 4. Closeout`; the check leaves tasks under an unnumbered heading alone, so
+it passes, while `read_sections` still counts them as the last section's. 39 F2:
+`pending()` holds the latest run of any step with unread denials whatever the
+phase, before the phase-filtered pass for a question, return, or block, since
+the run may be the one that moved the change on; tests for a design triage with
+denials after `ready for planning` and a pre-closeout triage with denials after
+`ready for closeout`, and a stopped design run with denials holding
+implementation until a line resolves it; the two phase tests that used a
+stopped fixture with denials now use a crash without any. 45 R1: `resume`
+takes a mandatory `--seq` and refuses a seq that is not a step's run, not its
+step's latest run, resolved by a decision line, or ended other than with a
+question or a stop; the computation's `owner` result carries the waiting run's
+`seq`; `make next CHANGE=<change>` prints the computation in plain form
+(`--plain`); no `make resume`. 39 F3: 6.1's denial and decision clauses
+rewritten around `reads` and `resolves`. 41 A1: `change-validate` section 2
+says to wait on a background part inside one Bash call with a blocking
+read-only `tail`, repeated when it times out, never by ending the turn, and to
+run the Helm part in the foreground. The orchestrator's table edit,
+`Bash(git check-ignore*)` on common (log seq 46), is carried here. Design: D1
+(a resume names its run; `make next`), D14 (the phase-blind reading; the
+task-list backstop). 8.9 names `make next` and `make check-tasks` for the
+contributor guide.
+
+Round 3 checks. Focused suites (unit, `uv run --no-project --with pytest`):
+`test_run_change_step.py`, `test_change_next_step.py`, and the new
+`test_check_tasks.py`, 304 passed before the fresh-context check's fixes, 309
+after; the whole of `scripts/tests`, 940 passed after them. `make test`:
+passed, every suite, before the fresh-context check's fixes, which touched only
+`change_next_step.py`, `run_change_step.py`, `check_tasks.py`, their tests, and
+`change-validate`'s wording; `scripts/tests` passed after them. `make
+check-comment-hygiene`: passed after three test strings were joined at run time
+(a task number beside the word that names it reads as history). `make
+check-agent-skills`, `make check-change-index`, `make check-packaging`
+(before and after the fixes), `openspec validate orchestrate-change-workflow
+--strict`: passed. `make check-doc-citations CHANGE=orchestrate-change-workflow`:
+the same five citations as rounds 1 and 2, all of what the change removes or has
+not yet written; nothing else. `make check-tasks` on this change: OK; the
+computation's plain form shows this triage's question with its `seq`.
+Fresh-context check of the diff against `3e9566af` (a subagent, read-only,
+reading the files since script execution was denied to it): hygiene, import
+placement, test seams, and public-repository discipline satisfied; it found,
+and this round fixed, four things — `task_problems` kept the last numbered
+heading across an unnumbered one and compared ids case-sensitively (now reset
+on any other `##` heading, compared lower-cased, two tests); the backstop ran
+before the status rules, turning a deferred or blocked change with a malformed
+list `unclassified` (now in the implementation phase only, one test); the
+phase-blind pass released a stopped run on a `reads` line where the in-phase
+pass needs `resolves` (now `resolves` for a stop in either pass, the docstring
+reworded, the test extended); and `resume` accepted a question a decision line
+had resolved (now refused whatever the outcome, one test) — plus the coverage
+it asked for (a plan run's denials after `ready for implementation`, an earlier
+phase's question with denials, `--plain` with a list value) and four nits (the
+check script's docstring, the validate sentence naming the line to match and
+why the Helm part is foreground, a dict's name and a set built once, a test's
+name). Declined: reading the task list once rather than twice in the
+computation, a small file and a simpler signature. Two calls were denied to
+this session, both `python3 -c` scans the orchestrator read at seq 50; neither
+was needed, the suites and `make check-tasks` proving what they would have
+shown.
+
+## 6. The orchestrating session
+
 Delivers `change-orchestrate` (D2, D7's notifications, D8, D9, D10, D13's round
 line, D14's backstop, never passing a gate; requirements "An orchestrating
 session advances one change" and "Discussion steps stay conversations with the
@@ -852,11 +934,16 @@ owner").
       or a forbidden action; `run_change_step.py denials <change> <seq>` for the
       calls after it, a later call doing the denied work being a workaround; for
       a gap the narrowest rule, as a one-run grant or a tracked table edit; the
-      reading recorded as the decision line resolving the run, `by:
-      orchestrator`, a forbidden or workaround reading going to the owner —;
-      record each decision, its own or the owner's, as a line naming the run it
-      resolves and any step it directs (a confirmed return, a repeat review);
-      when the script is
+      reading recorded as a decision line that `reads` the run, `by:
+      orchestrator`, and resolves it only when it stopped, a run that asked or
+      proposed a return being answered or decided after its reading; a forbidden
+      or workaround reading going to the owner —; resume a waiting run by its
+      `seq`, the one the computation's `owner` result names, never the log's
+      last run; record each decision, its own or the owner's, as D3's line:
+      `resolves` the run it settles and no other, `reads` the run whose denials
+      it read, `next` the step it directs with `kind` for a review — a confirmed
+      return resolves the returned run, a repeat review after a failed gate
+      names no run (39 F3); when the script is
       unclassified, decide routing or recovery itself and record an
       `orchestrator` line, or bring the matter to the owner. It commits nothing,
       passes no gate, answers no design question, and advances only its change.
@@ -927,7 +1014,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the proposal landing on dev first); update "Current limits" with one change
         at a time and gates never passed by the orchestrator.
       - `docs/agents/change-workflow.md` — the "Skills" table gains
-        `change-orchestrate`, `make plan`, and `UNATTENDED=1`; a new "Orchestrating
+        `change-orchestrate`, `make plan`, `UNATTENDED=1`, `make next`, and
+        `make check-tasks`; a new "Orchestrating
         a change" section: starting and resuming, agreeing a round, answering and
         taking over a step, maintaining `.claude/change-steps.toml`; "The review
         directory" gains `workflow.jsonl` and the step transcripts.

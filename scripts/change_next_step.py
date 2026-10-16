@@ -12,14 +12,18 @@ log, and whether a round view is open, and prints one JSON object:
   `kind`), `validate-and-review`, `triage`, `closeout`, or `archive-cleanup`;
 - `{"step": "owner", "reason": …}` when only the owner can move the change on: a
   question to answer, a gate or a returned step to decide, a round to agree, a
-  prerequisite to land;
+  prerequisite to land; for a waiting run, its `seq` — a question or a stop is
+  resumed by it;
 - `{"step": "done", …}` for an archived change;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
 The rules follow each step's skill: its entry check, and the handoff that names
 what comes after it. Where the log and the files disagree — a status set by hand —
-the files decide the step, and the result carries a `disagreement` saying so.
+the files decide the step, and the result carries a `disagreement` saying so. A
+task list whose tasks sit under another section's heading is not routed on
+(`task_problems`, which `scripts/check_tasks.py` runs for the skills). `--plain`
+prints the result as lines rather than JSON.
 
 Contract: openspec/specs/change-workflow/spec.md, "The next step is computed from
 the files".
@@ -51,7 +55,9 @@ _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
 TASKS_FILE = "tasks.md"
 _SECTION = re.compile(r"^## (?P<id>[0-9]+[A-Za-z]?)\. (?P<title>.+?)\s*$")
-_TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] ")
+# A task is numbered for its section, `N.m`, when it is numbered at all.
+_TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
+                   r"(?P<number>(?P<section>[0-9]+[A-Za-z]?)\.[0-9]+\b)?")
 # Where a log line's step sits among the phases, for comparing with the status.
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
                "validate": "implementation", "triage": None, "review": None,
@@ -134,6 +140,7 @@ class State:
     row: Row | None = None
     notes: str = ""
     records: list[Record] = field(default_factory=list)
+    tasks: str = ""
     sections: list[Section] = field(default_factory=list)
     log: list[dict[str, Any]] = field(default_factory=list)
     view: View | None = None
@@ -176,6 +183,29 @@ def read_sections(tasks: Path) -> list[Section]:
                             else Section(last.id, last.title, last.open_tasks + 1,
                                          last.done_tasks))
     return sections
+
+
+def task_problems(text: str) -> list[str]:
+    """Each numbered task of a task list that sits under another section's heading.
+
+    Sections are read from `## N. Title` headings alone, so a heading lost in an
+    edit silently hands its tasks to the section before it, and anything routing
+    on the sections then repeats or skips work. A task numbered `N.m` under a
+    heading other than `## N.` is that loss made visible. Only tasks under a
+    recognised heading are checked, so a list in another format is unaffected.
+    """
+    problems: list[str] = []
+    heading: tuple[str, str] | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if match := _SECTION.match(line):
+            heading = (match["id"].lower(), line.strip())
+        elif line.startswith("## "):
+            # An unnumbered heading, such as a deferred-work list: not a section.
+            heading = None
+        elif heading and (task := _TASK.match(line)) and task["section"] \
+                and task["section"].lower() != heading[0]:
+            problems.append(f"line {number}: task {task['number']} sits under `{heading[1]}`")
+    return problems
 
 
 def _git_head(root: Path) -> str | None:
@@ -283,7 +313,9 @@ class Computation:
                          None)
         state.notes = state.row.notes if state.row else ""
         state.records = read_records(state.directory / "reviews")
-        state.sections = read_sections(state.directory / TASKS_FILE)
+        tasks = state.directory / TASKS_FILE
+        state.tasks = tasks.read_text("utf-8") if tasks.is_file() else ""
+        state.sections = read_sections(tasks)
         state.log = read_log(log_path(self.root, state.change))
         state.head = self._head(self.root)
         if state.row is None:
@@ -378,6 +410,11 @@ class Computation:
         work = [s for s in state.sections if not s.closeout]
         if not state.sections:
             return self.unclassified("the task list has no sections")
+        if problems := task_problems(state.tasks):
+            # The skills check the task list before acting on it; this is the
+            # backstop for the one phase routed on its sections, since a list
+            # missing a heading would have whole sections repeated or skipped.
+            return self.unclassified("the task list is malformed: " + "; ".join(problems))
         current = rounds[-1] if rounds else None
         round_sections = ([str(s) for session in current["sections"] for s in session]
                           if current else [])
@@ -470,7 +507,7 @@ class Computation:
         return next((e for e in reversed(self.state.log) if e.get("step") in steps), None)
 
     def pending(self, phase: str) -> Result | None:
-        """A step of `phase` whose latest run waits on the owner, if one does.
+        """A step whose latest run waits on the owner, if one does.
 
         A question is answered by resuming its session; a returned, blocked, or
         stopped run is decided by the owner or the orchestrating session; none is
@@ -482,14 +519,27 @@ class Computation:
         run says nothing about another's, and a line that resolves a run counts
         as having read it. A design that ended blocked on a prerequisite is the
         prerequisite rules', not this one's, once its denials, if any, are read.
+
+        A question, return, block, or stop without unread denials waits only in
+        the phase it was raised in: a crashed design triage must not hold
+        implementation. Unread denials wait whatever the phase, since the step
+        that recorded them may be the one that moved the change on — a triage
+        passing a design gate sets the status to the next phase in the same run
+        — and the reading is owed before any step runs; a stopped run's reading
+        is the line that resolves it, in any phase. The result names the waiting
+        run's `seq`, which a resume must give.
         """
         log = self.state.log
         decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]
         resolved = {e.get("resolves") for e in decisions}
         read = {e.get("reads") for e in decisions} | resolved
         latest: dict[str, dict[str, Any]] = {}
+        latest_any: dict[str, dict[str, Any]] = {}
         for index, entry in enumerate(log):
             name = entry.get("step")
+            if name == ORCHESTRATOR:
+                continue
+            latest_any[name] = entry
             if name not in _PHASE_STEPS[phase]:
                 continue
             if name == "review" and _REVIEW_PHASE.get(entry.get("kind", "")) != phase:
@@ -497,11 +547,20 @@ class Computation:
             if name == "triage" and _triage_phase(log[:index]) not in (phase, None):
                 continue
             latest[name] = entry
-        waiting = [(entry["seq"], result) for entry in latest.values()
-                   if entry["seq"] not in resolved
-                   and (result := _waiting(entry, read=entry["seq"] in read))
-                   and not (entry.get("step") == "design" and "blocked_on" in result)]
-        return max(waiting)[1] if waiting else None
+        waiting = [(entry["seq"], result) for entry in latest_any.values()
+                   if entry.get("denials")
+                   and entry["seq"] not in (resolved if entry.get("outcome") == "stopped"
+                                            else read)
+                   and (result := _waiting(entry, read=False))]
+        unread = {seq for seq, _ in waiting}
+        waiting += [(entry["seq"], result) for entry in latest.values()
+                    if entry["seq"] not in resolved and entry["seq"] not in unread
+                    and (result := _waiting(entry, read=entry["seq"] in read))
+                    and not (entry.get("step") == "design" and "blocked_on" in result)]
+        if not waiting:
+            return None
+        seq, result = max(waiting)
+        return {**result, "seq": seq}
 
     def directed(self) -> Result | None:
         """The step the latest decision directs, until that step has run.
@@ -594,13 +653,27 @@ def compute(root: Path, change: str, **seams: Any) -> Result:
         return {"step": "unclassified", "reason": f"{type(exc).__name__}: {exc}"}
 
 
+def plain(result: Result) -> str:
+    """The result as lines of `field: value`, for reading rather than parsing:
+    the step and its reason first, then what else it carries — a waiting run's
+    `seq` and what it asks, a review's kind, a round's sections."""
+    first = [key for key in ("step", "reason") if key in result]
+    keys = first + sorted(key for key in result if key not in first)
+    shown = {key: value if isinstance(value, str)
+             else json.dumps(value, ensure_ascii=False, default=str)
+             for key, value in result.items()}
+    return "\n".join(f"{key}: {shown[key]}" for key in keys)
+
+
 def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
+    as_text = "--plain" in args
+    args = [arg for arg in args if arg != "--plain"]
     if len(args) != 1:
-        print("usage: change_next_step.py <change>", file=sys.stderr)
+        print("usage: change_next_step.py <change> [--plain]", file=sys.stderr)
         return 2
     result = compute(root, args[0])
-    print(json.dumps(result, ensure_ascii=False, default=str))
+    print(plain(result) if as_text else json.dumps(result, ensure_ascii=False, default=str))
     return 1 if result["step"] == "unclassified" else 0
 
 

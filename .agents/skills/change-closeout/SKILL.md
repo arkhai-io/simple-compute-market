@@ -74,9 +74,10 @@ the session, and every turn ends with an outcome matching
   review; if not, skip to step 4's steps after the archive (3 onwards), then commit.
   Never archive twice. Read every file of the change from the directory the lookup
   prints, not from `openspec/changes/<change>/`.
-- **Tasks.** Every task outside the closeout section is checked, or carries a note
-  recording its deferral with the owner's word. An unchecked task with neither is
-  unfinished implementation: stop and say which.
+- **Tasks.** `make check-tasks CHANGE=<change>` passes, so the sections are what
+  the headings say. Every task outside the closeout section is checked, or carries
+  a note recording its deferral with the owner's word. An unchecked task with
+  neither is unfinished implementation: stop and say which.
 - **Worktree.** It is clean, and `make round-view-closed` passes.
 
 If any check fails, stop and say why. Otherwise set the row's status to

@@ -711,10 +711,11 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
                         (_event_lines(VALID["finished"], session="v-1"), 0),
                         (_event_lines(VALID["finished"], session="v-2"), 0))
     wrapper = _wrapper(tmp_path, claude)
-    wrapper.run("validate", CHANGE)
+    asked = wrapper.run("validate", CHANGE)
     step.note_orchestrator(step.log_path(tmp_path, CHANGE), "asked the owner", "question")
 
-    resumed = wrapper.resume(CHANGE, "Delete the volume.", ["Bash(kubectl delete pvc *)"])
+    resumed = wrapper.resume(CHANGE, asked["seq"], "Delete the volume.",
+                             ["Bash(kubectl delete pvc *)"])
     rerun = wrapper.run("validate", CHANGE)
 
     command = claude.commands[1]
@@ -731,22 +732,93 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
 def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
     claude = FakeClaude((_event_lines(VALID["question"]), 0), (_event_lines(VALID["finished"]), 0))
     wrapper = _wrapper(tmp_path, claude)
-    wrapper.run("implement", CHANGE, arguments="section 2", sections=[2])
+    asked = wrapper.run("implement", CHANGE, arguments="section 2", sections=[2])
 
-    line = wrapper.resume(CHANGE, "Yes.")
+    line = wrapper.resume(CHANGE, asked["seq"], "Yes.")
 
     assert line["sections"] == [2]
     assert "granted" not in line
 
 
+def test_a_resume_names_the_waiting_run_not_the_last(tmp_path: Path) -> None:
+    # Validation and triage run side by side: the triage asks, then the
+    # validation finishes above it, and the answer is the triage's.
+    claude = FakeClaude((_event_lines(VALID["question"], session="t-1"), 0),
+                        (_event_lines(VALID["finished"], session="v-1"), 0),
+                        (_event_lines(VALID["finished"], session="t-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    asked = wrapper.run("triage", CHANGE)
+    finished = wrapper.run("validate", CHANGE)
+
+    line = wrapper.resume(CHANGE, asked["seq"], "Agreed.")
+
+    assert _option(claude.commands[2], "--resume") == "t-1"
+    assert (line["step"], line["session"]) == ("triage", "t-1")
+    with pytest.raises(step.StepError, match="ended finished"):
+        wrapper.resume(CHANGE, finished["seq"], "Agreed.")
+
+
+def test_a_stopped_run_is_resumed_with_a_grant_and_not_again(tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["stopped"], session="v-1"), 0),
+                        (_event_lines(VALID["finished"], session="v-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    stopped = wrapper.run("validate", CHANGE)
+
+    line = wrapper.resume(CHANGE, stopped["seq"], "Go on.", ["Bash(make lock)"])
+    step.note_orchestrator(step.log_path(tmp_path, CHANGE), "rerun it", "r",
+                           resolves=stopped["seq"])
+
+    assert (line["step"], line["granted"]) == ("validate", ["Bash(make lock)"])
+    assert line["seq"] != stopped["seq"]
+    with pytest.raises(step.StepError, match="latest run"):
+        wrapper.resume(CHANGE, stopped["seq"], "Go on.")
+
+
+def test_a_run_that_is_not_waiting_is_refused(tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["stopped"], session="d-1"), 0),
+                        (_event_lines(VALID["question"], session="v-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    log = step.log_path(tmp_path, CHANGE)
+    stopped = wrapper.run("design", CHANGE)
+    resolved = step.note_orchestrator(log, "rerun it", "r", resolves=stopped["seq"])
+    asked = wrapper.run("validate", CHANGE)
+    step.note_orchestrator(log, "abandoned", "r", resolves=asked["seq"])
+    review = step.record_outcome(log, "review", VALID["finished"], session="codex:x",
+                                 commit=COMMIT, extra={"kind": "design"})
+
+    with pytest.raises(step.StepError, match="ended stopped and a decision line resolves it"):
+        wrapper.resume(CHANGE, stopped["seq"], "Go on.")
+    with pytest.raises(step.StepError, match="ended question and a decision line resolves"):
+        wrapper.resume(CHANGE, asked["seq"], "Go on.")
+    with pytest.raises(step.StepError, match="orchestrator line, not the run of a step"):
+        wrapper.resume(CHANGE, resolved["seq"], "Go on.")
+    with pytest.raises(step.StepError, match="review line, not the run of a step"):
+        wrapper.resume(CHANGE, review["seq"], "Go on.")
+    with pytest.raises(step.StepError, match="no seq 9"):
+        wrapper.resume(CHANGE, 9, "Go on.")
+
+
 def test_nothing_to_resume_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(step.StepError, match="no step session"):
-        _wrapper(tmp_path, FakeClaude()).resume(CHANGE, "Yes.")
+    with pytest.raises(step.StepError, match="no seq 1"):
+        _wrapper(tmp_path, FakeClaude()).resume(CHANGE, 1, "Yes.")
 
 
 def test_a_resume_needs_an_answer(tmp_path: Path) -> None:
     with pytest.raises(step.StepError, match="answer"):
-        _wrapper(tmp_path, FakeClaude()).resume(CHANGE, "")
+        _wrapper(tmp_path, FakeClaude()).resume(CHANGE, 1, "")
+
+
+def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["question"], session="d-1"), 0),
+                        (_event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    wrapper.run("design", CHANGE)
+
+    assert step.main(["resume", CHANGE, "--seq", "1", "--answer", "Yes."], root=tmp_path,
+                     wrapper=wrapper) == 0
+
+    assert _option(claude.commands[1], "--resume") == "d-1"
+    assert claude.commands[1][2] == "The owner's answer: Yes."
 
 
 def test_the_stream_is_kept_as_a_numbered_transcript_with_progress(tmp_path: Path) -> None:
@@ -772,7 +844,7 @@ def test_each_run_claims_its_own_transcript(tmp_path: Path) -> None:
     wrapper = _wrapper(tmp_path, claude)
 
     first = wrapper.run("design", CHANGE)
-    second = wrapper.resume(CHANGE, "Option A.")
+    second = wrapper.resume(CHANGE, first["seq"], "Option A.")
 
     assert (first["transcript"], second["transcript"]) == (
         "transcripts/01-design.jsonl", "transcripts/02-design.jsonl")
@@ -840,11 +912,13 @@ def test_a_last_run_without_a_session_is_not_resumed_past(tmp_path: Path) -> Non
     claude = FakeClaude((_event_lines(VALID["question"], session="v-1"), 0),
                         (["Error: refused\n"], 1))
     wrapper = _wrapper(tmp_path, claude)
-    wrapper.run("validate", CHANGE)
-    wrapper.run("validate", CHANGE)
+    asked = wrapper.run("validate", CHANGE)
+    crashed = wrapper.run("validate", CHANGE)
 
     with pytest.raises(step.StepError, match="recorded no session"):
-        wrapper.resume(CHANGE, "Yes.")
+        wrapper.resume(CHANGE, crashed["seq"], "Yes.")
+    with pytest.raises(step.StepError, match="not validate's latest run"):
+        wrapper.resume(CHANGE, asked["seq"], "Yes.")
 
 
 def test_planning_resumes_its_own_latest_session_and_may_start_fresh(tmp_path: Path) -> None:

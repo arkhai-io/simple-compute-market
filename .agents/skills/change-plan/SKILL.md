@@ -190,7 +190,9 @@ Before presenting it:
   statement that none covers it, and a size its verification point can prove;
 - `openspec validate <change> --strict` passes, and
   `make check-doc-citations CHANGE=<change>` reports only files the change will
-  create.
+  create;
+- `make check-tasks CHANGE=<change>` passes: every numbered task sits under its
+  own section's heading, which is how every later step reads the plan.
 
 ## 6. Present the plan
 
