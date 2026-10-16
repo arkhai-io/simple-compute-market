@@ -2371,6 +2371,88 @@ Section 10 handoff:
   site's peer (and `[provisioning.identity]` only for the provisioning client), the
   renamed key, and the two homes of retired keys (10.3).
 
+### Round 05/06 triage fixes (owner dispositions 2026-10-16; not yet made)
+
+Review 06 (external, Sections 8–10) and check 05 (Section 10's fresh-context check), both of
+`5eff4a6`, were triaged together; every finding is disposed of, in
+`reviews/06-implementation-external.triage.md`. The fixes below are owed before Section 11, as one
+commit naming the round, followed by a fresh-context check of it and the gate question. Still to
+ask the owner: whether validation of `5eff4a6` (no end-to-end run yet) is run or waived for this
+round.
+
+- [ ] 10.7 (06 F1 / 05 F2) **Default release starts locally.** Chart defaults stay free of
+      Alkahest. `helm/local-values.yaml` enables Alkahest against the Anvil instance the chart
+      deploys, with the known development wallets (public, commented as test-only, never for a
+      public network), and contact exchange with a development contact. A render test loads the
+      `deploy-local` render's `storefront.json` through `STOREFRONT_PYTHON` and runs the real startup
+      refusal (`publication_startup_problems`), asserting no problem. Document in
+      `DEPLOYMENT_AND_CONFIG.md` at closeout (17.9).
+- [ ] 10.8 (05 F1) **Per-site fulfillment trust.** `build_fulfillment_client` gives each per-site
+      `ComputeProvisioningClient` its site's peer provider from `ServicePeerTrust`, as the capacity
+      clients have; `[provisioning.identity]` stays only on the provisioning-service client
+      (`fulfillment_service.py` `_provisioning_client`). Correct 10.2's text, which widened the
+      exception beyond D14b. Tests: a rotation moves fulfillment response verification; one site's
+      principal is refused on another site's fulfillment responses.
+- [ ] 10.9 (06 F2) **Capacity events refresh buckets inline.** Capacity-event reconciliation calls
+      `refresh_site(site_id, families=[CAPACITY_BUCKET])` before deriving candidates and never wakes
+      publication (refresh-and-reconcile); a failed fetch keeps the generation stale and reconciles
+      over what is held. Add the row to `design.md` D4 and a scenario to the storefront-publication
+      delta. Regression test (application integration): change availability and emit a reserving
+      event without stepping `site-projections` — the backed fungible listing closes; release —
+      it reopens. Keep the existing explicit-refresh test.
+- [ ] 10.10 (05 F3) **Registry discovery switch removed.** `enable_registry_discovery` is no
+      longer read; registry publication is always on, so the startup refusal checks the registry
+      and its authority pin unconditionally. A configuration stating the key refuses startup naming
+      it as removed (refusing, not ignoring, so an operator who turned publication off is not
+      silently switched on); add it to `RETIRED_KEYS` and regenerate both schemas. Reword D6's
+      parenthetical; update tests that set the switch.
+- [ ] 10.11 (06 F4) **Per-site capacity-event outcomes.** `run_capacity_event_pollers` (kit) records
+      each per-site timer cycle's outcome through a callback the controller provides, under a
+      per-site loop name in the snapshot, keeping the per-site cursor lock; the aggregate step keeps
+      its aggregate outcome. VM composes it; a status test shows a failing site feed. Bump the kit
+      and move pins. Section 15's API-credit pollers reuse it.
+- [ ] 10.12 (06 F3) **Poll interval validated.** `site_projection_poll_interval()` applies the
+      positive, finite rule (zero refused, not defaulted); startup validates the interval and the
+      derived window before anything runs. Tests: zero, negative, non-numeric, `nan`, `inf`, window
+      unset.
+- [ ] 10.13 (05 F4) **Trust reload never masks a commit.** In `ServicePeerTrust`, a reload failure
+      after a committed change is logged, never raised; the commit's result or refusal is returned;
+      the trust is marked stale and the next verification or callback check retries the reload.
+      `register_subject` is routed through the trust. Library integration test forcing a reload
+      failure after a commit.
+- [ ] 10.14 (05 F5) **Site-trust test at its stated level.** Run the real app with its lifespan (the
+      trust startup seeds), observe response verification through a storefront operation that
+      calls the site, send `capacity_released` signed by the old principal after the overlap
+      (refused) and the new one (accepted), reset state only through public seams; fix the
+      docstring. If the lifespan cannot run without a reachable provisioning service, keep the
+      router-level test and label it honestly.
+- [ ] 10.15 (05 F6) **No module patches in the composition test.** Inject the peer configuration
+      and trust into the composition root (production defaults) instead of patching
+      `server.get_service_peer_configs`, `server.ServicePeerTrust`,
+      `server.require_publishable_storefront`; assert "no database" through the file's absence, not
+      `sqlite_module._sqlite_client`; move `_replaced_setting` to a public test utility.
+- [ ] 10.16 (05 F7) **Empty settlements start.** If cheap, a lifespan case with empty
+      `[pricing].settlements` passing the refusal and reaching the database open; otherwise record
+      the disclosed split as accepted.
+- [ ] 10.17 (05 F8) **Decisions recorded.** In `design.md`: the two homes for retired keys (beside
+      C4), `[provisioning.identity]` only for the provisioning client (D14b), and this round's
+      decisions (local-values settlement, capacity-event inline refresh in D4, the removed
+      discovery switch in D6, per-site poller outcomes in D6). Name each destination in 17.9:
+      `DEPLOYMENT_AND_CONFIG.md` "Storefront agents: pass-through configuration" (retired keys,
+      removed switch, local-values settlement), storefront-publication architecture "Trusted site
+      routing", the storefront-publication and market-composition deltas.
+- [ ] 10.18 (05 F9, F10, F11) **Smaller fixes.** `market-storefront config set` refuses every key in
+      `RETIRED_KEYS`, naming its replacement, and the duplicate `_RETIRED_INVENTORY_KEYS` goes (unit
+      test: `config set claims_sweep_interval` refused naming `settlement_servicing_interval_seconds`);
+      the startup refusal reports retired-key problems under their own heading, separate from
+      publication problems, docstring and test text updated; remove the unused
+      `container.service_peer_trust()`; add a 17.10 note to confirm `startup_refusal.py`'s docstring
+      citation resolves after the archive.
+- [ ] 10.19 Validation for the round: VM storefront frozen, kit capacity-publication, core storefront,
+      `make -C helm test-render` with `STOREFRONT_PYTHON`, `make helm-values-schema` committed,
+      `make -k test` plus the frozen projects, packaging, hygiene, citations, `openspec validate
+      --strict`; then a fresh-context check and the gate question for reviews 05/06.
+
 ## 11. Bare-metal configuration through files
 
 Delivers bare metal on `storefront.toml`, `storefront.json`, and `storefront.secrets.toml`
