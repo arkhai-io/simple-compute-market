@@ -16,33 +16,18 @@ from market_storefront.services.publication_terms import (
 )
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
-    FULFILLMENT_RESUME,
-    INTRODUCTION_RETENTION,
-    NEGOTIATION_WATCHDOG,
-    SETTLEMENT_SERVICING,
-    PUBLICATION,
-    SITE_PROJECTION_POLLER,
-    idle,
-    loop_gate,
-    registered_loop_names,
     start_loops,
     start_registered_loop,
 )
+from market_storefront.lifecycle_steps import register_vm_loops
 from typing import Any
 
 from core_storefront.app_startup import (
     StorefrontBackgroundTask,
     StorefrontStartupStep,
     run_storefront_startup_steps,
-    start_storefront_background_task,
 )
-from core_storefront.stage_log import stage_event
-from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
-from market_storefront_kit import (
-    NegotiationWatchdogPolicy,
-    run_negotiation_watchdog,
-)
 
 import market_storefront.container as _container
 from market_storefront.utils.config import (
@@ -179,39 +164,6 @@ def _initialize_negotiation_thread_store() -> None:
     )
 
 
-def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    return NegotiationWatchdogPolicy(
-        timeout_seconds=float(settings.negotiation_timeout_seconds),
-        interval_seconds=float(settings.negotiation_watchdog_interval),
-    )
-
-
-def _start_negotiation_watchdog(sqlite_client: Any) -> None:
-    policy = _negotiation_watchdog_policy()
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=NEGOTIATION_WATCHDOG,
-            task_factory=partial(
-                run_negotiation_watchdog,
-                sqlite_client,
-                policy,
-                emit_stage_event=stage_event,
-                logger=logger,
-                paused=loop_gate(NEGOTIATION_WATCHDOG),
-                wait=idle,
-            ),
-            log_message=(
-                "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
-            ),
-            log_args=(
-                policy.interval_seconds,
-                policy.timeout_seconds,
-            ),
-        ),
-        task_logger=logger,
-    )
-
-
 async def _preflight_settlement_mechanisms() -> None:
     import market_storefront.container as _container
     from market_storefront.settlement_composition import (
@@ -243,66 +195,6 @@ async def _backfill_escrow_identity(sqlite_client: Any) -> None:
         )
 
 
-def _start_settlement_servicing() -> None:
-    import market_storefront.container as _container
-
-    composition = _container.resolved_settlement_composition
-    if composition is None:
-        raise RuntimeError("settlement composition was not initialized")
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=SETTLEMENT_SERVICING,
-            task_factory=partial(
-                composition.worker.run,
-                paused=loop_gate(SETTLEMENT_SERVICING),
-                wait=idle,
-            ),
-            log_message="[STARTUP] Settlement servicing started (interval=%ss)",
-            log_args=(getattr(settings, "claims_sweep_interval", 30),),
-        ),
-        task_logger=logger,
-    )
-
-
-def _start_introduction_retention() -> None:
-    """Every storefront composing contact exchange runs the retention sweep."""
-    import market_storefront.container as _container
-
-    composition = _container.resolved_contact_exchange
-    retention = composition.retention() if composition is not None else None
-    if retention is None:
-        return
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=INTRODUCTION_RETENTION,
-            task_factory=partial(
-                run_introduction_retention_sweep,
-                retention,
-                paused=loop_gate(INTRODUCTION_RETENTION),
-                wait=idle,
-            ),
-            log_message="[STARTUP] Introduction retention sweep started",
-        ),
-        task_logger=logger,
-    )
-
-
-def _start_fulfillment_resume(sqlite_client: Any) -> None:
-    from market_storefront.services.fulfillment_resume_runtime import (
-        fulfillment_resume_loop,
-    )
-
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=FULFILLMENT_RESUME,
-            task_factory=partial(fulfillment_resume_loop, sqlite_client),
-            log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
-            log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
-        ),
-        task_logger=logger,
-    )
-
-
 def _start_capacity_events_poller(sqlite_client: Any) -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
@@ -316,38 +208,29 @@ def _start_capacity_events_poller(sqlite_client: Any) -> None:
     )
 
 
-def _start_publication_loop(sqlite_client: Any) -> None:
-    # Publication follows what sites declare without an operator command; the
-    # loop is held by the lifecycle pause like every other loop.
-    del sqlite_client
-    from market_storefront.services.publication_loop import publication_loop
-
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=PUBLICATION,
-            task_factory=publication_loop,
-        ),
-        task_logger=logger,
-    )
-
-
 async def _load_site_projections() -> None:
     """The first load: one cycle of the poller, before its timer starts."""
     await _container.site_projections().poll_once()
 
 
-def _start_site_projection_poller() -> None:
-    """Start the poller's timer, the one loop registered with its interval.
+def _start_lifecycle_loops() -> None:
+    """Register every loop's timer under the running configuration and start them.
 
-    Refuses, naming the poller, when nothing registered it: a storefront whose
-    poller never runs holds no projection beyond its first load.
+    After the first projection load, so neither the poller nor publication
+    runs its first cycle over projections nothing has loaded, and after
+    settlement preflight and the escrow backfill the servicing sweep depends
+    on. Introduction retention runs only while contact exchange is composed.
     """
-    start_loops()
-    if SITE_PROJECTION_POLLER not in registered_loop_names():
-        raise RuntimeError(
-            f"the {SITE_PROJECTION_POLLER} loop is not registered, so nothing "
-            "polls the site projections"
+    composition = _container.resolved_contact_exchange
+    retention = composition.retention() if composition is not None else None
+    register_vm_loops(
+        retention_interval_seconds=(
+            float(retention.policy.sweep_interval_seconds)
+            if retention is not None
+            else None
         )
+    )
+    start_loops()
 
 
 def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
@@ -413,10 +296,6 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 partial(carry_over_seller_state, sqlite_client),
             ),
             StorefrontStartupStep(
-                "negotiation_watchdog",
-                partial(_start_negotiation_watchdog, sqlite_client),
-            ),
-            StorefrontStartupStep(
                 "settlement_mechanism_preflight",
                 _preflight_settlement_mechanisms,
             ),
@@ -425,14 +304,6 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 partial(_backfill_escrow_identity, sqlite_client),
                 error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
-            StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
-            StorefrontStartupStep(
-                "introduction_retention", _start_introduction_retention
-            ),
-            StorefrontStartupStep(
-                "fulfillment_resume",
-                partial(_start_fulfillment_resume, sqlite_client),
-            ),
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",
@@ -440,17 +311,10 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 error_message="[STARTUP] Site projection load failed: %s",
             ),
             StorefrontStartupStep(
-                "site_projection_poller",
-                _start_site_projection_poller,
-            ),
-            StorefrontStartupStep(
                 "capacity_events_poller",
                 partial(_start_capacity_events_poller, sqlite_client),
             ),
-            StorefrontStartupStep(
-                "publication_loop",
-                partial(_start_publication_loop, sqlite_client),
-            ),
+            StorefrontStartupStep("lifecycle_loops", _start_lifecycle_loops),
         ),
         logger=logger,
     )

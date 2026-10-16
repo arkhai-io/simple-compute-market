@@ -207,6 +207,40 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
     return str(active.get("wallet.private_key", "") or "").strip()
 
 
+#: The site-projection poller's interval when `[capacity].poll_interval` is unset.
+_DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+
+#: How many poll intervals a confirmed generation confirms a listing-source
+#: check for, when `[capacity].source_confirmation_seconds` is not stated.
+_CONFIRMATION_POLL_INTERVALS = 3
+
+
+def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
+    """`[capacity].poll_interval`: seconds between the projection poller's cycles."""
+
+    active = settings if source is None else source
+    return float(active.get("capacity.poll_interval") or _DEFAULT_POLL_INTERVAL_SECONDS)
+
+
+def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
+    """How old a site's last confirmed poll may be for a listing-source check
+    to rely on it: `[capacity].source_confirmation_seconds`, else three poll
+    intervals.
+
+    A cache turns stale only when a poll fails, so while no poll runs -- the
+    loops held with trading live, or a poller that has stopped -- a generation
+    would stay loaded indefinitely; this window is what bounds how far a
+    source check can lag its site. An operator holding the loops restores it by
+    stepping `site-projections`.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("capacity.source_confirmation_seconds")
+    if stated is not None:
+        return float(stated)
+    return _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+
+
 class AdministratorDeclaration(BaseModel):
     """One ``[Identity.administrators.<subject>]`` entry."""
 

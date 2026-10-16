@@ -1,16 +1,19 @@
 """One cycle of each VM storefront loop, registered as that loop's step.
 
-Each step calls the operation the loop's timer already invokes and returns what
-that operation returns, so an operator advancing a held loop exercises
-production behaviour rather than a test path. None drives an iteration of the
-loop itself, and none implements a transition the loop does not.
+Each step is the operation the loop's timer runs, and returns what that
+operation returns, so an operator advancing a held loop exercises production
+behaviour rather than a test path. None drives an iteration of the loop itself,
+and none implements a transition the loop does not.
 
 Steps resolve their collaborators from the container when they run, not when
 they are registered, so they answer the same way whether or not startup has
-started the loops.
-Registration happens when this module is imported, which the admin routes do.
-The site-projection poller registers its interval with its step, so the
-controller's timer runs that step; startup starts the timer.
+started the loops. The steps are registered when this module is imported, which
+the server does, so every lifecycle route can run one. Startup registers each
+loop's timer over its step with `register_vm_loops` and then starts the timers:
+the controller's timer gates, runs the step through the one cycle boundary an
+operator's step takes, and waits. The capacity-event pollers are the one
+exception: their per-site fan-out lives in the capacity-publication kit, which
+serializes each site's cycle with that site's step itself.
 """
 
 from __future__ import annotations
@@ -22,7 +25,11 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import SiteProjectionState
 from market_contact_exchange import INTRODUCTION_RETENTION_ROUTE
-from market_storefront_kit import LifecycleRouteError, sweep_stale_negotiations
+from market_storefront_kit import (
+    LifecycleRouteError,
+    NegotiationWatchdogPolicy,
+    sweep_stale_negotiations,
+)
 
 import market_storefront.container as _container
 from market_storefront.lifecycle import (
@@ -37,12 +44,15 @@ from market_storefront.lifecycle import (
     register_step,
 )
 from market_storefront.services.fulfillment_resume_runtime import (
-    resume_incomplete_fulfillments_once,
+    fulfillment_resume_cycle_once,
 )
-from market_storefront.services.publication_loop import run_publication_cycle_once
+from market_storefront.services.publication_loop import (
+    new_publication_wake,
+    publication_interval_seconds,
+    run_publication_cycle_once,
+)
 from market_storefront.services.capacity_client import site_projection_status
-from market_storefront.startup import _negotiation_watchdog_policy
-from market_storefront.utils.config import settings
+from market_storefront.utils.config import settings, site_projection_poll_interval
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +75,27 @@ def _capacity_runtime() -> Any:
     return _container.resolved_capacity_runtime
 
 
+def negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
+    """The watchdog's configured timeout and interval."""
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=float(settings.negotiation_timeout_seconds),
+        interval_seconds=float(settings.negotiation_watchdog_interval),
+    )
+
+
 async def negotiation_watchdog_step() -> Mapping[str, Any]:
     """One stale-negotiation sweep, under the watchdog's configured policy."""
+    policy = negotiation_watchdog_policy()
     abandoned = await sweep_stale_negotiations(
         _sqlite_client(),
-        _negotiation_watchdog_policy(),
+        policy,
         emit_stage_event=stage_event,
         logger=logger,
     )
+    if abandoned:
+        logger.info(
+            "[WATCHDOG] marked %d stale thread(s) as %s", abandoned, policy.terminal_state
+        )
     return {"loop": NEGOTIATION_WATCHDOG, "abandoned": int(abandoned)}
 
 
@@ -85,7 +108,8 @@ async def settlement_servicing_step() -> Mapping[str, Any]:
 
 
 async def fulfillment_resume_step() -> Mapping[str, Any]:
-    await resume_incomplete_fulfillments_once(sqlite_client=_sqlite_client())
+    """Re-drive unfinished accepted deliveries, then accepted payment deals."""
+    await fulfillment_resume_cycle_once(sqlite_client=_sqlite_client())
     return {"loop": FULFILLMENT_RESUME}
 
 
@@ -99,11 +123,6 @@ async def site_projections_step() -> Mapping[str, Any]:
     state = _site_projections()
     await state.poll_once()
     return {"loop": SITE_PROJECTION_POLLER, "sites": site_projection_status(state)}
-
-
-def _site_projection_poll_interval() -> float:
-    capacity = getattr(settings, "capacity", None)
-    return float(getattr(capacity, "poll_interval", 5) or 5)
 
 
 async def capacity_events_step() -> Mapping[str, Any]:
@@ -179,15 +198,21 @@ async def introduction_retention_preview() -> Mapping[str, Any]:
     return await retention.preview()
 
 
+def _settlement_servicing_interval() -> float:
+    return float(getattr(settings, "claims_sweep_interval", 30))
+
+
+def _fulfillment_resume_interval() -> float:
+    return float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
+
+
 def register_vm_lifecycle_steps() -> None:
+    """Register every loop's step, so each lifecycle route can run one."""
     register_step(NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step)
     register_step(SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step)
     register_step(FULFILLMENT_RESUME, route="fulfillment-resume", step=fulfillment_resume_step)
-    register_loop(
-        SITE_PROJECTION_POLLER,
-        route="site-projections",
-        step=site_projections_step,
-        interval_seconds=_site_projection_poll_interval(),
+    register_step(
+        SITE_PROJECTION_POLLER, route="site-projections", step=site_projections_step
     )
     register_step(
         CAPACITY_EVENTS_POLLER,
@@ -202,6 +227,64 @@ def register_vm_lifecycle_steps() -> None:
         step=introduction_retention_step,
         preview=introduction_retention_preview,
     )
+
+
+def register_vm_loops(*, retention_interval_seconds: float | None = None) -> None:
+    """Register each loop's timer over its step, with its configured interval.
+
+    Intervals are read when this runs, so startup registers what the running
+    configuration states. Publication and the site-projection poller run their
+    first cycle as soon as their timers start; the watchdog, servicing, and
+    retention first run one interval later, as their sweeps always have. The
+    retention sweep is registered only when ``retention_interval_seconds`` is
+    given, which startup does while contact exchange is composed. Publication
+    gets a fresh wake each time, bound to the event loop its timer runs on.
+    """
+    watchdog = negotiation_watchdog_policy().interval_seconds
+    register_loop(
+        NEGOTIATION_WATCHDOG,
+        route="negotiation-watchdog",
+        step=negotiation_watchdog_step,
+        interval_seconds=watchdog,
+        initial_delay_seconds=watchdog,
+    )
+    servicing = _settlement_servicing_interval()
+    register_loop(
+        SETTLEMENT_SERVICING,
+        route="settlement-servicing",
+        step=settlement_servicing_step,
+        interval_seconds=servicing,
+        initial_delay_seconds=servicing,
+    )
+    register_loop(
+        FULFILLMENT_RESUME,
+        route="fulfillment-resume",
+        step=fulfillment_resume_step,
+        interval_seconds=_fulfillment_resume_interval(),
+    )
+    register_loop(
+        SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=site_projections_step,
+        interval_seconds=site_projection_poll_interval(),
+    )
+    register_loop(
+        PUBLICATION,
+        route="publication",
+        step=publication_step,
+        preview=publication_preview,
+        interval_seconds=publication_interval_seconds(),
+        wake=new_publication_wake(),
+    )
+    if retention_interval_seconds is not None:
+        register_loop(
+            INTRODUCTION_RETENTION,
+            route=INTRODUCTION_RETENTION_ROUTE,
+            step=introduction_retention_step,
+            preview=introduction_retention_preview,
+            interval_seconds=retention_interval_seconds,
+            initial_delay_seconds=retention_interval_seconds,
+        )
 
 
 register_vm_lifecycle_steps()

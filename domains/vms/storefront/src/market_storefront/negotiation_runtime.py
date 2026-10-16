@@ -8,6 +8,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
@@ -793,12 +794,16 @@ def build_vm_negotiation_runtime(
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
     listing_source_check: ListingSourceCheckHook | None = None,
+    source_confirmation_clock: Callable[[], datetime] | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
     ``listing_source_check`` replaces the check of each listing against its own
     source; by default it reads ``site_projections``, the projections this
-    storefront holds, which the capacity hold's pool tags also come from.
+    storefront holds, which the capacity hold's pool tags also come from, and
+    confirms a listing only from projections polled within the configured
+    source-confirmation window, measured at ``source_confirmation_clock``
+    (the current UTC time unless given).
     """
 
     dispatch = (
@@ -1004,6 +1009,7 @@ def build_vm_negotiation_runtime(
             binding=resolved.binding,
             capacity_runtime=capacity_runtime,
             site_projections=site_projections,
+            clock=source_confirmation_clock,
         )
 
     async def place_hold(

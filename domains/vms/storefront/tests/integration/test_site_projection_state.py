@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from market_storefront import lifecycle
+from market_storefront import lifecycle, lifecycle_steps
 from tests.publication_app import ADMIN_SIGNER, SITE, SITE_B, pool, publication_app
 
 pytestmark = pytest.mark.asyncio
@@ -48,10 +48,16 @@ async def _open_listing_sites(world) -> dict[str, str]:
     return {listing.listing_id: listing.listing_resource["pool_id"] for listing in page.listings}
 
 
-async def _hold_the_loops(world) -> dict[str, str]:
-    """Hold the loops before the poller's timer starts, so it runs no cycle."""
-    await world.client.admin_pause_lifecycle_loops()
+def _start_the_loops() -> None:
+    """Register every loop's timer, as startup does, and start them."""
+    lifecycle_steps.register_vm_loops()
     lifecycle.start_loops()
+
+
+async def _hold_the_loops(world) -> dict[str, str]:
+    """Hold the loops before their timers start, so none runs a cycle."""
+    await world.client.admin_pause_lifecycle_loops()
+    _start_the_loops()
     return (await world.client.admin_pause_lifecycle_loops())["loops"]
 
 
@@ -145,7 +151,7 @@ async def test_the_admin_refresh_waits_for_a_running_timer_cycle_and_polls_after
     the change the caller made before asking, not the generation the timer's
     check saw."""
     world.projection.hold = asyncio.Event()
-    lifecycle.start_loops()
+    _start_the_loops()
     # The timer's first cycle checks site-a's version and parks there.
     await asyncio.wait_for(world.projection.holding.wait(), timeout=1)
 

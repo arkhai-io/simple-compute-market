@@ -8,7 +8,8 @@ pinned seller trust, and signed seller responses.
 from __future__ import annotations
 
 
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 import sqlite3
 
 import httpx
@@ -25,9 +26,14 @@ from market_policy.negotiation_middleware import (
 from market_policy.seller_round import SellerRoundResult
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from storefront_client import StorefrontClient, StorefrontClientError
-from market_capacity_publication import publication_binding
+from market_capacity_publication import RESOURCE_POOL, publication_binding
 
 import market_storefront.container as _container
+# The server module completes the controllers' import cycle; the admin
+# controller, imported first, would be partially initialized.
+import market_storefront.server  # noqa: F401  (import order, see above)
+from market_storefront import lifecycle, lifecycle_steps
+from market_storefront.controllers.admin_controller import router as admin_router
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
@@ -97,6 +103,8 @@ async def db(tmp_path):
 # The site-test projection the storefront reads each listing's own source from.
 # Seeding a listing declares its source here, as the site would.
 _SITE_POOLS: list[dict] = []
+# The site-test site serving ``_SITE_POOLS``, for tests that make it fail.
+_PROJECTION_SITES: list[FakeProjectionSite] = []
 # The fixture's recorded site requests, for tests asserting no site call.
 _SITE_REQUESTS: list[list[str]] = []
 # The fixture's application, for tests that also drive it as an administrator.
@@ -140,7 +148,9 @@ def _site_projections():
     """The storefront's projection state over the site-test site serving
     ``_SITE_POOLS``, holding nothing until polled."""
     _SITE_POOLS.clear()
-    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=_SITE_POOLS)})
+    site = FakeProjectionSite(resource_pools=_SITE_POOLS)
+    _PROJECTION_SITES[:] = [site]
+    return site_projection_state({"site-test": site})
 
 
 def _unheld_site_projections():
@@ -283,6 +293,8 @@ async def client(db, monkeypatch):
     app = FastAPI()
     app.include_router(negotiate_router)
     app.include_router(negotiations_router)
+    # The lifecycle routes, for tests that hold the loops and step them.
+    app.include_router(admin_router)
     app.middleware("http")(listing_lifecycle_middleware)
     app.middleware("http")(_admin_identity.administrator_identity_middleware)
     _APPS[:] = [app]
@@ -826,6 +838,109 @@ class TestAdministrativeAcceptance:
         # The acceptance hold reserves at the listing's site, as it does after
         # a negotiated acceptance.
         assert any("reserv" in request for request in site_requests), site_requests
+
+
+@pytest_asyncio.fixture
+async def held_loops(client):
+    """Every loop's timer registered as startup registers it and started held,
+    so no poll runs unless an operator steps one; the timers are cancelled and
+    awaited afterwards."""
+    lifecycle.reset_for_tests()
+    lifecycle.controller().request_pause(True)
+    lifecycle_steps.register_vm_loops()
+    lifecycle.start_loops()
+    yield
+    handles = list(lifecycle.controller()._handles.values())
+    lifecycle.reset_for_tests()
+    await asyncio.gather(*handles, return_exceptions=True)
+
+
+def _admin_client() -> StorefrontClient:
+    (app,) = _APPS
+    return StorefrontClient(
+        "http://test",
+        signer=_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_EXPECTED_PUBLISHERS,
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+class TestSourceConfirmationWindow:
+    """A source check confirms a listing only from a projection a poll
+    confirmed within the source-confirmation window, so a storefront whose
+    loops are held while it trades refuses rather than judging on projections
+    nobody polls."""
+
+    async def test_a_round_past_the_window_is_retryable_until_the_projection_is_stepped(
+        self, client, db, held_loops
+    ):
+        """Spec scenario "The loops are held past the confirmation window".
+
+        The runtime measures each check at a clock the test sets relative to
+        the site's last confirmed poll: past the window while the held poller
+        has run nothing, then a second after the operator's step polled it."""
+        c, db = client
+        await _seed_listing(db, "neg-window")
+        state = _container.site_projections()
+        since_last_poll = {"seconds": 61}
+
+        def clock() -> datetime:
+            confirmed = state.view("site-test", RESOURCE_POOL).fetched_at
+            return confirmed + timedelta(seconds=since_last_poll["seconds"])
+
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            source_confirmation_clock=clock
+        )
+        opening = dict(
+            listing_id="neg-window",
+            settlement_selection=await _selection(db, "neg-window"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+        )
+        with settings_overrides(**{"capacity.source_confirmation_seconds": 60}):
+            async with _admin_client() as admin:
+                held = await admin.admin_pause_lifecycle_loops()
+                assert held["loops"][lifecycle.SITE_PROJECTION_POLLER] == "paused"
+
+                with pytest.raises(StorefrontClientError) as refused:
+                    await c.negotiate_new(**opening)
+                assert refused.value.status_code == 503
+                assert "listing_source_unverifiable" in str(refused.value)
+
+                await admin.admin_run_lifecycle_cycle("site-projections")
+                since_last_poll["seconds"] = 1
+                opened = await c.negotiate_new(**opening)
+
+                still_held = await admin.admin_pause_lifecycle_loops()
+
+        assert opened["action"] == "counter"
+        assert still_held["loops"][lifecycle.SITE_PROJECTION_POLLER] == "paused"
+
+    async def test_an_unbacked_listings_stale_site_is_retryable(self, client, db):
+        """Spec scenario "An unbacked listing's site is stale": the retained
+        generation still declares the listing's source, but its latest poll
+        failed, and nothing else backs an unbacked listing."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-unbacked-stale", capacity_backing="unbacked")
+        (site,) = _PROJECTION_SITES
+        site.failing = True
+        await _container.site_projections().poll_once()
+        (site_requests,) = _SITE_REQUESTS
+        site_requests.clear()
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_new(
+                listing_id="neg-unbacked-stale",
+                settlement_selection=await _selection(db, "neg-unbacked-stale"),
+                initial_amount=4000,
+                provision_terms=_vm_provision(),
+            )
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+        assert site_requests == []
 
 
 class TestAcceptanceRechecksTheSource:

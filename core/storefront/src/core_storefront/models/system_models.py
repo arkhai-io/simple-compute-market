@@ -29,6 +29,47 @@ class ProjectionFamilyStatus(BaseModel):
     fetched_at: str | None = None
 
 
+class LoopCycleError(BaseModel):
+    """The error that ended a loop's cycle, as status may show it.
+
+    `message` is present only for an error the storefront declared
+    disclosable -- its own configuration and publication errors, whose text
+    names keys and reasons. Any other error is reported by its type alone, so
+    no credential, secret, or private URL reaches status.
+    """
+
+    type: str
+    message: str | None = None
+
+
+class LoopCycleOutcome(BaseModel):
+    """The terminal outcome of one loop cycle, whether its timer or an
+    operator's step ran it (`trigger`). A failed cycle names the stage it
+    failed in -- `compose`, `run`, or `converge` -- unless it was cancelled
+    before any stage began."""
+
+    finished_at: str
+    trigger: str
+    completed: bool
+    stage: str | None = None
+    error: LoopCycleError | None = None
+
+
+class LoopStatus(BaseModel):
+    """One lifecycle loop as the storefront's loop controller reports it.
+
+    `state` is the controller's: `starting`, `running`, `pausing`, `paused`,
+    `exited`, or `cancelled`; it is `None` for a loop whose timer is not
+    running, such as one an operator only steps. It is independent of
+    `last_outcome`: a running loop whose last cycle failed is still running,
+    and an exited loop runs no further cycles whatever its last outcome was.
+    """
+
+    name: str
+    state: str | None = None
+    last_outcome: LoopCycleOutcome | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     checks: dict[str, str] = Field(default_factory=dict)
@@ -69,6 +110,10 @@ class HealthResponse(BaseModel):
     #: which a buyer reads before handing over contact details. Absent when
     #: the storefront discloses nothing.
     disclosures: dict[str, dict[str, Any]] | None = None
+    #: Every lifecycle loop by name: its controller state and the outcome of
+    #: its most recent cycle, the publication loop's included. Present on
+    #: system status, not on the liveness probes.
+    lifecycle: dict[str, LoopStatus] | None = None
 
 
 class AdminPauseResponse(BaseModel):

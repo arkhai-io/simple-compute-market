@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
-from market_capacity_publication import PublicationBinding
+from market_capacity_publication import CAPACITY_BUCKET, RESOURCE_POOL, PublicationBinding
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_policy.listing_source import ListingSourceVerdict
 from market_storefront.domain_runtime import (
@@ -13,7 +15,9 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.listing_source_check import check_listing_source
+from market_storefront.utils.config import source_confirmation_seconds
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     FakeProjectionSite,
@@ -250,3 +254,125 @@ async def test_a_site_whose_capacity_cannot_be_read_confirms_nothing(repository)
     )
 
     assert result.outcome == "unverifiable"
+
+
+# -- The source-confirmation window -------------------------------------------
+
+_BACKED = PublicationBinding("site-a", "vm", "pool-a", BACKED)
+
+
+def _at(state, family, seconds):
+    """A clock ``seconds`` after the family's last confirmed poll."""
+    confirmed = state.view("site-a", family).fetched_at
+    return lambda: confirmed + timedelta(seconds=seconds)
+
+
+async def _confirmed_check(repository, state, *, clock, window=None, capacity=None):
+    listing = _listing()
+    if await repository.load_listing_binding(listing_id=listing["listing_id"]) is None:
+        await _bind(repository, _BACKED, listing)
+    return await check_listing_source(
+        repository=repository,
+        listing_record=listing,
+        binding=_BACKED,
+        capacity_runtime=capacity
+        or _Capacity({"site-a": [{"resource_id": "pool-a-r1", "available_units": 4}]}),
+        site_projections=state,
+        confirmation_window_seconds=window,
+        clock=clock,
+    )
+
+
+async def test_a_loaded_generation_past_the_window_confirms_nothing(repository):
+    """A generation no poll has reached stays `loaded`; the window is what
+    bounds how long it confirms a listing."""
+    state = await loaded_site_projection_state(
+        {"site-a": FakeProjectionSite(resource_pools=[_pool("pool-a")])}
+    )
+    capacity = _Capacity({"site-a": [{"resource_id": "pool-a-r1", "available_units": 4}]})
+
+    inside = await _confirmed_check(
+        repository, state, clock=_at(state, RESOURCE_POOL, 15), window=15, capacity=capacity
+    )
+    past = await _confirmed_check(
+        repository, state, clock=_at(state, RESOURCE_POOL, 16), window=15, capacity=capacity
+    )
+
+    assert inside == ListingSourceVerdict("matches")
+    assert past.outcome == "unverifiable"
+    assert "resource_pool" in past.reason
+    # Refused before any availability read.
+    assert capacity.asked == ["site-a"]
+
+
+async def test_a_stale_bucket_family_beside_a_fresh_pool_family_confirms_nothing(repository):
+    """Fungible availability is computed from the bucket family the site holds;
+    a stale one is not dropped in favour of the pool rows."""
+    site = FakeProjectionSite(resource_pools=[_pool("pool-a")], capacity_buckets=[])
+    state = await loaded_site_projection_state({"site-a": site})
+    site.capacity_buckets = None
+    await state.poll_once()
+    assert state.view("site-a", RESOURCE_POOL).state.value == "loaded"
+    assert state.view("site-a", CAPACITY_BUCKET).state.value == "stale"
+    capacity = _Capacity({"site-a": [{"resource_id": "pool-a-r1", "available_units": 4}]})
+
+    result = await _confirmed_check(
+        repository, state, clock=_at(state, RESOURCE_POOL, 0), window=15, capacity=capacity
+    )
+
+    assert result.outcome == "unverifiable"
+    assert "capacity_bucket" in result.reason
+    assert capacity.asked == []
+
+
+async def test_a_site_serving_no_bucket_family_is_judged_on_its_pools_alone(repository):
+    """A family the site holds no generation of is not read: fungible
+    availability comes from the pool rows, as publication derives it."""
+    state = await loaded_site_projection_state(
+        {"site-a": FakeProjectionSite(resource_pools=[_pool("pool-a")])}
+    )
+
+    result = await _confirmed_check(
+        repository, state, clock=_at(state, RESOURCE_POOL, 1), window=15
+    )
+
+    assert result == ListingSourceVerdict("matches")
+
+
+async def test_a_failed_poll_confirms_nothing_although_the_generation_is_held(repository):
+    site = FakeProjectionSite(resource_pools=[_pool("pool-a")])
+    state = await loaded_site_projection_state({"site-a": site})
+    site.failing = True
+    await state.poll_once()
+
+    result = await _confirmed_check(
+        repository, state, clock=_at(state, RESOURCE_POOL, 0), window=15
+    )
+
+    assert result.outcome == "unverifiable"
+    assert "stale" in result.reason
+
+
+async def test_the_window_defaults_to_three_poll_intervals():
+    with settings_overrides(**{"capacity.poll_interval": 7}):
+        assert source_confirmation_seconds() == 21
+    with settings_overrides(
+        **{"capacity.poll_interval": 7, "capacity.source_confirmation_seconds": 600}
+    ):
+        assert source_confirmation_seconds() == 600
+
+
+async def test_an_unstated_window_is_the_configured_one(repository):
+    """With no window given, the check reads the configured window: three poll
+    intervals here."""
+    state = await loaded_site_projection_state(
+        {"site-a": FakeProjectionSite(resource_pools=[_pool("pool-a")])}
+    )
+    with settings_overrides(**{"capacity.poll_interval": 7}):
+        inside = await _confirmed_check(
+            repository, state, clock=_at(state, RESOURCE_POOL, 21)
+        )
+        past = await _confirmed_check(repository, state, clock=_at(state, RESOURCE_POOL, 22))
+
+    assert inside == ListingSourceVerdict("matches")
+    assert past.outcome == "unverifiable"

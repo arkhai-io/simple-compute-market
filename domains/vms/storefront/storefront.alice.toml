@@ -95,6 +95,15 @@ principals = [
   { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
 ]
 
+[capacity]
+# How long a confirmed projection poll lets the inventory guard confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production
+# keeps the shipped window.
+source_confirmation_seconds = 3600
+
 # The site alias is local to this storefront and matches its service peer.
 [capacity.sites]
 default = "http://alice-provisioning:8081"

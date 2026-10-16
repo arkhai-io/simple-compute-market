@@ -19,6 +19,7 @@ from market_identity import Signer
 from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as _container
+from market_storefront import lifecycle
 from market_storefront.services.capacity_client import site_projection_status
 from market_storefront.services.listing_cardinality_explanations import (
     listing_cardinality_mode_explanations,
@@ -59,6 +60,12 @@ async def _default_pool_override_status_provider() -> list[dict[str, Any]] | Non
     return await service.statuses()
 
 
+def _default_lifecycle_provider() -> dict[str, dict[str, Any]]:
+    """Every lifecycle loop's controller state and the outcome of its last
+    cycle, by loop name, from the process's one loop controller."""
+    return {name: loop.to_dict() for name, loop in lifecycle.snapshot().items()}
+
+
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     """Which pre-shape listings carried a seller's close or pause, and to which
     shape-bearing successor: the listing a seller should reopen or resume."""
@@ -91,6 +98,7 @@ class SystemService:
         pool_override_status_provider: (
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
+        lifecycle_provider: Callable[[], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -114,6 +122,7 @@ class SystemService:
         self._pool_override_status_provider = (
             pool_override_status_provider or _default_pool_override_status_provider
         )
+        self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -246,6 +255,10 @@ class SystemService:
                 result["pool_overrides"] = await self._pool_override_status_provider()
             except Exception:
                 result["pool_overrides"] = None
+            try:
+                result["lifecycle"] = self._lifecycle_provider()
+            except Exception:
+                result["lifecycle"] = None
 
         return result
 

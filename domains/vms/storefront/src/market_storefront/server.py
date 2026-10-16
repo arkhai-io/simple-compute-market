@@ -455,8 +455,8 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
-# Registers every loop's step, and the site-projection poller with its interval,
-# which startup then starts; without it startup would start no poller.
+# Registers every loop's step, which the lifecycle routes run; startup registers
+# each loop's timer over the same step and starts it.
 import market_storefront.lifecycle_steps  # noqa: E402,F401
 
 

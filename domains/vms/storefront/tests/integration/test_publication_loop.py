@@ -15,6 +15,7 @@ listing has no option it may publish under it. Tests of unbacked supply declare
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from dataclasses import asdict
@@ -24,7 +25,7 @@ from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_storefront import lifecycle
-from market_storefront.startup import _start_publication_loop
+from market_storefront.startup import _start_lifecycle_loops
 
 from tests._settings_overrides import settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
@@ -586,13 +587,14 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
 
 
 @pytest.fixture
-def lifecycle_registry():
-    """A clean loop registry and pause flag, as a fresh process has."""
+async def lifecycle_registry():
+    """A clean loop registry and pause flag, as a fresh process has; any timer
+    a test started is cancelled and awaited before its event loop closes."""
     lifecycle.reset_for_tests()
-    lifecycle.controller().request_pause(False)
     yield
+    handles = list(lifecycle.controller()._handles.values())
     lifecycle.reset_for_tests()
-    lifecycle.controller().request_pause(False)
+    await asyncio.gather(*handles, return_exceptions=True)
 
 
 async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
@@ -600,7 +602,7 @@ async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
 ):
     # Held before it starts, so the running loop never begins a cycle of its own.
     await world.client.admin_pause_lifecycle_loops()
-    _start_publication_loop(world.db)
+    _start_lifecycle_loops()
     held = await world.client.admin_pause_lifecycle_loops()
     assert held["loops"]["publication"] == "paused"
 

@@ -8,10 +8,12 @@ the loop bodies, startup, and admin routes share it through stable names.
 
 A loop body consults `gate` once per cycle, before any work, and waits between
 cycles through `idle`, so a pause holds it at a cycle boundary without
-cancelling it. Two loop bodies live in kit runners and take a `paused`
-predicate and a `wait`; composition supplies `loop_gate(name)` and `idle`. A
-loop registered with `register_loop` has no body of its own: the controller's
-timer gates, runs its step, and waits.
+cancelling it. Every loop but the capacity-event pollers is registered with
+`register_loop` and has no body of its own: the controller's timer gates, runs
+the loop's step through the one cycle boundary an operator's step also takes,
+and waits. The capacity-event pollers fan out one cycle per site inside the
+capacity-publication kit, which takes `loop_gate(name)` and `idle` and
+serializes each site's cycle with that site's step itself.
 """
 
 from __future__ import annotations
@@ -22,7 +24,13 @@ from collections.abc import Callable
 from typing import Any
 
 from core_storefront.app_startup import StorefrontBackgroundTask
+from core_storefront.domain_registry import (
+    StorefrontDomainBindingError,
+    StorefrontDomainRegistryError,
+)
+from market_capacity_publication import CapacityBindingError, CapacityConfigurationError
 from market_storefront_kit import (
+    LoopSnapshot,
     LoopStep,
     QUIESCENCE_TIMEOUT_SECONDS,
     StorefrontLoopController,
@@ -34,10 +42,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Loop names.
 #
-# One definition per loop, used both by the registration in `startup.py` and by
-# the loop body's own gate call. A name spelled independently in those two
-# places can drift, and a loop acknowledging a name nobody waits on is
-# indistinguishable from a loop that never gates at all.
+# One definition per loop, used by its registration in `lifecycle_steps.py`,
+# which the controller's timer gates under, and by what its step reports. A
+# name spelled independently in those places can drift, and a loop
+# acknowledging a name nobody waits on is indistinguishable from a loop that
+# never gates at all.
 # ---------------------------------------------------------------------------
 
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
@@ -61,7 +70,22 @@ def capacity_site_loop_name(site: str) -> str:
     return f"{CAPACITY_EVENTS_POLLER}:{site}"
 
 
-_CONTROLLER = StorefrontLoopController(logger=logger)
+#: The errors whose messages a recorded cycle outcome may carry. These are the
+#: configuration and binding refusals the storefront's cycles raise -- a
+#: capacity site or binding that does not resolve, a domain registration that
+#: is incomplete or does not match durable state -- and their text names keys,
+#: site and listing identifiers, and reasons, never a configured value, a URL,
+#: or a credential. Every other exception reaches status by type alone.
+DISCLOSED_CYCLE_ERRORS: tuple[type[BaseException], ...] = (
+    CapacityBindingError,
+    CapacityConfigurationError,
+    StorefrontDomainBindingError,
+    StorefrontDomainRegistryError,
+)
+
+_CONTROLLER = StorefrontLoopController(
+    logger=logger, disclosed_errors=DISCLOSED_CYCLE_ERRORS
+)
 
 
 def controller() -> StorefrontLoopController:
@@ -105,11 +129,14 @@ def register_loop(
     step: LoopStep,
     interval_seconds: float,
     preview: LoopStep | None = None,
+    wake: asyncio.Event | None = None,
+    initial_delay_seconds: float = 0.0,
 ) -> None:
     """Register a loop whose timer the controller runs over its step.
 
     The timer and an operator's step run the same operation, one at a time;
-    `start_loops` starts the timer.
+    `start_loops` starts the timer. `wake` ends the wait between cycles early,
+    and the first cycle is due `initial_delay_seconds` after the timer starts.
     """
     _CONTROLLER.register_loop(
         name,
@@ -117,6 +144,8 @@ def register_loop(
         step=step,
         preview=preview,
         interval_seconds=interval_seconds,
+        wake=wake,
+        initial_delay_seconds=initial_delay_seconds,
     )
 
 
@@ -169,13 +198,25 @@ def registered_loop_names() -> list[str]:
     return _CONTROLLER.registered_loop_names()
 
 
+def enter_stage(stage: str) -> None:
+    """Name the stage the cycle running in this task has reached."""
+    _CONTROLLER.enter_stage(stage)
+
+
+def snapshot() -> dict[str, LoopSnapshot]:
+    """Every loop's state and the last outcome its cycles recorded."""
+    return _CONTROLLER.snapshot()
+
+
 def reset_for_tests() -> None:
-    """Drop all loop registrations, keeping steps. Test-only."""
+    """Cancel every loop and drop its handles, outcomes, and pause, keeping the
+    registered steps and loops. Test-only."""
     _CONTROLLER.clear_loops()
 
 
 __all__ = [
     "CAPACITY_EVENTS_POLLER",
+    "DISCLOSED_CYCLE_ERRORS",
     "FULFILLMENT_RESUME",
     "NEGOTIATION_WATCHDOG",
     "PUBLICATION",
@@ -186,6 +227,7 @@ __all__ = [
     "capacity_site_loop_name",
     "controller",
     "declare_and_gate",
+    "enter_stage",
     "failed_loop_names",
     "gate",
     "idle",
@@ -196,6 +238,7 @@ __all__ = [
     "register_step",
     "registered_loop_names",
     "reset_for_tests",
+    "snapshot",
     "start_loops",
     "start_registered_loop",
     "starting_loop_names",

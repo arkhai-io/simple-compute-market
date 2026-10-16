@@ -1,10 +1,10 @@
 """Each registered loop step reports a loop name the lifecycle controller knows.
 
-A loop's name is spelled where `startup.py` registers it, where the loop body
-gates on it, and in what its step reports. The first two are covered by
-`test_loop_gate_wiring.py`; this covers the third, which had already drifted
-once -- a route named an engine that no longer existed and reported a name
-nothing used any more.
+A loop's name is spelled where `lifecycle_steps.py` registers its timer, which
+the controller gates under, and in what its step reports. The first is covered
+by `test_loop_gate_wiring.py`; this covers the second, which had already
+drifted once -- a route named an engine that no longer existed and reported a
+name nothing used any more.
 
 The response name is load-bearing, not cosmetic: a caller advances a loop and
 then reads the loop states to see whether it is held, and a reported name that
@@ -86,7 +86,7 @@ class TestStepsReportRegisteredNames:
 
         monkeypatch.setattr(container, "resolved_sqlite_client", object(), raising=False)
         monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.resume_incomplete_fulfillments_once",
+            "market_storefront.lifecycle_steps.fulfillment_resume_cycle_once",
             _sweep,
         )
         result = await _advance("fulfillment-resume")

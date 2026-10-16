@@ -154,6 +154,12 @@ root_path = ""
 # billed, so that acquiring exclusivity costs the holder something.
 authority_url    = ""
 poll_interval    = 5
+# How old, in seconds, a site's last successful projection poll may be for the
+# seller's inventory guard to confirm a listing against it. A check past the
+# window is refused as retryable, so a storefront whose loops are held while it
+# trades does not judge negotiations on projections nobody is polling. Unset,
+# it is three poll intervals; stepping `site-projections` restores it.
+# source_confirmation_seconds = 15
 placement        = "fill_first"
 hold_ttl_seconds = 0
 # The publication loop's interval between cycles, in seconds. A change a site
