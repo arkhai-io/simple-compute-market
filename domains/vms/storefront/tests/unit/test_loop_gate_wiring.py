@@ -68,7 +68,7 @@ def long_intervals():
     """Every configured loop interval far longer than any test waits."""
     with settings_overrides(
         negotiation_watchdog_interval=_LONG_INTERVAL,
-        claims_sweep_interval=_LONG_INTERVAL,
+        settlement_servicing_interval_seconds=_LONG_INTERVAL,
         fulfillment_resume_sweep_interval=_LONG_INTERVAL,
         **{
             "capacity.poll_interval": _LONG_INTERVAL,

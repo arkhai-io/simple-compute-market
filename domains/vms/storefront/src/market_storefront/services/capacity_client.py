@@ -40,6 +40,7 @@ from core_storefront.aggregation import (
     AggregateCapacityClient,
     most_available,
 )
+from core_storefront.service_peers import ServicePeerTrust
 from market_capacity_publication import (
     CAPACITY_BUCKET,
     RESOURCE_POOL,
@@ -52,6 +53,7 @@ from market_capacity_publication import (
     publication_binding,
 )
 from market_core import VersionedEnvelope
+from market_identity import TrustedIdentitySet
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
@@ -84,20 +86,7 @@ def _capacity_settings() -> tuple[dict[str, str], str]:
 
     cap = getattr(config.settings, "capacity", None)
     placement = str(getattr(cap, "placement", "") or "fill_first").strip()
-    raw_sites = getattr(cap, "sites", None)
-    if not raw_sites:
-        raise RuntimeError(
-            "No capacity site authority configured: [capacity.sites] must map "
-            "each stable site ID to an authority URL."
-        )
-    sites: dict[str, str] = {}
-    for raw_name, raw_url in dict(raw_sites).items():
-        site_id = str(raw_name).strip()
-        url = str(raw_url or "").strip().rstrip("/")
-        if not site_id or not url:
-            raise RuntimeError("capacity site IDs and authority URLs must be non-empty")
-        sites[site_id] = url
-    return sites, placement
+    return config.configured_capacity_sites(config.settings), placement
 
 
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
@@ -120,6 +109,28 @@ class _LateSiteProjections:
 
     def __call__(self) -> SiteProjectionState | None:
         return self.provider()
+
+
+class _LateServicePeerTrust:
+    """The service-peer trust a runtime's site clients verify against, bound
+    after the runtime is built.
+
+    The runtime is cached across compositions in one process, so each
+    composition root binds its own trust here; a site's provider reads whichever
+    is bound at each response. A runtime nothing has bound verifies no response.
+    """
+
+    def __init__(self) -> None:
+        self.trust: ServicePeerTrust | None = None
+
+    def site_authorities(self, site_id: str) -> Callable[[], TrustedIdentitySet]:
+        def authorities() -> TrustedIdentitySet:
+            trust = self.trust
+            if trust is None:
+                raise RuntimeError("no service-peer trust is bound to the capacity runtime")
+            return trust.site_trusted_set(site_id)
+
+        return authorities
 
 
 def _capacity_reconciler(
@@ -205,6 +216,7 @@ _capacity_runtime_state: dict[str, Any] = {
     "key": None,
     "runtime": None,
     "site_projections": None,
+    "service_peer_trust": None,
 }
 
 
@@ -213,18 +225,23 @@ def build_capacity_runtime_for(
     *,
     signer: Any,
     site_projections: SiteProjectionsProvider | None = None,
+    service_peer_trust: ServicePeerTrust | None = None,
+    site_client_factory: Callable[[CapacitySite, Any], Any] | None = None,
 ) -> CapacityRuntime:
     """Compose the kit runtime from explicit repository and signer collaborators.
 
     ``site_projections`` is the composition root's provider of the projection
-    state its capacity reconciliation reads; a caller that is not the root
-    passes none and leaves the root's binding in place.
+    state its capacity reconciliation reads, and ``service_peer_trust`` the
+    trust each site's responses are verified against, that site's own service
+    peer's active principals; a caller that is not the root passes neither and
+    leaves the root's bindings in place. ``site_client_factory`` replaces how a
+    configured site's client is built, as the kit runtime's constructor allows,
+    and is part of what the cached runtime is keyed by.
     """
 
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
     sites, placement_name = _capacity_settings()
-    expected_authorities = get_provisioning_authorities()
     placement = PLACEMENT_POLICIES.get(placement_name)
     if placement is None:
         raise RuntimeError(
@@ -241,32 +258,40 @@ def build_capacity_runtime_for(
             ),
         )
     db_path = str(getattr(sqlite_client_factory(), "db_path", ""))
+    # No principal is part of the key: each site's trust is read from the bound
+    # service-peer trust at every response, so a rotation reuses the runtime.
     key = (
         tuple(sorted(sites.items())),
         placement_name,
         signer.identity.scheme.value,
         signer.identity.identifier,
-        tuple(
-            (principal.scheme.value, principal.identifier)
-            for principal in expected_authorities.identities
-        ),
         db_path,
+        site_client_factory,
     )
     if _capacity_runtime_state["key"] != key:
         late = _LateSiteProjections()
+        late_trust = _LateServicePeerTrust()
         _capacity_runtime_state["key"] = key
         _capacity_runtime_state["site_projections"] = late
+        _capacity_runtime_state["service_peer_trust"] = late_trust
         _capacity_runtime_state["runtime"] = CapacityRuntime(
             sites=tuple(
-                CapacitySite(site_id, url, expected_authorities)
+                CapacitySite(site_id, url, late_trust.site_authorities(site_id))
                 for site_id, url in sites.items()
             ),
             signer=signer,
             placement=placement,
             reconcile=_capacity_reconciler(sqlite_client_factory, site_projections=late),
+            **(
+                {}
+                if site_client_factory is None
+                else {"site_client_factory": site_client_factory}
+            ),
         )
     if site_projections is not None:
         _capacity_runtime_state["site_projections"].provider = site_projections
+    if service_peer_trust is not None:
+        _capacity_runtime_state["service_peer_trust"].trust = service_peer_trust
     return _capacity_runtime_state["runtime"]
 
 

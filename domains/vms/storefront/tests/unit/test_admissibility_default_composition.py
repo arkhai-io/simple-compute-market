@@ -52,7 +52,6 @@ async def test_the_lifespan_publishes_the_composed_default_to_the_container():
         with (
             settings_overrides(enable_registry_discovery=False),
             patch.object(server, "initialize_administrator_identities"),
-            patch.object(server, "initialize_service_peer_identities"),
             patch.object(server, "_run_startup_tasks", startup_tasks),
         ):
             await server._start_vm_services(services)

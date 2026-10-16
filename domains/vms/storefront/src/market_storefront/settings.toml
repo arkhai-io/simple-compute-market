@@ -45,9 +45,10 @@ resource_lease_grace_seconds = 1800
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-# Deal-servicing engine sweep cadence (seconds): how often due claims
-# are checked for collectable conditions / retried collections.
-claims_sweep_interval = 30
+# Settlement servicing sweep cadence (seconds): how often due obligations
+# are checked for collectable conditions / retried collections. The earlier
+# name, claims_sweep_interval, refuses startup naming this key.
+settlement_servicing_interval_seconds = 30
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60

@@ -2,10 +2,13 @@
 
 These run against a real SQLite database because the trust they resolve is the
 durable identity state a rotation rewrites, not the configuration that seeded it.
+The trust holds that state in memory, so verification reads no database; a
+change reaches it when it commits through the trust's identity authority.
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
 
 import pytest
@@ -18,10 +21,9 @@ from core_storefront.identity_authority import (
 )
 from core_storefront.service_peers import (
     ServicePeerConfigurationError,
+    ServicePeerTrust,
     require_one_service_peer_per_site,
     seed_service_peers,
-    site_active_principals,
-    site_trusted_authorities,
 )
 from core_storefront.sqlite_client import SQLiteClient
 
@@ -49,8 +51,14 @@ def db_path(tmp_path) -> str:
     return path
 
 
-def _rotate(db_path: str, *, now: int, overlap_seconds: int = 30) -> None:
-    StorefrontIdentityAuthority(db_path).apply_rotation(
+def _rotate(
+    db_path: str,
+    *,
+    now: int,
+    overlap_seconds: int = 30,
+    authority: StorefrontIdentityAuthority | None = None,
+) -> None:
+    (authority or StorefrontIdentityAuthority(db_path)).apply_rotation(
         sign_rotation(
             current_signer=_CURRENT,
             replacement_signer=_REPLACEMENT,
@@ -106,8 +114,9 @@ def test_seeding_after_a_rotation_keeps_the_durable_principals(db_path: str) -> 
 
     # Configuration covering both principals of the overlap restarts cleanly,
     # and durable state, not configuration, decides the primary.
-    seed_service_peers(db_path, _peers(_CURRENT, _REPLACEMENT), now=1_001)
-    assert site_active_principals(db_path, _peers(_CURRENT), "home", now=1_001) == {
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT, _REPLACEMENT))
+    trust.seed(now=1_001)
+    assert trust.site_active_principals("home", now=1_001) == {
         _CURRENT.identity,
         _REPLACEMENT.identity,
     }
@@ -145,50 +154,63 @@ def test_a_site_with_no_peer_or_two_authenticates_nothing(db_path: str) -> None:
     seed_service_peers(db_path, _peers(_CURRENT), now=1_000)
 
     for site_id, configured in (("unconfigured", _peers(_CURRENT)), ("home", peers)):
+        trust = ServicePeerTrust(db_path, configured, clock=lambda: 1_000)
+        trust.reload()
         with pytest.raises(AuthError, match="exactly one configured service peer"):
-            site_active_principals(db_path, configured, site_id, now=1_000)
+            trust.site_active_principals(site_id, now=1_000)
         with pytest.raises(AuthError, match="exactly one configured service peer"):
-            site_trusted_authorities(db_path, configured, site_id)()
+            trust.site_authorities(site_id)()
+
+
+def test_nothing_authenticates_before_the_trust_is_loaded(db_path: str) -> None:
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT))
+
+    with pytest.raises(AuthError, match="not loaded") as excinfo:
+        trust.site_authorities("home")()
+    assert excinfo.value.status_code == 503
 
 
 def test_active_principals_follow_a_rotation_through_its_overlap(db_path: str) -> None:
-    peers = _peers(_CURRENT)
-    seed_service_peers(db_path, peers, now=1_000)
-    assert site_active_principals(db_path, peers, "home", now=1_000) == {
-        _CURRENT.identity
-    }
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT))
+    trust.seed(now=1_000)
+    assert trust.site_active_principals("home", now=1_000) == {_CURRENT.identity}
 
-    _rotate(db_path, now=1_000, overlap_seconds=30)
+    _rotate(db_path, now=1_000, overlap_seconds=30, authority=trust.identity_authority())
 
-    assert site_active_principals(db_path, peers, "home", now=1_029) == {
+    assert trust.site_active_principals("home", now=1_029) == {
         _CURRENT.identity,
         _REPLACEMENT.identity,
     }
-    assert site_active_principals(db_path, peers, "home", now=1_030) == {
-        _REPLACEMENT.identity
-    }
+    assert trust.site_active_principals("home", now=1_030) == {_REPLACEMENT.identity}
     # Another site's trust is its own peer's, untouched by this rotation.
-    assert site_active_principals(db_path, peers, "away", now=1_030) == {
-        _OTHER_SITE.identity
-    }
+    assert trust.site_active_principals("away", now=1_030) == {_OTHER_SITE.identity}
 
 
-def test_the_provider_reads_durable_state_at_each_call(db_path: str) -> None:
-    peers = _peers(_CURRENT)
-    seed_service_peers(db_path, peers, now=1_000)
+def test_the_provider_follows_a_rotation_from_memory(db_path: str) -> None:
+    """The provider reads no database: an overlap ends by the clock alone, and a
+    change committed through the trust's authority is reloaded as it commits."""
     now = [1_000]
-    provider = site_trusted_authorities(db_path, peers, "home", clock=lambda: now[0])
-
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT), clock=lambda: now[0])
+    trust.seed(now=1_000)
+    provider = trust.site_authorities("home")
     assert provider() == _pins(_CURRENT)
 
-    _rotate(db_path, now=1_000, overlap_seconds=30)
+    authority = trust.identity_authority()
+    _rotate(db_path, now=1_000, overlap_seconds=30, authority=authority)
     now[0] = 1_010
     assert provider() == _pins(_REPLACEMENT, _CURRENT)
 
-    now[0] = 1_030
-    assert provider() == _pins(_REPLACEMENT)
+    # With the database gone, verification still answers, and the overlap
+    # still ends on time: nothing is read at a call.
+    moved = db_path + ".moved"
+    os.rename(db_path, moved)
+    try:
+        now[0] = 1_030
+        assert provider() == _pins(_REPLACEMENT)
+    finally:
+        os.rename(moved, db_path)
 
-    StorefrontIdentityAuthority(db_path).complete_rotation(
+    authority.complete_rotation(
         authority=SERVICE_PEER_AUTHORITY,
         subject="provisioning-home",
         rotation_nonce="rotate-home-1",
@@ -198,12 +220,24 @@ def test_the_provider_reads_durable_state_at_each_call(db_path: str) -> None:
     )
     now[0] = 1_031
     assert provider() == _pins(_REPLACEMENT)
+    assert trust.site_authorities("away")() == _pins(_OTHER_SITE)
+
+
+def test_a_change_made_outside_the_trust_waits_for_a_reload(db_path: str) -> None:
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT), clock=lambda: 1_010)
+    trust.seed(now=1_000)
+
+    _rotate(db_path, now=1_000, overlap_seconds=30)
+    assert trust.site_authorities("home")() == _pins(_CURRENT)
+
+    trust.reload()
+    assert trust.site_authorities("home")() == _pins(_REPLACEMENT, _CURRENT)
 
 
 def test_a_disabled_peer_authenticates_nothing(db_path: str) -> None:
-    peers = _peers(_CURRENT)
-    seed_service_peers(db_path, peers, now=1_000)
-    StorefrontIdentityAuthority(db_path).disable(
+    trust = ServicePeerTrust(db_path, _peers(_CURRENT), clock=lambda: 1_002)
+    trust.seed(now=1_000)
+    trust.identity_authority().disable(
         authority=SERVICE_PEER_AUTHORITY,
         subject="provisioning-home",
         principal=_CURRENT.identity,
@@ -213,6 +247,6 @@ def test_a_disabled_peer_authenticates_nothing(db_path: str) -> None:
     )
 
     with pytest.raises(AuthError, match="not active"):
-        site_active_principals(db_path, peers, "home", now=1_002)
+        trust.site_active_principals("home", now=1_002)
     with pytest.raises(AuthError, match="not active"):
-        site_trusted_authorities(db_path, peers, "home", clock=lambda: 1_002)()
+        trust.site_authorities("home")()

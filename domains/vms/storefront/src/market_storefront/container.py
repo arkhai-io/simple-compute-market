@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         StorefrontDomainBinding,
         StorefrontDomainRegistry,
     )
+    from core_storefront.service_peers import ServicePeerTrust
     from core_storefront.services.negotiation_service import NegotiationService
     from market_capability_admissibility import Declaration
     from market_capacity_publication import CapacityRuntime, SiteProjectionState
@@ -44,6 +45,9 @@ resolved_capacity_runtime: CapacityRuntime | None = None
 # Both projection families of every configured site, built once over the
 # capacity runtime's aggregate and read by every consumer in the process.
 resolved_site_projections: SiteProjectionState | None = None
+# Each configured site's service-peer principals, held in memory: the site's
+# responses and its callbacks are both verified against them.
+resolved_service_peer_trust: ServicePeerTrust | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are
@@ -81,6 +85,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_negotiation_runtime
     global resolved_capacity_runtime
     global resolved_site_projections
+    global resolved_service_peer_trust
     global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
@@ -107,6 +112,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_negotiation_runtime = None
     resolved_capacity_runtime = None
     resolved_site_projections = None
+    resolved_service_peer_trust = None
     resolved_listing_service = None
     resolved_negotiation_service = None
     resolved_system_service = None
@@ -124,6 +130,13 @@ def site_projections() -> SiteProjectionState:
     if resolved_site_projections is None:
         raise RuntimeError("site projection state is not composed")
     return resolved_site_projections
+
+
+def service_peer_trust() -> ServicePeerTrust:
+    """The process's service-peer trust; composition sets it before serving."""
+    if resolved_service_peer_trust is None:
+        raise RuntimeError("service-peer trust is not composed")
+    return resolved_service_peer_trust
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

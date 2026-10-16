@@ -24,6 +24,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
 )
+from core_storefront.service_peers import ServicePeerTrust
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_capacity_publication import CapacityRuntime, SiteProjectionState
@@ -53,7 +54,6 @@ from market_storefront.middleware.admin_identity import (
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.middleware.service_peer_auth import (
-    initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
@@ -61,7 +61,7 @@ from market_storefront.utils.config import (
     AGENT_ID,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
-    get_registry_authorities,
+    get_service_peer_configs,
     resolve_marketplace_signer,
     settings,
     storefront_domain_registry,
@@ -79,6 +79,7 @@ from market_storefront.services.publication_terms import (
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.settlement_composition import require_vm_release_model
+from market_storefront.startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,7 @@ class VmStorefrontServices:
     alkahest_clients: dict[str, Any]
     capacity_runtime: CapacityRuntime
     site_projections: SiteProjectionState
+    service_peer_trust: ServicePeerTrust
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
@@ -260,16 +262,23 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read, or an Alkahest release model it cannot deliver, stops
-    # startup rather than publishing without it.
+    # cannot read, an Alkahest release model it cannot deliver, or a
+    # configuration under which it could never publish stops startup rather
+    # than running without it.
     admissibility_default = parse_configured_admissibility_default()
     require_vm_release_model(domain)
+    require_publishable_storefront()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = _build_alkahest_clients()
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
+    # Each site's responses and callbacks are verified against its service
+    # peer's principals, which this trust holds once the lifespan seeds it.
+    service_peer_trust = ServicePeerTrust(
+        sqlite_client.db_path, get_service_peer_configs()
+    )
     site_projections: SiteProjectionState | None = None
     # Capacity reconciliation reads the state built just below, over this
     # runtime's own aggregate; the provider is read when a delta arrives.
@@ -277,6 +286,7 @@ def _build_vm_services(
         lambda: sqlite_client,
         signer=marketplace_signer,
         site_projections=lambda: site_projections,
+        service_peer_trust=service_peer_trust,
     )
     # One state per process, over the runtime's own aggregate: every consumer
     # reads it, and a resource-pool change a poll observes wakes publication.
@@ -347,6 +357,7 @@ def _build_vm_services(
         alkahest_clients=alkahest_clients,
         capacity_runtime=capacity_runtime,
         site_projections=site_projections,
+        service_peer_trust=service_peer_trust,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
@@ -371,10 +382,9 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     try:
         _container.resolved_sqlite_client = services.sqlite_client
         _container.resolved_marketplace_signer = services.marketplace_signer
-        if settings.enable_registry_discovery:
-            get_registry_authorities()
         initialize_administrator_identities(services.sqlite_client.db_path)
-        initialize_service_peer_identities(services.sqlite_client.db_path)
+        services.service_peer_trust.seed()
+        _container.resolved_service_peer_trust = services.service_peer_trust
         _container.resolved_alkahest_clients = services.alkahest_clients
         _container.resolved_capacity_runtime = services.capacity_runtime
         _container.resolved_site_projections = services.site_projections

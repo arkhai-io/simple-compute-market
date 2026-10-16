@@ -7,18 +7,24 @@ authenticate the site are that state's, rotated through the two-proof rotation
 operations, and configuration must keep covering them.
 
 A site's callbacks and the responses its clients receive are verified against
-the same active principals, read from durable state at each verification, so a
-completed rotation reaches both at once and needs no restart. See
+the same active principals: :class:`ServicePeerTrust` holds each site's durable
+records in memory, reloads them whenever an identity change commits, and
+evaluates which are active at each verification, so a completed rotation reaches
+both at once and needs no restart. See
 openspec/specs/storefront-publication/spec.md#requirement-site-authority-principals-rotate-with-bounded-overlap.
 """
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
+from functools import partial
+from types import MappingProxyType
+from typing import Any
 
-from market_identity import Identity, TrustedIdentitySet
+from market_identity import Identity, RotationRequest, TrustedIdentitySet
 
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import (
@@ -173,32 +179,141 @@ def _active_principals(status: IdentitySubjectStatus, now: int) -> frozenset[Ide
     return principals
 
 
-def site_active_principals(
-    db_path: str, peers: ServicePeerConfigs, site_id: str, *, now: int
-) -> frozenset[Identity]:
-    """The principals that authenticate a site at ``now``, from durable state."""
+class _TrustReloadingAuthority(StorefrontIdentityAuthority):
+    """An identity authority whose binding changes reload a service-peer trust.
 
-    return _active_principals(_site_peer_status(db_path, peers, site_id), now)
-
-
-def site_trusted_authorities(
-    db_path: str,
-    peers: ServicePeerConfigs,
-    site_id: str,
-    *,
-    clock: Callable[[], float] = time.time,
-) -> Callable[[], TrustedIdentitySet]:
-    """A provider of a site's active principals, read at each call.
-
-    A site client verifies each response against what this returns, so a
-    response follows the site's rotation as its callbacks do. The primary comes
-    first; a principal still in its rotation overlap follows it.
+    The reload follows each change whether or not it committed: a reload reads
+    what is durable, so an extra one is harmless, and a change that committed
+    before failing must not leave the trust behind it.
     """
 
-    def trusted_authorities() -> TrustedIdentitySet:
-        status = _site_peer_status(db_path, peers, site_id)
+    def __init__(
+        self, db_path: str, trust: ServicePeerTrust, **kwargs: Any
+    ) -> None:
+        super().__init__(db_path, **kwargs)
+        self._trust = trust
+
+    def register_service_peer(self, **kwargs: Any) -> IdentitySubjectStatus:
+        try:
+            return super().register_service_peer(**kwargs)
+        finally:
+            self._trust.reload()
+
+    def apply_rotation(
+        self, request: RotationRequest, **kwargs: Any
+    ) -> IdentitySubjectStatus:
+        try:
+            return super().apply_rotation(request, **kwargs)
+        finally:
+            self._trust.reload()
+
+    def complete_rotation(self, **kwargs: Any) -> IdentitySubjectStatus:
+        try:
+            return super().complete_rotation(**kwargs)
+        finally:
+            self._trust.reload()
+
+    def retire(self, **kwargs: Any) -> IdentitySubjectStatus:
+        try:
+            return super().retire(**kwargs)
+        finally:
+            self._trust.reload()
+
+    def disable(self, **kwargs: Any) -> IdentitySubjectStatus:
+        try:
+            return super().disable(**kwargs)
+        finally:
+            self._trust.reload()
+
+
+class ServicePeerTrust:
+    """Each configured site's service-peer principal records, held in memory.
+
+    A site client verifies every response synchronously on the event loop, so
+    the principals it verifies against must not be read from SQLite there: a
+    read that meets a writer's commit can wait out SQLite's busy timeout and
+    stall the loop. The trust therefore holds each site's durable binding
+    records, loaded when the peers are seeded and reloaded whenever an identity
+    change commits through :meth:`identity_authority`, and evaluates which of
+    them are active at each verification. An overlap therefore ends on time with
+    no reload, and a completed rotation or retirement reaches responses and
+    callbacks alike without a restart.
+
+    A site that durable state does not bind to exactly one active peer, or whose
+    peer disagrees with its configuration, authenticates nothing: reading its
+    trust raises the reason as an :class:`AuthError`.
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        peers: ServicePeerConfigs,
+        *,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._db_path = db_path
+        self._peers: ServicePeerConfigs = MappingProxyType(dict(peers))
+        self._clock = clock
+        self._reload_lock = threading.Lock()
+        # Replaced whole by each reload, so a reader on another thread sees one
+        # complete load or the next, never a mixture.
+        self._sites: Mapping[str, IdentitySubjectStatus | AuthError] | None = None
+
+    @property
+    def peers(self) -> ServicePeerConfigs:
+        """The configured service peers this trust was built from."""
+        return self._peers
+
+    def seed(self, *, now: int | None = None) -> None:
+        """Seed the configured peers into durable state, then load them."""
+        seed_service_peers(self._db_path, self._peers, now=now)
+        self.reload()
+
+    def reload(self) -> None:
+        """Read every configured site's peer records from durable state.
+
+        Blocking: run it off the event loop once the storefront is serving.
+        """
+        site_ids = {site_id for _role, site_id, _principals in self._peers.values()}
+        with self._reload_lock:
+            loaded: dict[str, IdentitySubjectStatus | AuthError] = {}
+            for site_id in site_ids:
+                try:
+                    loaded[site_id] = _site_peer_status(
+                        self._db_path, self._peers, site_id
+                    )
+                except AuthError as exc:
+                    loaded[site_id] = exc
+            self._sites = MappingProxyType(loaded)
+
+    def identity_authority(self, **kwargs: Any) -> StorefrontIdentityAuthority:
+        """The identity authority whose every binding change reloads this trust."""
+        return _TrustReloadingAuthority(self._db_path, self, **kwargs)
+
+    def _site_status(self, site_id: str) -> IdentitySubjectStatus:
+        sites = self._sites
+        if sites is None:
+            raise AuthError(
+                "Service-peer trust is not loaded", status_code=503
+            )
+        status = sites.get(site_id)
+        if status is None:
+            raise AuthError(
+                "Provisioning site must have exactly one configured service peer"
+            )
+        if isinstance(status, AuthError):
+            raise AuthError(status.detail, status_code=status.status_code)
+        return status
+
+    def site_active_principals(self, site_id: str, *, now: int) -> frozenset[Identity]:
+        """The principals that authenticate a site's callbacks at ``now``."""
+        return _active_principals(self._site_status(site_id), now)
+
+    def site_trusted_set(self, site_id: str) -> TrustedIdentitySet:
+        """The site's active principals now, primary first, for a site client."""
+        status = self._site_status(site_id)
         ordered = sorted(
-            _active_principals(status, int(clock())),
+            _active_principals(status, int(self._clock())),
             key=lambda principal: (
                 principal != status.primary,
                 principal.scheme.value,
@@ -207,7 +322,14 @@ def site_trusted_authorities(
         )
         return TrustedIdentitySet(identities=tuple(ordered))
 
-    return trusted_authorities
+    def site_authorities(self, site_id: str) -> Callable[[], TrustedIdentitySet]:
+        """A provider of the site's active principals, read at each call.
+
+        A site client verifies each response against what it returns, so a
+        response follows the site's rotation as its callbacks do. It reads only
+        memory, so it may run on the event loop.
+        """
+        return partial(self.site_trusted_set, site_id)
 
 
 __all__ = [
@@ -216,6 +338,5 @@ __all__ = [
     "ServicePeerConfigurationError",
     "require_one_service_peer_per_site",
     "seed_service_peers",
-    "site_active_principals",
-    "site_trusted_authorities",
+    "ServicePeerTrust",
 ]

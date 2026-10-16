@@ -1,8 +1,12 @@
-"""V2 authentication and signed responses for provisioning service callbacks."""
+"""V2 authentication and signed responses for provisioning service callbacks.
+
+A callback is verified against its site's service-peer principals, held by the
+process's :class:`core_storefront.service_peers.ServicePeerTrust` -- the same
+principals that site's responses are verified against.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -18,11 +22,10 @@ from core_storefront.auth import (
     authenticate_request,
     signed_response_headers,
 )
-from core_storefront.service_peers import seed_service_peers, site_active_principals
+from core_storefront.service_peers import SERVICE_PEER_ROLE, ServicePeerTrust
 from market_identity import EMPTY_BODY
 
 import market_storefront.container as _container
-from market_storefront.utils.config import get_service_peer_configs
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +50,11 @@ _CALLBACK_OPERATIONS = {
 }
 
 
-def initialize_service_peer_identities(
-    db_path: str, *, now: int | None = None
-) -> None:
-    """Idempotently materialize configured service-peer trust pins."""
-
-    seed_service_peers(db_path, get_service_peer_configs(), now=now)
+def _service_peer_trust() -> ServicePeerTrust:
+    trust = _container.resolved_service_peer_trust
+    if trust is None:
+        raise AuthError("Storefront service-peer trust is unavailable", status_code=503)
+    return trust
 
 
 def _storefront_signer():
@@ -72,8 +74,8 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
     if request.method == "GET" and path == "/api/v1/system/status":
         configured = [
             (site_id, principal)
-            for role, site_id, principal in get_service_peer_configs().values()
-            if role == "service"
+            for role, site_id, principal in _service_peer_trust().peers.values()
+            if role == SERVICE_PEER_ROLE
         ]
         if len(configured) != 1:
             raise AuthError(
@@ -111,13 +113,7 @@ async def _authenticate(
     if db is None:
         raise AuthError("Storefront identity state is unavailable", status_code=503)
     now = int(time.time())
-    allowed = await asyncio.to_thread(
-        site_active_principals,
-        db.db_path,
-        get_service_peer_configs(),
-        callback.site_id,
-        now=now,
-    )
+    allowed = _service_peer_trust().site_active_principals(callback.site_id, now=now)
     return await authenticate_request(
         headers=request.headers,
         method=callback.method,

@@ -2184,6 +2184,16 @@ configuration.
       `STOREFRONT_PYTHON` for the loader check), `make test`. End-to-end (VM lane): every
       VM scenario, since each starts the storefront; and the storefront smoke tests.
 
+**Stopped here (session ended by the owner, 2026-10-16).** Section 10 is committed as unverified
+work in progress: the implementer was relocking (its last step was hand-editing the VM storefront
+lock after `scripts/uv_project.py lock` of the other projects). Which of 10.1–10.5 are complete,
+and which checks ran, is not recorded; the next session reads the WIP diff
+(`git diff ecbbe47 <wip commit>`), finishes 10.1–10.6, runs every check in change-implement's step
+5 (VM storefront frozen, `make -C helm test-render` with `STOREFRONT_PYTHON`, `make -k test`,
+packaging, hygiene, citations), checks the tasks with evidence, and then the owner gets the
+code snapshot they asked for after Section 10's initial implementation, before its review.
+Round 04's triage (gate passed 2026-10-16) is in `reviews/04-implementation-external.triage.md`.
+
 ## 11. Bare-metal configuration through files
 
 Delivers bare metal on `storefront.toml`, `storefront.json`, and `storefront.secrets.toml`

@@ -9,7 +9,7 @@ dependencies = [
     "arkhai-apicredits-domain>=0.6.0",
     "arkhai-core-registry-client>=0.12.1",
     "arkhai-core-storefront>=0.11.0",
-    "arkhai-kit-capacity-publication==0.9.2",
+    "arkhai-kit-capacity-publication==0.9.3",
     "arkhai-kit-alkahest>=0.8.0",
     "arkhai-kit-arkhai-payments>=0.2.0",
     "arkhai-kit-config",

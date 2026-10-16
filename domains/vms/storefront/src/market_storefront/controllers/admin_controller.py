@@ -165,11 +165,28 @@ class AdminController:
         site_projections=Depends(  # noqa: B008
             lambda: _container.resolved_site_projections
         ),
+        service_peer_trust=Depends(  # noqa: B008
+            lambda: _container.resolved_service_peer_trust
+        ),
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
         self._capacity_runtime = capacity_runtime
         self._site_projections = site_projections
+        self._service_peer_trust = service_peer_trust
+
+    def _changing_identity_authority(self) -> StorefrontIdentityAuthority:
+        """The identity authority a rotation or retirement commits through.
+
+        It is the service-peer trust's, so a change to a site's peer reaches
+        the principals that site's responses and callbacks are verified
+        against as soon as it commits.
+        """
+        if self._service_peer_trust is None:
+            raise HTTPException(
+                status_code=503, detail="service-peer trust is not composed"
+            )
+        return self._service_peer_trust.identity_authority()
 
     @staticmethod
     def _operator(request: Request) -> AuthenticatedPrincipal:
@@ -195,7 +212,7 @@ class AdminController:
         try:
             return await asyncio.to_thread(
                 rotate_identity,
-                StorefrontIdentityAuthority(self._db.db_path),
+                self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
                 now=int(time.time()),
@@ -240,7 +257,7 @@ class AdminController:
         try:
             return await asyncio.to_thread(
                 retire_rotated_identity,
-                StorefrontIdentityAuthority(self._db.db_path),
+                self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
                 now=int(time.time()),

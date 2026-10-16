@@ -208,10 +208,51 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
 
 def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
-    """Seconds between the settlement servicing sweeps: `claims_sweep_interval`."""
+    """Seconds between the settlement servicing sweeps:
+    `settlement_servicing_interval_seconds`."""
 
     active = settings if source is None else source
-    return float(active.get("claims_sweep_interval", 30))
+    return float(active.get("settlement_servicing_interval_seconds", 30))
+
+
+#: Settings the storefront has renamed, each to the key that replaced it. A
+#: configuration stating one refuses startup rather than run at a default the
+#: operator did not choose.
+RENAMED_SETTINGS: dict[str, str] = {
+    "claims_sweep_interval": "settlement_servicing_interval_seconds",
+}
+
+
+def renamed_setting_problems(source: Dynaconf | None = None) -> list[str]:
+    """Name each renamed setting the configuration still states, with its
+    replacement."""
+
+    active = settings if source is None else source
+    return [
+        f"{old} was renamed {new}; state {new} instead"
+        for old, new in RENAMED_SETTINGS.items()
+        if active.get(old) is not None
+    ]
+
+
+def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
+    """`[capacity.sites]`: each stable site ID and its authority URL."""
+
+    active = settings if source is None else source
+    raw_sites = active.get("capacity.sites")
+    if not raw_sites:
+        raise RuntimeError(
+            "No capacity site authority configured: [capacity.sites] must map "
+            "each stable site ID to an authority URL."
+        )
+    sites: dict[str, str] = {}
+    for raw_name, raw_url in dict(raw_sites).items():
+        site_id = str(raw_name).strip()
+        url = str(raw_url or "").strip().rstrip("/")
+        if not site_id or not url:
+            raise RuntimeError("capacity site IDs and authority URLs must be non-empty")
+        sites[site_id] = url
+    return sites
 
 
 #: The site-projection poller's interval when `[capacity].poll_interval` is unset.
