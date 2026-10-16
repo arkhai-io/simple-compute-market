@@ -52,11 +52,11 @@ deny = [
 [steps.design]
 skill = "change-design"
 allow = [
-  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Edit(openspec/**)", "Edit(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
   "Bash(make -C ../*-proposal check-change-index)",
-  "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
+  "Edit(../*-proposal/openspec/**)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
@@ -65,7 +65,7 @@ deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 skill = "change-plan"
 resume_from = "design"
 allow = [
-  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Edit(openspec/**)", "Edit(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
@@ -115,7 +115,7 @@ deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
 [steps.closeout]
 skill = "change-closeout"
 allow = [
-  "Edit(openspec/**)", "Write(openspec/**)", "Edit(docs/**)", "Write(docs/**)",
+  "Edit(openspec/**)", "Edit(docs/**)",
   "Edit(AGENTS.md)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)",
